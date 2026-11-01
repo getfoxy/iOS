@@ -121,7 +121,8 @@
       asset: 'BITCOIN', unit: (!read.sats && this.satUsd() > 0) ? 'USD' : 'SATS', amount: '',
       recipient: read.address, recipientKind: 'address',
     }));
-    if (read.sats) this.ocQuote();
+    // with enough at more than one mint, which pays first (PAY FROM, 26l-pay-from.js), and its fee once chosen
+    if (read.sats && !(this.pfOnchain && this.pfOnchain())) this.ocQuote();
   }
 
   /* The keypad's NEXT during an on-chain send. */
@@ -135,7 +136,9 @@
     // from a card, what the card holds (26f-flashcard.js, `fcOutMode`), and not this phone's balance
     const fromCard = !!(this.fcOutMode && this.fcOutMode()) && !!this.state.fc;
     if (fromCard && sats > (Number(this.state.fc.balance) || 0)) { this.toast('That is more than the card holds.', true); return; }
-    if (!fromCard && sats > (this.state.balSats || 0)) { this.toast('That is more than your balance.', true); return; }
+    /* (unless another of this phone's mints holds enough, which PAY FROM offers next: 26l-pay-from.js) */
+    const elsewhere = !fromCard && this.pfPiles && this.pfPiles().some((p) => p.unit === 'sat' && p.have >= sats);
+    if (!fromCard && sats > (this.state.balSats || 0) && !elsewhere) { this.toast('That is more than your balance.', true); return; }
     const limits = this.state.ocLimits;
     const floor = limits && limits.send ? limits.send.min : 0;
     const ceiling = limits && limits.send ? limits.send.max : 0;
@@ -149,7 +152,7 @@
     }
     this.setState(p => ({ screen: 'ocConfirm', stack: p.stack.concat([p.screen]), ocSats: sats,
       ocPlan: null, ocFee: null, ocErr: '' }));
-    this.ocQuote();
+    if (!(this.pfOnchain && this.pfOnchain())) this.ocQuote();
   }
 
   /* The mint's fees for this payment. Nothing is spent by asking, and a
@@ -220,6 +223,8 @@
     }).then(done => {
       this.hideMelt();
       this.setState({ ocBusy: false, ocPlan: null, ocTo: '', ocSats: 0 });
+      // home from a mint visited to pay from (PAY FROM): the payout is followed from home (`onchainSendingAway`)
+      if (this.pfOcHome) this.pfOcHome();
       this.refreshBalance();
       this.loadHistory();
       this.onchainWatchLater();
@@ -236,6 +241,14 @@
         to: 'a bitcoin address', force: true });
     }, e => {
       this.hideMelt();
+      /* From a mint visited to pay from: home, and off the confirmation, whose figures were that mint's and whose TRY AGAIN
+       * would ask this one. A payout whose answer was lost is followed from home. */
+      if (this._ocVisit) {
+        this.pfOcHome();
+        this.setState({ ocBusy: false, ocErr: '', screen: 'home', stack: [], ocPlan: null, ocTo: '', ocSats: 0 });
+        this.toast(W.reason(e), true);
+        return;
+      }
       this.setState({ ocBusy: false, ocErr: W.reason(e) });
       this.toast(W.reason(e), true);
     });
@@ -257,7 +270,9 @@
     const cardHas = out ? Math.max(0, Math.round(Number(s.fc.balance) || 0)) : 0;
     const rows = [
       this.cfRow('DELIVERED TO', short.slice(0, 12) + '…' + short.slice(-8)),
-      out ? null : this.cfRow('PAYING FROM', (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
+      // (with a choice on PAY FROM, the mint and the balance: 26l-pay-from.js)
+      out ? null : this.cfRow('PAYING FROM', (this.pfMany && this.pfMany('oc') && this.pfLabel)
+        ? this.pfLabel(s.payMint || this.pfHere(), 'sat') : (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
       this.cfRow('NETWORK', 'ON-CHAIN', { half: true }),
       this.cfRow('ARRIVES', pick ? this.ocFeeLabel(pick).split(' · ')[0] : 'CHECKING…',
         { ink: 'var(--btc-ink)', half: true }),
@@ -328,6 +343,8 @@
   }
 
   ocCancel() {
+    // home from a mint visited to pay from (PAY FROM, 26l-pay-from.js)
+    if (this.pfOcHome) this.pfOcHome();
     // from a card, back to the card's screen it was paid from; from this phone, home
     const at = (this.fcOutMode && this.fcOutMode()) ? (this.state.stack || []).lastIndexOf('flashcard') : -1;
     if (at >= 0) {
@@ -360,7 +377,8 @@
       try {
         const due = W && W.connected && (W.onchainDue || W.onchainWatching);
         waiting = (due ? due.call(W).length : 0)
-          + (W && W.connected && W.onchainSending ? W.onchainSending().length : 0);
+          + (W && W.connected && W.onchainSending ? W.onchainSending().length : 0)
+          + (W && W.connected && W.onchainSendingAway ? W.onchainSendingAway().length : 0);
       } catch (e) { waiting = 0; }
       wait = waiting ? 3000 : 20000;
     }
@@ -387,7 +405,9 @@
     // two minutes (onchainDue)
     const waiting = W.onchainDue ? W.onchainDue() : W.onchainWatching();
     if (waiting.length && W.onchainAsked) W.onchainAsked(waiting.map(r => r.quote));
-    const sending = W.onchainSending ? W.onchainSending() : [];
+    /* And payouts made on a visit to another mint (PAY FROM): followed from here, with a wallet made for that mint
+     * (`onchainFollow`), since the phone came home once each had gone. */
+    const sending = (W.onchainSending ? W.onchainSending() : []).concat(W.onchainSendingAway ? W.onchainSendingAway() : []);
     if (!waiting.length && !sending.length) { again(120000); return; }
 
     // one at a time: every claim reserves counters, and two at once derive the same secrets

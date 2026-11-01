@@ -760,6 +760,34 @@ function representative(logic) {
     { wallet: TWO({ payNeed: (a, r) => ({ ok: true, need: a + r, have: 4205, fee: r, unit: 'usd', why: '' }) }), before: asked }));
   add('two balances: WALLET, dollars short', at('walletPick', Object.assign({ flow: 'send', wallet: 'sat', walletAuto: true,
     recipientKind: 'invoice', recipient: INVOICE_THIS_MINT, feeQ: FEEQ }, TWO_LIVE), { wallet: TWO(), before: asked }));
+  /* PAY FROM (build/app/26l-pay-from.js): enough at more than one mint, a row for each balance that could pay, cheapest
+   * first and chosen; one still being asked and one short; a payout on chain, whose fee comes after the choice; and the
+   * confirmation of a payment from another mint, with its PAY FROM button. */
+  const PF = (key, more) => Object.assign({ key: key, mint: key.split('|')[0], unit: key.split('|')[1], have: 0, cost: null, fee: null,
+    ok: null, why: '', tag: '', note: '', rank: 0, pref: false }, more);
+  const PF_LIST = [
+    PF(OTHER + '|sat', { have: 9000, cost: 2101, fee: 1, ok: true, rank: 1 }),
+    PF(MINT + '|sat', { have: 250000, cost: 2112, fee: 12, ok: true, rank: 12, pref: true }),
+    PF(MINT + '|usd', { have: 4205, cost: 164, fee: 2, ok: true, rank: 2600, pref: true }),
+  ];
+  add('PAY FROM, a Lightning invoice: three balances, the cheapest chosen', at('payFrom', Object.assign({ flow: 'send',
+    recipientKind: 'invoice', recipient: INVOICE_THIS_MINT, payFromFlow: 'send', payFromList: PF_LIST, payFromPick: OTHER + '|sat',
+    payFromAsk: 'Pay $ 1.62 from' }, TWO_LIVE), { wallet: TWO() }));
+  add('PAY FROM, one still asked, one short', at('payFrom', { flow: 'send', recipientKind: 'invoice', recipient: INVOICE_THIS_MINT,
+    payFromFlow: 'send', payFromPick: MINT + '|sat', payFromAsk: 'Pay $ 1.62 from', payFromList: [
+      PF(MINT + '|sat', { have: 250000, cost: 2112, fee: 12, ok: true, rank: 12, pref: true }),
+      PF(OTHER + '|sat', { have: 2105 }),
+      PF('https://mint.coinos.io|sat', { have: 2100, ok: false, why: 'You hold 2,100 sats at coinos. This needs 2,108.', tag: 'NOT ENOUGH' }),
+    ] }));
+  add('PAY FROM, a payout on chain', at('payFrom', { flow: 'onchain', payFromFlow: 'oc', payFromPick: MINT + '|sat',
+    payFromAsk: 'Pay $ 38.40 from', payFromList: [
+      PF(MINT + '|sat', { have: 250000, ok: true, note: 'Fee on the next screen', rank: 0, pref: true }),
+      PF(OTHER + '|sat', { have: 90000, ok: true, note: 'Fee on the next screen', rank: 1 }),
+    ] }));
+  add('CONFIRM PAYMENT from another mint, with PAY FROM', at('sendConfirm', Object.assign({ flow: 'send', wallet: 'sat', walletTapped: true,
+    recipientKind: 'invoice', recipient: INVOICE_THIS_MINT, payFromFlow: 'send', payFromList: PF_LIST, payFromPick: OTHER + '|sat',
+    payMint: OTHER, payUnit: 'sat' }, TWO_LIVE), { wallet: TWO(), before: (l) => { l._pf = { flow: 'send', run: 1, home: MINT,
+      full: { [OTHER + '|sat']: { mint: OTHER, unit: 'sat', amount: 2100, feeReserve: 1, need: 2101, ok: true, why: '' } } }; } }));
   add('two balances: paid, ADDED TO DOLLARS', at('paid', Object.assign({ paidUnit: 'usd', paidAmount: 500, recvResolved: true,
     recv: { live: 'in' } }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: sent FROM DOLLARS', at('sendDone', Object.assign({ sendPhase: 'settled', recipientKind: 'invoice',
@@ -1259,6 +1287,8 @@ const INSTANCE = ['_lastFee', '_returnTo', '_blockedEl', '_blockedKind', '_cardQ
   '_fcRefreshAsked', '_meltEl', '_fcTapO', '_stuckShown', '_stuckOpen', '_mintDownShown', '_quarantineShown', '_armed', '_armedAt',
   // what the send confirmation has asked, and whether it waited (03-send.js `quoteSendFee`, `syncSend`)
   '_quotedFor', '_found', '_feeQuote', '_feeClearedFor', '_askRun', '_sendWaited',
+  // PAY FROM's question, and a visit for a payout on chain (26l-pay-from.js)
+  '_pf', '_pfRun', '_pfFor', '_ocVisit',
   // which balance paid, and the quotes of both, at a mint with two (03-send.js)
   '_lastPay', '_paying', '_feeQuotes'];
 

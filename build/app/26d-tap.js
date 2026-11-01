@@ -2404,6 +2404,9 @@
       ? W.finishMove().then(() => null, () => null) : Promise.resolve(null);
     settle.then(() => {
       const there = W.balanceAt ? W.balanceAt(theirs) : 0;
+      /* With enough at more than one mint: which pays (PAY FROM, 26l-pay-from.js), their mint's sats first with no fee,
+       * and this phone's own and any other by the crossing. With one, on exactly as before. */
+      if (this.pfTapCross && this.pfTapCross(offer, want, theirs, mine, there)) return;
       // enough on its face; whether it covers that mint's fee too is asked once there (`sendShortfall`)
       if (there >= want && W.sendShortfall) { this.tapPayFromThere(offer, want, theirs, mine, there); return; }
       this.tapCrossQuote(offer, want, theirs, mine);
@@ -2445,8 +2448,11 @@
   }
 
   /* Quote the move, ask, move, pay. */
-  tapCrossQuote(offer, want, theirs, mine) {
+  /* `from`: the mint the sats cross from, where PAY FROM chose another than this phone's own (26l-pay-from.js); the phone
+   * comes home to `mine` all the same. */
+  tapCrossQuote(offer, want, theirs, mine, from) {
     const W = window.FoxyWallet;
+    const src = from || mine;
     /* The one asked for while they were deciding, if it is the same crossing.
      *
      * `tapPreQuoteMint` starts this the moment the price goes out, so by the
@@ -2456,20 +2462,20 @@
      * question and gets asked fresh. */
     const ready = this._crossReady;
     this._crossReady = null;
-    const ahead = !!(ready && ready.sats === want && ready.to === theirs && ready.from === mine);
+    const ahead = !!(ready && ready.sats === want && ready.to === theirs && ready.from === src);
     if (ahead) console.log('[foxy] tap: the crossing was already quoted while they decided');
     /* No overlay: the screen itself opens now, on what is already known, and
      * the fee fills in when the two mints answer. An overlay over a screen
      * nobody can see yet is a wait with nothing in it. */
-    const quoting = ahead ? ready.plan : W.transferQuote(mine, want, { to: theirs, land: true });
+    const quoting = ahead ? ready.plan : W.transferQuote(src, want, { to: theirs, land: true });
     quoting.catch(() => {});
     // CALCULATING FEE is `crossMintCard`'s to show, until the quote is in
-    this.crossMintCard(quoting, theirs, mine).then(yes => {
+    this.crossMintCard(quoting, theirs, src).then(yes => {
       if (!yes) {
         console.log('[foxy] tap: the fee to reach ' + theirs + ' was not accepted');
         return;
       }
-      return quoting.then(plan => this.crossRun(plan, offer, theirs, mine));
+      return quoting.then(plan => (src === mine ? this.crossRun(plan, offer, theirs, mine) : this.crossRun(plan, offer, theirs, src, mine)));
     }).catch(e => this.crossFailed(e, mine));
     return;
   }
@@ -2493,7 +2499,8 @@
     });
   }
 
-  crossRun(plan, offer, theirs, mine) {
+  /* `home`: the mint to come back to, where the sats cross from another than the one this phone is on (PAY FROM). */
+  crossRun(plan, offer, theirs, mine, home) {
     const W = window.FoxyWallet;
     /* Asked before the move, not after it. A move is a Lightning payment
      * and its fee; made for a request that is closed, or that the receiver
@@ -2512,11 +2519,11 @@
             eNo.foxyAskedNo = true;
             throw eNo;
           }
-          return this.crossRun(plan, offer, theirs, mine);
+          return this.crossRun(plan, offer, theirs, mine, home);
         }).then((r) => { this._crossAsked = false; return r; }, (e) => { this._crossAsked = false; throw e; });
       }
     }
-    return this.crossMove(plan, theirs, mine).then(() => {
+    return (home ? this.crossMove(plan, theirs, mine, home) : this.crossMove(plan, theirs, mine)).then(() => {
       console.log('[foxy] tap: the sats are at ' + theirs + '; paying their request now');
       /* Paid straight from here, with no second confirmation: the screen they
        * agreed on is this payment's confirmation. */
@@ -2539,8 +2546,11 @@
    * which is why the tap's own reading of the offer is not in here. Resolves
    * once the sats are at their mint, with `_crossMovedTo` and `_crossCameFrom`
    * set for whatever the payment does next. */
-  crossMove(plan, theirs, mine) {
+  /* `home`, where the sats leave from another mint than the one this phone is on (PAY FROM, 26l-pay-from.js): that mint is
+   * visited, not made the phone's own, and `home` is where the phone comes back to after the payment. */
+  crossMove(plan, theirs, mine, home) {
     const W = window.FoxyWallet;
+    const visit = !!(home && home !== mine);
     this.hushMove(plan);
     this.showMelt('Moving your sats to ' + (this.mintNameOf(theirs) || 'their mint') + '\u2026',
                   0, { sats: plan.net, mint: this.mintNameOf(theirs) });
@@ -2560,7 +2570,8 @@
     const loud = () => { this._quiet = false; };
     /* A visit: their mint is where this payment is made from, not where this
      * phone banks, and it is not saved as the phone's own. */
-    return W.connect(mine).then(() => W.moveRun(plan, () => {}, { visit: true })).then((done) => {
+    return (visit ? W.connect(mine, null, null, { remember: false }) : W.connect(mine))
+      .then(() => W.moveRun(plan, () => {}, { visit: true })).then((done) => {
       const quiet = this.hushSweepEntries ? this.hushSweepEntries() : Promise.resolve();
       return quiet.then(() => done, () => done);
     }).then(() => {
@@ -2573,7 +2584,7 @@
       this._crossMovedTo = theirs;
       /* And the mint to come home to once the payment is made: the crossing is
        * Foxy's business, the mint the person banks at is theirs. */
-      this._crossCameFrom = mine;
+      this._crossCameFrom = visit ? home : mine;
     });
   }
 

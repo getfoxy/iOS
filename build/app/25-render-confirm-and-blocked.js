@@ -16,6 +16,8 @@
       // the WALLET button, last under the rows: which balance pays, and the way to change it
       cfWalletShown: !!cf.wallet,
       cfWalletWord: (cf.wallet || {}).word || '',
+      // WALLET between a mint's two balances; PAY FROM where there is a choice of mints (26l-pay-from.js)
+      cfWalletLabel: (cf.wallet || {}).label || 'WALLET',
       cfWalletGo: (cf.wallet || {}).go || (() => {}),
       cfSubtitle: cf.subtitle || '',
       cfSubShown: cf.subtitle ? '1' : '0',
@@ -105,6 +107,9 @@
    *               saying so.
    *   holdChoice  "WHAT DO YOU WANT TO HOLD?": Dollars, Bitcoin or Both, once,
    *               after every other first step.
+   *   payFrom     "Pay ₿ 1,000 from": with enough at more than one mint, a
+   *               row for each balance that could pay, cheapest first and
+   *               chosen, with NEXT (26l-pay-from.js, `pfRows`).
    *
    * Frost is dollars, fur is bitcoin, slate is both: the home's own pills. */
   /** @param {RenderContext} c */
@@ -197,6 +202,9 @@
       });
     }) : [];
     const neither = pick && this.quoteFits('usd') === false && this.quoteFits('sat') === false;
+    // PAY FROM: the sources as rows in the same looks, and NEXT under them (26l-pay-from.js)
+    const pf = sc === 'payFrom';
+    const pfOn = pf && !!(this.pfNextOn && this.pfNextOn());
     const holding = s.holdPick || '';
     const HOLD = [
       { key: 'dollars', name: 'DOLLARS', sub: 'Steady. For spending.', look: LOOK.usd },
@@ -208,18 +216,29 @@
     const FUR_CTA = "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),"
       + "linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),url('foxy-fur.webp')";
     return {
-      isCurrency: sc === 'currency' || pick,
-      curTitle: pick ? 'WALLET' : 'CURRENCY',
-      curQuestion: pick ? 'Pay ' + this.sendAmountText() + ' from'
+      isCurrency: sc === 'currency' || pick || pf,
+      curTitle: pf ? 'PAY FROM' : pick ? 'WALLET' : 'CURRENCY',
+      curQuestion: pf ? String(s.payFromAsk || 'Pay from')
+        : pick ? 'Pay ' + this.sendAmountText() + ' from'
         : cc ? String(cc.question || '')
         : cardFlow ? 'What will this card hold?'
         : flow === 'receive' ? 'What do you want to receive?' : 'What do you want to send?',
       curCards: cards,
+      curCardsFlex: pf ? '0' : '1',
+      curRowsShown: pf,
+      curRows: (pf && this.pfRows) ? this.pfRows(LOOK, SHADOW) : [],
+      curNextShown: pf,
+      curNext: () => { if (this.pfNext) this.pfNext(); },
+      curNextBg: pfOn ? 'var(--acc)' : 'rgba(var(--ink-rgb),.14)',
+      curNextFur: pfOn ? FUR_CTA : 'none,none,none',
+      curNextInk: pfOn ? '#fff' : 'rgba(var(--ink-rgb),.4)',
+      curNextSh: pfOn ? 'inset 0 2px 0 rgba(255,255,255,.4),inset 0 -4px 0 rgba(0,0,0,.16),0 12px 24px rgba(var(--acc-rgb),.34)' : 'none',
       curGap: setUp ? '14px' : three ? '12px' : '16px',
       // (the set-up's tiles stand alone, with nothing under them)
       curFootShown: !setUp,
       curTilesOnly: setUp,
-      curFoot: pick
+      curFoot: pf ? (this.pfFoot ? this.pfFoot() : '')
+        : pick
         ? (neither ? 'Neither balance covers this. You hold ' + this.unitFigure(this.unitBalance('usd'), 'usd')
             + ' and ' + this.unitFigure(this.unitBalance('sat'), 'sat') + '.'
           : s.walletAuto ? this.unitWord(current).charAt(0) + this.unitWord(current).slice(1).toLowerCase()
@@ -231,8 +250,8 @@
         : cardFlow ? 'A card holds one of them. To change it later, RESET the card and set it up again.'
         : flow === 'receive' ? 'Asked once. After this, change it with the WALLET button on the invoice.'
         : 'Asked once. After this, change it with the WALLET button before you pay.',
-      curBack: () => this.back(),
-      curClose: () => this.setState({ screen: 'home', stack: [] }),
+      curBack: pf ? () => this.pfBack() : () => this.back(),
+      curClose: pf ? () => this.pfClose() : () => this.setState({ screen: 'home', stack: [] }),
       isHoldChoice: sc === 'holdChoice',
       holdSub: 'Your mint keeps both. You can change this any time from the menu.',
       holdRows: HOLD.map(h => Object.assign({}, h.look, {

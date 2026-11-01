@@ -171,6 +171,45 @@
       ]).then(function (both) { return { sat: both[0], usd: both[1] }; });
     },
 
+    /* What a mint asks to pay a Lightning invoice from this phone's pile of `unit` there, with the phone left where it is:
+     * the PAY FROM screen's question of each mint that could pay (build/app/26l-pay-from.js). A melt quote commits to
+     * nothing, so a wallet is made for that mint for the asking alone, as `cardCrossQuote` makes one, and the sum the
+     * payment would be refused on there (`meltNeed`: the amount, the reserve, the mint's fee for the split and again on the
+     * pieces the melt spends) is held against that mint's own pile in that unit. Answers { mint, unit, amount, feeReserve,
+     * need, have, ok, why, rate, quote }. `quote` is the mint's answer without the wallet that asked: that wallet has no
+     * seed, and `pay` melts with a quote's own wallet when it is handed one, so the payment asks that mint again once the
+     * phone is there (`pay` still holds a dollar payment to the figure shown, `shownMost`). Rejects with the mint's own
+     * words where it will not quote. */
+    quoteFeeAt: function (mint, bolt11, unit) {
+      try { assertRoute(); } catch (e) { return Promise.reject(e); }
+      var at = String(mint || '').replace(/\/+$/, '');
+      var u = unitOf(unit) || 'sat';
+      var inv = String(bolt11 || '').trim().replace(/^lightning:/i, '');
+      if (!at) return Promise.reject(new Error('No mint to pay from.'));
+      if (!/^ln(bc|tb|bcrt)/i.test(inv)) return Promise.reject(new Error('There is no invoice to pay.'));
+      var w;
+      try { w = newWallet(at, u === 'sat' ? undefined : { unit: u }); } catch (e1) { return Promise.reject(e1); }
+      var msat = 0;
+      try { msat = Number(FoxyWallet.msatOf(inv)) || 0; } catch (e2) { msat = 0; }
+      return withTimeout(w.loadMint(), 25000, hostOf(at)).then(function () {
+        if (u !== 'sat') {
+          var sets = [];
+          try { sets = (w.keyChain && w.keyChain.getKeysets) ? w.keyChain.getKeysets() : []; } catch (e3) { sets = []; }
+          if (!sets || !sets.length) throw new Error(hostOf(at) + ' does not issue ' + unitName(u) + ' ecash.');
+        }
+        return withTimeout(w.createMeltQuoteBolt11(inv), 25000, hostOf(at) + ' melt quote');
+      }).then(function (q) {
+        var amount = satsOf(q.amount) || 0;
+        var reserve = satsOf(q.fee_reserve) || 0;
+        if (!(amount > 0)) throw new Error(hostOf(at) + ' could not say what this invoice costs.');
+        var mn = meltNeed(w, proofs(at, u), amount + reserve);
+        var r = u === 'usd' ? rateFrom(amount, msat) : 0;
+        return { mint: at, unit: u, amount: amount, feeReserve: reserve, need: mn.need, have: mn.have, ok: !!mn.ok,
+                 why: mn.ok ? '' : notEnoughWords(mn, u), rate: r > 0 ? { usdPerBtc: r } : null,
+                 quote: { unit: u, amount: amount, feeReserve: reserve, quote: q, bolt11: inv, at: Date.now() } };
+      });
+    },
+
     /* A token in dollars (or another unit Foxy handles beyond sats), from the
      * connected mint's pile of that unit. Called by `sendToken` inside the
      * proof lock; not on its own.

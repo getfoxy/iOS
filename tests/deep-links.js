@@ -412,6 +412,8 @@ const BUSY_SCREENS = ['amount', 'bkStart', 'confirm', 'crossConfirm', 'depConfir
   'trConfirm',
   // two balances at one mint: what to hold, CURRENCY, WALLET, and SWAP are choices in progress
   'currency', 'holdChoice', 'swap', 'walletPick',
+  // PAY FROM: which mint's balance pays, a payment in progress (26l-pay-from.js)
+  'payFrom',
   // and SWAP's confirmation and SWAPPED: a swap being decided, and one just made
   'swapConfirm', 'swapDone'];
 

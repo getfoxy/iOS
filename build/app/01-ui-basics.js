@@ -240,7 +240,7 @@ class Component extends DCLogic {
    *    amount?: string, amountInk?: string, amountSub?: string, rows?: any[], warn?: string,
    *    chip?: string, secondary?: ConfirmSecondary, close?: () => void,
    *    cta?: string, ctaTone?: string, ctaBusy?: boolean,
-   *    titleUp?: boolean, wallet?: { word: string, go: () => void },
+   *    titleUp?: boolean, wallet?: { word: string, go: () => void, label?: string },
    *    diffLine?: ?{ text: string, amber: boolean, pct: number },
    *    go?: () => void }} ConfirmSpec */
   /* What the confirmation shell shows (renderConfirmShell). */
@@ -272,6 +272,9 @@ class Component extends DCLogic {
     if (s.screen === 'swapConfirm') return this.swapSpec();
     // sendConfirm
     const W = window.FoxyWallet;
+    // paid from another mint than this phone's, chosen on PAY FROM: that mint's quote and its own confirmation (26l-pay-from.js)
+    if (s.screen === 'sendConfirm' && (s.recipientKind === 'invoice' || s.recipientKind === 'email')
+        && this.pfAway && this.pfAway('send') && !(this.cardSendNow && this.cardSendNow())) return this.payAwaySpec();
     /* At a mint with two balances: the owner's CONFIRM PAYMENT, with its WALLET button. Not paying from a card, which holds
      * one kind of money and pays in it: that is the confirmation below, with FROM FLASHCARD and NEXT, and no WALLET button
      * (a dollar card's says the mint's price under its amount, since it pays a bitcoin invoice in dollars). */
@@ -306,7 +309,8 @@ class Component extends DCLogic {
     const rows = [
       this.cfRow('DELIVERED TO', this.sendToText()),
       // (from a card the FROM FLASHCARD row below says where it is paid from, and PAYING FROM BITCOIN would say otherwise)
-      out ? null : this.cfRow('PAYING FROM', s.payFrom || 'BITCOIN', { half: true }),
+      // (with a choice on PAY FROM, the mint and the balance at it: 26l-pay-from.js)
+      out ? null : this.cfRow('PAYING FROM', (this.pfMany && this.pfMany('send')) ? this.pfLabel(this.pfHome(), 'sat') : (s.payFrom || 'BITCOIN'), { half: true }),
       this.cfRow('NETWORK', s.recipientKind === 'address' ? 'ON-CHAIN' : 'LIGHTNING', { half: true }),
       this.cfRow('ARRIVES', s.recipientKind === 'address' ? '~10 MINUTES' : 'INSTANTLY',
         { ink: s.recipientKind === 'address' ? 'var(--btc-ink)' : 'var(--acc)', half: true }),
@@ -449,6 +453,8 @@ class Component extends DCLogic {
     };
     // from a card, NEXT, which reads the payment off the card (`fcOutNext`) before anything is paid
     if (out && !held) Object.assign(spec, { cta: 'NEXT', go: () => this.fcOutNext() });
+    // a choice of balances on PAY FROM: its button, under the rows, to change it (26l-pay-from.js)
+    if (!out && this.pfMany && this.pfMany('send')) spec.wallet = { label: 'PAY FROM', word: this.pfName(this.pfHome()), go: () => this.openWalletPick() };
     // a dollar card: the dollars it pays, and under them the sats the payee is paid
     if (cardHead) {
       const inv = (s.recipientKind === 'invoice' && s.recipient && W && W.amountOf) ? W.amountOf(s.recipient) : 0;
@@ -707,8 +713,17 @@ class Component extends DCLogic {
   }
 
   /* WALLET on CONFIRM PAYMENT: the two balances, with the one that cannot
-   * cover this payment greyed (renderCurrency). */
-  openWalletPick() { this.go('walletPick'); }
+   * cover this payment greyed (renderCurrency). With a choice of mints on PAY
+   * FROM, its list again, the one paying ringed (26l-pay-from.js). */
+  openWalletPick() {
+    const s = this.state;
+    if (this.pfMany && this.pfMany('send')) {
+      this.setState({ payFromReopen: true, payFromTapped: true, payFromPick: s.payMint ? this.pfKey(s.payMint, s.payUnit) : (s.payFromPick || '') });
+      this.go('payFrom');
+      return;
+    }
+    this.go('walletPick');
+  }
 
   /* A balance picked on WALLET: this payment's. Picked by hand, so it is not
    * switched for the person again. */
@@ -778,6 +793,9 @@ class Component extends DCLogic {
         { sub: (q && wallet === 'sat') ? bracket(fig(q.feeReserve).sub) : '', sub2: 'You pay the mint\u2019s fees' }),
       this.cfRow('NETWORK', 'LIGHTNING'),
     ];
+    // a choice of mints on PAY FROM: which mint and which balance, and the button that changes it says PAY FROM (26l-pay-from.js)
+    const many = !!(this.pfMany && this.pfMany('send'));
+    if (many) rows.push(this.cfRow('PAYING FROM', this.pfLabel(this.pfHome(), wallet)));
     const rate = q && q.rate ? Math.round(Number(q.rate.usdPerBtc) || 0) : 0;
     if (wallet === 'usd' && rate > 0) {
       const who = String(this.mintName() || 'the mint');
@@ -797,7 +815,7 @@ class Component extends DCLogic {
       : null;
     const base = {
       title: 'CONFIRM PAYMENT', titleUp: true, amountLabel: 'TOTAL', rows: rows, diffLine: diffLine,
-      wallet: { word: this.walletLabel(wallet), go: () => this.openWalletPick() },
+      wallet: Object.assign({ word: this.walletLabel(wallet), go: () => this.openWalletPick() }, many ? { label: 'PAY FROM' } : {}),
       close: () => this.setState({ screen: 'home', stack: [] }),
       // the figure in ink, as drawn; red only when it cannot be paid
       amountInk: 'var(--ink)',

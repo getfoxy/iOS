@@ -153,6 +153,9 @@
     const W = window.FoxyWallet;
     const s = this.state;
     if (!W || !W.quoteFee) return;
+    /* Paid from another mint (PAY FROM, 26l-pay-from.js): that mint was quoted there, and nothing of this one's is shown or
+     * paid with. Not asked here either, and not marked as asked, so choosing this mint again asks it then. */
+    if (this.pfAway && this.pfAway('send')) return;
     const ask = this.sendAsk();
     const target = ask ? ask.key : String(s.recipient || '');
     if (!target || this._quotedFor === target) return;
@@ -181,6 +184,8 @@
     const two = !!(this.twoUnitsOn && this.twoUnitsOn() && W.quoteFeeBoth) && !cardOut;
     // (a card of software 1.23 that holds both: the currency chosen to pay from, 26f-flashcard.js `fcUnit`)
     const cardUnit = (cardOut && this.state.fc && (this.fcUnit ? this.fcUnit() : this.state.fc.unit) === 'usd') ? 'usd' : '';
+    // an address's invoice that PAY FROM fetched for this question, before it is cleared (`syncPayFrom`)
+    const had = this._found;
     const clear = (more) => {
       this._feeQuote = null;
       this._found = null;
@@ -208,10 +213,19 @@
     // which balances' quotes have landed for this question: none yet (`feeQuoteIn`, `feeWaits`)
     if (two) this._feeQuotes = {};
     // not called on this turn: a wallet that refuses at once (no route after all) must not throw out of an update
-    Promise.resolve().then(() => (ask.addr ? W.lookupLnurl(ask.addr, ask.sats) : { pr: ask.inv })).then(found => {
+    /* An address asked once: the invoice PAY FROM fetched for these sats is the one quoted and paid, so the mints that
+     * were weighed against each other are weighed on the invoice that is paid. */
+    const fetched = (ask.addr && had && had.addr === ask.addr && had.sats === ask.sats && had.pr
+      && this._pf && this._pf.flow === 'send' && (Date.now() - Number(had.at || 0)) < 120000) ? had : null;
+    Promise.resolve().then(() => (ask.addr ? (fetched || W.lookupLnurl(ask.addr, ask.sats)) : { pr: ask.inv })).then(found => {
       if (stale()) return null;
       // kept for SEND: the address is not asked again for this payment (`payLnurl`, opts.found)
       if (ask.addr) this._found = found;
+      /* This mint's quotes asked on PAY FROM for this very invoice are taken as they are, not asked again (`pfPre`): the
+       * confirmation would otherwise say CHECKING for the seconds it took to ask what PAY FROM had just been told. */
+      const pre = (!cardOut && this.pfPre) ? this.pfPre(found.pr) : null;
+      if (pre && two && pre.sat && pre.usd) return { sat: pre.sat, usd: pre.usd };
+      if (pre && !two && !cardUnit && pre.sat) return pre.sat;
       // a quote not yet in when PAY is pressed is asked no more (`feeQuotesLeft`): `stale` stops its askings again
       return two ? W.quoteFeeBoth(found.pr, (unit, q) => stale() || this.feeQuoteIn(unit, q), stale)
         : cardUnit ? W.quoteFee(found.pr, { unit: cardUnit }) : W.quoteFee(found.pr);
@@ -328,6 +342,8 @@
   feeQuotesAgain() {
     const left = this._feeDropped;
     if (!left || !left.length) return;
+    // (a payment from another mint was never quoted here: PAY FROM, 26l-pay-from.js)
+    if (this.pfAway && this.pfAway('send')) return;
     const W = window.FoxyWallet;
     const k = this._feeQuotes;
     const ask = this.sendAsk();
@@ -365,7 +381,10 @@
    * for: working offline puts the keypad in sats (`syncUnit`), so a payment
    * reaches this screen in dollars only with a route. */
   syncSend() {
-    /* First, at a mint with two balances: the CURRENCY screen before a flow's
+    /* First, PAY FROM: with enough at more than one mint, which pays, before the confirmation (26l-pay-from.js). Where it
+     * has taken this update, the rest waits for the next, which draws what it chose. */
+    if (this.syncPayFrom && this.syncPayFrom()) return;
+    /* Then, at a mint with two balances: the CURRENCY screen before a flow's
      * first amount or confirmation, when none is picked for this payment (01-ui-basics.js). */
     if (this.syncWalletAsk) this.syncWalletAsk();
     const s = this.state;
@@ -602,14 +621,19 @@
     /* Which balance pays, at a mint with two: the one on the confirmation's
      * WALLET button. Its own quote is reused (never the other's), and the
      * figures of the payment are kept for the sending screen. */
-    const two = !card && !!(this.twoUnitsOn && this.twoUnitsOn());
-    const unit = two ? (this.walletNow('send') || 'sat') : 'sat';
+    /* From another mint than this phone's (PAY FROM, 26l-pay-from.js): a visit there, in the unit of the pile chosen, and
+     * home again whichever way it ends (`crossComeHome`). The quote it was chosen on was asked with no seed, so `pay`
+     * is handed it without its wallet and asks that mint again once the phone is there; a dollar payment is still held
+     * to the figure shown (`pay`, `shownMost`). */
+    const away = card ? null : (this.pfAwayNow ? this.pfAwayNow() : null);
+    const two = !card && !away && !!(this.twoUnitsOn && this.twoUnitsOn());
+    const unit = away ? away.unit : two ? (this.walletNow('send') || 'sat') : 'sat';
     const quotes = this._feeQuotes || {};
     const unitQuote = (bolt11) => (two && quotes[unit] && quotes[unit].bolt11 === bolt11 ? quotes[unit] : null);
     const askedSats = (W.amountOf && W.amountOf(to)) || typed;
-    const sq = two ? (this.state.feeQ || {})[unit] : null;
+    const sq = two ? (this.state.feeQ || {})[unit] : away ? away.q : null;
     this._lastPay = null;
-    this._paying = two ? { unit: unit, amount: sq ? sq.amount : 0, fee: sq ? sq.feeReserve : 0, asked: unit === 'usd' ? askedSats : 0 } : null;
+    this._paying = (two || away) ? { unit: unit, amount: sq ? sq.amount : 0, fee: sq ? sq.feeReserve : 0, asked: unit === 'usd' ? askedSats : 0 } : null;
     /* And what the confirmation has asked already. For an address that is the
      * invoice it gave and the fee quote on it, paid as they stand while they
      * are fresh (`payLnurl`); an address the screen could not look up, or one
@@ -619,6 +643,7 @@
       ? this._found : null;
     // a card's own quote; at a mint with two balances, the quote of the balance that pays
     const kept = card ? (card.quote || null)
+      : away ? (found ? away.shown(found.pr) : null)
       : two ? (found ? unitQuote(found.pr) : null)
       : (found && this._feeQuote && this._feeQuote.bolt11 === found.pr) ? this._feeQuote : null;
     /* An address's invoice is for one attempt. A payment that goes must not be
@@ -629,15 +654,21 @@
     // from a card: its held pieces, by name, and the card (an entry that says it was paid from the card)
     const fromCard = card ? { held: card.held, card: card.card } : {};
     // at a mint with two balances: the balance that pays; from a dollar card, its dollars (a bitcoin card's pays in sats, as ever)
-    const inUnit = two ? { unit: unit } : (card && card.unit === 'usd') ? { unit: 'usd' } : {};
+    const inUnit = (two || away) ? { unit: unit } : (card && card.unit === 'usd') ? { unit: 'usd' } : {};
     const invQuote = card ? kept
+      : away ? away.shown(to)
       : two ? unitQuote(to)
       : (this._feeQuote && this._feeQuote.bolt11 === to) ? this._feeQuote : null;
-    const run = W.classify(to) === 'lnurl'
+    const pays = () => (W.classify(to) === 'lnurl'
       ? W.payLnurl(to, card ? (found ? found.sats : typed) : typed, '', onStage,
-                   (found || card) ? Object.assign({ found: found, quote: kept }, fromCard, inUnit) : (two ? inUnit : undefined))
+                   (found || card) ? Object.assign({ found: found, quote: kept }, fromCard, inUnit) : ((two || away) ? inUnit : undefined))
       : W.pay(to, onStage, Object.assign(W.amountOf(to) ? {} : { sats: typed },
-                                         invQuote ? { quote: invQuote } : {}, inUnit, fromCard));
+                                         invQuote ? { quote: invQuote } : {}, inUnit, fromCard)));
+    if (away) {
+      console.log('[foxy] send: paying from ' + away.mint + ' in ' + away.unit + ', on a visit; home to ' + away.home + ' after');
+      this._crossCameFrom = away.home;
+    }
+    const run = away ? W.connect(away.mint, null, null, { remember: false }).then(pays) : pays();
     this._sendRun = run;
     const settled = () => { if (this._sendRun === run) this._sendRun = null; };
     run.then(settled, settled);
@@ -659,6 +690,8 @@
       }, 150000)),
     ]);
     job.then(r => {
+      // home from the mint it was paid from, settled or still pending: a melt held there is swept from home (`sweepMelts`)
+      if (away) this.crossComeHome();
       if (r && r.pending) {
         console.log('[foxy] send pending');
         if (card) card.pendingShown = true;
@@ -674,7 +707,7 @@
       // an invoice a tap offered: the other phone is told, over the link that is still open
       if (this.tapPaidByLightning) this.tapPaidByLightning(to);
       /* Which balance paid, in its own unit, for the sending screen. */
-      if (two) {
+      if (two || away) {
         const paidIn = (r && r.unit) || unit;
         this._lastPay = { unit: paidIn, amount: r.amount != null ? r.amount : askedSats, fee: r.fee != null ? r.fee : (r.feeSats || 0),
           asked: paidIn === 'usd' ? askedSats : 0 };
@@ -730,6 +763,9 @@
         this._sendA = setTimeout(() => { showDone(); settleUp(); }, 400);
       }
     }).catch(e => {
+      /* Home first from a payment made on a visit, whatever became of it (PAY FROM, 26l-pay-from.js): the visit was this
+       * payment's, and a refusal there leaves nothing at that mint for the person to look at that home does not show. */
+      if (away) this.crossComeHome();
       /* The mint's price for a dollar payment moved past the one confirmed.
        * The wallet stopped before anything moved (`pay`, e.repriced), so
        * this is not a failure: back to CONFIRM PAYMENT, which asks the mint
@@ -740,7 +776,8 @@
         this.toConfirm();
         this._quotedFor = null;
         this.toast('The price moved. Check the new total.', true);
-        this.quoteSendFee();
+        // (from another mint, that mint asked again: `quoteSendFee` asks only this one)
+        if (away && this.pfRequote) this.pfRequote(); else this.quoteSendFee();
         return;
       }
       const m = String((e && e.message) || '');

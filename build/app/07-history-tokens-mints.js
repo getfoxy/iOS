@@ -792,6 +792,9 @@
     this.setState(p => Object.assign({ screen: 'reqOffer', stack: p.stack.concat([p.screen]), req: req,
       // a note left on an earlier send is not this payment's note
       note: '', noteDraft: '' }, unitPick));
+    /* With enough at more than one mint: which pays, before the offer (PAY FROM, 26l-pay-from.js), the request's own
+     * mint first and chosen. Nothing is said to the phone in hand yet: this phone may hold enough elsewhere. */
+    if (this.pfRequest && this.pfRequest(req)) return;
     // a payer that cannot cover it tells the phone it is touching, before the offer is looked at
     this.tellPayerShort(req);
   }
@@ -968,6 +971,19 @@
       }
     }
     this._reqMintOk = null;
+    /* Chosen on PAY FROM (26l-pay-from.js): sats from another of this phone's mints than the one the request names, by
+     * the crossing quoted there. The offer said what it costs, its FEE and PAYING FROM, so it is moved with no second
+     * question, and the phone comes home after the payment (`crossMove`'s `home`) whichever way it goes. */
+    const chosen = (want && !(go && go.crossed) && this.pfReqCrossing) ? this.pfReqCrossing(want) : null;
+    if (chosen && this.crossMove) {
+      const home = String(W.mintUrl || '').replace(/\/+$/, '');
+      console.log('[foxy] request: paying it from ' + chosen.from + ', moving the sats to ' + want + ' first');
+      this.crossMove(chosen.plan, want, chosen.from, home).then(() => {
+        this.setState({ crossBusy: false, crossQ: null });
+        this.makeTokenForRequest(Object.assign({}, go || {}, { crossed: true }));
+      }).catch(e => this.crossFailed(e, home));
+      return;
+    }
     /* Too little at the mint the request names, and enough at this phone's
      * own: the sats are moved there first, as a tap to somebody at another
      * mint moves them (26d-tap.js `tapCrossQuote`). A request scanned off a

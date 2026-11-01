@@ -242,7 +242,7 @@ class Component extends DCLogic {
    *    amount?: string, amountInk?: string, amountSub?: string, rows?: any[], warn?: string,
    *    chip?: string, secondary?: ConfirmSecondary, close?: () => void,
    *    cta?: string, ctaTone?: string, ctaBusy?: boolean,
-   *    titleUp?: boolean, wallet?: { word: string, go: () => void },
+   *    titleUp?: boolean, wallet?: { word: string, go: () => void, label?: string },
    *    diffLine?: ?{ text: string, amber: boolean, pct: number },
    *    go?: () => void }} ConfirmSpec */
   /* What the confirmation shell shows (renderConfirmShell). */
@@ -274,6 +274,9 @@ class Component extends DCLogic {
     if (s.screen === 'swapConfirm') return this.swapSpec();
     // sendConfirm
     const W = window.FoxyWallet;
+    // paid from another mint than this phone's, chosen on PAY FROM: that mint's quote and its own confirmation (26l-pay-from.js)
+    if (s.screen === 'sendConfirm' && (s.recipientKind === 'invoice' || s.recipientKind === 'email')
+        && this.pfAway && this.pfAway('send') && !(this.cardSendNow && this.cardSendNow())) return this.payAwaySpec();
     /* At a mint with two balances: the owner's CONFIRM PAYMENT, with its WALLET button. Not paying from a card, which holds
      * one kind of money and pays in it: that is the confirmation below, with FROM FLASHCARD and NEXT, and no WALLET button
      * (a dollar card's says the mint's price under its amount, since it pays a bitcoin invoice in dollars). */
@@ -308,7 +311,8 @@ class Component extends DCLogic {
     const rows = [
       this.cfRow('DELIVERED TO', this.sendToText()),
       // (from a card the FROM FLASHCARD row below says where it is paid from, and PAYING FROM BITCOIN would say otherwise)
-      out ? null : this.cfRow('PAYING FROM', s.payFrom || 'BITCOIN', { half: true }),
+      // (with a choice on PAY FROM, the mint and the balance at it: 26l-pay-from.js)
+      out ? null : this.cfRow('PAYING FROM', (this.pfMany && this.pfMany('send')) ? this.pfLabel(this.pfHome(), 'sat') : (s.payFrom || 'BITCOIN'), { half: true }),
       this.cfRow('NETWORK', s.recipientKind === 'address' ? 'ON-CHAIN' : 'LIGHTNING', { half: true }),
       this.cfRow('ARRIVES', s.recipientKind === 'address' ? '~10 MINUTES' : 'INSTANTLY',
         { ink: s.recipientKind === 'address' ? 'var(--btc-ink)' : 'var(--acc)', half: true }),
@@ -451,6 +455,8 @@ class Component extends DCLogic {
     };
     // from a card, NEXT, which reads the payment off the card (`fcOutNext`) before anything is paid
     if (out && !held) Object.assign(spec, { cta: 'NEXT', go: () => this.fcOutNext() });
+    // a choice of balances on PAY FROM: its button, under the rows, to change it (26l-pay-from.js)
+    if (!out && this.pfMany && this.pfMany('send')) spec.wallet = { label: 'PAY FROM', word: this.pfName(this.pfHome()), go: () => this.openWalletPick() };
     // a dollar card: the dollars it pays, and under them the sats the payee is paid
     if (cardHead) {
       const inv = (s.recipientKind === 'invoice' && s.recipient && W && W.amountOf) ? W.amountOf(s.recipient) : 0;
@@ -709,8 +715,17 @@ class Component extends DCLogic {
   }
 
   /* WALLET on CONFIRM PAYMENT: the two balances, with the one that cannot
-   * cover this payment greyed (renderCurrency). */
-  openWalletPick() { this.go('walletPick'); }
+   * cover this payment greyed (renderCurrency). With a choice of mints on PAY
+   * FROM, its list again, the one paying ringed (26l-pay-from.js). */
+  openWalletPick() {
+    const s = this.state;
+    if (this.pfMany && this.pfMany('send')) {
+      this.setState({ payFromReopen: true, payFromTapped: true, payFromPick: s.payMint ? this.pfKey(s.payMint, s.payUnit) : (s.payFromPick || '') });
+      this.go('payFrom');
+      return;
+    }
+    this.go('walletPick');
+  }
 
   /* A balance picked on WALLET: this payment's. Picked by hand, so it is not
    * switched for the person again. */
@@ -780,6 +795,9 @@ class Component extends DCLogic {
         { sub: (q && wallet === 'sat') ? bracket(fig(q.feeReserve).sub) : '', sub2: 'You pay the mint\u2019s fees' }),
       this.cfRow('NETWORK', 'LIGHTNING'),
     ];
+    // a choice of mints on PAY FROM: which mint and which balance, and the button that changes it says PAY FROM (26l-pay-from.js)
+    const many = !!(this.pfMany && this.pfMany('send'));
+    if (many) rows.push(this.cfRow('PAYING FROM', this.pfLabel(this.pfHome(), wallet)));
     const rate = q && q.rate ? Math.round(Number(q.rate.usdPerBtc) || 0) : 0;
     if (wallet === 'usd' && rate > 0) {
       const who = String(this.mintName() || 'the mint');
@@ -799,7 +817,7 @@ class Component extends DCLogic {
       : null;
     const base = {
       title: 'CONFIRM PAYMENT', titleUp: true, amountLabel: 'TOTAL', rows: rows, diffLine: diffLine,
-      wallet: { word: this.walletLabel(wallet), go: () => this.openWalletPick() },
+      wallet: Object.assign({ word: this.walletLabel(wallet), go: () => this.openWalletPick() }, many ? { label: 'PAY FROM' } : {}),
       close: () => this.setState({ screen: 'home', stack: [] }),
       // the figure in ink, as drawn; red only when it cannot be paid
       amountInk: 'var(--ink)',
@@ -1001,6 +1019,9 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     const s = this.state;
     if (!W || !W.quoteFee) return;
+    /* Paid from another mint (PAY FROM, 26l-pay-from.js): that mint was quoted there, and nothing of this one's is shown or
+     * paid with. Not asked here either, and not marked as asked, so choosing this mint again asks it then. */
+    if (this.pfAway && this.pfAway('send')) return;
     const ask = this.sendAsk();
     const target = ask ? ask.key : String(s.recipient || '');
     if (!target || this._quotedFor === target) return;
@@ -1029,6 +1050,8 @@ class Component extends DCLogic {
     const two = !!(this.twoUnitsOn && this.twoUnitsOn() && W.quoteFeeBoth) && !cardOut;
     // (a card of software 1.23 that holds both: the currency chosen to pay from, 26f-flashcard.js `fcUnit`)
     const cardUnit = (cardOut && this.state.fc && (this.fcUnit ? this.fcUnit() : this.state.fc.unit) === 'usd') ? 'usd' : '';
+    // an address's invoice that PAY FROM fetched for this question, before it is cleared (`syncPayFrom`)
+    const had = this._found;
     const clear = (more) => {
       this._feeQuote = null;
       this._found = null;
@@ -1056,10 +1079,19 @@ class Component extends DCLogic {
     // which balances' quotes have landed for this question: none yet (`feeQuoteIn`, `feeWaits`)
     if (two) this._feeQuotes = {};
     // not called on this turn: a wallet that refuses at once (no route after all) must not throw out of an update
-    Promise.resolve().then(() => (ask.addr ? W.lookupLnurl(ask.addr, ask.sats) : { pr: ask.inv })).then(found => {
+    /* An address asked once: the invoice PAY FROM fetched for these sats is the one quoted and paid, so the mints that
+     * were weighed against each other are weighed on the invoice that is paid. */
+    const fetched = (ask.addr && had && had.addr === ask.addr && had.sats === ask.sats && had.pr
+      && this._pf && this._pf.flow === 'send' && (Date.now() - Number(had.at || 0)) < 120000) ? had : null;
+    Promise.resolve().then(() => (ask.addr ? (fetched || W.lookupLnurl(ask.addr, ask.sats)) : { pr: ask.inv })).then(found => {
       if (stale()) return null;
       // kept for SEND: the address is not asked again for this payment (`payLnurl`, opts.found)
       if (ask.addr) this._found = found;
+      /* This mint's quotes asked on PAY FROM for this very invoice are taken as they are, not asked again (`pfPre`): the
+       * confirmation would otherwise say CHECKING for the seconds it took to ask what PAY FROM had just been told. */
+      const pre = (!cardOut && this.pfPre) ? this.pfPre(found.pr) : null;
+      if (pre && two && pre.sat && pre.usd) return { sat: pre.sat, usd: pre.usd };
+      if (pre && !two && !cardUnit && pre.sat) return pre.sat;
       // a quote not yet in when PAY is pressed is asked no more (`feeQuotesLeft`): `stale` stops its askings again
       return two ? W.quoteFeeBoth(found.pr, (unit, q) => stale() || this.feeQuoteIn(unit, q), stale)
         : cardUnit ? W.quoteFee(found.pr, { unit: cardUnit }) : W.quoteFee(found.pr);
@@ -1176,6 +1208,8 @@ class Component extends DCLogic {
   feeQuotesAgain() {
     const left = this._feeDropped;
     if (!left || !left.length) return;
+    // (a payment from another mint was never quoted here: PAY FROM, 26l-pay-from.js)
+    if (this.pfAway && this.pfAway('send')) return;
     const W = window.FoxyWallet;
     const k = this._feeQuotes;
     const ask = this.sendAsk();
@@ -1213,7 +1247,10 @@ class Component extends DCLogic {
    * for: working offline puts the keypad in sats (`syncUnit`), so a payment
    * reaches this screen in dollars only with a route. */
   syncSend() {
-    /* First, at a mint with two balances: the CURRENCY screen before a flow's
+    /* First, PAY FROM: with enough at more than one mint, which pays, before the confirmation (26l-pay-from.js). Where it
+     * has taken this update, the rest waits for the next, which draws what it chose. */
+    if (this.syncPayFrom && this.syncPayFrom()) return;
+    /* Then, at a mint with two balances: the CURRENCY screen before a flow's
      * first amount or confirmation, when none is picked for this payment (01-ui-basics.js). */
     if (this.syncWalletAsk) this.syncWalletAsk();
     const s = this.state;
@@ -1450,14 +1487,19 @@ class Component extends DCLogic {
     /* Which balance pays, at a mint with two: the one on the confirmation's
      * WALLET button. Its own quote is reused (never the other's), and the
      * figures of the payment are kept for the sending screen. */
-    const two = !card && !!(this.twoUnitsOn && this.twoUnitsOn());
-    const unit = two ? (this.walletNow('send') || 'sat') : 'sat';
+    /* From another mint than this phone's (PAY FROM, 26l-pay-from.js): a visit there, in the unit of the pile chosen, and
+     * home again whichever way it ends (`crossComeHome`). The quote it was chosen on was asked with no seed, so `pay`
+     * is handed it without its wallet and asks that mint again once the phone is there; a dollar payment is still held
+     * to the figure shown (`pay`, `shownMost`). */
+    const away = card ? null : (this.pfAwayNow ? this.pfAwayNow() : null);
+    const two = !card && !away && !!(this.twoUnitsOn && this.twoUnitsOn());
+    const unit = away ? away.unit : two ? (this.walletNow('send') || 'sat') : 'sat';
     const quotes = this._feeQuotes || {};
     const unitQuote = (bolt11) => (two && quotes[unit] && quotes[unit].bolt11 === bolt11 ? quotes[unit] : null);
     const askedSats = (W.amountOf && W.amountOf(to)) || typed;
-    const sq = two ? (this.state.feeQ || {})[unit] : null;
+    const sq = two ? (this.state.feeQ || {})[unit] : away ? away.q : null;
     this._lastPay = null;
-    this._paying = two ? { unit: unit, amount: sq ? sq.amount : 0, fee: sq ? sq.feeReserve : 0, asked: unit === 'usd' ? askedSats : 0 } : null;
+    this._paying = (two || away) ? { unit: unit, amount: sq ? sq.amount : 0, fee: sq ? sq.feeReserve : 0, asked: unit === 'usd' ? askedSats : 0 } : null;
     /* And what the confirmation has asked already. For an address that is the
      * invoice it gave and the fee quote on it, paid as they stand while they
      * are fresh (`payLnurl`); an address the screen could not look up, or one
@@ -1467,6 +1509,7 @@ class Component extends DCLogic {
       ? this._found : null;
     // a card's own quote; at a mint with two balances, the quote of the balance that pays
     const kept = card ? (card.quote || null)
+      : away ? (found ? away.shown(found.pr) : null)
       : two ? (found ? unitQuote(found.pr) : null)
       : (found && this._feeQuote && this._feeQuote.bolt11 === found.pr) ? this._feeQuote : null;
     /* An address's invoice is for one attempt. A payment that goes must not be
@@ -1477,15 +1520,21 @@ class Component extends DCLogic {
     // from a card: its held pieces, by name, and the card (an entry that says it was paid from the card)
     const fromCard = card ? { held: card.held, card: card.card } : {};
     // at a mint with two balances: the balance that pays; from a dollar card, its dollars (a bitcoin card's pays in sats, as ever)
-    const inUnit = two ? { unit: unit } : (card && card.unit === 'usd') ? { unit: 'usd' } : {};
+    const inUnit = (two || away) ? { unit: unit } : (card && card.unit === 'usd') ? { unit: 'usd' } : {};
     const invQuote = card ? kept
+      : away ? away.shown(to)
       : two ? unitQuote(to)
       : (this._feeQuote && this._feeQuote.bolt11 === to) ? this._feeQuote : null;
-    const run = W.classify(to) === 'lnurl'
+    const pays = () => (W.classify(to) === 'lnurl'
       ? W.payLnurl(to, card ? (found ? found.sats : typed) : typed, '', onStage,
-                   (found || card) ? Object.assign({ found: found, quote: kept }, fromCard, inUnit) : (two ? inUnit : undefined))
+                   (found || card) ? Object.assign({ found: found, quote: kept }, fromCard, inUnit) : ((two || away) ? inUnit : undefined))
       : W.pay(to, onStage, Object.assign(W.amountOf(to) ? {} : { sats: typed },
-                                         invQuote ? { quote: invQuote } : {}, inUnit, fromCard));
+                                         invQuote ? { quote: invQuote } : {}, inUnit, fromCard)));
+    if (away) {
+      console.log('[foxy] send: paying from ' + away.mint + ' in ' + away.unit + ', on a visit; home to ' + away.home + ' after');
+      this._crossCameFrom = away.home;
+    }
+    const run = away ? W.connect(away.mint, null, null, { remember: false }).then(pays) : pays();
     this._sendRun = run;
     const settled = () => { if (this._sendRun === run) this._sendRun = null; };
     run.then(settled, settled);
@@ -1507,6 +1556,8 @@ class Component extends DCLogic {
       }, 150000)),
     ]);
     job.then(r => {
+      // home from the mint it was paid from, settled or still pending: a melt held there is swept from home (`sweepMelts`)
+      if (away) this.crossComeHome();
       if (r && r.pending) {
         console.log('[foxy] send pending');
         if (card) card.pendingShown = true;
@@ -1522,7 +1573,7 @@ class Component extends DCLogic {
       // an invoice a tap offered: the other phone is told, over the link that is still open
       if (this.tapPaidByLightning) this.tapPaidByLightning(to);
       /* Which balance paid, in its own unit, for the sending screen. */
-      if (two) {
+      if (two || away) {
         const paidIn = (r && r.unit) || unit;
         this._lastPay = { unit: paidIn, amount: r.amount != null ? r.amount : askedSats, fee: r.fee != null ? r.fee : (r.feeSats || 0),
           asked: paidIn === 'usd' ? askedSats : 0 };
@@ -1578,6 +1629,9 @@ class Component extends DCLogic {
         this._sendA = setTimeout(() => { showDone(); settleUp(); }, 400);
       }
     }).catch(e => {
+      /* Home first from a payment made on a visit, whatever became of it (PAY FROM, 26l-pay-from.js): the visit was this
+       * payment's, and a refusal there leaves nothing at that mint for the person to look at that home does not show. */
+      if (away) this.crossComeHome();
       /* The mint's price for a dollar payment moved past the one confirmed.
        * The wallet stopped before anything moved (`pay`, e.repriced), so
        * this is not a failure: back to CONFIRM PAYMENT, which asks the mint
@@ -1588,7 +1642,8 @@ class Component extends DCLogic {
         this.toConfirm();
         this._quotedFor = null;
         this.toast('The price moved. Check the new total.', true);
-        this.quoteSendFee();
+        // (from another mint, that mint asked again: `quoteSendFee` asks only this one)
+        if (away && this.pfRequote) this.pfRequote(); else this.quoteSendFee();
         return;
       }
       const m = String((e && e.message) || '');
@@ -3624,6 +3679,9 @@ class Component extends DCLogic {
     this.setState(p => Object.assign({ screen: 'reqOffer', stack: p.stack.concat([p.screen]), req: req,
       // a note left on an earlier send is not this payment's note
       note: '', noteDraft: '' }, unitPick));
+    /* With enough at more than one mint: which pays, before the offer (PAY FROM, 26l-pay-from.js), the request's own
+     * mint first and chosen. Nothing is said to the phone in hand yet: this phone may hold enough elsewhere. */
+    if (this.pfRequest && this.pfRequest(req)) return;
     // a payer that cannot cover it tells the phone it is touching, before the offer is looked at
     this.tellPayerShort(req);
   }
@@ -3800,6 +3858,19 @@ class Component extends DCLogic {
       }
     }
     this._reqMintOk = null;
+    /* Chosen on PAY FROM (26l-pay-from.js): sats from another of this phone's mints than the one the request names, by
+     * the crossing quoted there. The offer said what it costs, its FEE and PAYING FROM, so it is moved with no second
+     * question, and the phone comes home after the payment (`crossMove`'s `home`) whichever way it goes. */
+    const chosen = (want && !(go && go.crossed) && this.pfReqCrossing) ? this.pfReqCrossing(want) : null;
+    if (chosen && this.crossMove) {
+      const home = String(W.mintUrl || '').replace(/\/+$/, '');
+      console.log('[foxy] request: paying it from ' + chosen.from + ', moving the sats to ' + want + ' first');
+      this.crossMove(chosen.plan, want, chosen.from, home).then(() => {
+        this.setState({ crossBusy: false, crossQ: null });
+        this.makeTokenForRequest(Object.assign({}, go || {}, { crossed: true }));
+      }).catch(e => this.crossFailed(e, home));
+      return;
+    }
     /* Too little at the mint the request names, and enough at this phone's
      * own: the sats are moved there first, as a tap to somebody at another
      * mint moves them (26d-tap.js `tapCrossQuote`). A request scanned off a
@@ -16241,8 +16312,35 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     // locked exactly when the send will be (makeTokenForRequest): a key named, and a route
     const lockedNow = !!(req && req.lockTo && !(this.offlineNow && this.offlineNow()));
-    const lack = (sats > 0 && W && W.sendShortfall)
-      ? (usdReq ? W.sendShortfall(sats, { unit: 'usd', locked: lockedNow }) : W.sendShortfall(sats, { locked: lockedNow })) : null;
+    /* Judged at the mint the payment is made from, not the one this phone is on.
+     *
+     * The shortfall below was always this phone's own mint's, so a request at
+     * another mint where the person held enough there, and less here, was
+     * answered CLOSE, "More than your balance". Now: the source chosen on PAY
+     * FROM (26l-pay-from.js) where there is one, and otherwise the request's
+     * own mint, which is visited to pay it. Only where that mint holds too
+     * little is this mint's own judged, as before, because then PAY offers to
+     * move the sats here across (`makeTokenForRequest`). A source that
+     * crosses was quoted on PAY FROM, whose quote is what said it covers it. */
+    const src = this.pfReqSource ? this.pfReqSource(req) : null;
+    const crossFee = (src && src.plan) ? Math.max(0, Math.round(Number(src.plan.feeSats) || 0)) : 0;
+    const want = String((req && req.mints && req.mints[0]) || '').replace(/\/+$/, '');
+    const judgeAt = src ? src.mint : want;
+    const atHere = !judgeAt || this.requestHere({ mints: [judgeAt] });
+    const thereHas = (!atHere && !usdReq && W && W.balanceAt) ? Math.round(Number(W.balanceAt(judgeAt)) || 0) : null;
+    let lack = null;
+    if (sats > 0 && W && W.sendShortfall && !(src && src.plan)) {
+      if (atHere || ((thereHas == null || thereHas < sats) && !src)) {
+        lack = usdReq ? W.sendShortfall(sats, { unit: 'usd', locked: lockedNow }) : W.sendShortfall(sats, { locked: lockedNow });
+      } else if (thereHas != null && thereHas >= sats) {
+        // paid there, on a visit: what that mint charges for the pieces is known once there
+        lack = { short: false, need: sats, have: thereHas, fee: 0, there: true };
+      } else {
+        const name = this.pfName ? this.pfName(judgeAt) : judgeAt;
+        lack = { short: true, need: sats, have: thereHas || 0, fee: 0, there: true,
+          why: 'You hold ' + this.money(thereHas || 0).main + ' at ' + name + '. This needs ' + this.money(sats).main + '.' };
+      }
+    }
     /* Waiting on a connection that is on its way.
      *
      * A request that names somewhere to be paid, or a lock to be made, or
@@ -16266,7 +16364,7 @@ class Component extends DCLogic {
      * minutes. Only on the request that answered that price. */
     const agreed = !!(req && req.id && s.tapQuoteFor && s.tapQuoteFor === req.id && Number(s.tapQuoteUsd) > 0);
     // the FEE row: while it is being checked, where the mint takes a fee for the pieces, or across units
-    const feeShown = held || !!(lack && lack.fee > 0) || agreed;
+    const feeShown = held || !!(lack && lack.fee > 0) || agreed || crossFee > 0;
     const agreedRows = () => {
       const words = this.priceAgeWords ? this.priceAgeWords(Number(s.tapQuoteAgeMs) || 0) : '';
       return [
@@ -16285,7 +16383,8 @@ class Component extends DCLogic {
       ? { main: '\u20bf ' + this.group(n), sub: this.unitFigure(Math.round(Number(s.tapQuoteUsd) || 0), 'usd') }
       : fig(n));
     const rows = (byTap ? [] : [this.cfRow('DELIVERED TO', to)]).concat([
-      this.cfRow('PAYING FROM', (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
+      // (the source chosen on PAY FROM, its mint and balance: 26l-pay-from.js)
+      this.cfRow('PAYING FROM', src && this.pfLabel ? this.pfLabel(src.mint, 'sat') : (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
       this.cfRow('NETWORK', 'CASHU', { half: true }),
       // not in the accent: the accent on this screen belongs to the code, and
       // two orange things is one too many to look at
@@ -16296,7 +16395,7 @@ class Component extends DCLogic {
        * is asked at, Foxy charges nothing and says nothing; a fee the mint
        * itself takes for the pieces, or a payment across units, is the
        * payer's, and the row says whose. */
-      this.cfRow('FEE', held ? 'CHECKING…' : fig(lack && lack.fee > 0 ? lack.fee : 0).main,
+      this.cfRow('FEE', held ? 'CHECKING…' : fig(crossFee > 0 ? crossFee : lack && lack.fee > 0 ? lack.fee : 0).main,
         { half: true, sub2: held ? '' : 'You pay the mint\u2019s fees' }),
     ] : []).concat(usdReq ? [this.cfRow('FROM', 'DOLLARS')] : agreed ? agreedRows() : this.peerRateRow());
     /* Short with the fee counted, as the send itself counts it. The balance
@@ -16312,15 +16411,17 @@ class Component extends DCLogic {
      * connected to when the button is pressed, and what is held there, and
      * what it charges, are known only then, so the figures below stay as they
      * were. */
-    if (lack && lack.short && this.requestHere(req)) {
+    if (lack && lack.short && (this.requestHere(req) || lack.there)) {
       return {
         title: 'CONFIRMATION', amountLabel: 'SENDING', code: byTap ? s.tapCode : '',
         amount: head(sats).main, amountSub: head(sats).sub, amountInk: '#FF5C5C', rows: rows,
-        warn: this.heldBlocks(usdReq ? 0 : lack.need - lack.have) || lack.why,
+        // (what is held back with this mint says nothing of a pile at another)
+        warn: (lack.there ? '' : this.heldBlocks(usdReq ? 0 : lack.need - lack.have)) || lack.why,
         cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
       };
     }
-    const shortBy = lack && lack.short ? lack.need - lack.have
+    // (not this mint's balance where the payment is made from another, or crosses from one: judged above)
+    const shortBy = (src && src.plan) || (lack && lack.there) ? 0 : lack && lack.short ? lack.need - lack.have
       : Math.max(0, sats - (usdReq ? this.unitBalance('usd') : (s.balSats || 0)));
     const short = shortBy > 0;
     if (short) {
@@ -16385,6 +16486,8 @@ class Component extends DCLogic {
       // the WALLET button, last under the rows: which balance pays, and the way to change it
       cfWalletShown: !!cf.wallet,
       cfWalletWord: (cf.wallet || {}).word || '',
+      // WALLET between a mint's two balances; PAY FROM where there is a choice of mints (26l-pay-from.js)
+      cfWalletLabel: (cf.wallet || {}).label || 'WALLET',
       cfWalletGo: (cf.wallet || {}).go || (() => {}),
       cfSubtitle: cf.subtitle || '',
       cfSubShown: cf.subtitle ? '1' : '0',
@@ -16474,6 +16577,9 @@ class Component extends DCLogic {
    *               saying so.
    *   holdChoice  "WHAT DO YOU WANT TO HOLD?": Dollars, Bitcoin or Both, once,
    *               after every other first step.
+   *   payFrom     "Pay ₿ 1,000 from": with enough at more than one mint, a
+   *               row for each balance that could pay, cheapest first and
+   *               chosen, with NEXT (26l-pay-from.js, `pfRows`).
    *
    * Frost is dollars, fur is bitcoin, slate is both: the home's own pills. */
   /** @param {RenderContext} c */
@@ -16566,6 +16672,9 @@ class Component extends DCLogic {
       });
     }) : [];
     const neither = pick && this.quoteFits('usd') === false && this.quoteFits('sat') === false;
+    // PAY FROM: the sources as rows in the same looks, and NEXT under them (26l-pay-from.js)
+    const pf = sc === 'payFrom';
+    const pfOn = pf && !!(this.pfNextOn && this.pfNextOn());
     const holding = s.holdPick || '';
     const HOLD = [
       { key: 'dollars', name: 'DOLLARS', sub: 'Steady. For spending.', look: LOOK.usd },
@@ -16577,18 +16686,29 @@ class Component extends DCLogic {
     const FUR_CTA = "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),"
       + "linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),url('foxy-fur.webp')";
     return {
-      isCurrency: sc === 'currency' || pick,
-      curTitle: pick ? 'WALLET' : 'CURRENCY',
-      curQuestion: pick ? 'Pay ' + this.sendAmountText() + ' from'
+      isCurrency: sc === 'currency' || pick || pf,
+      curTitle: pf ? 'PAY FROM' : pick ? 'WALLET' : 'CURRENCY',
+      curQuestion: pf ? String(s.payFromAsk || 'Pay from')
+        : pick ? 'Pay ' + this.sendAmountText() + ' from'
         : cc ? String(cc.question || '')
         : cardFlow ? 'What will this card hold?'
         : flow === 'receive' ? 'What do you want to receive?' : 'What do you want to send?',
       curCards: cards,
+      curCardsFlex: pf ? '0' : '1',
+      curRowsShown: pf,
+      curRows: (pf && this.pfRows) ? this.pfRows(LOOK, SHADOW) : [],
+      curNextShown: pf,
+      curNext: () => { if (this.pfNext) this.pfNext(); },
+      curNextBg: pfOn ? 'var(--acc)' : 'rgba(var(--ink-rgb),.14)',
+      curNextFur: pfOn ? FUR_CTA : 'none,none,none',
+      curNextInk: pfOn ? '#fff' : 'rgba(var(--ink-rgb),.4)',
+      curNextSh: pfOn ? 'inset 0 2px 0 rgba(255,255,255,.4),inset 0 -4px 0 rgba(0,0,0,.16),0 12px 24px rgba(var(--acc-rgb),.34)' : 'none',
       curGap: setUp ? '14px' : three ? '12px' : '16px',
       // (the set-up's tiles stand alone, with nothing under them)
       curFootShown: !setUp,
       curTilesOnly: setUp,
-      curFoot: pick
+      curFoot: pf ? (this.pfFoot ? this.pfFoot() : '')
+        : pick
         ? (neither ? 'Neither balance covers this. You hold ' + this.unitFigure(this.unitBalance('usd'), 'usd')
             + ' and ' + this.unitFigure(this.unitBalance('sat'), 'sat') + '.'
           : s.walletAuto ? this.unitWord(current).charAt(0) + this.unitWord(current).slice(1).toLowerCase()
@@ -16600,8 +16720,8 @@ class Component extends DCLogic {
         : cardFlow ? 'A card holds one of them. To change it later, RESET the card and set it up again.'
         : flow === 'receive' ? 'Asked once. After this, change it with the WALLET button on the invoice.'
         : 'Asked once. After this, change it with the WALLET button before you pay.',
-      curBack: () => this.back(),
-      curClose: () => this.setState({ screen: 'home', stack: [] }),
+      curBack: pf ? () => this.pfBack() : () => this.back(),
+      curClose: pf ? () => this.pfClose() : () => this.setState({ screen: 'home', stack: [] }),
       isHoldChoice: sc === 'holdChoice',
       holdSub: 'Your mint keeps both. You can change this any time from the menu.',
       holdRows: HOLD.map(h => Object.assign({}, h.look, {
@@ -17688,7 +17808,8 @@ class Component extends DCLogic {
       asset: 'BITCOIN', unit: (!read.sats && this.satUsd() > 0) ? 'USD' : 'SATS', amount: '',
       recipient: read.address, recipientKind: 'address',
     }));
-    if (read.sats) this.ocQuote();
+    // with enough at more than one mint, which pays first (PAY FROM, 26l-pay-from.js), and its fee once chosen
+    if (read.sats && !(this.pfOnchain && this.pfOnchain())) this.ocQuote();
   }
 
   /* The keypad's NEXT during an on-chain send. */
@@ -17702,7 +17823,9 @@ class Component extends DCLogic {
     // from a card, what the card holds (26f-flashcard.js, `fcOutMode`), and not this phone's balance
     const fromCard = !!(this.fcOutMode && this.fcOutMode()) && !!this.state.fc;
     if (fromCard && sats > (Number(this.state.fc.balance) || 0)) { this.toast('That is more than the card holds.', true); return; }
-    if (!fromCard && sats > (this.state.balSats || 0)) { this.toast('That is more than your balance.', true); return; }
+    /* (unless another of this phone's mints holds enough, which PAY FROM offers next: 26l-pay-from.js) */
+    const elsewhere = !fromCard && this.pfPiles && this.pfPiles().some((p) => p.unit === 'sat' && p.have >= sats);
+    if (!fromCard && sats > (this.state.balSats || 0) && !elsewhere) { this.toast('That is more than your balance.', true); return; }
     const limits = this.state.ocLimits;
     const floor = limits && limits.send ? limits.send.min : 0;
     const ceiling = limits && limits.send ? limits.send.max : 0;
@@ -17716,7 +17839,7 @@ class Component extends DCLogic {
     }
     this.setState(p => ({ screen: 'ocConfirm', stack: p.stack.concat([p.screen]), ocSats: sats,
       ocPlan: null, ocFee: null, ocErr: '' }));
-    this.ocQuote();
+    if (!(this.pfOnchain && this.pfOnchain())) this.ocQuote();
   }
 
   /* The mint's fees for this payment. Nothing is spent by asking, and a
@@ -17787,6 +17910,8 @@ class Component extends DCLogic {
     }).then(done => {
       this.hideMelt();
       this.setState({ ocBusy: false, ocPlan: null, ocTo: '', ocSats: 0 });
+      // home from a mint visited to pay from (PAY FROM): the payout is followed from home (`onchainSendingAway`)
+      if (this.pfOcHome) this.pfOcHome();
       this.refreshBalance();
       this.loadHistory();
       this.onchainWatchLater();
@@ -17803,6 +17928,14 @@ class Component extends DCLogic {
         to: 'a bitcoin address', force: true });
     }, e => {
       this.hideMelt();
+      /* From a mint visited to pay from: home, and off the confirmation, whose figures were that mint's and whose TRY AGAIN
+       * would ask this one. A payout whose answer was lost is followed from home. */
+      if (this._ocVisit) {
+        this.pfOcHome();
+        this.setState({ ocBusy: false, ocErr: '', screen: 'home', stack: [], ocPlan: null, ocTo: '', ocSats: 0 });
+        this.toast(W.reason(e), true);
+        return;
+      }
       this.setState({ ocBusy: false, ocErr: W.reason(e) });
       this.toast(W.reason(e), true);
     });
@@ -17824,7 +17957,9 @@ class Component extends DCLogic {
     const cardHas = out ? Math.max(0, Math.round(Number(s.fc.balance) || 0)) : 0;
     const rows = [
       this.cfRow('DELIVERED TO', short.slice(0, 12) + '…' + short.slice(-8)),
-      out ? null : this.cfRow('PAYING FROM', (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
+      // (with a choice on PAY FROM, the mint and the balance: 26l-pay-from.js)
+      out ? null : this.cfRow('PAYING FROM', (this.pfMany && this.pfMany('oc') && this.pfLabel)
+        ? this.pfLabel(s.payMint || this.pfHere(), 'sat') : (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
       this.cfRow('NETWORK', 'ON-CHAIN', { half: true }),
       this.cfRow('ARRIVES', pick ? this.ocFeeLabel(pick).split(' · ')[0] : 'CHECKING…',
         { ink: 'var(--btc-ink)', half: true }),
@@ -17895,6 +18030,8 @@ class Component extends DCLogic {
   }
 
   ocCancel() {
+    // home from a mint visited to pay from (PAY FROM, 26l-pay-from.js)
+    if (this.pfOcHome) this.pfOcHome();
     // from a card, back to the card's screen it was paid from; from this phone, home
     const at = (this.fcOutMode && this.fcOutMode()) ? (this.state.stack || []).lastIndexOf('flashcard') : -1;
     if (at >= 0) {
@@ -17927,7 +18064,8 @@ class Component extends DCLogic {
       try {
         const due = W && W.connected && (W.onchainDue || W.onchainWatching);
         waiting = (due ? due.call(W).length : 0)
-          + (W && W.connected && W.onchainSending ? W.onchainSending().length : 0);
+          + (W && W.connected && W.onchainSending ? W.onchainSending().length : 0)
+          + (W && W.connected && W.onchainSendingAway ? W.onchainSendingAway().length : 0);
       } catch (e) { waiting = 0; }
       wait = waiting ? 3000 : 20000;
     }
@@ -17954,7 +18092,9 @@ class Component extends DCLogic {
     // two minutes (onchainDue)
     const waiting = W.onchainDue ? W.onchainDue() : W.onchainWatching();
     if (waiting.length && W.onchainAsked) W.onchainAsked(waiting.map(r => r.quote));
-    const sending = W.onchainSending ? W.onchainSending() : [];
+    /* And payouts made on a visit to another mint (PAY FROM): followed from here, with a wallet made for that mint
+     * (`onchainFollow`), since the phone came home once each had gone. */
+    const sending = (W.onchainSending ? W.onchainSending() : []).concat(W.onchainSendingAway ? W.onchainSendingAway() : []);
     if (!waiting.length && !sending.length) { again(120000); return; }
 
     // one at a time: every claim reserves counters, and two at once derive the same secrets
@@ -20565,6 +20705,9 @@ class Component extends DCLogic {
       ? W.finishMove().then(() => null, () => null) : Promise.resolve(null);
     settle.then(() => {
       const there = W.balanceAt ? W.balanceAt(theirs) : 0;
+      /* With enough at more than one mint: which pays (PAY FROM, 26l-pay-from.js), their mint's sats first with no fee,
+       * and this phone's own and any other by the crossing. With one, on exactly as before. */
+      if (this.pfTapCross && this.pfTapCross(offer, want, theirs, mine, there)) return;
       // enough on its face; whether it covers that mint's fee too is asked once there (`sendShortfall`)
       if (there >= want && W.sendShortfall) { this.tapPayFromThere(offer, want, theirs, mine, there); return; }
       this.tapCrossQuote(offer, want, theirs, mine);
@@ -20606,8 +20749,11 @@ class Component extends DCLogic {
   }
 
   /* Quote the move, ask, move, pay. */
-  tapCrossQuote(offer, want, theirs, mine) {
+  /* `from`: the mint the sats cross from, where PAY FROM chose another than this phone's own (26l-pay-from.js); the phone
+   * comes home to `mine` all the same. */
+  tapCrossQuote(offer, want, theirs, mine, from) {
     const W = window.FoxyWallet;
+    const src = from || mine;
     /* The one asked for while they were deciding, if it is the same crossing.
      *
      * `tapPreQuoteMint` starts this the moment the price goes out, so by the
@@ -20617,20 +20763,20 @@ class Component extends DCLogic {
      * question and gets asked fresh. */
     const ready = this._crossReady;
     this._crossReady = null;
-    const ahead = !!(ready && ready.sats === want && ready.to === theirs && ready.from === mine);
+    const ahead = !!(ready && ready.sats === want && ready.to === theirs && ready.from === src);
     if (ahead) console.log('[foxy] tap: the crossing was already quoted while they decided');
     /* No overlay: the screen itself opens now, on what is already known, and
      * the fee fills in when the two mints answer. An overlay over a screen
      * nobody can see yet is a wait with nothing in it. */
-    const quoting = ahead ? ready.plan : W.transferQuote(mine, want, { to: theirs, land: true });
+    const quoting = ahead ? ready.plan : W.transferQuote(src, want, { to: theirs, land: true });
     quoting.catch(() => {});
     // CALCULATING FEE is `crossMintCard`'s to show, until the quote is in
-    this.crossMintCard(quoting, theirs, mine).then(yes => {
+    this.crossMintCard(quoting, theirs, src).then(yes => {
       if (!yes) {
         console.log('[foxy] tap: the fee to reach ' + theirs + ' was not accepted');
         return;
       }
-      return quoting.then(plan => this.crossRun(plan, offer, theirs, mine));
+      return quoting.then(plan => (src === mine ? this.crossRun(plan, offer, theirs, mine) : this.crossRun(plan, offer, theirs, src, mine)));
     }).catch(e => this.crossFailed(e, mine));
     return;
   }
@@ -20654,7 +20800,8 @@ class Component extends DCLogic {
     });
   }
 
-  crossRun(plan, offer, theirs, mine) {
+  /* `home`: the mint to come back to, where the sats cross from another than the one this phone is on (PAY FROM). */
+  crossRun(plan, offer, theirs, mine, home) {
     const W = window.FoxyWallet;
     /* Asked before the move, not after it. A move is a Lightning payment
      * and its fee; made for a request that is closed, or that the receiver
@@ -20673,11 +20820,11 @@ class Component extends DCLogic {
             eNo.foxyAskedNo = true;
             throw eNo;
           }
-          return this.crossRun(plan, offer, theirs, mine);
+          return this.crossRun(plan, offer, theirs, mine, home);
         }).then((r) => { this._crossAsked = false; return r; }, (e) => { this._crossAsked = false; throw e; });
       }
     }
-    return this.crossMove(plan, theirs, mine).then(() => {
+    return (home ? this.crossMove(plan, theirs, mine, home) : this.crossMove(plan, theirs, mine)).then(() => {
       console.log('[foxy] tap: the sats are at ' + theirs + '; paying their request now');
       /* Paid straight from here, with no second confirmation: the screen they
        * agreed on is this payment's confirmation. */
@@ -20700,8 +20847,11 @@ class Component extends DCLogic {
    * which is why the tap's own reading of the offer is not in here. Resolves
    * once the sats are at their mint, with `_crossMovedTo` and `_crossCameFrom`
    * set for whatever the payment does next. */
-  crossMove(plan, theirs, mine) {
+  /* `home`, where the sats leave from another mint than the one this phone is on (PAY FROM, 26l-pay-from.js): that mint is
+   * visited, not made the phone's own, and `home` is where the phone comes back to after the payment. */
+  crossMove(plan, theirs, mine, home) {
     const W = window.FoxyWallet;
+    const visit = !!(home && home !== mine);
     this.hushMove(plan);
     this.showMelt('Moving your sats to ' + (this.mintNameOf(theirs) || 'their mint') + '\u2026',
                   0, { sats: plan.net, mint: this.mintNameOf(theirs) });
@@ -20721,7 +20871,8 @@ class Component extends DCLogic {
     const loud = () => { this._quiet = false; };
     /* A visit: their mint is where this payment is made from, not where this
      * phone banks, and it is not saved as the phone's own. */
-    return W.connect(mine).then(() => W.moveRun(plan, () => {}, { visit: true })).then((done) => {
+    return (visit ? W.connect(mine, null, null, { remember: false }) : W.connect(mine))
+      .then(() => W.moveRun(plan, () => {}, { visit: true })).then((done) => {
       const quiet = this.hushSweepEntries ? this.hushSweepEntries() : Promise.resolve();
       return quiet.then(() => done, () => done);
     }).then(() => {
@@ -20734,7 +20885,7 @@ class Component extends DCLogic {
       this._crossMovedTo = theirs;
       /* And the mint to come home to once the payment is made: the crossing is
        * Foxy's business, the mint the person banks at is theirs. */
-      this._crossCameFrom = mine;
+      this._crossCameFrom = visit ? home : mine;
     });
   }
 
@@ -31230,6 +31381,641 @@ class Component extends DCLogic {
       amber: netPct >= 2,
       pct,
     };
+  }
+  /* ---- PAY FROM: which of this phone's balances a payment is made from -------
+   *
+   * Decided 2026-10-31: with enough at more than one mint, a payment shows
+   * the balances that could make it before its confirmation, the cheapest
+   * first and chosen, and one at the mint that asked for it as the cheapest.
+   *
+   * A source is one mint's pile in one unit: every mint's sats, and the
+   * dollars of a mint that issues both. It is offered when it covers the
+   * amount and the fee of the way it would pay. Two or more, and the screen is
+   * shown (`renderCurrency`, its rows); one, and it pays with nothing asked;
+   * none, and the confirmation says NOT ENOUGH as it always has. Two sources
+   * are never put together for one payment.
+   *
+   * How a source pays, by what is being paid:
+   *
+   *   a Lightning invoice or address .. each source's own melt quote, asked
+   *     with the phone left where it is (`quoteFeeAt`, or `quoteFee` at this
+   *     mint); paid from another mint on a visit, and home again whichever
+   *     way it ends (03-send.js `startSendNow`, `crossComeHome`).
+   *   a Cashu request ................. the request's own mint, with no fee;
+   *     another mint's sats by the crossing a tap makes (`transferQuote`).
+   *   a tap at another mint ........... their mint's sats, with no fee; this
+   *     phone's own mint and any other by the crossing (26d-tap.js).
+   *   a bitcoin address ............... every mint's sats; the fee is asked
+   *     after the choice, on a visit to the mint chosen (26b-onchain.js).
+   *
+   * Where every pile that could pay is at the mint this phone is on, nothing
+   * here changes a screen: CURRENCY and WALLET ask between its two balances as
+   * before. With no route only the request's own mint can pay, and nothing
+   * crosses. A card is never a source: it pays from its own screen.
+   *
+   * State: `payFromFlow` ('send', 'req', 'tap', 'oc'), `payFromList` (the
+   * tiles, cheapest first), `payFromPick` (the tile chosen), `payFromAsk` (the
+   * question), and once chosen `payMint` and `payUnit` beside `wallet`, which
+   * stays the unit `walletNow` reads at this mint. All cleared when the flow
+   * ends (`pfTidy`). */
+
+  /* A mint as it is written down here, with no slash at the end. */
+  pfMint(u) { return String(u || '').replace(/\/+$/, ''); }
+
+  /* The mint this phone is on now. */
+  pfHere() { const W = window.FoxyWallet; return this.pfMint(W && W.mintUrl); }
+
+  /* The mint this phone was on when the question was asked, which a visit does not change. */
+  pfHome() { return (this._pf && this._pf.home) || this.pfHere(); }
+
+  pfKey(mint, unit) { return this.pfMint(mint) + '|' + (unit === 'usd' ? 'usd' : 'sat'); }
+
+  /* A mint's name as a tile and a row write it. */
+  pfName(mint) {
+    const m = this.pfMint(mint);
+    return String(this.mintNameOf(m) || m.replace(/^https?:\/\//, '') || 'THIS MINT').toUpperCase();
+  }
+
+  /* "FORGE · BITCOIN": the mint and the balance at it, for PAYING FROM. */
+  pfLabel(mint, unit) { return this.pfName(mint) + ' · ' + this.unitWord(unit); }
+
+  /* Every pile this phone holds something in, sats and dollars: [{ mint, unit, have }]. */
+  pfPiles() {
+    const W = window.FoxyWallet;
+    let all = [];
+    try { all = (W && W.balances) ? W.balances() : []; } catch (e) { all = []; }
+    return (Array.isArray(all) ? all : []).filter((b) => b && (b.unit === 'sat' || b.unit === 'usd') && Number(b.amount) > 0)
+      .map((b) => ({ mint: this.pfMint(b.mint), unit: b.unit, have: Math.round(Number(b.amount) || 0) }));
+  }
+
+  /* Does `have` in `unit` cover `sats` on its face, before any fee? Dollars at this phone's price with a tenth to spare,
+   * since a mint's rate is not the market's; with no price, any dollars at all, and the mint's quote says. */
+  pfFace(have, unit, sats) {
+    if (unit !== 'usd') return have >= sats;
+    const r = this.satUsd ? Number(this.satUsd()) || 0 : 0;
+    if (!(r > 0)) return have > 0;
+    return have * 1.1 >= sats * r * 100;
+  }
+
+  /* A tile, before anything is known of what it costs: `ok` null while asked, true offered, false short. */
+  pfEntry(src, more) {
+    return Object.assign({ key: this.pfKey(src.mint, src.unit), mint: src.mint, unit: src.unit === 'usd' ? 'usd' : 'sat',
+      have: src.have, cost: null, fee: null, ok: null, why: '', tag: '', note: '', rank: 0, pref: false }, more || {});
+  }
+
+  /* Cheapest first: those offered by what their fee is worth in sats, the one at the mint asked first among equals
+   * (`pref`), then those still being asked, then those that cannot pay. */
+  pfRanked(list) {
+    const band = (e) => (e.ok === true ? 0 : e.ok === null ? 1 : 2);
+    return list.map((e, i) => ({ e, i })).sort((a, b) => (band(a.e) - band(b.e))
+      || (a.e.ok === true ? (a.e.rank - b.e.rank) || ((b.e.pref ? 1 : 0) - (a.e.pref ? 1 : 0)) : 0)
+      || (a.i - b.i)).map((x) => x.e);
+  }
+
+  pfCheapest(list) {
+    const first = (list || []).filter((e) => e.ok === true)[0];
+    return first ? first.key : '';
+  }
+
+  pfList() { return this.state.payFromList || []; }
+
+  pfFull(key) { return (this._pf && this._pf.full && this._pf.full[key]) || null; }
+
+  /* The tile the payment was given to (`payMint`, `payUnit`). */
+  pfChosen() {
+    const s = this.state;
+    if (!s.payMint) return null;
+    const key = this.pfKey(s.payMint, s.payUnit);
+    return this.pfList().filter((e) => e.key === key)[0] || null;
+  }
+
+  /* More than one source for this flow's payment that is not short: the confirmation offers PAY FROM to change it. */
+  pfMany(flow) {
+    const s = this.state;
+    return s.payFromFlow === flow && this.pfList().filter((e) => e.ok !== false).length >= 2;
+  }
+
+  /* Is this flow's payment made from another mint than the one the phone was on when it was asked? */
+  pfAway(flow) {
+    const s = this.state;
+    if (!s.payMint || (flow && s.payFromFlow !== flow)) return false;
+    return this.pfMint(s.payMint) !== this.pfHome();
+  }
+
+  /* PAY FROM for `flow`, with the sources in `list`.
+   *
+   * `o.quote(entry)` asks what a source costs: a promise of { cost, fee, ok, why, tag, rank, full }, or nothing where the
+   * entry says already. Every source is asked at once, and each tile fills in as its answer lands. `o.go(entry, shown)`
+   * pays from the one chosen; `o.none()` is where none can pay after all; `o.cancel()` the way out. `o.show` puts the screen
+   * up; without it there is one source, and the caller pays from it. */
+  pfOpen(flow, list, o) {
+    const run = (this._pfRun || 0) + 1;
+    this._pfRun = run;
+    this._pf = { flow: flow, run: run, home: this.pfHere(), full: {}, quote: o.quote || null, go: o.go,
+      none: o.none || null, cancel: o.cancel || (() => this.setState({ screen: 'home', stack: [] })) };
+    const ranked = this.pfRanked(list);
+    const patch = Object.assign({ payFromFlow: flow, payFromList: ranked, payFromAsk: o.ask || '', payFromTapped: false,
+      payFromReopen: false, payFromPick: this.pfCheapest(ranked) }, o.patch || {});
+    console.log('[foxy] pay from: ' + list.length + ' balance' + (list.length === 1 ? '' : 's') + ' could pay this ('
+      + list.map((e) => this.pfName(e.mint).toLowerCase() + ' ' + e.unit).join(', ') + ')' + (o.show ? '; asking which' : ''));
+    if (o.show) this.setState((p) => Object.assign(patch, { screen: 'payFrom', stack: p.stack.concat([p.screen]) }));
+    else this.setState(patch);
+    list.forEach((e) => { if (e.ok === null) this.pfAsk(e, run); });
+    this.pfSettled(run);
+  }
+
+  /* What one source costs, asked of its mint, and its tile filled in when the answer lands. */
+  pfAsk(e, run) {
+    const pf = this._pf;
+    const W = window.FoxyWallet;
+    if (!pf || !pf.quote) return;
+    let asked = null;
+    try { asked = pf.quote(e); } catch (x) { asked = Promise.reject(x); }
+    if (!asked || typeof asked.then !== 'function') return;
+    asked.then((r) => this.pfIn(run, e.key, r || { ok: false }), (x) => {
+      const why = W && W.reason ? W.reason(x) : String((x && x.message) || x);
+      const short = (x && x.foxyHave != null) || /not enough|isn.t enough|you hold|short/i.test(why);
+      console.log('[foxy] pay from: ' + this.pfName(e.mint).toLowerCase() + ' ' + e.unit + ' cannot pay this: ' + why);
+      this.pfIn(run, e.key, { ok: false, why: why, tag: short ? 'NOT ENOUGH' : 'NOT AVAILABLE' });
+    });
+  }
+
+  /* One source's answer, as it lands. */
+  pfIn(run, key, r) {
+    const pf = this._pf;
+    if (!pf || pf.run !== run || run !== this._pfRun) return;
+    if (r.full) pf.full[key] = r.full;
+    const list = this.pfList().map((e) => (e.key !== key ? e : Object.assign({}, e, {
+      cost: r.cost != null ? r.cost : e.cost, fee: r.fee != null ? r.fee : e.fee,
+      ok: r.ok === true, why: r.ok === true ? '' : String(r.why || ''),
+      tag: r.ok === true ? '' : String(r.tag || 'NOT ENOUGH'), rank: r.rank != null ? r.rank : e.rank,
+    })));
+    const ranked = this.pfRanked(list);
+    const s = this.state;
+    const patch = { payFromList: ranked };
+    // the cheapest stays chosen until the person picks one, and a pick that turned out short is no pick
+    const picked = ranked.filter((e) => e.key === s.payFromPick)[0];
+    if (!s.payFromTapped || !picked || picked.ok === false) patch.payFromPick = this.pfCheapest(ranked) || (picked && picked.ok !== false ? picked.key : '');
+    this.setState(patch);
+    this.pfSettled(run);
+  }
+
+  /* Every source answered, on a screen the person has not touched: with one offered after all it pays with nothing asked,
+   * and with none the payment goes on as it would have with no question (`o.none`), to say NOT ENOUGH. */
+  pfSettled(run) {
+    const pf = this._pf;
+    const s = this.state;
+    if (!pf || pf.run !== run || s.screen !== 'payFrom' || s.payFromReopen || s.payFromTapped) return;
+    const list = this.pfList();
+    if (list.some((e) => e.ok === null)) return;
+    const offered = list.filter((e) => e.ok === true);
+    if (offered.length > 1) return;
+    if (offered.length === 1) {
+      console.log('[foxy] pay from: only ' + this.pfName(offered[0].mint).toLowerCase() + ' ' + offered[0].unit + ' covers it with its fee; paying from it');
+      pf.go(offered[0], true);
+      return;
+    }
+    console.log('[foxy] pay from: none of them covers it with its fee');
+    if (pf.none) pf.none(); else pf.cancel();
+  }
+
+  /* A tile tapped: chosen, unless it cannot pay or is still being asked. */
+  pfTap(key) {
+    const e = this.pfList().filter((x) => x.key === key)[0];
+    if (!e) return;
+    if (e.ok === null) { this.toast('Still asking ' + this.pfName(e.mint) + ' what it costs.', true); return; }
+    if (e.ok === false) { this.toast(e.why || 'That balance cannot cover this payment.', true); return; }
+    this.setState({ payFromPick: key, payFromTapped: true });
+  }
+
+  /* NEXT: the payment, from the tile chosen. */
+  pfNext() {
+    const s = this.state;
+    const e = this.pfList().filter((x) => x.key === s.payFromPick)[0];
+    if (!e || e.ok !== true || !this._pf) return;
+    console.log('[foxy] pay from: ' + this.pfName(e.mint).toLowerCase() + ' ' + e.unit + ' chosen');
+    this._pf.go(e, true);
+  }
+
+  /* Back: to the confirmation when it was opened from there, and out of the payment when it came first. */
+  pfBack() {
+    if (this.state.payFromReopen || !this._pf) { this.back(); return; }
+    this._pf.cancel();
+  }
+
+  pfClose() {
+    if (this._pf) { this._pf.cancel(); return; }
+    this.setState({ screen: 'home', stack: [] });
+  }
+
+  /* What a tile says it costs: the whole of it in its own unit, "no fee" where there is none. */
+  pfCostText(e) {
+    if (e.ok === null) return 'CALCULATING…';
+    if (e.ok === false) return '';
+    if (e.cost == null) return e.note || '';
+    const fig = this.unitFigure(e.cost, e.unit);
+    return 'Costs ' + fig + (Number(e.fee) === 0 ? ' · no fee' : '');
+  }
+
+  /* The tiles, in the CURRENCY screen's looks (`renderCurrency`): frost for dollars, fur for bitcoin, grey for one that
+   * cannot pay, the one chosen ringed, and CHEAPEST on the first once every mint has answered. */
+  pfRows(LOOK, SHADOW) {
+    const s = this.state;
+    const list = this.pfList();
+    const offered = list.filter((e) => e.ok === true);
+    const known = list.every((e) => e.ok !== null) && offered.length > 1 && offered.every((e) => e.cost != null);
+    const best = known ? offered[0].key : '';
+    return list.map((e) => {
+      const short = e.ok === false, asking = e.ok === null;
+      const look = Object.assign({}, LOOK[e.unit === 'usd' ? 'usd' : 'sat'], short ? LOOK.grey : {});
+      const chosen = e.key === s.payFromPick && !short;
+      return Object.assign(look, {
+        key: e.key, sym: LOOK[e.unit === 'usd' ? 'usd' : 'sat'].sym, name: this.pfName(e.mint),
+        unitLine: this.unitWord(e.unit) + ' · ' + this.unitFigure(e.have, e.unit),
+        cost: this.pfCostText(e), costShown: !short,
+        tag: short ? (e.tag || 'NOT ENOUGH') : '', tagShown: short,
+        bestShown: e.key === best,
+        outline: chosen ? '3px solid rgba(255,255,255,.9)' : 'none',
+        shadow: short ? 'none' : SHADOW,
+        cursor: (short || asking) ? 'default' : 'pointer',
+        opacity: asking ? '.8' : '1',
+        tap: () => this.pfTap(e.key),
+      });
+    });
+  }
+
+  pfFoot() {
+    const s = this.state;
+    const list = this.pfList();
+    if (s.payFromFlow === 'oc') return 'One balance pays. Its mint says the fee on the next screen.';
+    if (list.length && list.every((e) => e.ok === null)) return 'Asking each mint what it costs.';
+    return 'One balance pays. The cheapest is first.';
+  }
+
+  /* NEXT's look: the accent while the tile chosen can pay, grey while it cannot be told. */
+  pfNextOn() {
+    const s = this.state;
+    const e = this.pfList().filter((x) => x.key === s.payFromPick)[0];
+    return !!(e && e.ok === true);
+  }
+
+  /* Called on every update (`syncSend`): a payment's choice let go once its flow is over, and a visit for a payout on
+   * chain ended once its screens are left (`pfOcHome`). */
+  pfTidy() {
+    const s = this.state;
+    const sc = s.screen;
+    const SEND = ['payFrom', 'sendConfirm', 'sendDone', 'walletPick', 'currency'];
+    if (SEND.indexOf(sc) < 0) this._pfFor = null;
+    if (this._ocVisit && ['ocConfirm', 'payFrom'].indexOf(sc) < 0 && !s.ocBusy) this.pfOcHome();
+    const f = s.payFromFlow;
+    if (!f) return;
+    const keep = { send: SEND, req: ['payFrom', 'reqOffer', 'sendDone', 'crossConfirm'], tap: ['payFrom'], oc: ['payFrom', 'ocConfirm'] };
+    if ((keep[f] || []).indexOf(sc) >= 0) return;
+    // a payment on its way keeps what it was made from until it ends
+    if (f === 'send' && this._sendRun) return;
+    if (f === 'req' && s.reqBusy) return;
+    if (f === 'oc' && s.ocBusy) return;
+    this._pf = null;
+    this._pfRun = (this._pfRun || 0) + 1;
+    this.setState({ payFromFlow: '', payFromList: null, payFromPick: '', payFromAsk: '', payFromTapped: false, payFromReopen: false,
+      payMint: '', payUnit: '' });
+  }
+
+  // ---- a Lightning payment ----
+
+  /* PAY FROM before a Lightning payment's confirmation. Called on every update (`syncSend`), before anything else it
+   * does: true where it has taken this update (the screen put up, or the one source chosen), and the rest waits for the
+   * next. Once for each question (`sendAsk`'s key), with a route, and not for a payment from a card. Where every pile
+   * that could pay is at this mint, nothing is done here, and CURRENCY and WALLET are as they were. */
+  syncPayFrom() {
+    this.pfTidy();
+    const s = this.state;
+    const W = window.FoxyWallet;
+    if (s.screen !== 'sendConfirm' || !(s.recipientKind === 'invoice' || s.recipientKind === 'email')) return false;
+    if (this.cardSendNow && this.cardSendNow()) return false;
+    if (!W || !W.balances || !W.quoteFeeAt || !W.quoteFee || !W.payNeed) return false;
+    if (this.offlineNow() || this.connecting()) return false;
+    const ask = this.sendAsk();
+    if (!ask || this._pfFor === ask.key) return false;
+    this._pfFor = ask.key;
+    const sats = ask.inv ? Math.round(Number(W.amountOf(ask.inv)) || 0) : Math.round(Number(ask.sats) || 0);
+    if (!(sats > 0)) return false;
+    const here = this.pfHere();
+    // dollars only where the mint issues them
+    const issues = (p) => p.unit === 'sat' || (p.mint === here ? this.twoUnitsOn() : !!(W.twoUnits && W.twoUnits(p.mint)));
+    const piles = this.pfPiles().filter((p) => issues(p) && this.pfFace(p.have, p.unit, sats));
+    if (!piles.some((p) => p.mint !== here)) return false;
+    const list = piles.map((p) => this.pfEntry(p, { pref: p.mint === here }));
+    const show = list.length > 1;
+    const key = ask.key;
+    const found = Promise.resolve().then(() => (ask.addr ? W.lookupLnurl(ask.addr, ask.sats) : { pr: ask.inv }));
+    found.catch(() => {});
+    const quote = (e) => found.then((f) => {
+      // kept for SEND and the confirmation's own question: the address is not asked again for this payment
+      if (ask.addr && this._pfFor === key) this._found = f;
+      return e.mint === here ? this.pfQuoteHere(f.pr, e.unit) : W.quoteFeeAt(e.mint, f.pr, e.unit);
+    }).then((q) => this.pfLnCost(e, q));
+    const one = show ? null : list[0];
+    this.pfOpen('send', list, {
+      show: show, ask: 'Pay ' + this.sendAmountText() + ' from', quote: quote,
+      go: (e, shown) => this.pfSendGo(e, shown),
+      none: () => this.pfSendGo(null, true),
+      cancel: () => this.setState({ screen: 'home', stack: [] }),
+      // the one source, chosen in the same breath: the confirmation is drawn from it, and asks nothing of this mint
+      patch: one ? { payMint: one.mint, payUnit: one.unit, wallet: one.unit, walletAuto: false, walletTapped: true } : null,
+    });
+    return true;
+  }
+
+  /* This mint's own quote for one of its balances, in the shape another mint's comes in (`quoteFeeAt`), and kept whole
+   * for the confirmation (`pfPre`). */
+  pfQuoteHere(pr, unit) {
+    const W = window.FoxyWallet;
+    return W.quoteFee(pr, { unit: unit }).then((q) => {
+      if (!q) return null;
+      const r = W.payNeed(q.amount, q.feeReserve, { unit: unit }) || {};
+      return { mint: this.pfHere(), unit: unit, amount: q.amount, feeReserve: q.feeReserve, need: Number(r.need) || (q.amount + q.feeReserve),
+        have: r.have, ok: r.ok !== false, why: r.why || '', rate: q.rate || null, quote: q, here: true };
+    });
+  }
+
+  /* A melt quote as a tile reads it: the whole cost in the unit, the fee in it, and the fee in sats to rank by. */
+  pfLnCost(e, q) {
+    if (!q) return { ok: false, why: this.pfName(e.mint) + ' gave no price for this.', tag: 'NOT AVAILABLE' };
+    const need = Math.round(Number(q.need) || 0);
+    const fee = Math.max(0, need - Math.round(Number(q.amount) || 0));
+    let rank = fee;
+    if (e.unit === 'usd') {
+      const btc = (q.rate && Number(q.rate.usdPerBtc)) || ((this.satUsd && Number(this.satUsd())) ? Number(this.satUsd()) * 1e8 : 0);
+      rank = btc > 0 ? Math.round(fee / 100 / btc * 1e8) : fee * 1000;
+    }
+    return { cost: need, fee: fee, ok: !!q.ok, why: q.why || '', rank: rank, full: q };
+  }
+
+  /* This mint's quotes asked on PAY FROM for the invoice `pr`, by unit, for the confirmation to take rather than ask
+   * again (03-send.js `quoteSendFee`). Only this mint's: another's was asked with no seed and is never paid with. */
+  pfPre(pr) {
+    const pf = this._pf;
+    if (!pf || pf.flow !== 'send') return null;
+    const out = {};
+    ['sat', 'usd'].forEach((u) => {
+      const f = pf.full[this.pfKey(pf.home, u)];
+      if (f && f.here && f.quote && f.quote.bolt11 === pr) out[u] = f.quote;
+    });
+    return out;
+  }
+
+  /* A source chosen for a Lightning payment, or none (`o.none`: this mint's, as if nothing had been asked). Back to the
+   * confirmation when the screen was up. */
+  pfSendGo(e, shown) {
+    const patch = e ? { payMint: e.mint, payUnit: e.unit, wallet: e.unit, walletAuto: false, walletTapped: true, payFromReopen: false }
+      : { payMint: '', payUnit: '', payFromReopen: false };
+    this.setState(patch);
+    if (shown && this.state.screen === 'payFrom') this.back();
+  }
+
+  /* The source a Lightning payment is made from when it is another mint's (`startSendNow`): where, in what, the home it
+   * comes back to, and the quote shown, which is handed to `pay` without the wallet that asked for it. Null for one made
+   * here. */
+  pfAwayNow() {
+    if (!this.pfAway('send')) return null;
+    const s = this.state;
+    const e = this.pfChosen();
+    const q = e ? this.pfFull(e.key) : null;
+    return { mint: this.pfMint(s.payMint), unit: s.payUnit === 'usd' ? 'usd' : 'sat', home: this.pfHome(), q: q,
+      shown: (b) => ((q && q.quote && q.quote.bolt11 === b) ? q.quote : null) };
+  }
+
+  /* After a payment from another mint was refused for a price that moved: that source asked again. */
+  pfRequote() {
+    const e = this.pfChosen();
+    if (!e || !this._pf) return;
+    this.setState({ payFromList: this.pfList().map((x) => (x.key === e.key ? Object.assign({}, x, { ok: null }) : x)) });
+    this.pfAsk(Object.assign({}, e, { ok: null }), this._pf.run);
+  }
+
+  /* CONFIRM PAYMENT for a Lightning payment from another mint than this phone's: the same rows as at a mint with two
+   * balances (`confirmTwoSpec`), in the unit of the pile that pays and from that mint's own quote, PAYING FROM naming
+   * it, and PAY FROM to change it where there is a choice. PAY is a visit there (03-send.js `startSendNow`). */
+  payAwaySpec() {
+    const s = this.state;
+    const unit = s.payUnit === 'usd' ? 'usd' : 'sat';
+    const e = this.pfChosen();
+    const q = e ? this.pfFull(e.key) : null;
+    const asked = this.sendSatsNow();
+    const bracket = (t) => (t ? '(' + t + ')' : '');
+    const fig = (n) => (unit === 'usd' ? { main: this.unitFigure(n, 'usd'), sub: '' } : this.money(n));
+    const asking = !e || e.ok === null;
+    const total = q ? Math.round(Number(q.need) || 0) : null;
+    const fee = q ? Math.max(0, total - Math.round(Number(q.amount) || 0)) : null;
+    const rows = [
+      this.cfRow('TO', this.sendToText()),
+      this.cfRow('AMOUNT', q ? fig(q.amount).main : this.sendAmountText(), {
+        sub: unit === 'usd' ? (asked ? bracket('₿ ' + this.group(asked)) : '') : bracket(q ? fig(q.amount).sub : ''),
+      }),
+      this.cfRow('FEE INCLUDED', q ? fig(fee).main : asking ? 'CHECKING…' : 'UNKNOWN',
+        { sub: (q && unit === 'sat') ? bracket(fig(fee).sub) : '', sub2: 'You pay the mint’s fees' }),
+      this.cfRow('NETWORK', 'LIGHTNING'),
+      this.cfRow('PAYING FROM', this.pfLabel(s.payMint, unit)),
+    ];
+    const rate = q && q.rate ? Math.round(Number(q.rate.usdPerBtc) || 0) : 0;
+    if (unit === 'usd' && rate > 0) {
+      const who = String(this.mintNameOf(s.payMint) || 'the mint');
+      rows.push(this.cfRow('RATE', '₿ 1 = $ ' + this.group(rate) + ' · ' + who + (/s$/i.test(who) ? '’' : '’s') + ' rate'));
+    }
+    if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
+    const base = {
+      title: 'CONFIRM PAYMENT', titleUp: true, amountLabel: 'TOTAL', rows: rows,
+      wallet: this.pfMany('send') ? { label: 'PAY FROM', word: this.pfName(s.payMint), go: () => this.openWalletPick() } : undefined,
+      close: () => this.setState({ screen: 'home', stack: [] }),
+      amountInk: 'var(--ink)',
+      amount: total != null ? fig(total).main : this.sendAmountText(),
+      amountSub: (total != null && unit === 'sat') ? fig(total).sub : '',
+    };
+    if (e && e.ok === false) {
+      return Object.assign(base, {
+        amountInk: '#FF5C5C',
+        warn: e.why || 'More than your ' + this.unitWord(unit).toLowerCase() + ' at ' + this.pfName(s.payMint) + '.',
+        cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
+      });
+    }
+    const held = asking || this.connecting();
+    return Object.assign(base, {
+      cta: held ? 'CHECKING…' : 'PAY', ctaBusy: held, ctaTone: 'go',
+      // a visit is a switch of mints, which waits for money already moving
+      go: held ? () => {} : () => { if (this.refuseSwitchWhileBusy && this.refuseSwitchWhileBusy()) return; this.startSend(); },
+    });
+  }
+
+  // ---- a Cashu request ----
+
+  /* PAY FROM before a request's confirmation (07-history-tokens-mints.js `openRequest`): the request's own mint with no
+   * fee, first among equals, and every other mint's sats by the crossing, each quoted at once. Sats only: dollars do not
+   * cross between mints, and a request in dollars is paid from the dollars at its own mint or not at all. Not with no
+   * route, where only the request's own mint can pay. */
+  pfRequest(req) {
+    const W = window.FoxyWallet;
+    if (!req || req.unit === 'usd' || !W || !W.balances || !W.transferQuote) return false;
+    if (this.offlineNow()) return false;
+    const want = this.pfMint(req.mints && req.mints[0]);
+    const need = Math.round(Number(req.sats) || 0);
+    if (!want || !(need > 0)) return false;
+    const here = this.pfHere();
+    const piles = this.pfPiles().filter((p) => p.unit === 'sat' && p.have >= need);
+    if (piles.length < 2) return false;
+    const list = piles.map((p) => {
+      if (p.mint !== want) return this.pfEntry(p);
+      // at their mint: no fee, or where it is this phone's own, the mint's fee for the pieces (`sendShortfall`)
+      let lack = null;
+      try {
+        lack = (p.mint === here && W.sendShortfall)
+          ? W.sendShortfall(need, { locked: !!(req.lockTo && !this.offlineNow()) }) : null;
+      } catch (x) { lack = null; }
+      const fee = lack ? Math.max(0, Number(lack.fee) || 0) : 0;
+      return this.pfEntry(p, { pref: true, cost: need + fee, fee: fee, rank: fee, ok: !(lack && lack.short),
+        why: lack && lack.short ? String(lack.why || '') : '', tag: lack && lack.short ? 'NOT ENOUGH' : '' });
+    });
+    const quote = (e) => W.transferQuote(e.mint, need, { to: want, land: true }).then((plan) => {
+      const fee = Math.max(0, Math.round(Number(plan && plan.feeSats) || 0));
+      return { cost: need + fee, fee: fee, ok: true, rank: fee, full: plan };
+    });
+    const out = () => {
+      if (req.viaTap && W.tapQuote) W.tapQuote(JSON.stringify({ gaveUp: 'The payer cancelled.' })).catch(() => {});
+      this.setState({ screen: 'home', stack: [], req: null, note: '', noteDraft: '', tapQuoteFor: '' });
+    };
+    this.pfOpen('req', list, {
+      show: true, ask: 'Pay ' + this.money(need).main + ' from', quote: quote,
+      go: (e, shown) => {
+        this.setState({ payMint: e.mint, payUnit: 'sat', payFromReopen: false });
+        if (shown && this.state.screen === 'payFrom') this.back();
+      },
+      none: () => { if (this.state.screen === 'payFrom') this.back(); },
+      cancel: out,
+    });
+    return true;
+  }
+
+  /* The source chosen for this request on PAY FROM: its mint and, where it is another than the request's, the crossing's
+   * plan, quoted there. Null where nothing was chosen. */
+  pfReqSource(req) {
+    const s = this.state;
+    if (s.payFromFlow !== 'req' || !s.payMint || !req) return null;
+    const want = this.pfMint(req.mints && req.mints[0]);
+    const mint = this.pfMint(s.payMint);
+    return { mint: mint, plan: (want && mint !== want) ? this.pfFull(this.pfKey(mint, 'sat')) : null };
+  }
+
+  /* For `makeTokenForRequest`: the crossing to make before the payment, when the source chosen is another mint than the
+   * one the request names and there is a route to make it over. */
+  pfReqCrossing(want) {
+    const src = this.pfReqSource(this.state.req);
+    if (!src || !src.plan || this.offlineNow() || this.pfMint(want) === src.mint) return null;
+    return { plan: src.plan, from: src.mint };
+  }
+
+  // ---- a tap from somebody at another mint ----
+
+  /* PAY FROM where a tap at another mint is decided (26d-tap.js `tapCrossMint`): their mint's sats with no fee, first
+   * among equals, and this phone's own mint and any other by the crossing, the one asked while they decided reused where it
+   * is the same (`_crossReady`). With one source, false, and the tap goes on exactly as it did. */
+  pfTapCross(offer, want, theirs, mine, there) {
+    const W = window.FoxyWallet;
+    if (!W || !W.balances || !W.transferQuote || this.offlineNow()) return false;
+    const to = this.pfMint(theirs);
+    const piles = this.pfPiles().filter((p) => p.unit === 'sat' && (p.mint === to ? there >= want : p.have >= want));
+    if (piles.length < 2) return false;
+    const ready = this._crossReady;
+    const list = piles.map((p) => (p.mint === to
+      ? this.pfEntry(p, { pref: true, cost: want, fee: 0, rank: 0, ok: true })
+      : this.pfEntry(p)));
+    const quote = (e) => {
+      const same = !!(ready && ready.sats === want && ready.to === to && ready.from === e.mint);
+      const plan = same ? ready.plan : W.transferQuote(e.mint, want, { to: to, land: true });
+      return plan.then((p) => {
+        const fee = Math.max(0, Math.round(Number(p && p.feeSats) || 0));
+        return { cost: want + fee, fee: fee, ok: true, rank: fee, full: p };
+      });
+    };
+    // off PAY FROM, and on as the tap would have gone: the crossing's own screen is its confirmation
+    const leave = () => { if (this.state.screen === 'payFrom') this.back(); };
+    this.pfOpen('tap', list, {
+      show: true, ask: 'Pay ' + this.money(want).main + ' from', quote: quote,
+      go: (e) => {
+        const plan = this.pfFull(e.key);
+        leave();
+        if (e.mint === to) { this.tapPayFromThere(offer, want, theirs, mine, there); return; }
+        if (plan) this._crossReady = { sats: want, to: to, from: e.mint, plan: Promise.resolve(plan) };
+        this.tapCrossQuote(offer, want, theirs, mine, e.mint);
+      },
+      none: () => {
+        leave();
+        if (there >= want && W.sendShortfall) this.tapPayFromThere(offer, want, theirs, mine, there);
+        else this.tapCrossQuote(offer, want, theirs, mine);
+      },
+      cancel: () => {
+        if (W.tapQuote) W.tapQuote(JSON.stringify({ gaveUp: 'The payer cancelled.' })).catch(() => {});
+        this.setState({ screen: 'home', stack: [] });
+      },
+    });
+    return true;
+  }
+
+  // ---- a payout on chain ----
+
+  /* PAY FROM before a payout's confirmation (26b-onchain.js `payOnchain`, `ocNext`): every mint's sats that cover the
+   * amount. What a mint charges on chain is asked of it after it is chosen, once the phone is there, so every tile can be
+   * chosen at once and says the fee comes next; this phone's own mint is first, as the one with no visit. True where it has
+   * taken the payout on: the screen put up, or the one source at another mint gone to. */
+  pfOnchain() {
+    const s = this.state;
+    const W = window.FoxyWallet;
+    if (!W || !W.balances || !W.connect || (this.fcOutMode && this.fcOutMode()) || this.offlineNow()) return false;
+    const sats = Math.round(Number(s.ocSats) || 0);
+    if (!(sats > 0)) return false;
+    const here = this.pfHere();
+    const piles = this.pfPiles().filter((p) => p.unit === 'sat' && p.have >= sats);
+    if (!piles.some((p) => p.mint !== here)) return false;
+    const list = piles.map((p) => this.pfEntry(p, { ok: true, note: 'Fee on the next screen', rank: p.mint === here ? 0 : 1, pref: p.mint === here }));
+    const show = list.length > 1;
+    this.pfOpen('oc', list, {
+      show: show, ask: 'Pay ' + this.money(sats).main + ' from',
+      go: (e, shown) => this.pfOnchainGo(e, shown),
+      cancel: () => this.ocCancel(),
+    });
+    if (!show) this.pfOnchainGo(list[0], false);
+    return true;
+  }
+
+  /* A mint chosen for a payout: its quote asked here, or on a visit there (`_ocVisit`), home again when the payout has gone
+   * or failed or the screens are left (`pfOcHome`). */
+  pfOnchainGo(e, shown) {
+    const W = window.FoxyWallet;
+    if (shown && this.state.screen === 'payFrom') this.back();
+    const here = this.pfHere();
+    this.setState({ payMint: e.mint, payUnit: 'sat', payFromReopen: false });
+    if (e.mint === here) { this.ocQuote(); return; }
+    this._ocVisit = e.mint;
+    this._crossCameFrom = here;
+    this.setState({ ocPlan: null, ocFee: null, ocErr: '' });
+    console.log('[foxy] pay from: visiting ' + this.pfName(e.mint).toLowerCase() + ' for its on-chain fee');
+    W.connect(e.mint, null, null, { remember: false }).then(() => {
+      if (this._ocVisit !== e.mint) return;
+      this._ocAsked = null;
+      this.onchainAsk();
+      this.refreshBalance();
+      this.ocQuote();
+    }, (x) => {
+      if (this._ocVisit !== e.mint) return;
+      this.setState({ ocErr: W.reason ? W.reason(x) : String((x && x.message) || x) });
+      this.pfOcHome();
+    });
+  }
+
+  /* Home from a visit made for a payout on chain. */
+  pfOcHome() {
+    if (!this._ocVisit) return;
+    this._ocVisit = null;
+    this.crossComeHome();
   }
 
   /* switchMint: the mint list. */

@@ -890,8 +890,35 @@
     const W = window.FoxyWallet;
     // locked exactly when the send will be (makeTokenForRequest): a key named, and a route
     const lockedNow = !!(req && req.lockTo && !(this.offlineNow && this.offlineNow()));
-    const lack = (sats > 0 && W && W.sendShortfall)
-      ? (usdReq ? W.sendShortfall(sats, { unit: 'usd', locked: lockedNow }) : W.sendShortfall(sats, { locked: lockedNow })) : null;
+    /* Judged at the mint the payment is made from, not the one this phone is on.
+     *
+     * The shortfall below was always this phone's own mint's, so a request at
+     * another mint where the person held enough there, and less here, was
+     * answered CLOSE, "More than your balance". Now: the source chosen on PAY
+     * FROM (26l-pay-from.js) where there is one, and otherwise the request's
+     * own mint, which is visited to pay it. Only where that mint holds too
+     * little is this mint's own judged, as before, because then PAY offers to
+     * move the sats here across (`makeTokenForRequest`). A source that
+     * crosses was quoted on PAY FROM, whose quote is what said it covers it. */
+    const src = this.pfReqSource ? this.pfReqSource(req) : null;
+    const crossFee = (src && src.plan) ? Math.max(0, Math.round(Number(src.plan.feeSats) || 0)) : 0;
+    const want = String((req && req.mints && req.mints[0]) || '').replace(/\/+$/, '');
+    const judgeAt = src ? src.mint : want;
+    const atHere = !judgeAt || this.requestHere({ mints: [judgeAt] });
+    const thereHas = (!atHere && !usdReq && W && W.balanceAt) ? Math.round(Number(W.balanceAt(judgeAt)) || 0) : null;
+    let lack = null;
+    if (sats > 0 && W && W.sendShortfall && !(src && src.plan)) {
+      if (atHere || ((thereHas == null || thereHas < sats) && !src)) {
+        lack = usdReq ? W.sendShortfall(sats, { unit: 'usd', locked: lockedNow }) : W.sendShortfall(sats, { locked: lockedNow });
+      } else if (thereHas != null && thereHas >= sats) {
+        // paid there, on a visit: what that mint charges for the pieces is known once there
+        lack = { short: false, need: sats, have: thereHas, fee: 0, there: true };
+      } else {
+        const name = this.pfName ? this.pfName(judgeAt) : judgeAt;
+        lack = { short: true, need: sats, have: thereHas || 0, fee: 0, there: true,
+          why: 'You hold ' + this.money(thereHas || 0).main + ' at ' + name + '. This needs ' + this.money(sats).main + '.' };
+      }
+    }
     /* Waiting on a connection that is on its way.
      *
      * A request that names somewhere to be paid, or a lock to be made, or
@@ -915,7 +942,7 @@
      * minutes. Only on the request that answered that price. */
     const agreed = !!(req && req.id && s.tapQuoteFor && s.tapQuoteFor === req.id && Number(s.tapQuoteUsd) > 0);
     // the FEE row: while it is being checked, where the mint takes a fee for the pieces, or across units
-    const feeShown = held || !!(lack && lack.fee > 0) || agreed;
+    const feeShown = held || !!(lack && lack.fee > 0) || agreed || crossFee > 0;
     const agreedRows = () => {
       const words = this.priceAgeWords ? this.priceAgeWords(Number(s.tapQuoteAgeMs) || 0) : '';
       return [
@@ -934,7 +961,8 @@
       ? { main: '\u20bf ' + this.group(n), sub: this.unitFigure(Math.round(Number(s.tapQuoteUsd) || 0), 'usd') }
       : fig(n));
     const rows = (byTap ? [] : [this.cfRow('DELIVERED TO', to)]).concat([
-      this.cfRow('PAYING FROM', (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
+      // (the source chosen on PAY FROM, its mint and balance: 26l-pay-from.js)
+      this.cfRow('PAYING FROM', src && this.pfLabel ? this.pfLabel(src.mint, 'sat') : (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
       this.cfRow('NETWORK', 'CASHU', { half: true }),
       // not in the accent: the accent on this screen belongs to the code, and
       // two orange things is one too many to look at
@@ -945,7 +973,7 @@
        * is asked at, Foxy charges nothing and says nothing; a fee the mint
        * itself takes for the pieces, or a payment across units, is the
        * payer's, and the row says whose. */
-      this.cfRow('FEE', held ? 'CHECKING…' : fig(lack && lack.fee > 0 ? lack.fee : 0).main,
+      this.cfRow('FEE', held ? 'CHECKING…' : fig(crossFee > 0 ? crossFee : lack && lack.fee > 0 ? lack.fee : 0).main,
         { half: true, sub2: held ? '' : 'You pay the mint\u2019s fees' }),
     ] : []).concat(usdReq ? [this.cfRow('FROM', 'DOLLARS')] : agreed ? agreedRows() : this.peerRateRow());
     /* Short with the fee counted, as the send itself counts it. The balance
@@ -961,15 +989,17 @@
      * connected to when the button is pressed, and what is held there, and
      * what it charges, are known only then, so the figures below stay as they
      * were. */
-    if (lack && lack.short && this.requestHere(req)) {
+    if (lack && lack.short && (this.requestHere(req) || lack.there)) {
       return {
         title: 'CONFIRMATION', amountLabel: 'SENDING', code: byTap ? s.tapCode : '',
         amount: head(sats).main, amountSub: head(sats).sub, amountInk: '#FF5C5C', rows: rows,
-        warn: this.heldBlocks(usdReq ? 0 : lack.need - lack.have) || lack.why,
+        // (what is held back with this mint says nothing of a pile at another)
+        warn: (lack.there ? '' : this.heldBlocks(usdReq ? 0 : lack.need - lack.have)) || lack.why,
         cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
       };
     }
-    const shortBy = lack && lack.short ? lack.need - lack.have
+    // (not this mint's balance where the payment is made from another, or crosses from one: judged above)
+    const shortBy = (src && src.plan) || (lack && lack.there) ? 0 : lack && lack.short ? lack.need - lack.have
       : Math.max(0, sats - (usdReq ? this.unitBalance('usd') : (s.balSats || 0)));
     const short = shortBy > 0;
     if (short) {

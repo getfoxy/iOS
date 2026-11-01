@@ -603,10 +603,32 @@
       });
     },
 
+    /* The same, for payouts made on a visit to another mint (PAY FROM, build/app/26l-pay-from.js): the phone comes home
+     * once the payout has gone, and a payout followed only while the phone is at its mint was followed by nobody after
+     * that: its change, and its ecash when the mint never took it, waited for a visit nobody had reason to make. */
+    onchainSendingAway: function () {
+      var at = String(mintUrl || '').replace(/\/+$/, '');
+      return load(K.onchainOut, []).filter(function (r) {
+        return !!r.mint && String(r.mint).replace(/\/+$/, '') !== at && r.state !== 'PAID';
+      });
+    },
+
+    /* Asked of the mint the payout was made at: the connected one's wallet on a circuit of its own, or for a payout at
+     * another mint (`onchainSendingAway`) a wallet made for that mint on this phone's seed, as the sweep of melts held
+     * elsewhere makes one (`awayWallet`), which connects the phone nowhere. */
     onchainFollow: function (quoteId) {
       assertRoute();
+      var rec = /** @type {any} */ (null);
+      load(K.onchainOut, []).forEach(function (r) { if (r.quote === quoteId) rec = r; });
+      var here = String(mintUrl || '').replace(/\/+$/, '');
+      var away = rec && rec.mint && String(rec.mint).replace(/\/+$/, '') !== here ? String(rec.mint).replace(/\/+$/, '') : '';
+      if (away) return awayWallet(away).then(function (ow) { return FoxyWallet._onchainFollowWith(ow, quoteId); });
       var w;
       try { w = onCircuit(need(), 'melt:' + quoteId); } catch (e) { return Promise.reject(e); }
+      return FoxyWallet._onchainFollowWith(w, quoteId);
+    },
+
+    _onchainFollowWith: function (w, quoteId) {
       var at = mintOf(w);
       return w.checkMeltQuoteOnchain(String(quoteId)).then(function (q) {
         var state = String(q.state || '').toUpperCase();
