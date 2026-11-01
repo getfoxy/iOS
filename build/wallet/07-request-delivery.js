@@ -2777,7 +2777,10 @@
     if (typeof t !== 'string' || t.length > 2048 || !/^https:\/\//i.test(t)) return false;
     var u;
     try { u = new URL(t); } catch (e) { return false; }
-    return u.protocol === 'https:' && !!u.hostname && !/\.onion$/i.test(u.hostname)
+    /* An onion with a dot at the end ("…d.onion.") is still an onion to a
+     * resolver, and was read as a web address: posted through an exit, or
+     * looked up in DNS on the open connection. */
+    return u.protocol === 'https:' && !!u.hostname && !/\.onion\.*$/i.test(u.hostname)
       && !u.username && !u.password && !u.hash;
   }
 
@@ -2883,17 +2886,53 @@
    * the wire buys nothing; the token's own claim watch sees it redeemed. Their
    * server's words are not put on screen: it is anybody's website, not
    * another Foxy, and 200 characters of its choosing on a card is not a
-   * refusal, it is a notice board. The status is said instead. */
-  var HTTPS_REACH_MS = 45000;
+   * refusal, it is a notice board. The status is said instead.
+   *
+   * Taken is any 2xx on the address asked, and nothing else. Only 200 used to
+   * count, so a site that answered 201, 202 or 204 had the payment and the
+   * person was told it had not arrived. The bridge never follows a redirect
+   * for this post and says "redirected N" if one got through: a 301, 302 or
+   * 303 turned the POST into a GET with no body, and that GET's 200 used to
+   * read as paid while the handler that had the proofs had only said "go
+   * elsewhere".
+   *
+   * Any other answer is the site saying no after it has seen the proofs, so
+   * it is a refusal (`foxyRefused`) and `payRequest` takes them back at once
+   * (`afterRefusal`), as for a refusal over the link. It used to hand the
+   * token back to "show them", and there is nobody at a website to show a
+   * token to.
+   *
+   * The page waits as long as the post can run (the Tor session's 60 s) and
+   * the bridge is told that ceiling. The page used to give up at 50 s while
+   * the post ran on, and said the internal action's name. An answer that
+   * never came is not a refusal: the post may have landed, so the token stays
+   * as it is and its claim watch decides (`foxyMaybeSent`). */
+  var HTTPS_REACH_MS = 60000;
+  var HTTPS_MAYBE = 'The payment may have reached them; Foxy is checking.';
   function deliverOverHttps(target, body) {
     return bridgeAsk('httpsPost', { url: target, body: body, timeout: HTTPS_REACH_MS },
                      HTTPS_REACH_MS + ONION_SLACK_MS).then(function (text) {
       var s = String(text || '');
       var nl = s.indexOf('\n');
-      var code = Number(s.slice(0, nl)) || 0;
-      if (code === 200) return true;
-      if (code === 404 || code === 410) throw new Error('That request is no longer open at their address.');
-      throw new Error('Their address did not take the payment (' + code + ').');
+      var line = nl >= 0 ? s.slice(0, nl) : s;
+      var code = /^\d{3}$/.test(line) ? Number(line) : 0;
+      if (code >= 200 && code < 300) return true;
+      var e = /** @type {any} */ (/^redirected\b/.test(line)
+        ? new Error('Their website sent the payment elsewhere (' + (line.split(' ')[1] || '?') + '), so it was not taken.')
+        : code === 404 || code === 410 ? new Error('That request is no longer open at their website.')
+        : new Error('Their website did not take the payment (' + (code || line.slice(0, 12) || '?') + ').'));
+      e.foxyRefused = true;
+      e.foxyWebsite = true;
+      throw e;
+    }, function (x) {
+      var said = String((x && x.message) || x);
+      // no answer in time, from the bridge or from the post itself
+      if (/did not answer|may have reached them/.test(said)) {
+        var m = /** @type {any} */ (new Error(HTTPS_MAYBE));
+        m.foxyMaybeSent = true;
+        throw m;
+      }
+      throw x;
     });
   }
 

@@ -110,6 +110,12 @@
       return sumProofs(load(K.proofs + '.' + url, []));
     },
 
+    /* A mint as this wallet files it (`canonicalMint`), for the screens to
+     * compare a request's mint with the ones held: a mint written with
+     * capitals or :443 is the same mint, and `balanceAt` reads it only in
+     * this spelling. */
+    canonicalMint: function (url) { return canonicalMint(url); },
+
     /* Why this mint URL is unacceptable, or null if it is fine. */
     mintProblem: function (u) { return mintUrlProblem(u); },
 
@@ -2247,8 +2253,16 @@
             return out;
           }) };
         if (req.id) payment.id = req.id;
+        /* What only another Foxy reads: a key for change, the payer's name for
+         * an offline receiver, and the over-payment said out loud. Over a tap
+         * or to an onion, never to a website. A website is somebody's server,
+         * and it was sent `changeTo` whenever the lock pool had keys in it (any
+         * tap or shown request fills it): a key derived from this phone's seed
+         * and a mark that the payer is a Foxy, to a stranger, beyond NUT-18's
+         * id, memo, mint, unit and proofs. */
+        var toFoxy = d.kind !== 'https' && (!!req.viaTap || d.kind === 'onion');
         // who is paying, to a receiver that said it is offline, in the name for that receiver alone (`payerTag`)
-        var fromName = req.theirRoute === false ? payerTag(req.theirTill) : '';
+        var fromName = (toFoxy && req.theirRoute === false) ? payerTag(req.theirTill) : '';
         if (fromName) payment.from = fromName;
         /* A key for change to be locked to, when this payment might overpay.
          *
@@ -2266,10 +2280,10 @@
          * step. A phone paid with `no key to lock change to` twenty
          * minutes after the same phone had taken change back fine, because by
          * then the pool had been used up. */
-        var changeKey = req.id ? changeKeyFor(req.id, reqUnit) : '';
+        var changeKey = (req.id && toFoxy) ? changeKeyFor(req.id, reqUnit) : '';
         if (changeKey) {
           payment.changeTo = changeKey;
-        } else if (req.id) {
+        } else if (req.id && toFoxy) {
           console.warn('[foxy] no key to lock change to, so any over-payment is owed'
             + ' rather than handed back');
         }
@@ -2277,7 +2291,7 @@
          * come back. A receiver with no route refuses an over-payment otherwise,
          * because it would have to swap to give the difference back — and this
          * is what tells it the difference was meant. */
-        if (Number(made.over) > 0 && opts && opts.overpayOk) payment.overpaid = true;
+        if (toFoxy && Number(made.over) > 0 && opts && opts.overpayOk) payment.overpaid = true;
         var body = serialiseBody(payment);
         step('delivering');
         /* Over Bluetooth when this request came over Bluetooth.

@@ -152,8 +152,10 @@
           if (!n10 || n10.kind !== 'P2PK' || typeof n10.data !== 'string') return '';
           return /^0[23][0-9a-f]{64}$/i.test(n10.data) ? n10.data : '';
         })(),
-        // text only: a crafted request carried numbers and byte arrays here
-        mints: Array.isArray(r.mints) ? r.mints.filter(function (m) { return typeof m === 'string'; }) : [],
+        /* Text only: a crafted request carried numbers and byte arrays here.
+         * In the wallet's own spelling (`canonicalMint`), so a mint written
+         * with capitals or :443 is the mint it is, wherever it is compared. */
+        mints: Array.isArray(r.mints) ? r.mints.filter(function (m) { return typeof m === 'string'; }).map(canonicalMint) : [],
         description: str(r.description),
         /* What a phone with no route asked for, when it asked in dollars: the
          * amount in cents and the price it last saw, both written into the

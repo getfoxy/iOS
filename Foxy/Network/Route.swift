@@ -114,8 +114,14 @@ enum Route {
     /// is kept for the job that takes the circuit (`startWarm`). A request on
     /// a circuit whose session is kept takes that session, and with it the
     /// connection the spare made to the mint.
+    ///
+    /// `redirects`: false for a request that must never be sent on, even to
+    /// the same host (a payment posted to a website: a 301, 302 or 303 turns
+    /// a POST into a GET with no body, and that GET's 200 used to read as the
+    /// payment taken). The task then completes with the redirect itself.
     @discardableResult
     static func start(_ request: URLRequest, circuit: String? = nil, warm: Bool = false,
+                      redirects: Bool = true,
                       _ done: @escaping (Data?, URLResponse?, Error?) -> Void) -> URLSessionDataTask? {
         // Foxy is being put away: nothing new leaves (the door, below)
         guard !shut() else {
@@ -125,13 +131,13 @@ enum Route {
 #if canImport(Tor)
         if TorService.isRunning, let circuit {
             if warm { return startWarm(request, circuit: circuit, counted(done)) }
-            if let kept = takeWarm(circuit: circuit, host: request.url?.host) { return startOnce(kept, request, counted(done)) }
+            if let kept = takeWarm(circuit: circuit, host: request.url?.host) { return startOnce(kept, request, redirects: redirects, counted(done)) }
         }
-        if TorService.isRunning { return startOnce(TorService.socksSession(circuit: circuit), request, counted(done)) }
+        if TorService.isRunning { return startOnce(TorService.socksSession(circuit: circuit), request, redirects: redirects, counted(done)) }
 #endif
         guard unprotected else { return nil }
         let task = clearSession.dataTask(with: request)
-        redirectGuard.collect(task, limit: largestAnswer, counted(done))
+        redirectGuard.collect(task, limit: largestAnswer, redirects: redirects, counted(done))
         task.resume()
         return task
     }
@@ -378,9 +384,10 @@ enum Route {
     /// the completion handler would have. The session must be made with
     /// `redirectGuard`, as every session here is (smoke check 17d).
     static func startOnce(_ session: URLSession, _ request: URLRequest, limit: Int = largestAnswer,
+                          redirects: Bool = true,
                           _ done: @escaping (Data?, URLResponse?, Error?) -> Void) -> URLSessionDataTask {
         let task = session.dataTask(with: request)
-        redirectGuard.collect(task, limit: limit, done)
+        redirectGuard.collect(task, limit: limit, redirects: redirects, done)
         task.resume()
         session.finishTasksAndInvalidate()
         return task
@@ -654,6 +661,15 @@ final class RedirectGuard: NSObject, URLSessionTaskDelegate, URLSessionDataDeleg
                     completionHandler: @escaping (URLRequest?) -> Void) {
         guard let target = request.url else { completionHandler(nil); return }
         let original = task.originalRequest?.url ?? response.url
+        // a request started with `redirects: false` (Route.start) is never sent on, to any host
+        lock.lock()
+        let follows = collecting[ObjectIdentifier(task)]?.redirects ?? true
+        lock.unlock()
+        if !follows {
+            print("[foxy] redirect not followed:", original?.host ?? "?", "answered", response.statusCode)
+            completionHandler(nil)
+            return
+        }
         if let problem = Route.redirectProblem(from: original, to: target) {
             // Cancelled: the task completes with the redirect response itself,
             // a 3xx the page reports as a failure, and nothing is sent to the target.
@@ -674,6 +690,8 @@ final class RedirectGuard: NSObject, URLSessionTaskDelegate, URLSessionDataDeleg
         let done: (Data?, URLResponse?, Error?) -> Void
         var data = Data()
         var tooLarge = false
+        /// False for a task Route.start was told not to let redirect.
+        var redirects = true
     }
     private let lock = NSLock()
     /// Keyed by the task object: a task identifier is unique only within its
@@ -681,9 +699,10 @@ final class RedirectGuard: NSObject, URLSessionTaskDelegate, URLSessionDataDeleg
     private var collecting: [ObjectIdentifier: Collecting] = [:]
 
     /// Before `task` resumes: collect its answer up to `limit`, then call `done`.
-    func collect(_ task: URLSessionTask, limit: Int, _ done: @escaping (Data?, URLResponse?, Error?) -> Void) {
+    func collect(_ task: URLSessionTask, limit: Int, redirects: Bool = true,
+                 _ done: @escaping (Data?, URLResponse?, Error?) -> Void) {
         lock.lock(); defer { lock.unlock() }
-        collecting[ObjectIdentifier(task)] = Collecting(cap: AnswerCap(limit: limit), done: done)
+        collecting[ObjectIdentifier(task)] = Collecting(cap: AnswerCap(limit: limit), done: done, redirects: redirects)
     }
 
     /// A server that says it will send more than the limit is refused before

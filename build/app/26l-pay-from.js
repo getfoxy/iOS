@@ -29,14 +29,30 @@
    * before. With no route only the request's own mint can pay, and nothing
    * crosses. A card is never a source: it pays from its own screen.
    *
+   * Every mint that covers the amount is asked for a quote before anything is chosen, with the same invoice (or, for a
+   * request, a mint quote at the request's mint for each crossing): mints that compared notes could tie the person's
+   * holdings at them together. Left so on purpose until it is decided (attack 2026-11-01, P).
+   *
    * State: `payFromFlow` ('send', 'req', 'tap', 'oc'), `payFromList` (the
    * tiles, cheapest first), `payFromPick` (the tile chosen), `payFromAsk` (the
    * question), and once chosen `payMint` and `payUnit` beside `wallet`, which
    * stays the unit `walletNow` reads at this mint. All cleared when the flow
    * ends (`pfTidy`). */
 
-  /* A mint as it is written down here, with no slash at the end. */
-  pfMint(u) { return String(u || '').replace(/\/+$/, ''); }
+  /* A mint as the wallet writes one (`canonicalMint`): small letters in the scheme and host, no default port, no slash at
+   * the end. Only the slash went before, so a request naming its mint in capitals was compared with `!==` against the
+   * pile of the same mint and offered as somewhere else, with a crossing's fee. */
+  pfMint(u) {
+    const W = window.FoxyWallet;
+    if (W && W.canonicalMint) return W.canonicalMint(u);
+    const m = /^(https?):\/\/([^/?#]+)(.*)$/i.exec(String(u || '').trim());
+    if (!m) return String(u || '').trim().replace(/\/+$/, '');
+    const scheme = m[1].toLowerCase();
+    const port = scheme === 'https' ? ':443' : ':80';
+    let host = m[2].toLowerCase();
+    if (host.slice(-port.length) === port) host = host.slice(0, -port.length);
+    return scheme + '://' + host + (m[3] || '').replace(/\/+$/, '');
+  }
 
   /* The mint this phone is on now. */
   pfHere() { const W = window.FoxyWallet; return this.pfMint(W && W.mintUrl); }
@@ -523,9 +539,13 @@
 
   /* For `makeTokenForRequest`: the crossing to make before the payment, when the source chosen is another mint than the
    * one the request names and there is a route to make it over. */
+  /* Not once its sats have been moved there (`_crossMovedTo`, set by `crossMove`): a pass that comes back for the
+   * over-payment question ran the same plan a second time, and only the far side refusing an invoice already paid
+   * stopped a second melt. */
   pfReqCrossing(want) {
     const src = this.pfReqSource(this.state.req);
     if (!src || !src.plan || this.offlineNow() || this.pfMint(want) === src.mint) return null;
+    if (this._crossMovedTo && this.pfMint(this._crossMovedTo) === this.pfMint(want)) return null;
     return { plan: src.plan, from: src.mint };
   }
 

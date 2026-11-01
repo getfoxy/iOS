@@ -335,10 +335,19 @@ extension FoxyBridge {
     /// The person's choice of the open connection is honoured here as it is
     /// for a mint: it is one policy, not two.
     func handleHttpsPost(id: String, body: [String: Any]) {
+        // the host as a resolver reads it: "x.onion." is an onion too, and is never posted through an exit
         guard let text = body["url"] as? String, text.count <= 2048, let url = URL(string: text),
-              url.scheme == "https", let host = url.host, !host.isEmpty, !OnionAddress.isHost(host),
+              url.scheme == "https", let host = url.host, !host.isEmpty,
+              !host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")).hasSuffix(".onion"),
               url.user == nil, url.password == nil, url.fragment == nil else {
             resolve(id: id, text: nil, error: "That is not an https address.")
+            return
+        }
+        /* The checks every mint address meets: no LAN name, no IP literal, no
+         * localhost. A request is anybody's QR code, and on the open
+         * connection this post used to go wherever it named. */
+        if Route.urlProblem(url) != nil {
+            resolve(id: id, text: nil, error: "That is not an address Foxy will pay to.")
             return
         }
         let payment = Data((body["body"] as? String ?? "").utf8)
@@ -350,21 +359,47 @@ extension FoxyBridge {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = payment
+        /* The page's own budget, as onionPost has it: the page used to give
+         * up at 50 s while this post ran on to Tor's 60, and a site that
+         * answered in between had taken a payment the person was told had
+         * failed. Bounded by the sessions' own 60 s. */
+        let seconds = (body["timeout"] as? NSNumber)?.doubleValue ?? 0
+        request.timeoutInterval = seconds > 0 ? min(max(seconds / 1000, 3), 60) : 60
         let began = Date()
-        let task = Route.start(request, circuit: MintCircuit.label(nil)) { [weak self] data, response, error in
+        /* Never redirected (`redirects: false`). A 301, 302 or 303 turns this
+         * POST into a GET with no body, and the 200 that GET got used to read
+         * as the payment taken, while the handler that had the proofs had
+         * only said "go elsewhere". The task completes with the 3xx instead,
+         * which the page treats as not taken. The final address is checked as
+         * well, so a redirect that got through anyway is never a 200. */
+        let task = Route.start(request, circuit: MintCircuit.label(nil), redirects: false) { [weak self] data, response, error in
             let ms = Int(Date().timeIntervalSince(began) * 1000)
             if error is AnswerTooLarge {
                 self?.resolve(id: id, text: nil, error: "The answer from \(host) was too large.")
                 return
             }
             if let error {
-                print("[foxy] net: POST \(host) · \(ms) ms · \(NetDiary.failure(error as NSError))")
-                self?.resolve(id: id, text: nil, error: "Their address could not be reached over Tor.")
+                let ns = error as NSError
+                print("[foxy] net: POST \(host) · \(ms) ms · \(NetDiary.failure(ns))")
+                // sent, perhaps, and the answer never came: the token's own claim watch decides
+                let maybeSent = ns.domain == NSURLErrorDomain
+                    && (ns.code == NSURLErrorTimedOut || ns.code == NSURLErrorNetworkConnectionLost)
+                self?.resolve(id: id, text: nil, error: maybeSent
+                    ? "The payment may have reached them; Foxy is checking."
+                    : "Their address could not be reached over Tor.")
                 return
             }
-            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-            print("[foxy] net: POST \(host) · \(ms) ms · \(code)")
+            let http = response as? HTTPURLResponse
+            let code = http?.statusCode ?? 0
             let answer = String(data: data ?? Data(), encoding: .utf8) ?? ""
+            // the address as asked and as answered, without the spellings URLSession may tidy
+            let place = { (u: URL) -> String in "\((u.host ?? "").lowercased())|\(u.path.isEmpty ? "/" : u.path)|\(u.query ?? "")" }
+            if let landed = http?.url, place(landed) != place(url) {
+                print("[foxy] net: POST \(host) · \(ms) ms · \(code), redirected: not taken")
+                self?.resolve(id: id, text: "redirected \(code)\n" + answer, error: nil)
+                return
+            }
+            print("[foxy] net: POST \(host) · \(ms) ms · \(code)")
             self?.resolve(id: id, text: "\(code)\n" + answer, error: nil)
         }
         // no route, or Foxy being put away: nothing left

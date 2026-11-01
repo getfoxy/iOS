@@ -940,10 +940,32 @@
     const W = window.FoxyWallet;
     const req = this.state.req;
     if (!req || this.state.reqBusy) return;
-    const want = String(req.mints[0] || '').replace(/\/+$/, '');
-    const here = W.mintHost && ('https://' + W.mintHost()) === want;
+    /* The request's mint as the wallet writes a mint (`canonicalMint`): small
+     * letters in the scheme and host, no default port, no slash at the end.
+     * It lost only its slash before, so a request naming
+     * https://MINT.minibits.cash/Bitcoin read as a stranger: A DIFFERENT MINT
+     * about a mint the person uses, a balance there of 0 (the wallet files
+     * it under its own spelling), a crossing with a Lightning fee though 1,500
+     * sats were already there, and the question asked again after the sats
+     * had moved. */
+    const canon = (u) => {
+      if (W && W.canonicalMint) return W.canonicalMint(u);
+      const m = /^(https?):\/\/([^/?#]+)(.*)$/i.exec(String(u || '').trim());
+      if (!m) return String(u || '').trim().replace(/\/+$/, '');
+      const scheme = m[1].toLowerCase();
+      const port = scheme === 'https' ? ':443' : ':80';
+      let host = m[2].toLowerCase();
+      if (host.slice(-port.length) === port) host = host.slice(0, -port.length);
+      return scheme + '://' + host + (m[3] || '').replace(/\/+$/, '');
+    };
+    const want = canon(req.mints[0]);
+    const here = !!(W.mintHost && canon('https://' + W.mintHost()) === want);
     // making it somewhere else switches mints, which waits for any payment
     if (want && !here && this.refuseSwitchWhileBusy()) return;
+    /* Back from a step this function started itself (a crossing, a move
+     * collected, the over-pay question): the mint was accepted on the first
+     * pass, and is not asked about again. */
+    const again = !!(go && (go.crossed || go.collected));
 
     /* A payment request names its own mint, and this used to connect to it on
      * one tap. Tokens from an attacker-chosen mint are worthless, and the
@@ -952,9 +974,8 @@
      * So a mint this device has never used gets named in full first, with
      * connecting as the deliberate action. One already on the list goes
      * through — it has been accepted before. */
-    if (want && !here && !this._reqMintOk) {
-      const known = (W.mints ? W.mints() : []).some(m =>
-        String(m.id || m).replace(/\/+$/, '') === want);
+    if (want && !here && !this._reqMintOk && !again) {
+      const known = (W.mints ? W.mints() : []).some(m => canon(m.id || m) === want);
       if (!known) {
         const host = want.replace(/^https?:\/\//, '');
         const mine = W.mintHost ? W.mintHost() : 'none';
@@ -994,26 +1015,49 @@
      * the payment follows from there with no second question
      * (`go.crossed`). Sats only: a move between mints is a Lightning payment,
      * and dollars do not cross one. Not with no route, where nothing moves. */
-    if (want && !here && req.unit !== 'usd' && !(go && go.crossed) && !(this.offlineNow && this.offlineNow())
-        && W.balanceAt && W.transferQuote && this.crossMove) {
-      const need = Math.round(Number(req.sats) || 0);
+    const need = Math.round(Number(req.sats) || 0);
+    const crossing = (mine) => {
+      console.log('[foxy] request: it is paid at ' + want + ', where this phone holds ' + W.balanceAt(want)
+        + ' of the ' + need + ' sats with that mint\u2019s fee; offering to move them from ' + mine);
+      const quoting = W.transferQuote(mine, need, { to: want, land: true });
+      quoting.catch(() => {});
+      this.crossMintCard(quoting, want, mine).then(yes => {
+        if (!yes) { console.log('[foxy] request: the move to ' + want + ' was not accepted'); return null; }
+        return quoting.then(plan => this.crossMove(plan, want, mine)).then(() => {
+          console.log('[foxy] request: the sats are at ' + want + '; paying it now');
+          this.setState({ crossBusy: false, crossQ: null });
+          this.makeTokenForRequest(Object.assign({}, go || {}, { crossed: true }));
+        });
+      }).catch(e => this.crossFailed(e, mine));
+    };
+    const canCross = !!(want && !here && req.unit !== 'usd' && !(go && go.crossed) && !(this.offlineNow && this.offlineNow())
+        && W.balanceAt && W.transferQuote && this.crossMove);
+    if (canCross) {
       const mine = String(W.mintUrl || '').replace(/\/+$/, '');
-      const there = W.balanceAt(want);
-      if (need > 0 && mine && there < need) {
-        console.log('[foxy] request: it is paid at ' + want + ', where this phone holds ' + there
-          + ' of the ' + need + ' sats; offering to move them from ' + mine);
-        const quoting = W.transferQuote(mine, need, { to: want, land: true });
-        quoting.catch(() => {});
-        this.crossMintCard(quoting, want, mine).then(yes => {
-          if (!yes) { console.log('[foxy] request: the move to ' + want + ' was not accepted'); return null; }
-          return quoting.then(plan => this.crossMove(plan, want, mine)).then(() => {
-            console.log('[foxy] request: the sats are at ' + want + '; paying it now');
-            this.setState({ crossBusy: false, crossQ: null });
-            this.makeTokenForRequest(Object.assign({}, go || {}, { crossed: true }));
-          });
-        }).catch(e => this.crossFailed(e, mine));
+      /* A move to that mint that is paid and not yet collected is collected
+       * first, as a tap does (26d-tap.js `tapCrossMint`, `move-twice`). PAY
+       * pressed again under YOUR SATS ARE ON THEIR WAY quoted and made a
+       * second move: a second routing fee and another lot off home, with the
+       * first landing later. One still not collected after that is waited
+       * for, not made again. */
+      const owed = () => (W.pendingMoves ? W.pendingMoves() : []).filter(n => canon(n && n.to) === want);
+      if (need > 0 && mine && owed().length && W.finishMove && !(go && go.collected)) {
+        console.log('[foxy] request: a move to ' + want + ' is paid and not yet collected; collecting it first');
+        W.finishMove().then(() => null, () => null).then(() => {
+          this.makeTokenForRequest(Object.assign({}, go || {}, { collected: true }));
+        });
         return;
       }
+      if (need > 0 && mine && owed().length) {
+        const e = /** @type {any} */ (new Error('A move to that mint has not been collected yet.'));
+        e.movePaid = true;
+        e.moveTo = want;
+        e.moveSats = owed().reduce((a, n) => a + (Math.round(Number(n.amount) || 0)), 0) || need;
+        this.crossFailed(e, mine);
+        return;
+      }
+      const there = W.balanceAt(want);
+      if (need > 0 && mine && there < need) { crossing(mine); return; }
     }
     this.setState({ reqBusy: true });
 
@@ -1077,12 +1121,25 @@
      * It was connected to and remembered, so a payment refused there left
      * home showing 298 sats at a mint the person had never chosen, with 2,591
      * of their own out of sight; `crossComeHome` brings the phone back once
-     * the payment has gone through or failed, as it does after a tap. A token
-     * to show stays where it is made: the watch for it runs at the connected
-     * mint, and the person is told where it is. */
+     * the payment has gone through or failed, as it does after a tap, and
+     * when it failed with a token made, too: the token's watch keeps the
+     * token's own mint, so it runs from home. A token made to show, with no
+     * visit, stays where it is made. */
     const visit = !!(want && !here && direct);
-    if (visit) this._crossCameFrom = String(W.mintUrl || '').replace(/\/+$/, '');
+    /* Never over a home already set: a pass that comes back here after a
+     * crossing or a visit is still on that trip, and it used to write the
+     * mint it was visiting as the one to come home to. */
+    if (visit && !this._crossCameFrom) this._crossCameFrom = String(W.mintUrl || '').replace(/\/+$/, '');
     const ready = (want && !here) ? W.connect(want, null, null, visit ? { remember: false } : undefined) : Promise.resolve(null);
+    /* Enough there on its face, and short once that mint's fee for the
+     * pieces is counted: the crossing, as a tap does (26d-tap.js
+     * `tapPayFromThere`). The figures are known only once there. It used to
+     * pay there and be refused "you hold 1,000" with no crossing offered. */
+    const shortThere = () => {
+      if (!visit || !canCross || !W.sendShortfall) return false;
+      const sf = W.sendShortfall(need, { locked: !!(req.lockTo && !(this.offlineNow && this.offlineNow())) });
+      return !!(sf && sf.short);
+    };
     /* Agreed before it is asked, where the change comes straight back. The
      * question was being skipped already, but only after the send had refused
      * once for want of an answer — so the screen went to sending, back to the
@@ -1090,7 +1147,14 @@
      * the card came up anyway, telling a payer whose change was on its way
      * back that the other phone would keep it. */
     const overOk = !!(go && go.overpayOk) || (direct && this.changeComesBack(req));
-    ready.then(() => direct
+    ready.then(() => {
+      if (shortThere()) {
+        const eShort = /** @type {any} */ (new Error('Not enough there once that mint\u2019s fee is counted.'));
+        eShort.foxyShortThere = true;
+        throw eShort;
+      }
+      return null;
+    }).then(() => direct
       ? W.payRequest(req, null, { overpayOk: overOk })
       /* Locked to them when they asked for it and this phone can: a token shown
        * on a screen is one anybody's camera can take, and a receiver with no
@@ -1126,6 +1190,9 @@
       }
       // a token to show stays where it was made (see `visit`); nothing to come home from
       this._crossCameFrom = null;
+      /* Nor anything moved for the next payment to speak of: a later refusal
+       * said its sats "are now at" this mint, about sats that never moved. */
+      this._crossMovedTo = null;
       if (usdReq) {
         // a dollar token: its cents on the token screen, never a number of sats
         const got = Math.round(Number(r.amount != null ? r.amount : amt) || 0);
@@ -1153,6 +1220,15 @@
       this.setState({ reqBusy: false, sendPhase: null });
       // stopped by the person before it was made: nothing to report, and they are home already
       if (e && e.foxyStopped) { if (this._crossCameFrom) this.crossComeHome(); return; }
+      // short at their mint by its fee, found on the visit: home, and the crossing from there (`shortThere`)
+      if (e && e.foxyShortThere) {
+        const from = this._crossCameFrom;
+        console.log('[foxy] request: what is held at ' + want + ' does not cover it with that mint\u2019s fee; offering the crossing instead');
+        this.setState(p0 => ({ screen: p0.screen === 'sendDone' ? 'reqOffer' : p0.screen }));
+        this.crossComeHome();
+        if (from) crossing(from);
+        return;
+      }
       /* Offline, in a unit this phone holds none (or too little) of here: it
        * needs the mint, and nothing was made (`unitHeldRefusal`). Said on a
        * card, and to the phone being paid in words with no figures. */
@@ -1189,13 +1265,21 @@
         if (comesBack) {
           console.log('[foxy] no exact pieces, and the change comes straight back;'
             + ' paying ' + e.foxyNeedsOverpay.pay + ' for ' + e.foxyNeedsOverpay.asked);
-          this.makeTokenForRequest({ overpayOk: true });
+          this.makeTokenForRequest(Object.assign({}, go || {}, { overpayOk: true }));
           return;
         }
         this.overpayCard(Object.assign({ unit: usdReq ? 'usd' : '' }, e.foxyNeedsOverpay,
                                        { changeComesBack: false })).then((yes) => {
-          if (!yes) { this.setState({ req: null, sendPhase: null, screen: 'home', stack: [] }); return; }
-          this.makeTokenForRequest({ overpayOk: true });
+          if (!yes) {
+            this.setState({ req: null, sendPhase: null, screen: 'home', stack: [] });
+            if (this._crossCameFrom) this.crossComeHome();
+            return;
+          }
+          /* With `crossed` carried: a payment whose sats were moved here to make
+           * it is not moved again. The second pass ran PAY FROM's crossing a
+           * second time, and the far side's "already paid" was all that stopped
+           * a second melt. */
+          this.makeTokenForRequest(Object.assign({}, go || {}, { overpayOk: true }));
         });
         return;
       }
@@ -1256,11 +1340,17 @@
         /* With a route the wallet has already dealt with it (`afterRefusal`):
          * the pieces are swapped, or the phone that said no had redeemed
          * them first. Neither is a risk still standing. */
+        /* A website that answered anything but a 2xx (07-request-delivery.js
+         * `deliverOverHttps`): its server has seen the pieces, so they are
+         * taken back as a refusal's are, and the card says it was the site. */
+        const site = !!e.foxyWebsite;
         if (e.foxyAtRisk.safe) {
           this.blockedCard('theyRefused', {
             tone: 'warn',
             title: 'THEY DID NOT TAKE IT',
-            reason: 'They refused this payment and sent nothing back. Foxy has swapped your ecash for new pieces, so the copy they saw is worth nothing.',
+            reason: site
+              ? 'Their website did not take this payment. Foxy has swapped your ecash for new pieces, so the copy it saw is worth nothing.'
+              : 'They refused this payment and sent nothing back. Foxy has swapped your ecash for new pieces, so the copy they saw is worth nothing.',
             chip: 'Your ' + riskSaid + (risk.unit === 'usd' ? ' is' : ' are') + ' in your wallet. Nothing is at risk. They said: ' + W.reason(e),
           });
           return;
@@ -1269,7 +1359,7 @@
           this.blockedCard('theyRefused', {
             tone: 'warn',
             title: 'THEY TOOK THE PAYMENT',
-            reason: 'They said no, and your ecash has been redeemed all the same: ' + riskSaid + '. Its entry in your history says paid.',
+            reason: (site ? 'Their website said no, and' : 'They said no, and') + ' your ecash has been redeemed all the same: ' + riskSaid + '. Its entry in your history says paid.',
             chip: 'Do not pay again. If they are sending it back, they will show you a code to scan. They said: ' + W.reason(e),
           });
           return;
@@ -1277,7 +1367,8 @@
         this.blockedCard('theyRefused', {
           tone: 'warn',
           title: 'HIGH RISK',
-          reason: 'They refused this payment and did not send it back locked to you. They have seen your ecash and can still redeem it. '
+          reason: (site ? 'Their website did not take this payment, and it has seen your ecash and can still redeem it. '
+            : 'They refused this payment and did not send it back locked to you. They have seen your ecash and can still redeem it. ')
             + 'Do not pay again until you are online.',
           chip: riskSaid + (risk.unit === 'usd' ? ' is' : ' are') + ' in your wallet again, at risk until Foxy has a connection. They said: ' + W.reason(e),
         });
@@ -1363,6 +1454,16 @@
       }
       // made but not delivered: the token screen, to show them instead
       try { if (W.tag) W.tag(made.hash, { inflight: false }); } catch (x) {}
+      /* And home, from a visit made to pay them. It stayed at their mint with
+       * the person's own money out of sight, and the home it should have
+       * gone back to was left set for whatever came next to act on. The
+       * token's watch keeps the token's own mint, so it runs from home. */
+      this._crossMovedTo = null;
+      if (this._crossCameFrom) this.crossComeHome();
+      /* A website that did not answer in time may have the payment: said so,
+       * and the token's claim watch says which (`foxyMaybeSent`). */
+      const undelivered = (e && e.foxyMaybeSent) ? W.reason(e)
+        : 'It did not reach them (' + W.reason(e) + '). Show them this token instead.';
       this._seenTx = this._seenTx || {};
       this._seenTx[made.hash] = true;
       if (made.unit === 'usd' || usdReq) {
@@ -1374,7 +1475,7 @@
         });
         this.needScanStage(Object.assign({}, made, { unit: 'usd', amount: got }));
         this.refreshBalance();
-        this.toast('It did not reach them (' + W.reason(e) + '). Show them this token instead.', true);
+        this.toast(undelivered, true);
         return;
       }
       this.setState({
@@ -1391,7 +1492,7 @@
       this.refreshBalance();
       this.watchToken(made.sats, made.hash, made.swapped === false);
       this.tidyChangeLater();
-      this.toast('It did not reach them (' + W.reason(e) + '). Show them this token instead.', true);
+      this.toast(undelivered, true);
     });
   }
 

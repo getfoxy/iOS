@@ -931,10 +931,18 @@
      * connection does not come the button is simply what it is with none:
      * the token. */
     const held = !!(sats > 0 && this.connecting() && this.requestNeedsRoute(req));
+    /* A website is reached as a mint is (FoxyBridge+Delivery.swift
+     * `httpsPost`, Route.start): over Tor when Tor is up, and over the open
+     * connection when the person chose it. The row said OVER TOR either way,
+     * and named no host; it says which, and where. */
+    const pv = (d && d.kind === 'https' && W && W.privacy) ? W.privacy() : null;
+    const siteOverTor = !!(pv && pv.tor === 'up' && !pv.unprotected);
+    let siteHost = '';
+    if (d && d.kind === 'https') { try { siteHost = new URL(d.target).hostname; } catch (x) { siteHost = ''; } }
     const to = byTap ? s.tapCode
       : d ? (onion ? 'THEIR PHONE, OVER TOR'
              : d.kind === 'tap' ? 'THE PHONE IN YOUR HAND'
-             : d.kind === 'https' ? 'THEIR WEBSITE, OVER TOR' : 'THEIR NOSTR INBOX, OVER TOR')
+             : d.kind === 'https' ? (siteOverTor ? 'THEIR WEBSITE, OVER TOR' : 'THEIR WEBSITE') : 'THEIR NOSTR INBOX, OVER TOR')
       : (req && !req.transports.length) ? 'A TOKEN TO SHOW THEM' : 'A TOKEN YOU SEND THEM';
     /* Sats for dollars they asked for, at this phone's price, which they
      * agreed to over the tap (`tapQuoteTheirDollars`): what the sats are for,
@@ -960,7 +968,7 @@
     const head = (n) => (agreed && sats > 0
       ? { main: '\u20bf ' + this.group(n), sub: this.unitFigure(Math.round(Number(s.tapQuoteUsd) || 0), 'usd') }
       : fig(n));
-    const rows = (byTap ? [] : [this.cfRow('DELIVERED TO', to)]).concat([
+    const rows = (byTap ? [] : [this.cfRow('DELIVERED TO', to, siteHost ? { sub: siteHost } : undefined)]).concat([
       // (the source chosen on PAY FROM, its mint and balance: 26l-pay-from.js)
       this.cfRow('PAYING FROM', src && this.pfLabel ? this.pfLabel(src.mint, 'sat') : (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
       this.cfRow('NETWORK', 'CASHU', { half: true }),

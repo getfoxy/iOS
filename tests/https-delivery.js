@@ -12,10 +12,13 @@
  *      and before Nostr, and refuses what is not one (http, an onion, a
  *      sign-in in the address, a fragment);
  *   2. the payment goes over the bridge's `httpsPost` with the request's
- *      body, exactly once: a 200 confirms it, anything else is a refusal
- *      said by its status and never in the server's own words, and a lost
- *      answer is not tried again;
- *   3. the offer screen says THEIR WEBSITE, OVER TOR and PAY.
+ *      body, exactly once: a 2xx confirms it, anything else is a refusal
+ *      said by its status and never in the server's own words, whose pieces
+ *      are taken back at once (the site has seen them, and there is nobody
+ *      at a website to show a token to), and a lost answer is not tried
+ *      again;
+ *   3. the offer screen says THEIR WEBSITE, OVER TOR, or THEIR WEBSITE when
+ *      Tor does not carry it, and PAY.
  *
  * The wallet runs for real against a fake mint, as onion-fallback.js does.
  */
@@ -141,7 +144,8 @@ async function run() {
     ok(threw && /did not take the payment \(422\)/.test(threw.message), 'a 422 is said by its number: ' + (threw && threw.message));
     ok(threw && !/evil|again/.test(threw.message), 'and the server’s words are not on the card');
     ok(ctx.script.posts.length === 1, 'posted once');
-    ok(threw && threw.foxyToken && threw.foxyToken.token, 'the token comes back to show instead');
+    ok(threw && threw.foxyRefused && threw.foxyAtRisk && threw.foxyAtRisk.safe === true,
+      'the pieces the site saw are taken back at once, not handed back as a token to show: ' + JSON.stringify(threw && threw.foxyAtRisk));
   }
   {
     const ctx = page({ posts: [], code: 410 });
@@ -172,7 +176,8 @@ async function run() {
     // the one place the offer screen names where the money goes
     const at = SRC.indexOf("'THEIR NOSTR INBOX, OVER TOR'");
     const near = at > 0 ? SRC.slice(at - 400, at + 60) : '';
-    ok(/d\.kind === 'https' \? 'THEIR WEBSITE, OVER TOR'/.test(near), 'says THEIR WEBSITE, OVER TOR for a web address');
+    ok(/d\.kind === 'https' \? \(siteOverTor \? 'THEIR WEBSITE, OVER TOR' : 'THEIR WEBSITE'\)/.test(near),
+      'says THEIR WEBSITE, OVER TOR for a web address, and THEIR WEBSITE when Tor does not carry it');
     ok(/d\.kind === 'tap' \? 'SEND ' : 'PAY '/.test(SRC), 'and the button says PAY');
   }
 

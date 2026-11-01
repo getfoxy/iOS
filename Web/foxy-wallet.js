@@ -10891,7 +10891,10 @@
     if (typeof t !== 'string' || t.length > 2048 || !/^https:\/\//i.test(t)) return false;
     var u;
     try { u = new URL(t); } catch (e) { return false; }
-    return u.protocol === 'https:' && !!u.hostname && !/\.onion$/i.test(u.hostname)
+    /* An onion with a dot at the end ("…d.onion.") is still an onion to a
+     * resolver, and was read as a web address: posted through an exit, or
+     * looked up in DNS on the open connection. */
+    return u.protocol === 'https:' && !!u.hostname && !/\.onion\.*$/i.test(u.hostname)
       && !u.username && !u.password && !u.hash;
   }
 
@@ -10997,17 +11000,53 @@
    * the wire buys nothing; the token's own claim watch sees it redeemed. Their
    * server's words are not put on screen: it is anybody's website, not
    * another Foxy, and 200 characters of its choosing on a card is not a
-   * refusal, it is a notice board. The status is said instead. */
-  var HTTPS_REACH_MS = 45000;
+   * refusal, it is a notice board. The status is said instead.
+   *
+   * Taken is any 2xx on the address asked, and nothing else. Only 200 used to
+   * count, so a site that answered 201, 202 or 204 had the payment and the
+   * person was told it had not arrived. The bridge never follows a redirect
+   * for this post and says "redirected N" if one got through: a 301, 302 or
+   * 303 turned the POST into a GET with no body, and that GET's 200 used to
+   * read as paid while the handler that had the proofs had only said "go
+   * elsewhere".
+   *
+   * Any other answer is the site saying no after it has seen the proofs, so
+   * it is a refusal (`foxyRefused`) and `payRequest` takes them back at once
+   * (`afterRefusal`), as for a refusal over the link. It used to hand the
+   * token back to "show them", and there is nobody at a website to show a
+   * token to.
+   *
+   * The page waits as long as the post can run (the Tor session's 60 s) and
+   * the bridge is told that ceiling. The page used to give up at 50 s while
+   * the post ran on, and said the internal action's name. An answer that
+   * never came is not a refusal: the post may have landed, so the token stays
+   * as it is and its claim watch decides (`foxyMaybeSent`). */
+  var HTTPS_REACH_MS = 60000;
+  var HTTPS_MAYBE = 'The payment may have reached them; Foxy is checking.';
   function deliverOverHttps(target, body) {
     return bridgeAsk('httpsPost', { url: target, body: body, timeout: HTTPS_REACH_MS },
                      HTTPS_REACH_MS + ONION_SLACK_MS).then(function (text) {
       var s = String(text || '');
       var nl = s.indexOf('\n');
-      var code = Number(s.slice(0, nl)) || 0;
-      if (code === 200) return true;
-      if (code === 404 || code === 410) throw new Error('That request is no longer open at their address.');
-      throw new Error('Their address did not take the payment (' + code + ').');
+      var line = nl >= 0 ? s.slice(0, nl) : s;
+      var code = /^\d{3}$/.test(line) ? Number(line) : 0;
+      if (code >= 200 && code < 300) return true;
+      var e = /** @type {any} */ (/^redirected\b/.test(line)
+        ? new Error('Their website sent the payment elsewhere (' + (line.split(' ')[1] || '?') + '), so it was not taken.')
+        : code === 404 || code === 410 ? new Error('That request is no longer open at their website.')
+        : new Error('Their website did not take the payment (' + (code || line.slice(0, 12) || '?') + ').'));
+      e.foxyRefused = true;
+      e.foxyWebsite = true;
+      throw e;
+    }, function (x) {
+      var said = String((x && x.message) || x);
+      // no answer in time, from the bridge or from the post itself
+      if (/did not answer|may have reached them/.test(said)) {
+        var m = /** @type {any} */ (new Error(HTTPS_MAYBE));
+        m.foxyMaybeSent = true;
+        throw m;
+      }
+      throw x;
     });
   }
 
@@ -27423,8 +27462,10 @@
           if (!n10 || n10.kind !== 'P2PK' || typeof n10.data !== 'string') return '';
           return /^0[23][0-9a-f]{64}$/i.test(n10.data) ? n10.data : '';
         })(),
-        // text only: a crafted request carried numbers and byte arrays here
-        mints: Array.isArray(r.mints) ? r.mints.filter(function (m) { return typeof m === 'string'; }) : [],
+        /* Text only: a crafted request carried numbers and byte arrays here.
+         * In the wallet's own spelling (`canonicalMint`), so a mint written
+         * with capitals or :443 is the mint it is, wherever it is compared. */
+        mints: Array.isArray(r.mints) ? r.mints.filter(function (m) { return typeof m === 'string'; }).map(canonicalMint) : [],
         description: str(r.description),
         /* What a phone with no route asked for, when it asked in dollars: the
          * amount in cents and the price it last saw, both written into the
@@ -29703,6 +29744,12 @@
       return sumProofs(load(K.proofs + '.' + url, []));
     },
 
+    /* A mint as this wallet files it (`canonicalMint`), for the screens to
+     * compare a request's mint with the ones held: a mint written with
+     * capitals or :443 is the same mint, and `balanceAt` reads it only in
+     * this spelling. */
+    canonicalMint: function (url) { return canonicalMint(url); },
+
     /* Why this mint URL is unacceptable, or null if it is fine. */
     mintProblem: function (u) { return mintUrlProblem(u); },
 
@@ -31840,8 +31887,16 @@
             return out;
           }) };
         if (req.id) payment.id = req.id;
+        /* What only another Foxy reads: a key for change, the payer's name for
+         * an offline receiver, and the over-payment said out loud. Over a tap
+         * or to an onion, never to a website. A website is somebody's server,
+         * and it was sent `changeTo` whenever the lock pool had keys in it (any
+         * tap or shown request fills it): a key derived from this phone's seed
+         * and a mark that the payer is a Foxy, to a stranger, beyond NUT-18's
+         * id, memo, mint, unit and proofs. */
+        var toFoxy = d.kind !== 'https' && (!!req.viaTap || d.kind === 'onion');
         // who is paying, to a receiver that said it is offline, in the name for that receiver alone (`payerTag`)
-        var fromName = req.theirRoute === false ? payerTag(req.theirTill) : '';
+        var fromName = (toFoxy && req.theirRoute === false) ? payerTag(req.theirTill) : '';
         if (fromName) payment.from = fromName;
         /* A key for change to be locked to, when this payment might overpay.
          *
@@ -31859,10 +31914,10 @@
          * step. A phone paid with `no key to lock change to` twenty
          * minutes after the same phone had taken change back fine, because by
          * then the pool had been used up. */
-        var changeKey = req.id ? changeKeyFor(req.id, reqUnit) : '';
+        var changeKey = (req.id && toFoxy) ? changeKeyFor(req.id, reqUnit) : '';
         if (changeKey) {
           payment.changeTo = changeKey;
-        } else if (req.id) {
+        } else if (req.id && toFoxy) {
           console.warn('[foxy] no key to lock change to, so any over-payment is owed'
             + ' rather than handed back');
         }
@@ -31870,7 +31925,7 @@
          * come back. A receiver with no route refuses an over-payment otherwise,
          * because it would have to swap to give the difference back — and this
          * is what tells it the difference was meant. */
-        if (Number(made.over) > 0 && opts && opts.overpayOk) payment.overpaid = true;
+        if (toFoxy && Number(made.over) > 0 && opts && opts.overpayOk) payment.overpaid = true;
         var body = serialiseBody(payment);
         step('delivering');
         /* Over Bluetooth when this request came over Bluetooth.
