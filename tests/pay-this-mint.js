@@ -126,7 +126,7 @@ const check = (name, ok, detail) => results.push((ok ? 'ok    ' : 'FAIL  ') + na
     const a = app(W);
     a.acceptTarget(INVOICE);
     check('an invoice scanned before the mint\'s node is known is not held for it',
-      W.calls.indexOf('learn') < 0 && !a._checkingInvoice && !a.cards.length && a.state.screen === 'sendConfirm',
+      W.calls.indexOf('learn') < 0 && !a.cards.length && a.state.screen === 'sendConfirm',
       JSON.stringify({ calls: W.calls, cards: a.cards, screen: a.state.screen }));
   }
   {
@@ -137,12 +137,6 @@ const check = (name, ok, detail) => results.push((ok ? 'ok    ' : 'FAIL  ') + na
     a._blockedEl = {};
     a.syncPreview();
     check('a card on the scan screen puts the camera away', W.calls.indexOf('stopPreview') >= 0 && a._previewOn === false, JSON.stringify(W.calls));
-    W.calls.length = 0;
-    a._blockedEl = null;
-    a._checkingInvoice = true;
-    a._previewOn = true;
-    a.syncPreview();
-    check('and so does checking an invoice', W.calls.indexOf('stopPreview') >= 0, JSON.stringify(W.calls));
   }
   {
     /* nor over the connection screen: back from the background on a scan

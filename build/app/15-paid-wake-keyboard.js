@@ -568,8 +568,8 @@
     const covered = gated || !!this._takingToken
       || !!(R && R.visible && R.visible()) || !!(M && M.visible && M.visible())
       || !!(typeof document !== 'undefined' && document.getElementById('foxy-stage'));
-    const wants = (sc === 'sendHow' || sc === 'sendScan') && !this._blockedEl && !this._checkingInvoice
-      && !covered;
+    // (an invoice is no longer checked against the mint's node before the confirmation, so nothing holds the camera for that any more)
+    const wants = (sc === 'sendHow' || sc === 'sendScan') && !this._blockedEl && !covered;
     /* Apple's paste button also sits over home's PASTE, so a token or an
      * invoice on the clipboard is one tap from home. */
     /* Nor under a screen drawn over the page. Apple's paste control is a
