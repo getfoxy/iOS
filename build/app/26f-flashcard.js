@@ -6378,11 +6378,13 @@
       });
       return;
     }
+    // with the mint they are this mint's (`onchainAsk`)
+    const ocAt = W.canonicalMint ? W.canonicalMint(W.mintUrl) : String(W.mintUrl || '').replace(/\/+$/, '');
     Promise.resolve(W.onchainLimits ? W.onchainLimits() : null).then((limits) => {
       // left card mode while the mint was asked: nothing to do
       if (!this.fcOutMode()) return;
       const known = !!(W.onchainKnown && W.onchainKnown());
-      if (known) this.setState({ ocLimits: limits || null });
+      if (known) this.setState({ ocLimits: limits || null, ocLimitsMint: ocAt });
       if (known && !(limits && limits.send)) {
         this.blockedCard('fcOutNot', {
           tone: 'warn', title: 'THAT WON\u2019T WORK',

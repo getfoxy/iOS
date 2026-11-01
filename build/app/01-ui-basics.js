@@ -189,6 +189,18 @@ class Component extends DCLogic {
     const stk = st.stack || [];
     const to = stk.length ? stk[stk.length - 1] : 'home';
     if (st.screen === 'flashcard' && to !== 'flashcard' && stk.slice(0, -1).indexOf('flashcard') < 0) this._fcCard = null;
+    /* Back off a request's offer, the edge swipe's way among them, is the X's way out (24-render-receive-and-send.js,
+     * `requestSpec` `close`): the request goes with the offer, and a tap's other phone is told. It stayed in state, and
+     * a payment queued behind the trip home went out after the person had left (`makeTokenForRequest`). Not while it
+     * is being paid, collected or crossed for: each of those ends it itself. A queued pass tells the other phone
+     * itself, when it is dropped at landing. */
+    if (st.screen === 'reqOffer' && to !== 'reqOffer' && st.req && !st.reqBusy && !st.reqCollecting && !st.crossBusy) {
+      const W = window.FoxyWallet;
+      if (st.req.viaTap && this._payAfterHome !== st.req && W && W.tapQuote) {
+        W.tapQuote(JSON.stringify({ gaveUp: 'The payer cancelled.' })).catch(() => {});
+      }
+      this.setState({ req: null, tapQuoteFor: '' });
+    }
     this.setState(p => {
       const next = p.stack.length
         ? { screen: p.stack[p.stack.length - 1], stack: p.stack.slice(0, -1) }

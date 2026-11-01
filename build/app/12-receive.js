@@ -41,6 +41,11 @@
     this.stopReceive();
     this.setState({ invoice: '', invoiceHash: '', invoiceErr: '' });
     if (!W || !W.connected) { this.setState({ invoiceErr: 'No wallet connected.' }); return; }
+    /* An invoice being made at the mint the phone is on, from here to the mint's answer (`_invMaking`): the trip home
+     * waits for it (`homeWaitsFor`). The hold began only once the mint had answered (`_watching`), so the trip's
+     * second try went under an invoice still being asked for, and it landed on a screen at home naming the mint
+     * visited. Let go by the answer, a failure, or the receive being stopped (`stopReceive`). */
+    this._invMaking = { at: Date.now() };
 
     // Requesting an invoice is a mint call like any other, so Tor is
     // checked first and the work happens in its own method. Calling back into
@@ -48,7 +53,7 @@
     const G = window.FoxyGate;
     if (G && G.quiet) {
       return G.quiet().then(ok => {
-        if (!ok) { this.setState({ invoiceErr: 'Tor is reconnecting. Try again in a moment.' }); return; }
+        if (!ok) { this._invMaking = null; this.setState({ invoiceErr: 'Tor is reconnecting. Try again in a moment.' }); return; }
         console.log('[foxy] receive invoice |', G.stamp());
         this.openReceiveNow();
       });
@@ -673,6 +678,7 @@
        * the fallback that comes back with SKIP, not because anything reaches
        * it today. */
       const addr = W.myAddress();
+      this._invMaking = null;
       this.setState({ invoice: addr, invoiceHash: '', invoiceIsAddress: true });
       return;
     }
@@ -689,6 +695,7 @@
      * announced through `_requestPaid`, not through an invoice's watch, so
      * nothing here needs one. */
     if (this.offlineNow()) {
+      this._invMaking = null;
       this.setState({ invoice: '', invoiceHash: '', invoiceErr: '' });
       console.log('[foxy] receive: offline, so a Cashu request and no invoice');
       return;
@@ -765,7 +772,11 @@
         if (mine !== this._invoiceRun) return;
         this._watching = false;
         // what arrived, in its own unit: the paid screen reads it first
-        this.setState({ paidUnit: (paid && paid.unit) || 'sat', paidAmount: paid && paid.amount != null ? paid.amount : (paid && paid.sats) });
+        this.setState({ paidUnit: (paid && paid.unit) || 'sat', paidAmount: paid && paid.amount != null ? paid.amount : (paid && paid.sats),
+          /* Claimed at the mint that made it, with the phone on another (the watch's away claim): the sats are in
+           * that mint's pile, so the line says NOW AT it, as a card's transfer does, and not ADDED TO this balance. */
+          paidPlace: paid && paid.away && paid.mint
+            ? { label: 'NOW AT', to: (this.mintNameOf && this.mintNameOf(paid.mint)) || String(paid.mint).replace(/^https?:\/\//, '') } : null });
         // the payer said so first, and the mint has now agreed (tapPaidNotice)
         this._tapPaidNote = 0;
         if (this.hideStage) this.hideStage('paidCheck');
@@ -791,6 +802,7 @@
       });
     }).catch(e => {
       if (mine !== this._invoiceRun) return;
+      this._invMaking = null;
       // invoiceErr is not rendered anywhere on that screen, so a failure here
       // used to be completely silent: no code, no message, nothing to copy.
       console.error('[foxy] invoice failed after 3 tries:', e);
@@ -811,6 +823,7 @@
   stopReceive() {
     if (this._stopWatch) { this._stopWatch(); this._stopWatch = null; }
     this._watching = false;
+    this._invMaking = null;
     clearInterval(this._recvClockT);
     this._recvClockT = null;
   }
@@ -838,8 +851,9 @@
     const W = window.FoxyWallet;
     const off = this.offlineNow();
     this.setState({ recvRail: off ? 'CASHU' : 'LIGHTNING', invoiceIsAddress: false, recvUnit: 'usd', recvAmount: cents, recvExpiresAt: null });
-    if (!(cents > 0)) { this.toast('Ask for an amount above zero.', true); this.back(); return; }
+    if (!(cents > 0)) { this._invMaking = null; this.toast('Ask for an amount above zero.', true); this.back(); return; }
     if (off) {
+      this._invMaking = null;
       this.setState({ invoice: '', invoiceHash: '', invoiceErr: '' });
       console.log('[foxy] receive: offline, so a Cashu request in dollars and no invoice');
       return;
@@ -866,6 +880,7 @@
     }).catch(e => {
       if (this._usdCodeMaking === mine) this._usdCodeMaking = 0;
       if (mine !== this._invoiceRun) return;
+      this._invMaking = null;
       console.error('[foxy] dollar invoice failed after 3 tries:', e);
       this.setState(p => ({
         invoiceErr: W.reason(e), blockedWhy: W.reason(e),
@@ -898,6 +913,9 @@
       this.setState(p => ({
         screen: 'paid', stack: p.stack.concat([p.screen]), recvResolved: true,
         paidUnit: unit, paidAmount: paid && paid.amount != null ? paid.amount : p.recvAmount,
+        // claimed at the mint that made it, with the phone on another: NOW AT that mint (`openReceiveNow`)
+        paidPlace: paid && paid.away && paid.mint
+          ? { label: 'NOW AT', to: (this.mintNameOf && this.mintNameOf(paid.mint)) || String(paid.mint).replace(/^https?:\/\//, '') } : null,
         recvExpiresAt: null,
         recv: Object.assign({}, p.recv, { live: 'in' }),
       }));
@@ -1308,6 +1326,10 @@
     this._heldConfirm = null;
     // a card's VERIFYING over the code comes down with the confirmation (26f-flashcard.js, `fcCardVerifying`)
     if (this.hideStage) this.hideStage('paidCheck');
+    const canonM = (u) => (W && W.canonicalMint ? W.canonicalMint(u) : String(u || '').replace(/\/+$/, ''));
+    // (`awayAt`: the mint a claim was made at with the phone elsewhere, said only by such claims)
+    const nowAt = (!out && ev.awayAt && W && W.mintUrl && canonM(ev.awayAt) !== canonM(W.mintUrl))
+      ? ((this.mintNameOf && this.mintNameOf(ev.awayAt)) || String(ev.awayAt).replace(/^https?:\/\//, '')) : '';
     // the confirmation screen already knows how to word a payment going out
     this.setState(p => ({
       screen: 'paid',
@@ -1316,7 +1338,10 @@
       // its own heading, where the ordinary one would say the wrong thing
       paidSays: ev.says || '',
       // (the place line and the button are the ordinary ones: a card's TRANSFER names its own, 26f-flashcard.js `fcMovedScreen`)
-      paidPlace: null,
+      /* But a payment claimed at another mint than the one the phone is on (an on-chain deposit to an address made on
+       * a visit, `onchainClaimAway`) is in that mint's pile: NOW AT it, the card transfer's line. It said ADDED TO this
+       * balance, which did not move. */
+      paidPlace: nowAt ? { label: 'NOW AT', to: nowAt } : null,
       // what arrived or left in its own unit, read first by the paid screen: cents for dollars
       paidUnit: ev.unit || 'sat',
       paidAmount: ev.amount != null ? ev.amount : ev.sats,

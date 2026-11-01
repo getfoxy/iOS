@@ -43,8 +43,9 @@
     * so none waits on itself; the watcher chains them one at a time anyway. */
    /* And making an address, which writes the same list the claims write: made
     * while a claim was at the mint, it was erased by that claim's save. */
-   /* And a claim at another mint (`onchainClaimAway`): it writes the same list, and its proofs to the same store. */
-   'onchainPay', 'onchainClaim', 'onchainClaimAway', 'onchainFollow', 'onchainAddress'].forEach(function (name) {
+   /* And a claim at another mint (`onchainClaimAway`): it writes the same list, and its proofs to the same store.
+    * The inner one, with the wallet for that mint already made outside the lock (`_onchainClaimAwayWith`). */
+   'onchainPay', 'onchainClaim', '_onchainClaimAwayWith', 'onchainFollow', 'onchainAddress'].forEach(function (name) {
     var inner = FoxyWallet[name];
     if (typeof inner !== 'function') return;
     FoxyWallet[name] = function () {

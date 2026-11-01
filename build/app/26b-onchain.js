@@ -18,15 +18,30 @@
    */
 
   /* What this mint does on chain, kept in state so the screens can ask. */
+  /* Kept with the mint it came from (`ocLimitsMint`), and asked again whenever the phone is on another. It was asked
+   * at launch, on resume and for a payout, and nothing asked after a trip home: back from a PAY FROM visit, home's
+   * address was shown under the visited mint's floor ("Send at least 10,000 sats" where home swallows anything under
+   * 25,000). Returns the connected mint's limits once they are in, and null until then (and for a mint that does
+   * nothing on chain), so a screen that reads them through here never reads another mint's. */
   onchainAsk() {
     const W = window.FoxyWallet;
-    if (!W || !W.onchainLimits || this._ocAsked === W.mintUrl) return;
-    this._ocAsked = W.mintUrl;
-    W.onchainLimits().then(limits => this.setState({ ocLimits: limits || null }), () => {});
+    const s = this.state || {};
+    const canon = (u) => (W && W.canonicalMint ? W.canonicalMint(u) : String(u || '').replace(/\/+$/, ''));
+    const at = W && W.mintUrl ? canon(W.mintUrl) : '';
+    // (limits written with no mint are from before this, and are the connected mint's)
+    const mine = !s.ocLimitsMint || (!!at && canon(s.ocLimitsMint) === at);
+    if (W && W.onchainLimits && at && this._ocAsked !== at) {
+      this._ocAsked = at;
+      W.onchainLimits().then(limits => {
+        // an answer for a mint asked before the one asked last is not this screen's
+        if (this._ocAsked === at) this.setState({ ocLimits: limits || null, ocLimitsMint: at });
+      }, () => {});
+    }
+    return mine ? (s.ocLimits || null) : null;
   }
 
   ocCan(which) {
-    const limits = this.state.ocLimits;
+    const limits = this.onchainAsk ? this.onchainAsk() : this.state.ocLimits;
     return !!(limits && limits[which]);
   }
 
@@ -40,7 +55,11 @@
   ocReceiveAddress() {
     const W = window.FoxyWallet;
     if (!W || !W.onchainAddress) return '';
-    if (this._ocAddr && this._ocAddr.mint === W.mintUrl) return this._ocAddr.address;
+    /* Shown only once this mint's own limits are in (`onchainAsk`, asked here when they are not): the floor under the
+     * QR is the floor of the mint that makes the address, and the limits come with a redraw. The address is made
+     * meanwhile. */
+    const limitsIn = this.onchainAsk ? !!this.onchainAsk() : true;
+    if (this._ocAddr && this._ocAddr.mint === W.mintUrl) return limitsIn ? this._ocAddr.address : '';
     if (this._ocMaking) return '';
     if (this._homeGoing) {
       if (this._ocAddrWait !== this._homeGoing) {
@@ -66,10 +85,12 @@
   }
 
   /* What the receive screen shows under the QR on this network. */
+  /* Nothing until the connected mint's limits are in: another mint's floor here is a promise this one does not keep. */
   ocReceiveNote() {
-    const limits = this.state.ocLimits;
-    const floor = limits && limits.receive ? limits.receive.min : 0;
-    const blocks = limits && limits.receive ? limits.receive.confirmations : 0;
+    const limits = this.onchainAsk ? this.onchainAsk() : this.state.ocLimits;
+    if (!limits || !limits.receive) return '';
+    const floor = limits.receive.min || 0;
+    const blocks = limits.receive.confirmations || 0;
     if (!floor) return 'This mint takes ordinary Bitcoin payments.';
     return 'Send at least ' + this.group(floor) + ' sats. Less than that is lost, not returned. '
       + (blocks ? 'Your ecash arrives after ' + blocks + ' confirmations.' : '');
@@ -80,13 +101,13 @@
    * why and belongs where there is room; a row under a network's name has one
    * line, and what a person needs there is the number. */
   ocFloorShort() {
-    const limits = this.state.ocLimits;
+    const limits = this.onchainAsk ? this.onchainAsk() : this.state.ocLimits;
     const floor = limits && limits.receive ? limits.receive.min : 0;
     return 'Minimum \u20bf ' + this.group(floor);
   }
 
   ocFloorSays() {
-    const limits = this.state.ocLimits;
+    const limits = this.onchainAsk ? this.onchainAsk() : this.state.ocLimits;
     const floor = limits && limits.receive ? limits.receive.min : 0;
     return 'On chain this mint takes ' + this.group(floor) + ' sats or more. '
       + 'Anything less is swallowed, not returned.';
@@ -94,8 +115,9 @@
 
   /* Below the floor the address is worth nothing, so the screen says so rather
    * than showing a QR that eats the money. */
+  /* The connected mint's floor (`onchainAsk`), never the last mint asked's. */
   ocReceiveBlocked(sats) {
-    const limits = this.state.ocLimits;
+    const limits = this.onchainAsk ? this.onchainAsk() : this.state.ocLimits;
     const floor = limits && limits.receive ? limits.receive.min : 0;
     return !!(floor && sats && sats < floor);
   }
@@ -122,8 +144,9 @@
     }
     const read = W.readAddress ? W.readAddress(text) : null;
     if (!read) { this.toast('That is not a Bitcoin address Foxy can read.', true); return; }
-    this.onchainAsk();
-    const limits = this.state.ocLimits;
+    // the connected mint's, never the last mint asked's (`onchainAsk`)
+    const asked = this.onchainAsk();
+    const limits = asked !== undefined ? asked : this.state.ocLimits;
     if (limits && !limits.send) {
       this.toast(this.mintName() + ' does not send on chain. Move your sats to a mint that does.', true);
       return;
@@ -175,7 +198,8 @@
     /* (unless another of this phone's mints holds enough, which PAY FROM offers next: 26l-pay-from.js) */
     const elsewhere = !fromCard && this.pfPiles && this.pfPiles().some((p) => p.unit === 'sat' && p.have >= sats);
     if (!fromCard && sats > (this.state.balSats || 0) && !elsewhere) { this.toast('That is more than your balance.', true); return; }
-    const limits = this.state.ocLimits;
+    const asked = this.onchainAsk ? this.onchainAsk() : undefined;
+    const limits = asked !== undefined ? asked : this.state.ocLimits;
     const floor = limits && limits.send ? limits.send.min : 0;
     const ceiling = limits && limits.send ? limits.send.max : 0;
     if (floor && sats < floor) {
@@ -473,7 +497,10 @@
         this.refreshBalance();
         this.loadHistory();
         // the hash the wallet logged, so the confirmation and the entry are one thing
-        this.announcePayment({ dir: 'in', sats: got.sats, hash: got.hash, to: 'on chain' });
+        /* And claimed away, the mint it was claimed at (`awayAt`): the sats are in that mint's pile, and the screen
+         * says NOW AT it rather than ADDED TO a balance that did not move. */
+        this.announcePayment(Object.assign({ dir: 'in', sats: got.sats, hash: got.hash, to: 'on chain' },
+          away.indexOf(record) >= 0 ? { awayAt: record.mint } : {}));
       }, () => {})), Promise.resolve());
 
     claims.then(() => sending.reduce((chain, record) => chain.then(() => W.onchainFollow(record.quote)

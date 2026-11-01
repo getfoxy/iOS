@@ -23337,6 +23337,16 @@
         var n = Math.round(Number(got) || 0);
         return Object.assign({ hash: quoteId, unit: unitQ, amount: n, sats: unitQ === 'sat' ? n : 0 }, more || {});
       };
+      /* Asked from wherever the phone is: at another mint than `madeAt`, with a wallet made for that mint
+       * (`awayWallet`), which connects the phone nowhere. It was not asked at all ("asked when the phone is back"), so
+       * an invoice made on a visit and paid once the phone was home was never claimed from home. Built once per watch,
+       * outside the proof lock: only the claim takes it. */
+      var awayW = null;
+      var awayFor = function () {
+        return !!madeAt && canonicalMint(String(mintUrl || '')) !== madeAt;
+      };
+      // what the screen is told of a payment claimed away: where its sats are
+      var awaySay = function (on) { return on ? { mint: madeAt, away: true } : {}; };
 
       function stop() {
         if (timer) { clearTimeout(timer); timer = null; }
@@ -23434,9 +23444,11 @@
         if (done) return;
         done = true;
         stop();
+        // at the mint that made it, by the wallet the poll asked with when the phone is elsewhere
+        var away = awayFor() && awayW ? awayW : null;
         // two handlers, not then().catch(): only the mint's failure is the mint's failure
-        FoxyWallet.claim(quoteId).then(function (got) {
-          tell(onPaid, paidSay(got));
+        FoxyWallet.claim(quoteId, away ? { w: away } : undefined).then(function (got) {
+          tell(onPaid, paidSay(got, awaySay(!!away)));
         }, function (e) {
           noteClaimTrouble(quoteId, e);
           // invalid signatures: not asked again, so no more polling for it
@@ -23465,8 +23477,20 @@
           var w = wallet && onCircuit(wallet, 'quote:' + quoteId);
           // no wallet, or the gate is closed: do not ask the mint, do not die
           if (!w || !routeOpen()) { again(); return; }
-          // away at another mint: it is asked when the phone is back (`madeAt`)
-          if (madeAt && canonicalMint(String(mintUrl || '')) !== madeAt) { again(); return; }
+          // away at another mint: asked there, by a wallet made for it (`awayW`), never at the mint the phone is on
+          if (awayFor()) {
+            if (!awayW || mintOf(awayW) !== madeAt) {
+              /* Made first, and the pass after asks with it. `asking` while it is made, so a hurry (`kick`) does not
+               * start a second chain of passes beside the one this ends in. */
+              asking = true;
+              awayW = null;
+              awayWallet(madeAt).then(function (ow) { awayW = ow; }, function (e) {
+                console.warn('[foxy] watch: could not reach ' + hostOf(madeAt) + ' for its invoice \u2014', FoxyWallet.reason(e));
+              }).then(function () { asking = false; again(); });
+              return;
+            }
+            w = onCircuit(awayW, 'quote:' + quoteId);
+          }
           /* By the wallet of the invoice's unit: cashu-ts reads a quote's
            * amount in its wallet's unit, and a sat wallet asked about a usd
            * quote finds the invoice "does not match" its cents. */
@@ -23493,8 +23517,9 @@
              * after the mint issued. The second used to be taken for the
              * first. recoverIssued restores the claim's recorded outputs and
              * adds only what is not already held. */
-            FoxyWallet.recoverIssued(quoteId).then(function (got) {
-              if (got > 0) tell(onPaid, paidSay(got, { recovered: true }));
+            var awayR = awayFor() && awayW ? awayW : null;
+            FoxyWallet.recoverIssued(quoteId, awayR ? { w: awayR } : undefined).then(function (got) {
+              if (got > 0) tell(onPaid, paidSay(got, Object.assign({ recovered: true }, awaySay(!!awayR))));
             }, function () {});
             return;
           }
@@ -23515,7 +23540,10 @@
     },
 
     /* Turn a paid quote into proofs on this device. */
-    claim: function (quoteId) {
+    /* `away`: { w } — a wallet made for the mint that issued it, when the phone is on another (`awayWallet`): an
+     * invoice made on a visit and paid once the phone was home was asked about only on that mint, and its sats sat
+     * there as a PAID quote until somebody switched there by hand. */
+    claim: function (quoteId, away) {
       /* One claim per invoice, however many things ask.
        *
        * The screen's watcher and the resume sweep can both see the same
@@ -23528,16 +23556,16 @@
        * same id now shares the first answer. */
       var going = claiming[quoteId];
       if (going) return going;
-      var answer = FoxyWallet._claimOnce(quoteId);
+      var answer = FoxyWallet._claimOnce(quoteId, away);
       claiming[quoteId] = answer;
       var done = function () { delete claiming[quoteId]; };
       answer.then(done, done);
       return answer;
     },
 
-    _claimOnce: function (quoteId) {
+    _claimOnce: function (quoteId, away) {
       var w;
-      try { w = onCircuit(need(), 'quote:' + quoteId); }
+      try { w = onCircuit(away && away.w ? away.w : need(), 'quote:' + quoteId); }
       catch (e) {
         // no circuit, so nothing was asked and no counter reserved: this
         // failure must not spend one of CLAIM_TRIES_MAX (outputsRecorder)
@@ -23675,6 +23703,29 @@
       var run;
       try { run = FoxyWallet._sweepQuotesOnce(); }
       catch (e) { run = Promise.reject(e); }
+      /* Then every other mint an invoice of this phone's is at, one at a time, each with a wallet made for it
+       * (`awayWallet`), as the held melts and the lost swaps are (`sweepMelts`, `recoverSwaps`). An invoice made on a
+       * visit, paid once the phone was home, sat at that mint as a PAID quote for as long as nobody switched there.
+       * The wallet is made outside the proof lock; only each claim takes it. */
+      run = run.then(function (claimed) {
+        if (!routeOpen()) return claimed;
+        var away = {};
+        load(K.quotes, []).forEach(function (e) {
+          if (!e || !e.mint || (e.unclaimed && (e.unclaimed.gaveUp || e.unclaimed.badSignatures || e.unclaimed.refused >= 3))) return;
+          var at = String(e.mint).replace(/\/+$/, '');
+          if (canonicalMint(at) !== canonicalMint(here)) away[at] = true;
+        });
+        return Object.keys(away).reduce(function (chain, at) {
+          return chain.then(function (all) {
+            if (!routeOpen()) return all;
+            return awayWallet(at).then(function (ow) { return FoxyWallet._sweepQuotesOnce({ w: ow, here: at }); })
+              .then(function (more) { return all.concat(more || []); }, function (e) {
+                console.warn('[foxy] could not ask', hostOf(at), 'about an invoice made there \u2014', FoxyWallet.reason(e));
+                return all;
+              });
+          });
+        }, Promise.resolve(claimed || []));
+      });
       /* What was claimed is told to the page (`onSwept`): a sweep the route
        * coming up ran has no connect or return to refresh the balance after
        * it, and a card about an invoice just claimed is no longer true. */
@@ -23717,8 +23768,10 @@
       });
     },
 
-    _sweepQuotesOnce: function () {
-      var w = wallet;
+    /* `other`: { w, here } — a wallet for a mint the phone is not connected to, and that mint's address as its
+     * invoices are written. Only the invoices made there are looked at, and claimed by that wallet. */
+    _sweepQuotesOnce: function (other) {
+      var w = other ? other.w : wallet;
       if (!w) return Promise.resolve([]);
 
       /* Only this mint's quotes.
@@ -23728,7 +23781,8 @@
        * launch. The melt sweep and the split reconcile had the same defect.
        * An entry with no mint predates the stamp and is left alone rather
        * than guessed at. */
-      var hereQ = String(mintUrl || '').replace(/\/+$/, '');
+      var hereQ = String((other ? other.here : mintUrl) || '').replace(/\/+$/, '');
+      var awayArg = other ? { w: other.w } : undefined;
       var nowS = Math.floor(Date.now() / 1000);
       /* Archived invoices too, 25 a pass, least recently asked first, so every
        * one gets its turn. Nothing is dropped before the mint is asked: an
@@ -23779,10 +23833,12 @@
              * was lost left its sats reachable only by a full seed restore. */
             var u = recordUnit(entry);
             var said = function (got, more) {
-              return Object.assign({ quote: entry.quote, unit: u, amount: got, sats: u === 'sat' ? got : 0 }, more || {});
+              // and where it went, when that is another mint than the phone is on
+              return Object.assign({ quote: entry.quote, unit: u, amount: got, sats: u === 'sat' ? got : 0 },
+                other ? { mint: hereQ, away: true } : {}, more || {});
             };
             if (q.state === 'ISSUED') {
-              return FoxyWallet.recoverIssued(entry.quote).then(function (got) {
+              return FoxyWallet.recoverIssued(entry.quote, awayArg).then(function (got) {
                 if (got > 0) claimed.push(said(got, { recovered: true }));
               });
             }
@@ -23810,7 +23866,7 @@
               }
               return;
             }
-            return FoxyWallet.claim(entry.quote).then(function (got) {
+            return FoxyWallet.claim(entry.quote, awayArg).then(function (got) {
               claimed.push(said(got));
             }, function (e) {
               // only a claim that failed is "paid, not collected" — not an offline check
@@ -25418,13 +25474,30 @@
       if (!at || at === String(mintUrl || '').replace(/\/+$/, '')) {
         return Promise.reject(new Error('That address is at the mint this phone is on.'));
       }
-      return awayWallet(at).then(function (ow) {
-        var w = onCircuit(ow, 'quote:' + quoteId);
-        var seen = w.checkMintQuoteOnchain(String(quoteId)).then(function (q) {
-          return { address: q.request, paid: satsOf(q.amount_paid), issued: satsOf(q.amount_issued), answer: q };
-        });
-        return FoxyWallet._onchainClaimWith(w, record, seen, FoxyWallet._onchainLimitsAt(at).then(null, function () { return null; }));
+      /* The wallet and the mint's limits outside the proof lock, and only the claim inside it
+       * (`_onchainClaimAwayWith`). Made under the lock, a slow or silent mint held it for the wallet's load (25 s)
+       * and a fresh /v1/info, every pass, and a tap arriving meanwhile waited on it. */
+      var limits = FoxyWallet._onchainLimitsAt(at).then(null, function () { return null; });
+      return awayWallet(at).then(function (ow) { return FoxyWallet._onchainClaimAwayWith(ow, quoteId, limits); });
+    },
+
+    /* The claim itself, under the proof lock (99-proof-lock-and-export.js): the record read again here, so what it
+     * says was issued is what the last claim wrote, and refused once the phone is on that mint (claimed as here). */
+    _onchainClaimAwayWith: function (ow, quoteId, limitsAsked) {
+      assertRoute();
+      var record = /** @type {any} */ (null);
+      load(K.onchain, []).forEach(function (r) { if (r && r.quote === quoteId) record = r; });
+      if (!record) return Promise.reject(new Error('That address was not made on this device.'));
+      var at = String(record.mint || '').replace(/\/+$/, '');
+      if (!at || at === String(mintUrl || '').replace(/\/+$/, '')) {
+        return Promise.reject(new Error('That address is at the mint this phone is on.'));
+      }
+      if (mintOf(ow) !== canonicalMint(at)) return Promise.reject(new Error('That address belongs to ' + hostOf(at) + '.'));
+      var w = onCircuit(ow, 'quote:' + quoteId);
+      var seen = w.checkMintQuoteOnchain(String(quoteId)).then(function (q) {
+        return { address: q.request, paid: satsOf(q.amount_paid), issued: satsOf(q.amount_issued), answer: q };
       });
+      return FoxyWallet._onchainClaimWith(w, record, seen, limitsAsked);
     },
 
     /* What `onchainClaim` does once it has the wallet the address belongs to, what that mint has seen for it, and its
@@ -36312,8 +36385,9 @@
     * so none waits on itself; the watcher chains them one at a time anyway. */
    /* And making an address, which writes the same list the claims write: made
     * while a claim was at the mint, it was erased by that claim's save. */
-   /* And a claim at another mint (`onchainClaimAway`): it writes the same list, and its proofs to the same store. */
-   'onchainPay', 'onchainClaim', 'onchainClaimAway', 'onchainFollow', 'onchainAddress'].forEach(function (name) {
+   /* And a claim at another mint (`onchainClaimAway`): it writes the same list, and its proofs to the same store.
+    * The inner one, with the wallet for that mint already made outside the lock (`_onchainClaimAwayWith`). */
+   'onchainPay', 'onchainClaim', '_onchainClaimAwayWith', 'onchainFollow', 'onchainAddress'].forEach(function (name) {
     var inner = FoxyWallet[name];
     if (typeof inner !== 'function') return;
     FoxyWallet[name] = function () {

@@ -976,19 +976,22 @@
    * screen by then: a second request opened while the first one's owed move
    * was being collected was paid with PAY never pressed, and the A DIFFERENT
    * MINT question was skipped for it. A pass whose request is no longer the
-   * one on screen is dropped, and the phone comes home from any trip it made. */
+   * one on screen is dropped, and the phone comes home from any trip it made.
+   * So is a pass queued behind the trip home whose offer was left before it
+   * landed (`offerUp`), and its request with it. */
   makeTokenForRequest(go) {
     const W = window.FoxyWallet;
     const req = (go && go.req) || this.state.req;
     if (!req) return;
-    if (go && go.req && this.state.req !== go.req) {
+    if (go && go.req && (this.state.req !== go.req || (go.offerUp && this.state.screen !== 'reqOffer'))) {
       console.log('[foxy] request: the request on screen is not the one this pass was for; not paid');
       if (this._reqCollect === req) { this._reqCollect = null; this.setState({ reqCollecting: false }); }
       this._crossMovedTo = null;
+      if (this.state.req === req) this.setState({ req: null });
       /* A tap's other phone is told the payment is not coming. It sat on its
        * four digits until its own clock ended. */
       if (req.viaTap && W && W.tapQuote) {
-        W.tapQuote(JSON.stringify({ gaveUp: this.state.req ? 'The payer opened another payment.' : 'The payer stopped this payment.' }))
+        W.tapQuote(JSON.stringify({ gaveUp: (this.state.req && this.state.req !== req) ? 'The payer opened another payment.' : 'The payer stopped this payment.' }))
           .catch(() => {});
       }
       if (this._crossCameFrom) this.crossComeHome();
@@ -1019,7 +1022,11 @@
       this.toast('Foxy is getting back to your mint. The payment follows.');
       /* Marked, so its connect to the request's mint is not remembered (`afterHome`): a token to show at the mint the
        * phone was visiting, queued here, went home and back and saved that mint as the phone's own. */
-      const pass = Object.assign({}, go || {}, { req: req, afterHome: true });
+      /* And the offer it was asked from (`offerUp`): PAY under the trip and then BACK or the edge swipe left the offer
+       * with `state.req` still set, and the payment went out seconds later from wherever the person had gone. As the
+       * on-chain queues do, the pass is dropped when its screen is not up at landing (and a tap's phone told). */
+      const offerUp = this.state.screen === 'reqOffer';
+      const pass = Object.assign({}, go || {}, { req: req, afterHome: true, offerUp: offerUp });
       const after = () => {
         if (this._payAfterHome === req) this._payAfterHome = null;
         this.makeTokenForRequest(pass);
@@ -1027,7 +1034,8 @@
       this._homeGoing.then(after, after);
       return;
     }
-    go = Object.assign({}, go || {}, { req: req });
+    // (the offer is asked about once, at landing: the passes after it come back from screens of their own)
+    go = Object.assign({}, go || {}, { req: req, offerUp: false });
     /* The end of this payment, whichever way it ended: nothing moved for the
      * next payment to speak of, and home after a crossing or a visit.
      * `_crossMovedTo` was cleared on three endings of nine, so a later refusal
@@ -1245,6 +1253,11 @@
     let overOk = false;
     // the home this pass wrote for its visit, if it wrote one (a token to show clears only that)
     let wroteHome = '';
+    /* And the home a pass queued behind the trip home (`afterHome`) wrote, going out from home for a token to show
+     * at the request's mint: kept by the token's ending, which brings the phone back (`homeAgain`). Nothing was
+     * written, so the phone stayed at that mint for the rest of the session and the next receive was made there. */
+    let afterHomeFrom = '';
+    const homeAgain = () => { if (afterHomeFrom && this._crossCameFrom === afterHomeFrom) this.crossComeHome(); };
     try {
       /* A payment going out looks like a payment going out.
        *
@@ -1282,6 +1295,10 @@
       if (visit && !this._crossCameFrom) {
         wroteHome = String(W.mintUrl || '').replace(/\/+$/, '');
         this._crossCameFrom = wroteHome;
+      }
+      if (go && go.afterHome && want && !here && !visit && !this._crossCameFrom) {
+        afterHomeFrom = String(W.mintUrl || '').replace(/\/+$/, '');
+        this._crossCameFrom = afterHomeFrom;
       }
       ready = (want && !here) ? W.connect(want, null, null, (visit || (go && go.afterHome)) ? { remember: false } : undefined) : Promise.resolve(null);
       /* Agreed before it is asked, where the change comes straight back. The
@@ -1368,6 +1385,7 @@
         });
         this.needScanStage(Object.assign({}, r, { unit: 'usd', amount: got }));
         this.refreshBalance();
+        homeAgain();
         return;
       }
       this.setState({
@@ -1379,6 +1397,7 @@
       this.refreshBalance();
       this.watchToken(r.sats, r.hash, r.swapped === false);
       this.tidyChangeLater();
+      homeAgain();
     }).catch(e => {
       if (gone()) { endRun(); if (this.lateRunEnded) this.lateRunEnded(req, null, direct, e); return; }
       endRun();
@@ -1777,6 +1796,8 @@
         this._homeOwed = null;
         this.refreshBalance();
         this.loadHistory();
+        // and what home does on chain: the limits on file were the visited mint's (26b-onchain.js `onchainAsk`)
+        if (this.onchainAsk) this.onchainAsk();
       }, (e) => {
         landed();
         console.warn('[foxy] could not get back to ' + back + (again ? ' a second time' : '') + ':', W.reason ? W.reason(e) : (e && e.message));
@@ -1785,6 +1806,10 @@
           if (!this._crossCameFrom) this._crossCameFrom = back;
           setTimeout(() => {
             if (this._crossCameFrom !== back || window.FoxyWallet !== W) return;
+            /* Nor under a trip already out: anything that came home itself in the two seconds (a crossing's ending,
+             * a payout's visit, a tap's) began one, and a second connect under it overwrote `_homeGoing`, so the
+             * first trip's landing never let its own hold go. That trip ends in its own retry. */
+            if (this._homeGoing) { this._homeWaiting = true; return; }
             // and not under whatever has begun meanwhile: it comes home itself when it ends
             if (this.homeWaitsFor ? this.homeWaitsFor() : this._reqRun) { this._homeWaiting = true; return; }
             if (String(W.mintUrl || '').replace(/\/+$/, '') === back) { this._crossCameFrom = null; return; }
@@ -1858,6 +1883,13 @@
     /* An invoice of this mint being watched (`_watching`): the watch asks only at the mint that made it, so a trip home
      * under it left the payer paying a quote nobody was asking about. */
     if (this._watching) return 'an invoice is being watched';
+    /* And one still being asked for on a receive screen (`_invMaking`, 12-receive.js `openReceive`), from the request
+     * to the mint's answer: `_watching` is set only once it has answered, and over Tor that is longer than the trip's
+     * two-second retry, so the invoice landed on a screen at home naming the mint visited. Three minutes at most, past
+     * any answer (three tries and their waits). */
+    if (this._invMaking && s.flow === 'receive' && s.screen !== 'home' && Date.now() - (Number(this._invMaking.at) || 0) < 180000) {
+      return 'an invoice is being made at this mint';
+    }
     /* A request at the mint the phone is on, up to be paid (its offer, or its sending screen): it is paid from here,
      * and a connect home under it made the payment from home's pile. */
     const canon = (u) => (W && W.canonicalMint ? W.canonicalMint(u) : String(u || '').replace(/\/+$/, ''));
@@ -1879,6 +1911,11 @@
      * request is made on that rail, so `_creqs` held nothing, and the address was remade at home under the payer. */
     if (here && s.flow === 'receive' && s.screen === 'confirm' && s.recvRail === 'ON-CHAIN'
         && this._ocAddr && canon(this._ocAddr.mint) === here) return 'an on-chain address of this mint is on show';
+    /* And one being made for that screen (`_ocMaking`): it lands naming this mint, and a trip home under it remade it
+     * at home, so the QR changed under the payer. */
+    if (s.flow === 'receive' && s.screen === 'confirm' && s.recvRail === 'ON-CHAIN' && this._ocMaking) {
+      return 'an on-chain address is being made here';
+    }
     return '';
   }
 

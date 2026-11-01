@@ -73,6 +73,8 @@
      * request is marked as an older one here, whether or not anything is
      * being watched, so its answer is dropped (`openReceiveNow`). */
     this._invoiceRun = (this._invoiceRun || 0) + 1;
+    // and the trip home no longer waits for it (`_invMaking`, `homeWaitsFor`)
+    this._invMaking = null;
     if (!this._watching && !this._stopWatch) return;
     console.log('[foxy] receive: home, so the invoice watch stops; the sweep has the quote');
     this.stopReceive();

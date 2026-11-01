@@ -160,13 +160,30 @@
       if (!at || at === String(mintUrl || '').replace(/\/+$/, '')) {
         return Promise.reject(new Error('That address is at the mint this phone is on.'));
       }
-      return awayWallet(at).then(function (ow) {
-        var w = onCircuit(ow, 'quote:' + quoteId);
-        var seen = w.checkMintQuoteOnchain(String(quoteId)).then(function (q) {
-          return { address: q.request, paid: satsOf(q.amount_paid), issued: satsOf(q.amount_issued), answer: q };
-        });
-        return FoxyWallet._onchainClaimWith(w, record, seen, FoxyWallet._onchainLimitsAt(at).then(null, function () { return null; }));
+      /* The wallet and the mint's limits outside the proof lock, and only the claim inside it
+       * (`_onchainClaimAwayWith`). Made under the lock, a slow or silent mint held it for the wallet's load (25 s)
+       * and a fresh /v1/info, every pass, and a tap arriving meanwhile waited on it. */
+      var limits = FoxyWallet._onchainLimitsAt(at).then(null, function () { return null; });
+      return awayWallet(at).then(function (ow) { return FoxyWallet._onchainClaimAwayWith(ow, quoteId, limits); });
+    },
+
+    /* The claim itself, under the proof lock (99-proof-lock-and-export.js): the record read again here, so what it
+     * says was issued is what the last claim wrote, and refused once the phone is on that mint (claimed as here). */
+    _onchainClaimAwayWith: function (ow, quoteId, limitsAsked) {
+      assertRoute();
+      var record = /** @type {any} */ (null);
+      load(K.onchain, []).forEach(function (r) { if (r && r.quote === quoteId) record = r; });
+      if (!record) return Promise.reject(new Error('That address was not made on this device.'));
+      var at = String(record.mint || '').replace(/\/+$/, '');
+      if (!at || at === String(mintUrl || '').replace(/\/+$/, '')) {
+        return Promise.reject(new Error('That address is at the mint this phone is on.'));
+      }
+      if (mintOf(ow) !== canonicalMint(at)) return Promise.reject(new Error('That address belongs to ' + hostOf(at) + '.'));
+      var w = onCircuit(ow, 'quote:' + quoteId);
+      var seen = w.checkMintQuoteOnchain(String(quoteId)).then(function (q) {
+        return { address: q.request, paid: satsOf(q.amount_paid), issued: satsOf(q.amount_issued), answer: q };
       });
+      return FoxyWallet._onchainClaimWith(w, record, seen, limitsAsked);
     },
 
     /* What `onchainClaim` does once it has the wallet the address belongs to, what that mint has seen for it, and its
