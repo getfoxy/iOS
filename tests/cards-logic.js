@@ -24,7 +24,7 @@ const dom = new JSDOM('<body></body>');
 global.window = dom.window;
 global.document = dom.window.document;
 const methods = new Function('return {' + method('blockedCard(kind, over) {') + ',' +
-  method('claimFailed(e, again) {') + ',' +
+  method('claimFailed(e, again, at) {') + ',' +
   method('offerQuarantine() {') + '}')();
 const toasts = [];
 const app = Object.assign({ state: {}, setState() {}, BLOCKED_INFO: () => null, group: n => String(n),
