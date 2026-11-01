@@ -152,7 +152,8 @@ async function stubbed() {
     p.W.mintUrl = THEIRS;   // on a visit, paying somebody there
     p.a._crossCameFrom = MINE;
     p.a.crossComeHome();    // that payment ended: the trip home begins, its connect on its way
-    ok('G (control) the trip home has begun', typeof land === 'function' && !p.a._crossCameFrom && p.W.mintUrl === THEIRS);
+    // home stays written until the connect lands (round 5's A)
+    ok('G (control) the trip home has begun', typeof land === 'function' && p.a._crossCameFrom === MINE && p.W.mintUrl === THEIRS);
     ok('G1 (control) and nothing is listed as holding it', p.a.homeWaitsFor() === '');
     // (fix) the trip home is a hold of its own while its connect is out: a mint switch waits for it
     const mb = Object.assign(lift(['moneyBusy() {']), { state: {}, _homeGoing: p.a._homeGoing });

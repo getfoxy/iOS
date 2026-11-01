@@ -1436,6 +1436,30 @@ async function forgottenQuote() {
     /belongs to other\.test/.test(elsewhere), elsewhere || 'it was allowed');
   check('and it is not watched at this mint either',
     p.W.onchainWatching().length === 0, JSON.stringify(p.W.onchainWatching()));
+
+  /* But it is watched from here, as a payout made away is followed (attack round 5, B1): an address made on a visit
+   * was asked about only while the phone was on that mint, so a deposit to it waited for a visit nobody made. Claimed
+   * with a wallet made for that mint, its ecash filed under it, and the phone still where it was. */
+  p.m.seenFor.theirs = { amount_paid: 12000, amount_issued: 0 };
+  check('an address from another mint is watched from here, for the same window',
+    p.W.onchainWatchingAway().map(r => r.quote).join() === 'theirs' && p.W.onchainDueAway().length === 1,
+    JSON.stringify(p.W.onchainWatchingAway()));
+  let awayGot = null, awaySaid = '';
+  const pileBefore = p.pile();
+  try { awayGot = await p.W.onchainClaimAway('theirs'); } catch (e) { awaySaid = said(e); }
+  const theirPile = sum(p.read('foxy.cashu.proofs.' + OTHER, '[]'));
+  check('and claimed there with a wallet made for that mint, into that mint’s pile',
+    !!awayGot && awayGot.sats === 12000 && theirPile === 12000 && p.pile() === pileBefore && p.addr('theirs').issued === 12000,
+    awaySaid || JSON.stringify({ got: awayGot, theirPile, here: p.pile(), rec: p.addr('theirs') }));
+  check('without moving the phone', p.W.mintUrl === MINT, p.W.mintUrl);
+  let hereSaid = '';
+  try { await p.W.onchainClaimAway('here'); } catch (e) { hereSaid = said(e); }
+  check('an address at the mint the phone is on is not claimed as one away', /mint this phone is on|not made/.test(hereSaid), hereSaid || 'it was allowed');
+  const aged = p.read(K.onchain, '[]');
+  aged.forEach(r => { if (r.quote === 'theirs') r.at = Date.now() - 8 * DAY; });
+  p.storage.setItem(K.onchain, JSON.stringify(aged));
+  check('and past the window it drops off that list too', p.W.onchainWatchingAway().length === 0,
+    JSON.stringify(p.W.onchainWatchingAway()));
 }
 
 async function run() {

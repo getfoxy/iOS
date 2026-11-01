@@ -34,11 +34,23 @@
 
   /* The receive screen's ON-CHAIN network: an address for this wallet, made
    * once per visit and kept while the screen is up. */
+  /* Not while the phone is on its way home (`_homeGoing`): an address made at the mint being visited names a mint the
+   * phone is no longer on a moment later. Made once the trip has landed or failed (the QR waits as it does for any
+   * address being made). */
   ocReceiveAddress() {
     const W = window.FoxyWallet;
     if (!W || !W.onchainAddress) return '';
     if (this._ocAddr && this._ocAddr.mint === W.mintUrl) return this._ocAddr.address;
     if (this._ocMaking) return '';
+    if (this._homeGoing) {
+      if (this._ocAddrWait !== this._homeGoing) {
+        const trip = this._homeGoing;
+        this._ocAddrWait = trip;
+        const after = () => { if (this._ocAddrWait === trip) this._ocAddrWait = null; this.setState({ ocMade: Date.now() }); };
+        trip.then(after, after);
+      }
+      return '';
+    }
     this._ocMaking = true;
     W.onchainAddress().then(made => {
       this._ocMaking = false;
@@ -99,6 +111,15 @@
      * at the mint it is on. A payout from another mint wrote the mint being
      * visited as home, too. */
     if (this.reqRunLive && this.reqRunLive()) { this.refuseForRun(false); return; }
+    /* Nor while the phone is on its way home (`_homeGoing`): PAY FROM's mints and the quote would be read at the mint
+     * being visited. Taken up once the trip has landed or failed, if the screen is still the one it was scanned on. */
+    if (this._homeGoing) {
+      const screen = this.state.screen;
+      const after = () => { if (this.state.screen === screen && !this._homeGoing) this.payOnchain(text); };
+      this.toast('Foxy is getting back to your mint. The payout follows.');
+      this._homeGoing.then(after, after);
+      return;
+    }
     const read = W.readAddress ? W.readAddress(text) : null;
     if (!read) { this.toast('That is not a Bitcoin address Foxy can read.', true); return; }
     this.onchainAsk();
@@ -136,6 +157,14 @@
     if (!(sats > 0)) { this.toast('Enter an amount first', true); return; }
     // not while a request payment is still out (`payOnchain`)
     if (this.reqRunLive && this.reqRunLive()) { this.refuseForRun(false); return; }
+    // nor while the phone is on its way home (`payOnchain`): NEXT again once it is there, if the keypad is still up
+    if (this._homeGoing) {
+      const screen = this.state.screen;
+      const after = () => { if (this.state.screen === screen && !this._homeGoing) this.ocNext(); };
+      this.toast('Foxy is getting back to your mint. The payout follows.');
+      this._homeGoing.then(after, after);
+      return;
+    }
     /* More than is here is refused at the keypad, before the mint is asked
      * for a fee: the confirmation said so only after its quote, a screen
      * later. The fee comes on top and is still
@@ -164,10 +193,21 @@
 
   /* The mint's fees for this payment. Nothing is spent by asking, and a
    * mistyped address is refused here, before any ecash moves. */
+  /* Not while the phone is on its way home (`_homeGoing`): a quote asked at the mint being visited was paid from home's
+   * pile once the trip landed. Asked once it is there. */
   ocQuote() {
     const W = window.FoxyWallet;
     const { ocTo, ocSats } = this.state;
     if (!ocTo || !(ocSats > 0)) return;
+    if (this._homeGoing) {
+      this.setState({ ocQuoting: true, ocErr: '' });
+      const after = () => {
+        if (this.state.ocTo === ocTo && this.state.ocSats === ocSats) this.ocQuote();
+        else if (this.state.ocQuoting) this.setState({ ocQuoting: false });
+      };
+      this._homeGoing.then(after, after);
+      return;
+    }
     this.setState({ ocQuoting: true, ocErr: '' });
     W.onchainQuote(ocTo, ocSats).then(plan => {
       this.setState({
@@ -387,6 +427,7 @@
       try {
         const due = W && W.connected && (W.onchainDue || W.onchainWatching);
         waiting = (due ? due.call(W).length : 0)
+          + (W && W.connected && W.onchainDueAway ? W.onchainDueAway().length : 0)
           + (W && W.connected && W.onchainSending ? W.onchainSending().length : 0)
           + (W && W.connected && W.onchainSendingAway ? W.onchainSendingAway().length : 0);
       } catch (e) { waiting = 0; }
@@ -413,7 +454,11 @@
     if (!W || !W.onchainWatching || !W.connected) { again(20000); return; }
     // only those due this pass: an address a week old is not asked about every
     // two minutes (onchainDue)
-    const waiting = W.onchainDue ? W.onchainDue() : W.onchainWatching();
+    const here = W.onchainDue ? W.onchainDue() : W.onchainWatching();
+    /* And addresses made on a visit to another mint: claimed from here, with a wallet made for that mint
+     * (`onchainClaimAway`), for the same week. Once the phone was home nothing asked about them. */
+    const away = W.onchainDueAway && W.onchainClaimAway ? W.onchainDueAway() : [];
+    const waiting = here.concat(away);
     if (waiting.length && W.onchainAsked) W.onchainAsked(waiting.map(r => r.quote));
     /* And payouts made on a visit to another mint (PAY FROM): followed from here, with a wallet made for that mint
      * (`onchainFollow`), since the phone came home once each had gone. */
@@ -421,7 +466,8 @@
     if (!waiting.length && !sending.length) { again(120000); return; }
 
     // one at a time: every claim reserves counters, and two at once derive the same secrets
-    const claims = waiting.reduce((chain, record) => chain.then(() => W.onchainClaim(record.quote)
+    const claims = waiting.reduce((chain, record) => chain.then(() => (away.indexOf(record) >= 0
+      ? W.onchainClaimAway(record.quote) : W.onchainClaim(record.quote))
       .then(got => {
         if (!got || !got.sats) return;
         this.refreshBalance();

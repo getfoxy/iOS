@@ -31,6 +31,14 @@
       if (FoxyWallet._onchain && FoxyWallet._onchain.mint === at) {
         return Promise.resolve(FoxyWallet._onchain.limits);
       }
+      return FoxyWallet._onchainLimitsAt(at).then(function (limits) {
+        FoxyWallet._onchain = { mint: at, limits: limits };
+        return limits;
+      }, function () { return null; });
+    },
+
+    /* The same, asked of any mint and kept nowhere: `_onchain` is the connected mint's, and the screens read it. */
+    _onchainLimitsAt: function (at) {
       return FoxyWallet.nativeRequest({ endpoint: at + '/v1/info', method: 'GET' }).then(function (info) {
         var nuts = (info && info.nuts) || {};
         var find = function (n) {
@@ -52,9 +60,8 @@
           } : null,
           send: melt ? { min: satsOf(melt.min_amount) || 0, max: satsOf(melt.max_amount) || 0 } : null,
         } : null;
-        FoxyWallet._onchain = { mint: at, limits: limits };
         return limits;
-      }, function () { return null; });
+      });
     },
 
     /** @type {any} */
@@ -128,6 +135,44 @@
      * Resolves with the sats taken, or 0 when there is nothing yet. */
     onchainClaim: function (quoteId) {
       assertRoute();
+      var pending = load(K.onchain, []);
+      var record = null;
+      for (var i = 0; i < pending.length; i++) if (pending[i].quote === quoteId) record = pending[i];
+      if (!record) return Promise.reject(new Error('That address was not made on this device.'));
+      var w;
+      try { w = onCircuit(need(), 'quote:' + quoteId); } catch (e) { return Promise.reject(e); }
+      if (mintOf(w) !== record.mint) {
+        return Promise.reject(new Error('That address belongs to ' + hostOf(record.mint) + '.'));
+      }
+      return FoxyWallet._onchainClaimWith(w, record, FoxyWallet.onchainSeen(quoteId), FoxyWallet.onchainLimits());
+    },
+
+    /* An address made at another mint (`onchainWatchingAway`), claimed with a wallet made for that mint on this phone's
+     * seed (`awayWallet`), which connects the phone nowhere, as payouts made away are followed (`onchainFollow`). An
+     * address made on a visit was asked about only while the phone was on that mint, so a deposit to it waited for a
+     * visit nobody had reason to make, and was given up when the watch window closed. */
+    onchainClaimAway: function (quoteId) {
+      assertRoute();
+      var record = /** @type {any} */ (null);
+      load(K.onchain, []).forEach(function (r) { if (r && r.quote === quoteId) record = r; });
+      if (!record) return Promise.reject(new Error('That address was not made on this device.'));
+      var at = String(record.mint || '').replace(/\/+$/, '');
+      if (!at || at === String(mintUrl || '').replace(/\/+$/, '')) {
+        return Promise.reject(new Error('That address is at the mint this phone is on.'));
+      }
+      return awayWallet(at).then(function (ow) {
+        var w = onCircuit(ow, 'quote:' + quoteId);
+        var seen = w.checkMintQuoteOnchain(String(quoteId)).then(function (q) {
+          return { address: q.request, paid: satsOf(q.amount_paid), issued: satsOf(q.amount_issued), answer: q };
+        });
+        return FoxyWallet._onchainClaimWith(w, record, seen, FoxyWallet._onchainLimitsAt(at).then(null, function () { return null; }));
+      });
+    },
+
+    /* What `onchainClaim` does once it has the wallet the address belongs to, what that mint has seen for it, and its
+     * limits. */
+    _onchainClaimWith: function (w, record, seenAsked, limitsAsked) {
+      var quoteId = record.quote;
       /* What a claim writes back is what it changed, into the list as it is
        * NOW. It loaded the whole list before its round trip and saved that
        * copy after, several seconds later over Tor: an address made meanwhile
@@ -144,16 +189,7 @@
         }
         save(K.onchain, now);
       };
-      var pending = load(K.onchain, []);
-      var record = null;
-      for (var i = 0; i < pending.length; i++) if (pending[i].quote === quoteId) record = pending[i];
-      if (!record) return Promise.reject(new Error('That address was not made on this device.'));
-      var w;
-      try { w = onCircuit(need(), 'quote:' + quoteId); } catch (e) { return Promise.reject(e); }
-      if (mintOf(w) !== record.mint) {
-        return Promise.reject(new Error('That address belongs to ' + hostOf(record.mint) + '.'));
-      }
-      return Promise.all([FoxyWallet.onchainSeen(quoteId), FoxyWallet.onchainLimits()])
+      return Promise.all([seenAsked, limitsAsked])
         .then(function (both) {
         var seen = both[0], limits = both[1];
         var ceiling = (limits && limits.receive && limits.receive.max) || 0;
@@ -257,8 +293,27 @@
      * still claimed the next time round.
      */
     onchainDue: function () {
+      return FoxyWallet._onchainDueOf(FoxyWallet.onchainWatching());
+    },
+
+    /* Addresses made at another mint than the one the phone is on (on a visit), for the same watch window, asked about
+     * from here (`onchainClaimAway`) as payouts made away are (`onchainSendingAway`). */
+    onchainWatchingAway: function () {
+      var at = String(mintUrl || '').replace(/\/+$/, '');
+      var cutoff = Date.now() - ONCHAIN_WATCH_DAYS * 86400000;
+      return load(K.onchain, []).filter(function (r) {
+        return !!(r && r.mint) && String(r.mint).replace(/\/+$/, '') !== at && (r.at || 0) > cutoff;
+      });
+    },
+
+    // Of those, the ones due on this pass (`onchainDue`).
+    onchainDueAway: function () {
+      return FoxyWallet._onchainDueOf(FoxyWallet.onchainWatchingAway());
+    },
+
+    _onchainDueOf: function (list) {
       var now = Date.now();
-      return FoxyWallet.onchainWatching().filter(function (r) {
+      return list.filter(function (r) {
         var age = now - (r.at || 0);
         var every = age < 1800000 ? 0             // the first half hour: every pass
           : age < 86400000 ? 900000               // the first day: a quarter hour

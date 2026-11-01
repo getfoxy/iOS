@@ -2250,7 +2250,7 @@
         if (String(mintUrl || '').replace(/\/+$/, '') !== boundAt) {
           console.warn('[foxy] the payment was not made: the wallet moved to ' + String(mintUrl || 'no mint')
             + ' while it was being made, from ' + (boundAt || 'no mint'));
-          throw new Error('Foxy changed mint while this payment was being made, so it was stopped. Nothing was sent.');
+          throw new Error('Foxy\u2019s mint changed while this payment was being made, so it was stopped. Nothing was sent.');
         }
         return FoxyWallet.sendToken(want, lockTo ? { unit: reqUnit, lockTo: lockTo, inflight: true }
                                                  : { unit: reqUnit, cover: !!req.viaTap,

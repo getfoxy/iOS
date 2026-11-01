@@ -626,10 +626,31 @@
 
   /* A mint chosen for a payout: its quote asked here, or on a visit there (`_ocVisit`), home again when the payout has gone
    * or failed or the screens are left (`pfOcHome`). */
+  /* Not while the phone is on its way home (`_homeGoing`): `here` is still the mint being visited, so it wrote that mint
+   * as home under the trip and its ending saved it as the phone's own. Chosen again once the trip has landed or failed,
+   * from wherever the phone is then, if the screen is still up. And no visit while money is moving here
+   * (`refuseSwitchWhileBusy`): a visit is a mint switch. */
   pfOnchainGo(e, shown) {
     const W = window.FoxyWallet;
     if (shown && this.state.screen === 'payFrom') this.back();
+    if (this._homeGoing) {
+      if (this._ocAfterHome === e) return;
+      this._ocAfterHome = e;
+      const screen = this.state.screen;
+      const to = this.state.ocTo;
+      console.log('[foxy] pay from: the phone is on its way home; the payout follows once it is there');
+      this.toast('Foxy is getting back to your mint. The payout follows.');
+      const after = () => {
+        if (this._ocAfterHome !== e) return;
+        this._ocAfterHome = null;
+        if (this.state.screen === screen && this.state.ocTo === to) this.pfOnchainGo(e, false);
+      };
+      this._homeGoing.then(after, after);
+      return;
+    }
+    this._ocAfterHome = null;
     const here = this.pfHere();
+    if (e.mint !== here && this.refuseSwitchWhileBusy && this.refuseSwitchWhileBusy()) return;
     this.setState({ payMint: e.mint, payUnit: 'sat', payFromReopen: false });
     if (e.mint === here) { this.ocQuote(); return; }
     this._ocVisit = e.mint;
