@@ -1516,18 +1516,18 @@
  },
  "PAY FROM, a Lightning invoice: three balances, the cheapest chosen": {
   "file": "599-pay-from-a-lightning-invoice-three-balances-the-cheapest-chosen.html",
-  "markup": "d1a848018abb4f40e5c697e1e587d46514897b8b32673241ef65a2a818b92cee",
-  "vals": "fccda20512c196b6153cb47f7f320902f0d32b4bec7a6a4c01bd7a3defa95095"
+  "markup": "b4db42a5952c1a5868ccd3b054d0b3c4e10d8eed319303adce7a8dc212a213ca",
+  "vals": "8afce4f13e05f070ffa93797e068870ec486114d5a0b2def1652a6aa2105ba8a"
  },
  "PAY FROM, one still asked, one short": {
   "file": "600-pay-from-one-still-asked-one-short.html",
-  "markup": "6239cf5ea62cf52b2e88ea68b29e4e89edc9dab9aaf175a4f460325e20dee221",
-  "vals": "3b57813dac6dbcc8c9ccf610ec3217ee580334d64cdf421017ce993cba345f56"
+  "markup": "56c359b426513d4b66f35512cd8515b84e59ea32a38ce058197e0743ecbf13fc",
+  "vals": "7698c44184c15dc1cfd714592026d96a2690bcf8be01fbc71b041794f054d2f4"
  },
  "PAY FROM, a payout on chain": {
   "file": "601-pay-from-a-payout-on-chain.html",
-  "markup": "5408c17815a496d632742ba2a01aa89a63759fb0c0794b9062f27a1e74e42c54",
-  "vals": "656e4bee0335e15977e935f9722556ef13420d54b6b509095cf3a6141ac515db"
+  "markup": "1b6a689d3bbdca2e6eb78c574f446ded711bead995c66df8ed2c02423a32dd95",
+  "vals": "1bb68c1676c5cc94c7492c2d81956025cd48d00eb1af3d29d15e8c05117de412"
  },
  "CONFIRM PAYMENT from another mint, with PAY FROM": {
   "file": "602-confirm-payment-from-another-mint-with-pay-from.html",
@@ -1917,11 +1917,6 @@
  "card: secure Foxy, three ways": {
   "file": "210-card-secure-foxy-three-ways.html",
   "markup": "71bb812aa1b251250254c6b1397e0bfc3b831f2f914236637d5ddb78bb802f91",
-  "vals": "5e4c402e0ed2261101451accb68545d657d5e5ed50ab5b9a612f607ffbaa6f3a"
- },
- "card: paying another user of this mint": {
-  "file": "202-card-paying-another-user-of-this-mint.html",
-  "markup": "31273411260dc353119605ad0ee25938abb37db3c3aa0c0bfa4f3a35873561be",
   "vals": "5e4c402e0ed2261101451accb68545d657d5e5ed50ab5b9a612f607ffbaa6f3a"
  },
  "card: invalid signatures at a claim": {

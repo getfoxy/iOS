@@ -1005,8 +1005,7 @@ function cards() {
     shut: { label: 'SET A FOXY PIN', tap() {} },
     also: { label: 'NO PROTECTION', tap() {} },
   }));
-  add('card: paying another user of this mint', (a) => a.acceptTarget(INVOICE_THIS_MINT),
-    { wallet: { classify: () => 'invoice', amountOf: () => 2100, msatOf: () => 2100000, invoiceFromThisMint: () => true, mintHost: () => 'mint.minibits.cash/Bitcoin' } });
+  // (the card that offered USE CASHU for an invoice of this mint's own is gone since 2026-11-01: such an invoice goes straight to the confirmation)
   add('card: invalid signatures at a claim', (a) => a.badSignatureCard('mint.example.com', 'claim'));
   add('card: invalid signatures at a payment', (a) => a.badSignatureCard('', 'pay'));
   add('card: invalid signatures, elsewhere', (a) => a.badSignatureCard(null, 'swap'));
