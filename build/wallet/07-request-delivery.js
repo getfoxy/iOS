@@ -1683,8 +1683,11 @@
     });
     return out;
   }
+  /* At every mint: what the home screen rings red for. It read the connected
+   * mint's alone, so pieces refused at a mint the phone had visited rang for
+   * 0 once it was home. */
   function atRiskSats() {
-    return atRiskIn('sat');
+    return atRiskGroups().reduce(function (n, g) { return n + (g.unit === 'sat' ? g.amount : 0); }, 0);
   }
   // at the connected mint, in one unit
   function atRiskIn(unit) {

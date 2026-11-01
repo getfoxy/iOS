@@ -468,6 +468,8 @@
     const p = (W.privacy && W.privacy()) || {};
     if (!(p.tor === 'up' || p.unprotected)) return;
     if (p.network === 'none') return;
+    // home, where a come-home after a crossing could not connect (`crossComeHome`)
+    if (this.comeHomeOwed) this.comeHomeOwed();
     /* And what was left between two mints, which needs a route just as much:
      * a crossing to claim, a payment to bring home, a refusal to take back. */
     if (!this._crossingsOnRoute && W.crossingsWaiting && W.crossingsWaiting()) {

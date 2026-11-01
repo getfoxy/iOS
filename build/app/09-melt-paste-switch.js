@@ -643,6 +643,10 @@
           console.log('[foxy] the sats held for a swap are settled; the balance has them again');
           this.refreshBalance();
           if (this.loadHistory) this.loadHistory();
+          /* Pieces a refusal flagged come back into the pile here when the swap
+           * that was to make them safe got no answer, after the connect's own
+           * settle had found nothing to settle. */
+          if (W.atRisk && W.atRisk().length && W.settleAtRisk) W.settleAtRisk().then(() => this.refreshBalance(), () => {});
         }
       }, () => {});
       go.then(() => { if (W.heldSats() > 0 && !this._heldT) this._heldT = setTimeout(again, 3000); });

@@ -67,6 +67,7 @@ check "scan twice"     1 node tests/scan-twice.js
 check "scan cross mint" 1 node tests/scan-cross-mint.js
 check "pay from"       1 node tests/pay-from.js
 check "attack 11-01"    1 node tests/attack-2026-11-01.js
+check "attack 11-01 r2" 1 node tests/attack-2026-11-01-round2.js
 check "change twin"    1 node tests/change-twin.js
 check "address kept"   1 node tests/onchain-address-kept.js
 check "lock key kept"  1 node tests/lock-key-kept.js

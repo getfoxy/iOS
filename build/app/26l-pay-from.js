@@ -51,6 +51,8 @@
     const port = scheme === 'https' ? ':443' : ':80';
     let host = m[2].toLowerCase();
     if (host.slice(-port.length) === port) host = host.slice(0, -port.length);
+    // and no dot at the end of the name, as the wallet writes it
+    host = host.replace(/\.+(?=(:\d+)?$)/, '');
     return scheme + '://' + host + (m[3] || '').replace(/\/+$/, '');
   }
 

@@ -674,6 +674,11 @@
     if (host.slice(-defaultPort.length) === defaultPort) {
       host = host.slice(0, -defaultPort.length);
     }
+    /* Nor a dot at the end of the name ("mint.example.com."), which a
+     * resolver reads as the same host and the native side trims before it
+     * asks: kept, it filed the same mint as a stranger, with a pile of its
+     * own and a crossing to reach it. */
+    host = host.replace(/\.+(?=(:\d+)?$)/, '');
     return scheme + '://' + host + rest;
   }
 
@@ -9797,8 +9802,11 @@
     });
     return out;
   }
+  /* At every mint: what the home screen rings red for. It read the connected
+   * mint's alone, so pieces refused at a mint the phone had visited rang for
+   * 0 once it was home. */
   function atRiskSats() {
-    return atRiskIn('sat');
+    return atRiskGroups().reduce(function (n, g) { return n + (g.unit === 'sat' ? g.amount : 0); }, 0);
   }
   // at the connected mint, in one unit
   function atRiskIn(unit) {
@@ -32004,7 +32012,9 @@
             + over + (confirmed ? '' : ' (nobody has confirmed it)')
             + ' in ' + (Date.now() - madeAt) + ' ms, ' + (Date.now() - began) + ' ms in all');
           // a copy, so the type check is not asked about a field sendToken never had
-          return /** @type {any} */ (Object.assign({}, made, { confirmed: confirmed }));
+          /* `website`: delivered to a web address, whose 2xx is no promise the
+           * pieces were redeemed (the app keeps and watches the token). */
+          return /** @type {any} */ (Object.assign({}, made, { confirmed: confirmed, website: over === 'https' }));
         }, function (e) {
           /* A refusal is not a delivery failure.
            *
@@ -32136,10 +32146,33 @@
      * unspent, they are swapped and the flag goes. Spent, the phone that said
      * no redeemed them: they come out of the pile, the entry says paid, and
      * the person is told. Resolves [{ state, hash, sats }]. */
+    /* Every mint's, each at its own: this mint's with the connected wallet,
+     * any other's with a wallet made for it (`awayWallet`), as `recoverSwaps`
+     * and `finishMove` ask about what is held elsewhere. Only the connected
+     * mint was looked at, so pieces a website refused at a mint the phone had
+     * visited stayed flagged and unspent there while it was home, and the
+     * site could redeem them whenever it liked. */
     settleAtRisk: function () {
       if (FoxyWallet._settlingAtRisk) return FoxyWallet._settlingAtRisk;
       if (!wallet || !routeOpen() || !Object.keys(atRiskAll()).length) return Promise.resolve([]);
       var walk = FoxyWallet._settleAtRiskOnce().then(function (out) {
+        if (!routeOpen()) return out || [];
+        var here = mintOf(wallet);
+        var away = {};
+        atRiskGroups().forEach(function (g) {
+          var at = canonicalMint(g.mint || '');
+          if (at && at !== here) away[at] = true;
+        });
+        return Object.keys(away).reduce(function (chain, at) {
+          return chain.then(function (all) {
+            return awayWallet(at).then(function (ow) { return FoxyWallet._settleAtRiskOnce({ w: ow, here: at }); })
+              .then(function (more) { return all.concat(more || []); }, function (e) {
+                console.warn('[foxy] could not ask', hostOf(at), 'about ecash at risk there \u2014', FoxyWallet.reason(e));
+                return all;
+              });
+          });
+        }, Promise.resolve(out || []));
+      }).then(function (out) {
         (out || []).forEach(function (r) {
           if (typeof FoxyWallet._onAtRisk === 'function') {
             try { FoxyWallet._onAtRisk(r); } catch (x) { console.warn('[foxy] at-risk watcher:', x && x.message); }
@@ -32158,10 +32191,12 @@
     /** @type {?Promise<any[]>} */
     _settlingAtRisk: null,
 
-    _settleAtRiskOnce: function () {
-      var w = wallet;
+    /* `other`: { w, here } — a wallet for a mint the phone is not connected
+     * to, and that mint's address. Only the groups there are looked at. */
+    _settleAtRiskOnce: function (other) {
+      var w = other ? other.w : wallet;
       if (!w || !routeOpen()) return Promise.resolve([]);
-      var here = mintOf(w);
+      var here = other ? canonicalMint(other.here) : mintOf(w);
       /** @type {any[]} */
       var out = [];
       // a group none of whose pieces is left was spent by this phone since: nothing to settle

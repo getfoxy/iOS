@@ -673,6 +673,11 @@
     if (host.slice(-defaultPort.length) === defaultPort) {
       host = host.slice(0, -defaultPort.length);
     }
+    /* Nor a dot at the end of the name ("mint.example.com."), which a
+     * resolver reads as the same host and the native side trims before it
+     * asks: kept, it filed the same mint as a stranger, with a pile of its
+     * own and a crossing to reach it. */
+    host = host.replace(/\.+(?=(:\d+)?$)/, '');
     return scheme + '://' + host + rest;
   }
 
