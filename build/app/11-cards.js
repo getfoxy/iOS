@@ -235,12 +235,13 @@
     this._stuckOpen = null;
     const u = hit.unclaimed;
     const host = String(hit.mint || '').replace(/^https?:\/\//, '') || 'the mint';
-    const sats = this.group(Number(hit.amount) || 0);
+    // in the invoice's own unit: a dollar record's amount is cents, and read "150 sats at …"
+    const money = this.moneyIn(hit.amount, hit.unit === 'usd' ? 'usd' : 'sat');
     if (u.badSignatures) {
       this.blockedCard('stuckInvoice', {
         tone: 'warn',
         title: 'PAID, NOT COLLECTED',
-        reason: sats + ' sats at ' + host + '. The mint sent invalid signatures for it, so Foxy will not collect it or ask again.',
+        reason: money + ' at ' + host + '. The mint sent invalid signatures for it, so Foxy will not collect it or ask again.',
         chip: 'Consider moving your balance to another mint.',
       });
       return;
@@ -252,15 +253,12 @@
       this.blockedCard('stuckInvoice', {
         tone: 'warn',
         title: 'PAID, NOT COLLECTED',
-        reason: sats + ' sats at ' + host + '. The mint refused to hand them over three times'
+        reason: money + ' at ' + host + '. The mint refused to hand them over three times'
           + (u.reason ? ' (' + u.reason + ')' : '') + ', so Foxy stopped asking on its own.',
         chip: 'The money is still at the mint. Try again later, or ask the mint what is wrong.',
         retry: 'TRY AGAIN',
         go: () => {
-          window.FoxyWallet.retryRefusedClaim(hit.quote).then(() => {
-            this.toast('Collected ' + sats + ' sats');
-            this.refreshBalance();
-          }, e => this.claimFailed(e));
+          window.FoxyWallet.retryRefusedClaim(hit.quote).then((got) => this.stuckCollected(hit, got), e => this.claimFailed(e, null, hit.mint));
         },
       });
       return;
@@ -272,21 +270,30 @@
       this.blockedCard('stuckInvoice', {
         tone: 'warn',
         title: 'PAID, NOT COLLECTED',
-        reason: sats + ' sats at ' + host + '. Foxy asked for them ' + (u.tries || 10)
+        reason: money + ' at ' + host + '. Foxy asked for them ' + (u.tries || 10)
           + ' times and the mint never answered'
           + (u.reason ? ' (' + u.reason + ')' : '') + ', so it stopped asking on its own.',
         chip: 'The money is still at the mint. Try again when it is answering.',
         retry: 'TRY AGAIN',
         go: () => {
-          window.FoxyWallet.retryRefusedClaim(hit.quote).then(() => {
-            this.toast('Collected ' + sats + ' sats');
-            this.refreshBalance();
-          }, e => this.claimFailed(e));
+          window.FoxyWallet.retryRefusedClaim(hit.quote).then((got) => this.stuckCollected(hit, got), e => this.claimFailed(e, null, hit.mint));
         },
       });
       return;
     }
     this.stuckRetryCard(hit);
+  }
+
+  /* TRY AGAIN collected it: in the invoice's own unit, and where the money now is when that is another mint than
+   * the phone is on. "Collected 1,000 sats" and a refresh of home, whose balance did not move, read as money lost. */
+  stuckCollected(hit, got) {
+    const W = window.FoxyWallet;
+    const canonM = (u) => (W && W.canonicalMint ? W.canonicalMint(u) : String(u || '').replace(/\/+$/, ''));
+    const n = Number(got) > 0 ? Number(got) : Number(hit.amount) || 0;
+    const away = !!hit.mint && !!W && !!W.mintUrl && canonM(hit.mint) !== canonM(W.mintUrl);
+    const where = away ? ((this.mintNameOf && this.mintNameOf(hit.mint)) || String(hit.mint).replace(/^https?:\/\//, '')) : '';
+    this.toast('Collected ' + this.moneyIn(n, hit.unit === 'usd' ? 'usd' : 'sat') + (where ? ', now at ' + where : ''));
+    this.refreshBalance();
   }
 
   /* PAID, NOT COLLECTED YET, in words that are true now.
@@ -303,11 +310,11 @@
     const up = !(W && W.routeOpen) || W.routeOpen();
     this._stuckOpen = { hit, up };
     const host = String(hit.mint || '').replace(/^https?:\/\//, '') || 'the mint';
-    const sats = this.group(Number(hit.amount) || 0);
+    const money = this.moneyIn(hit.amount, hit.unit === 'usd' ? 'usd' : 'sat');
     this.blockedCard('stuckInvoice', {
       tone: 'warn',
       title: 'PAID, NOT COLLECTED YET',
-      reason: sats + ' sats at ' + host + (up
+      reason: money + ' at ' + host + (up
         ? ' \u2014 retrying.' + (u.reason && !u.unsent ? ' ' + u.reason : '')
         : ' \u2014 waiting for a connection.'),
       chip: 'The money is at the mint, waiting for this phone. Keep Foxy installed until it arrives.',
@@ -337,7 +344,9 @@
     if (this._blockedKind === 'stuckInvoice' && this._blockedEl && this._blockedClose) this._blockedClose();
   }
 
-  claimFailed(e, again) {
+  /* `at`: the mint the claim was made at, when it is not the one the phone is on (TRY AGAIN on an invoice made on a
+   * visit), so a card about its signatures names that mint and not this one. */
+  claimFailed(e, again, at) {
     const W = window.FoxyWallet;
 
     /* Classify on the RAW error, display the translated one.
@@ -355,7 +364,7 @@
     if (/cancelled|canceled/.test(low)) return;
 
     // not a connection problem, and not one to try again
-    if (this.isBadSignatures(e)) { this.badSignatureCard(null, 'swap'); return; }
+    if (this.isBadSignatures(e)) { this.badSignatureCard(at ? String(at).replace(/^https?:\/\//, '').replace(/\/+$/, '') : null, at ? 'claim' : 'swap'); return; }
 
     /* Each of these three is its own kind, not all `netLost`.
      *

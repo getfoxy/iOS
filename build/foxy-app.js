@@ -4475,7 +4475,7 @@ class Component extends DCLogic {
           title: 'HIGH RISK',
           reason: (site ? 'Their website did not take this payment, and it has seen your ecash and can still redeem it. '
             : 'They refused this payment and did not send it back locked to you. They have seen your ecash and can still redeem it. ')
-            + 'Do not pay again until it is safe.',
+            + 'Do not pay again until the red ring is gone.',
           /* Swapped at that mint, from wherever the phone is (`settleAtRisk`
            * settles every mint's). It said "until Foxy has a connection"
            * while connected, about pieces nothing was going to settle. */
@@ -4569,8 +4569,11 @@ class Component extends DCLogic {
       crossDone();
       /* A website that did not answer in time may have the payment: said so,
        * and the token's claim watch says which (`foxyMaybeSent`). */
+      /* Nobody can show a website a token: after a post that failed, the token is kept and watched (below). */
+      const toSite = !!(req && !req.viaTap && req.delivery && req.delivery.kind === 'https');
       const undelivered = (e && e.foxyMaybeSent) ? W.reason(e)
-        : 'It did not reach them (' + W.reason(e) + '). Show them this token instead.';
+        : 'It did not reach ' + (toSite ? 'their website' : 'them') + ' (' + W.reason(e) + '). '
+          + (toSite ? 'The token is kept; Foxy watches it.' : 'Show them this token instead.');
       this._seenTx = this._seenTx || {};
       this._seenTx[made.hash] = true;
       if (made.unit === 'usd' || usdReq) {
@@ -5332,14 +5335,20 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     const before = this._sweepBefore;
     this._sweepBefore = null;
+    /* Only rows at the mint the phone is on (and the oldest rows, which name none). A payment the away walk claimed at
+     * another mint meanwhile is written there too, and marked here it was never said: the hush had dropped its report,
+     * and the dedupe dropped it once the hush was over. It is said when the hush ends (`sayHushedAway`). */
+    const canonM = (u) => (W && W.canonicalMint ? W.canonicalMint(u) : String(u || '').replace(/\/+$/, ''));
+    const here = canonM(W.mintUrl);
     return W.transactions(50).then(list => {
       this._seenTx = this._seenTx || {};
       let n = 0;
       const mine = {};
       list.forEach(x => {
         if (before && before.has(x.hash)) return;
-        this._seenTx[x.hash] = true;
         mine[x.hash] = true;
+        if (x.mint && canonM(x.mint) !== here) return;
+        this._seenTx[x.hash] = true;
         n++;
       });
       // and any a history pass already queued for a confirmation
@@ -7771,12 +7780,13 @@ class Component extends DCLogic {
     this._stuckOpen = null;
     const u = hit.unclaimed;
     const host = String(hit.mint || '').replace(/^https?:\/\//, '') || 'the mint';
-    const sats = this.group(Number(hit.amount) || 0);
+    // in the invoice's own unit: a dollar record's amount is cents, and read "150 sats at …"
+    const money = this.moneyIn(hit.amount, hit.unit === 'usd' ? 'usd' : 'sat');
     if (u.badSignatures) {
       this.blockedCard('stuckInvoice', {
         tone: 'warn',
         title: 'PAID, NOT COLLECTED',
-        reason: sats + ' sats at ' + host + '. The mint sent invalid signatures for it, so Foxy will not collect it or ask again.',
+        reason: money + ' at ' + host + '. The mint sent invalid signatures for it, so Foxy will not collect it or ask again.',
         chip: 'Consider moving your balance to another mint.',
       });
       return;
@@ -7788,15 +7798,12 @@ class Component extends DCLogic {
       this.blockedCard('stuckInvoice', {
         tone: 'warn',
         title: 'PAID, NOT COLLECTED',
-        reason: sats + ' sats at ' + host + '. The mint refused to hand them over three times'
+        reason: money + ' at ' + host + '. The mint refused to hand them over three times'
           + (u.reason ? ' (' + u.reason + ')' : '') + ', so Foxy stopped asking on its own.',
         chip: 'The money is still at the mint. Try again later, or ask the mint what is wrong.',
         retry: 'TRY AGAIN',
         go: () => {
-          window.FoxyWallet.retryRefusedClaim(hit.quote).then(() => {
-            this.toast('Collected ' + sats + ' sats');
-            this.refreshBalance();
-          }, e => this.claimFailed(e));
+          window.FoxyWallet.retryRefusedClaim(hit.quote).then((got) => this.stuckCollected(hit, got), e => this.claimFailed(e, null, hit.mint));
         },
       });
       return;
@@ -7808,21 +7815,30 @@ class Component extends DCLogic {
       this.blockedCard('stuckInvoice', {
         tone: 'warn',
         title: 'PAID, NOT COLLECTED',
-        reason: sats + ' sats at ' + host + '. Foxy asked for them ' + (u.tries || 10)
+        reason: money + ' at ' + host + '. Foxy asked for them ' + (u.tries || 10)
           + ' times and the mint never answered'
           + (u.reason ? ' (' + u.reason + ')' : '') + ', so it stopped asking on its own.',
         chip: 'The money is still at the mint. Try again when it is answering.',
         retry: 'TRY AGAIN',
         go: () => {
-          window.FoxyWallet.retryRefusedClaim(hit.quote).then(() => {
-            this.toast('Collected ' + sats + ' sats');
-            this.refreshBalance();
-          }, e => this.claimFailed(e));
+          window.FoxyWallet.retryRefusedClaim(hit.quote).then((got) => this.stuckCollected(hit, got), e => this.claimFailed(e, null, hit.mint));
         },
       });
       return;
     }
     this.stuckRetryCard(hit);
+  }
+
+  /* TRY AGAIN collected it: in the invoice's own unit, and where the money now is when that is another mint than
+   * the phone is on. "Collected 1,000 sats" and a refresh of home, whose balance did not move, read as money lost. */
+  stuckCollected(hit, got) {
+    const W = window.FoxyWallet;
+    const canonM = (u) => (W && W.canonicalMint ? W.canonicalMint(u) : String(u || '').replace(/\/+$/, ''));
+    const n = Number(got) > 0 ? Number(got) : Number(hit.amount) || 0;
+    const away = !!hit.mint && !!W && !!W.mintUrl && canonM(hit.mint) !== canonM(W.mintUrl);
+    const where = away ? ((this.mintNameOf && this.mintNameOf(hit.mint)) || String(hit.mint).replace(/^https?:\/\//, '')) : '';
+    this.toast('Collected ' + this.moneyIn(n, hit.unit === 'usd' ? 'usd' : 'sat') + (where ? ', now at ' + where : ''));
+    this.refreshBalance();
   }
 
   /* PAID, NOT COLLECTED YET, in words that are true now.
@@ -7839,11 +7855,11 @@ class Component extends DCLogic {
     const up = !(W && W.routeOpen) || W.routeOpen();
     this._stuckOpen = { hit, up };
     const host = String(hit.mint || '').replace(/^https?:\/\//, '') || 'the mint';
-    const sats = this.group(Number(hit.amount) || 0);
+    const money = this.moneyIn(hit.amount, hit.unit === 'usd' ? 'usd' : 'sat');
     this.blockedCard('stuckInvoice', {
       tone: 'warn',
       title: 'PAID, NOT COLLECTED YET',
-      reason: sats + ' sats at ' + host + (up
+      reason: money + ' at ' + host + (up
         ? ' \u2014 retrying.' + (u.reason && !u.unsent ? ' ' + u.reason : '')
         : ' \u2014 waiting for a connection.'),
       chip: 'The money is at the mint, waiting for this phone. Keep Foxy installed until it arrives.',
@@ -7873,7 +7889,9 @@ class Component extends DCLogic {
     if (this._blockedKind === 'stuckInvoice' && this._blockedEl && this._blockedClose) this._blockedClose();
   }
 
-  claimFailed(e, again) {
+  /* `at`: the mint the claim was made at, when it is not the one the phone is on (TRY AGAIN on an invoice made on a
+   * visit), so a card about its signatures names that mint and not this one. */
+  claimFailed(e, again, at) {
     const W = window.FoxyWallet;
 
     /* Classify on the RAW error, display the translated one.
@@ -7891,7 +7909,7 @@ class Component extends DCLogic {
     if (/cancelled|canceled/.test(low)) return;
 
     // not a connection problem, and not one to try again
-    if (this.isBadSignatures(e)) { this.badSignatureCard(null, 'swap'); return; }
+    if (this.isBadSignatures(e)) { this.badSignatureCard(at ? String(at).replace(/^https?:\/\//, '').replace(/\/+$/, '') : null, at ? 'claim' : 'swap'); return; }
 
     /* Each of these three is its own kind, not all `netLost`.
      *
@@ -10078,6 +10096,21 @@ class Component extends DCLogic {
     return !!this._seenSeeded;
   }
 
+  /* Payments claimed at another mint while a crossing or a carry home had the page quiet (`announcePayment`), said
+   * once the quiet is over, oldest first. One timer at a time; it looks again every two seconds while the page is
+   * still quiet. One said meanwhile (its receive screen) is dropped by `announcePayment`'s own check. */
+  sayHushedAway() {
+    if (this._hushedAwayTimer) return;
+    const wait = Math.max(2000, (this._hushUntil || 0) - Date.now());
+    this._hushedAwayTimer = setTimeout(() => {
+      this._hushedAwayTimer = null;
+      if (this._quiet || Date.now() < (this._hushUntil || 0)) { this.sayHushedAway(); return; }
+      const held = this._hushedAway || [];
+      this._hushedAway = [];
+      held.forEach((ev) => this.announcePayment(ev));
+    }, wait);
+  }
+
   // the confirmation screen, from either path
   announcePayment(ev) {
     const W = window.FoxyWallet;
@@ -10100,7 +10133,30 @@ class Component extends DCLogic {
     // own schedule — seconds after the fact, which is why marking the entries
     // it had already written was not enough. Nothing announces during a sweep
     // or shortly after it, except the sweep's own confirmation, which says so.
+    /* A claim made at another mint (`awayAt`) is said by this path alone, so it skips what the history pass skips
+     * (16-history-lists.js): a leg of a swap between balances, which its own screen reports; change; money moved to or
+     * from a card; a card's share of a split bill; and another unit's receive, except dollars at a mint with two
+     * balances. A swap's leg read PAYMENT RECEIVED, NOW AT that mint, for the person's own conversion. */
+    if (!ev.force && ev.awayAt && ev.hash) {
+      const tags = (W && W.tagsFor && W.tagsFor(ev.hash)) || {};
+      const shares = (this.splitCardEntries && this.splitCardEntries()) || {};
+      const unit = String(ev.unit || 'sat');
+      let usdThere = false;
+      try { usdThere = unit === 'usd' && !!(W && W.twoUnits && W.twoUnits(ev.awayAt)); } catch (e) { usdThere = false; }
+      if (ev.swap || ev.kind === 'swap' || tags.change || tags.to === 'card' || shares[ev.hash] || (unit !== 'sat' && !usdThere)) {
+        this.txIsNew(ev.hash);
+        console.log('[foxy] confirmation: a claim at another mint that is not a payment received, not announced');
+        return;
+      }
+    }
+
     if (!ev.force && (this._quiet || Date.now() < (this._hushUntil || 0))) {
+      /* Except a payment claimed at another mint: nothing else will say it (its row is at that mint, and the first
+       * history load there seeds quietly), so it waits for the hush to end (`sayHushedAway`). Not one already said. */
+      if (ev.awayAt && ev.dir === 'in' && ev.hash && !ev.again && !(this._seenTx && this._seenTx[ev.hash])) {
+        this._hushedAway = (this._hushedAway || []).filter((x) => x.hash !== ev.hash).concat([ev]);
+        if (this.sayHushedAway) this.sayHushedAway();
+      }
       console.log('[foxy] confirmation held back:', ev.dir, ev.sats);
       return;
     }

@@ -357,7 +357,8 @@
     _onClaimTrouble: null,
     onClaimTrouble: function (fn) { FoxyWallet._onClaimTrouble = fn; },
 
-    /* Invoices paid at the mint but not collected, with why. */
+    /* Invoices paid at the mint but not collected, with why, and in which unit
+     * their amount is (cents for dollars). */
     stuckInvoices: function () {
       return load(K.quotes, []).concat(load(K.quotesOld, [])).filter(function (q) {
         return q && q.unclaimed;
@@ -366,7 +367,7 @@
          * mint was asked, in the words a refusal that never left uses. */
         var u = q.unclaimed;
         var unsent = !!u.unsent || NEVER_SENT.indexOf(String(u.reason || '')) >= 0;
-        return { quote: q.quote, amount: q.amount, mint: q.mint, unclaimed: Object.assign({}, u, { unsent: unsent }) };
+        return { quote: q.quote, amount: q.amount, unit: recordUnit(q), mint: q.mint, unclaimed: Object.assign({}, u, { unsent: unsent }) };
       });
     },
     /* What stands in front of the seed (the SECURE FOXY card, 10-pin.js).

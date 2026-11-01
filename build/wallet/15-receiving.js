@@ -640,8 +640,10 @@
             var said = function (got, more) {
               /* And where it went, when that is another mint than the phone is on: written so the page can raise it as
                * it is (`announcePayment`, NOW AT `awayAt`). Home's balance and history do not move for it, and its
-               * row is filed at that mint, so nothing else would say it came. */
+               * row is filed at that mint, so nothing else would say it came. A leg of a swap between balances says
+               * so (`swap`, as its row does), and the page leaves it to the swap's own screen. */
               return Object.assign({ quote: entry.quote, unit: u, amount: got, sats: u === 'sat' ? got : 0 },
+                entry.swap ? { swap: String(entry.swap), kind: 'swap' } : {},
                 other ? { mint: hereQ, away: true, awayAt: hereQ, dir: 'in', hash: entry.quote } : {}, more || {});
             };
             if (q.state === 'ISSUED') {

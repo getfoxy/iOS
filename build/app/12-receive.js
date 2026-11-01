@@ -1231,6 +1231,21 @@
     return !!this._seenSeeded;
   }
 
+  /* Payments claimed at another mint while a crossing or a carry home had the page quiet (`announcePayment`), said
+   * once the quiet is over, oldest first. One timer at a time; it looks again every two seconds while the page is
+   * still quiet. One said meanwhile (its receive screen) is dropped by `announcePayment`'s own check. */
+  sayHushedAway() {
+    if (this._hushedAwayTimer) return;
+    const wait = Math.max(2000, (this._hushUntil || 0) - Date.now());
+    this._hushedAwayTimer = setTimeout(() => {
+      this._hushedAwayTimer = null;
+      if (this._quiet || Date.now() < (this._hushUntil || 0)) { this.sayHushedAway(); return; }
+      const held = this._hushedAway || [];
+      this._hushedAway = [];
+      held.forEach((ev) => this.announcePayment(ev));
+    }, wait);
+  }
+
   // the confirmation screen, from either path
   announcePayment(ev) {
     const W = window.FoxyWallet;
@@ -1253,7 +1268,30 @@
     // own schedule — seconds after the fact, which is why marking the entries
     // it had already written was not enough. Nothing announces during a sweep
     // or shortly after it, except the sweep's own confirmation, which says so.
+    /* A claim made at another mint (`awayAt`) is said by this path alone, so it skips what the history pass skips
+     * (16-history-lists.js): a leg of a swap between balances, which its own screen reports; change; money moved to or
+     * from a card; a card's share of a split bill; and another unit's receive, except dollars at a mint with two
+     * balances. A swap's leg read PAYMENT RECEIVED, NOW AT that mint, for the person's own conversion. */
+    if (!ev.force && ev.awayAt && ev.hash) {
+      const tags = (W && W.tagsFor && W.tagsFor(ev.hash)) || {};
+      const shares = (this.splitCardEntries && this.splitCardEntries()) || {};
+      const unit = String(ev.unit || 'sat');
+      let usdThere = false;
+      try { usdThere = unit === 'usd' && !!(W && W.twoUnits && W.twoUnits(ev.awayAt)); } catch (e) { usdThere = false; }
+      if (ev.swap || ev.kind === 'swap' || tags.change || tags.to === 'card' || shares[ev.hash] || (unit !== 'sat' && !usdThere)) {
+        this.txIsNew(ev.hash);
+        console.log('[foxy] confirmation: a claim at another mint that is not a payment received, not announced');
+        return;
+      }
+    }
+
     if (!ev.force && (this._quiet || Date.now() < (this._hushUntil || 0))) {
+      /* Except a payment claimed at another mint: nothing else will say it (its row is at that mint, and the first
+       * history load there seeds quietly), so it waits for the hush to end (`sayHushedAway`). Not one already said. */
+      if (ev.awayAt && ev.dir === 'in' && ev.hash && !ev.again && !(this._seenTx && this._seenTx[ev.hash])) {
+        this._hushedAway = (this._hushedAway || []).filter((x) => x.hash !== ev.hash).concat([ev]);
+        if (this.sayHushedAway) this.sayHushedAway();
+      }
       console.log('[foxy] confirmation held back:', ev.dir, ev.sats);
       return;
     }

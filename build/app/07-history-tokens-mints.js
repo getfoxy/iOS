@@ -1569,7 +1569,7 @@
           title: 'HIGH RISK',
           reason: (site ? 'Their website did not take this payment, and it has seen your ecash and can still redeem it. '
             : 'They refused this payment and did not send it back locked to you. They have seen your ecash and can still redeem it. ')
-            + 'Do not pay again until it is safe.',
+            + 'Do not pay again until the red ring is gone.',
           /* Swapped at that mint, from wherever the phone is (`settleAtRisk`
            * settles every mint's). It said "until Foxy has a connection"
            * while connected, about pieces nothing was going to settle. */
@@ -1663,8 +1663,11 @@
       crossDone();
       /* A website that did not answer in time may have the payment: said so,
        * and the token's claim watch says which (`foxyMaybeSent`). */
+      /* Nobody can show a website a token: after a post that failed, the token is kept and watched (below). */
+      const toSite = !!(req && !req.viaTap && req.delivery && req.delivery.kind === 'https');
       const undelivered = (e && e.foxyMaybeSent) ? W.reason(e)
-        : 'It did not reach them (' + W.reason(e) + '). Show them this token instead.';
+        : 'It did not reach ' + (toSite ? 'their website' : 'them') + ' (' + W.reason(e) + '). '
+          + (toSite ? 'The token is kept; Foxy watches it.' : 'Show them this token instead.');
       this._seenTx = this._seenTx || {};
       this._seenTx[made.hash] = true;
       if (made.unit === 'usd' || usdReq) {
@@ -2426,14 +2429,20 @@
     const W = window.FoxyWallet;
     const before = this._sweepBefore;
     this._sweepBefore = null;
+    /* Only rows at the mint the phone is on (and the oldest rows, which name none). A payment the away walk claimed at
+     * another mint meanwhile is written there too, and marked here it was never said: the hush had dropped its report,
+     * and the dedupe dropped it once the hush was over. It is said when the hush ends (`sayHushedAway`). */
+    const canonM = (u) => (W && W.canonicalMint ? W.canonicalMint(u) : String(u || '').replace(/\/+$/, ''));
+    const here = canonM(W.mintUrl);
     return W.transactions(50).then(list => {
       this._seenTx = this._seenTx || {};
       let n = 0;
       const mine = {};
       list.forEach(x => {
         if (before && before.has(x.hash)) return;
-        this._seenTx[x.hash] = true;
         mine[x.hash] = true;
+        if (x.mint && canonM(x.mint) !== here) return;
+        this._seenTx[x.hash] = true;
         n++;
       });
       // and any a history pass already queued for a confirmation

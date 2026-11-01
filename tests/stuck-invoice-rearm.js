@@ -143,7 +143,7 @@ const liveSince = (c, n) => [...c.timers.live.values()].filter((t) => t.n > n);
  * that answers from the route the test set: home first, a return never waits
  * behind a screen (FoxyGate.check answers true at once). */
 const LIFTED = ['blockedCard(kind, over) {', 'showStuckInvoice(hit) {', 'stuckRetryCard(hit) {', 'stuckInvoiceRoute() {',
-  'stuckInvoiceLanded(claimed) {', 'setUpAfterReturn() {', 'connectForRealOnceOnline() {'];
+  'stuckInvoiceLanded(claimed) {', 'setUpAfterReturn() {', 'connectForRealOnceOnline() {', 'moneyIn(n, unit) {', 'usd(v) {'];
 function appOn(c) {
   const app = Object.assign(c.window.eval('(function () { return {' + LIFTED.map(method).join(',') + '}; })()'), {
     state: {}, setState() {}, BLOCKED_INFO: () => null, toast() {},

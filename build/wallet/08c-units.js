@@ -523,11 +523,55 @@
      * key was lost is money the mint will not release. */
     if (pending.length > 50) {
       var older = pending.slice(50);
-      mustSave(K.quotesOld, older.concat(load(K.quotesOld, [])).slice(0, 500));
+      mustSave(K.quotesOld, archiveCapped(older.concat(load(K.quotesOld, []))));
       console.warn('[foxy] the unpaid invoice list is full — archived', older.length, 'older one(s)');
     }
     mustSave(K.quotes, pending.slice(0, 50));
     return rec;
+  }
+
+  /* The archive held to ARCHIVE_CAP, newest first, by what each record is
+   * rather than by its age alone. The newest 500 used to be kept blind: a
+   * paid invoice waiting for TRY AGAIN, or one at a mint that is down, went
+   * with its NUT-20 key once a till's dollar receive screen had made 551
+   * newer ones, and nothing could claim it again, a seed restore included.
+   *
+   * Never dropped: a record that is paid and not collected (`unclaimed`),
+   * one a claim has reserved counters for (`outputs`, which may be ISSUED),
+   * one marked paid, and one at a mint the away walk is resting
+   * (`awayDown`). Dropped first, oldest first: those five minutes past
+   * their expiry, as the sweep would drop them once asked. Then the oldest
+   * of the rest. If what has to stay is itself over the cap, it all stays,
+   * and that is logged once. */
+  var ARCHIVE_CAP = 500;
+  var archiveOverTold = false;
+  function archiveHolds(e) {
+    if (!e) return false;
+    if (e.unclaimed || e.paid || e.state === 'PAID' || e.state === 'ISSUED') return true;
+    if (e.outputs && e.outputs.length) return true;
+    return !!e.mint && (awayDown[canonicalMint(String(e.mint))] || 0) > Date.now();
+  }
+  function archiveCapped(list) {
+    var all = (list || []).filter(Boolean);
+    if (all.length <= ARCHIVE_CAP) return all;
+    var nowS = Math.floor(Date.now() / 1000);
+    var expired = function (e) { var x = Number(e.expiry) || 0; return x > 0 && x + 300 < nowS; };
+    var over = all.length - ARCHIVE_CAP;
+    var drop = {};
+    // the list is newest first: walk it from the end, so the oldest go first
+    [function (e) { return expired(e); }, function () { return true; }].forEach(function (may) {
+      for (var i = all.length - 1; i >= 0 && over > 0; i--) {
+        var e = all[i];
+        if (drop[i] || archiveHolds(e) || !may(e)) continue;
+        drop[i] = true;
+        over--;
+      }
+    });
+    if (over > 0 && !archiveOverTold) {
+      archiveOverTold = true;
+      console.warn('[foxy] the invoice archive is over', ARCHIVE_CAP, 'with invoices that may still hold money — all of them are kept');
+    }
+    return all.filter(function (e, i) { return !drop[i]; });
   }
 
   function makeQuote(w, amount, memo, unit, extra) {

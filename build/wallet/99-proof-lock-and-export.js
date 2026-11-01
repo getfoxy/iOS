@@ -13,6 +13,17 @@
    * pieces on hand. With a route, or with none coming, nothing is waited
    * for. */
   var ROUTE_FIRST = { pay: 1, sendToken: 1, receiveToken: 1, reclaimToken: 1, onchainPay: 1 };
+  /* The wallet a locked call was given, if any: one passed as it is (`_onchainClaimAwayWith(ow, …)`) or as `.w`
+   * in its options (`claim(q, { w })`, `_sweepMeltsOnce({ w, here })`). */
+  function walletGiven(args) {
+    for (var i = 0; i < args.length; i++) {
+      var a = args[i];
+      if (!a || typeof a !== 'object') continue;
+      if (a.w && typeof a.w === 'object') return a.w;
+      if (a.mint && typeof a.mint === 'object' && a.mint.mintUrl) return a;
+    }
+    return null;
+  }
   ['claimQuote', 'claim', 'pay', 'reconcile', 'reclaimToken',
    'receiveToken', 'sendToken', 'importProofs', 'adoptScan',
    /* Settles held payments and puts proofs back: it ran outside the lock, and
@@ -78,8 +89,12 @@
       var turn = function () {
         return withProofs(name, function () { return attempt(3); }).catch(function (e) {
           // invalid signatures, from whichever operation met them
+          /* Against the mint the call was made at: a claim at another mint (the away walk, TRY AGAIN, an on-chain
+           * deposit claimed from home) carries that mint's wallet, and naming the connected mint told the person to
+           * move an honest balance away while the mint that sent them went unnamed. */
           if (badSignatures(e)) {
-            reportBadSignatures(hostOf(mintUrl || ''),
+            var used = walletGiven(args);
+            reportBadSignatures(hostOf(used ? mintOf(used) : (mintUrl || '')),
               name === 'claim' || name === 'claimQuote' ? 'claim' : name === 'pay' || name === 'sweepMelts' ? 'pay' : 'swap');
           }
           throw e;

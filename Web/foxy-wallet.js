@@ -20564,11 +20564,55 @@
      * key was lost is money the mint will not release. */
     if (pending.length > 50) {
       var older = pending.slice(50);
-      mustSave(K.quotesOld, older.concat(load(K.quotesOld, [])).slice(0, 500));
+      mustSave(K.quotesOld, archiveCapped(older.concat(load(K.quotesOld, []))));
       console.warn('[foxy] the unpaid invoice list is full — archived', older.length, 'older one(s)');
     }
     mustSave(K.quotes, pending.slice(0, 50));
     return rec;
+  }
+
+  /* The archive held to ARCHIVE_CAP, newest first, by what each record is
+   * rather than by its age alone. The newest 500 used to be kept blind: a
+   * paid invoice waiting for TRY AGAIN, or one at a mint that is down, went
+   * with its NUT-20 key once a till's dollar receive screen had made 551
+   * newer ones, and nothing could claim it again, a seed restore included.
+   *
+   * Never dropped: a record that is paid and not collected (`unclaimed`),
+   * one a claim has reserved counters for (`outputs`, which may be ISSUED),
+   * one marked paid, and one at a mint the away walk is resting
+   * (`awayDown`). Dropped first, oldest first: those five minutes past
+   * their expiry, as the sweep would drop them once asked. Then the oldest
+   * of the rest. If what has to stay is itself over the cap, it all stays,
+   * and that is logged once. */
+  var ARCHIVE_CAP = 500;
+  var archiveOverTold = false;
+  function archiveHolds(e) {
+    if (!e) return false;
+    if (e.unclaimed || e.paid || e.state === 'PAID' || e.state === 'ISSUED') return true;
+    if (e.outputs && e.outputs.length) return true;
+    return !!e.mint && (awayDown[canonicalMint(String(e.mint))] || 0) > Date.now();
+  }
+  function archiveCapped(list) {
+    var all = (list || []).filter(Boolean);
+    if (all.length <= ARCHIVE_CAP) return all;
+    var nowS = Math.floor(Date.now() / 1000);
+    var expired = function (e) { var x = Number(e.expiry) || 0; return x > 0 && x + 300 < nowS; };
+    var over = all.length - ARCHIVE_CAP;
+    var drop = {};
+    // the list is newest first: walk it from the end, so the oldest go first
+    [function (e) { return expired(e); }, function () { return true; }].forEach(function (may) {
+      for (var i = all.length - 1; i >= 0 && over > 0; i--) {
+        var e = all[i];
+        if (drop[i] || archiveHolds(e) || !may(e)) continue;
+        drop[i] = true;
+        over--;
+      }
+    });
+    if (over > 0 && !archiveOverTold) {
+      archiveOverTold = true;
+      console.warn('[foxy] the invoice archive is over', ARCHIVE_CAP, 'with invoices that may still hold money — all of them are kept');
+    }
+    return all.filter(function (e, i) { return !drop[i]; });
   }
 
   function makeQuote(w, amount, memo, unit, extra) {
@@ -23886,8 +23930,10 @@
             var said = function (got, more) {
               /* And where it went, when that is another mint than the phone is on: written so the page can raise it as
                * it is (`announcePayment`, NOW AT `awayAt`). Home's balance and history do not move for it, and its
-               * row is filed at that mint, so nothing else would say it came. */
+               * row is filed at that mint, so nothing else would say it came. A leg of a swap between balances says
+               * so (`swap`, as its row does), and the page leaves it to the swap's own screen. */
               return Object.assign({ quote: entry.quote, unit: u, amount: got, sats: u === 'sat' ? got : 0 },
+                entry.swap ? { swap: String(entry.swap), kind: 'swap' } : {},
                 other ? { mint: hereQ, away: true, awayAt: hereQ, dir: 'in', hash: entry.quote } : {}, more || {});
             };
             if (q.state === 'ISSUED') {
@@ -32096,7 +32142,7 @@
         if (String(mintUrl || '').replace(/\/+$/, '') !== boundAt) {
           console.warn('[foxy] the payment was not made: the wallet moved to ' + String(mintUrl || 'no mint')
             + ' while it was being made, from ' + (boundAt || 'no mint'));
-          throw new Error('Foxy\u2019s mint changed while this payment was being made, so it was stopped. Nothing was sent.');
+          throw new Error('The phone moved to another mint while this payment was being made, so it was stopped. Nothing was sent.');
         }
         return FoxyWallet.sendToken(want, lockTo ? { unit: reqUnit, lockTo: lockTo, inflight: true }
                                                  : { unit: reqUnit, cover: !!req.viaTap,
@@ -35590,7 +35636,8 @@
     _onClaimTrouble: null,
     onClaimTrouble: function (fn) { FoxyWallet._onClaimTrouble = fn; },
 
-    /* Invoices paid at the mint but not collected, with why. */
+    /* Invoices paid at the mint but not collected, with why, and in which unit
+     * their amount is (cents for dollars). */
     stuckInvoices: function () {
       return load(K.quotes, []).concat(load(K.quotesOld, [])).filter(function (q) {
         return q && q.unclaimed;
@@ -35599,7 +35646,7 @@
          * mint was asked, in the words a refusal that never left uses. */
         var u = q.unclaimed;
         var unsent = !!u.unsent || NEVER_SENT.indexOf(String(u.reason || '')) >= 0;
-        return { quote: q.quote, amount: q.amount, mint: q.mint, unclaimed: Object.assign({}, u, { unsent: unsent }) };
+        return { quote: q.quote, amount: q.amount, unit: recordUnit(q), mint: q.mint, unclaimed: Object.assign({}, u, { unsent: unsent }) };
       });
     },
     /* What stands in front of the seed (the SECURE FOXY card, 10-pin.js).
@@ -36426,6 +36473,17 @@
    * pieces on hand. With a route, or with none coming, nothing is waited
    * for. */
   var ROUTE_FIRST = { pay: 1, sendToken: 1, receiveToken: 1, reclaimToken: 1, onchainPay: 1 };
+  /* The wallet a locked call was given, if any: one passed as it is (`_onchainClaimAwayWith(ow, …)`) or as `.w`
+   * in its options (`claim(q, { w })`, `_sweepMeltsOnce({ w, here })`). */
+  function walletGiven(args) {
+    for (var i = 0; i < args.length; i++) {
+      var a = args[i];
+      if (!a || typeof a !== 'object') continue;
+      if (a.w && typeof a.w === 'object') return a.w;
+      if (a.mint && typeof a.mint === 'object' && a.mint.mintUrl) return a;
+    }
+    return null;
+  }
   ['claimQuote', 'claim', 'pay', 'reconcile', 'reclaimToken',
    'receiveToken', 'sendToken', 'importProofs', 'adoptScan',
    /* Settles held payments and puts proofs back: it ran outside the lock, and
@@ -36491,8 +36549,12 @@
       var turn = function () {
         return withProofs(name, function () { return attempt(3); }).catch(function (e) {
           // invalid signatures, from whichever operation met them
+          /* Against the mint the call was made at: a claim at another mint (the away walk, TRY AGAIN, an on-chain
+           * deposit claimed from home) carries that mint's wallet, and naming the connected mint told the person to
+           * move an honest balance away while the mint that sent them went unnamed. */
           if (badSignatures(e)) {
-            reportBadSignatures(hostOf(mintUrl || ''),
+            var used = walletGiven(args);
+            reportBadSignatures(hostOf(used ? mintOf(used) : (mintUrl || '')),
               name === 'claim' || name === 'claimQuote' ? 'claim' : name === 'pay' || name === 'sweepMelts' ? 'pay' : 'swap');
           }
           throw e;
