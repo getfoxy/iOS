@@ -512,10 +512,10 @@ densityDrives();
     accept.search(/if \(off && W\.invoiceFromThisMint && W\.invoiceFromThisMint\(t\)\) \{[\s\S]{0,200}payThisMintWithToken/) >= 0
     && accept.search(/off && W\.invoiceFromThisMint/) < accept.search(/off && !this\.connecting\(\)/),
     'a token needs no connection to make');
-  check('one that is coming goes to the confirmation, without asking the mint what it cannot yet be asked',
+  check('one that is coming goes to the confirmation, and nothing in acceptTarget asks the mint anything any more',
     /if \(off\) \{[^}]{0,200}overLightning\(\);\s*return true;\s*\}/.test(accept)
-    && accept.search(/if \(off\) \{[^}]{0,200}overLightning/) < accept.search(/learnThisMintNode/),
-    'learnThisMintNode needs the route');
+    && !/learnThisMintNode|mintNodeKnown/.test(accept),
+    'the question of whose invoice it is went with the USE CASHU card on 2026-11-01: an invoice of this mint is paid through the mint like any other');
   check('a lightning address and a request never had an offline refusal at the scan, and have none now',
     !/kind === 'lnurl'[\s\S]{0,600}offlineInvoiceCard/.test(accept) && !/kind === 'request'[\s\S]{0,200}offline/.test(accept),
     'they reach their screens; the confirmation is what waits');
