@@ -64,6 +64,7 @@ check "gate scenarios" 1 node tests/gate-scenarios.js
 check "home first"     1 node tests/home-first.js
 check "two doors"      1 node tests/two-doors.js
 check "scan twice"     1 node tests/scan-twice.js
+check "scan cross mint" 1 node tests/scan-cross-mint.js
 check "change twin"    1 node tests/change-twin.js
 check "address kept"   1 node tests/onchain-address-kept.js
 check "lock key kept"  1 node tests/lock-key-kept.js

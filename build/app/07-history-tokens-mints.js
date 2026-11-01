@@ -968,6 +968,37 @@
       }
     }
     this._reqMintOk = null;
+    /* Too little at the mint the request names, and enough at this phone's
+     * own: the sats are moved there first, as a tap to somebody at another
+     * mint moves them (26d-tap.js `tapCrossQuote`). A request scanned off a
+     * donation page nearly always names a mint the person does not bank at,
+     * and this used to switch there and refuse with "you hold 298" — the only
+     * way to pay it was a transfer made by hand first. The screen is the
+     * crossing's own confirmation: the amount, the fee, both mints, and PAY;
+     * the payment follows from there with no second question
+     * (`go.crossed`). Sats only: a move between mints is a Lightning payment,
+     * and dollars do not cross one. Not with no route, where nothing moves. */
+    if (want && !here && req.unit !== 'usd' && !(go && go.crossed) && !(this.offlineNow && this.offlineNow())
+        && W.balanceAt && W.transferQuote && this.crossMove) {
+      const need = Math.round(Number(req.sats) || 0);
+      const mine = String(W.mintUrl || '').replace(/\/+$/, '');
+      const there = W.balanceAt(want);
+      if (need > 0 && mine && there < need) {
+        console.log('[foxy] request: it is paid at ' + want + ', where this phone holds ' + there
+          + ' of the ' + need + ' sats; offering to move them from ' + mine);
+        const quoting = W.transferQuote(mine, need, { to: want, land: true });
+        quoting.catch(() => {});
+        this.crossMintCard(quoting, want, mine).then(yes => {
+          if (!yes) { console.log('[foxy] request: the move to ' + want + ' was not accepted'); return null; }
+          return quoting.then(plan => this.crossMove(plan, want, mine)).then(() => {
+            console.log('[foxy] request: the sats are at ' + want + '; paying it now');
+            this.setState({ crossBusy: false, crossQ: null });
+            this.makeTokenForRequest(Object.assign({}, go || {}, { crossed: true }));
+          });
+        }).catch(e => this.crossFailed(e, mine));
+        return;
+      }
+    }
     this.setState({ reqBusy: true });
 
     /* A request that says where to deliver is paid there: onion, straight to
@@ -1025,7 +1056,17 @@
     } else {
       this.showMelt('Making the token\u2026');
     }
-    const ready = (want && !here) ? W.connect(want) : Promise.resolve(null);
+    /* A visit, when the payment goes straight to them: the mint the request
+     * names is where this payment is made from, not where the person banks.
+     * It was connected to and remembered, so a payment refused there left
+     * home showing 298 sats at a mint the person had never chosen, with 2,591
+     * of their own out of sight; `crossComeHome` brings the phone back once
+     * the payment has gone through or failed, as it does after a tap. A token
+     * to show stays where it is made: the watch for it runs at the connected
+     * mint, and the person is told where it is. */
+    const visit = !!(want && !here && direct);
+    if (visit) this._crossCameFrom = String(W.mintUrl || '').replace(/\/+$/, '');
+    const ready = (want && !here) ? W.connect(want, null, null, visit ? { remember: false } : undefined) : Promise.resolve(null);
     /* Agreed before it is asked, where the change comes straight back. The
      * question was being skipped already, but only after the send had refused
      * once for want of an answer — so the screen went to sending, back to the
@@ -1067,6 +1108,8 @@
         this.crossComeHome();
         return;
       }
+      // a token to show stays where it was made (see `visit`); nothing to come home from
+      this._crossCameFrom = null;
       if (usdReq) {
         // a dollar token: its cents on the token screen, never a number of sats
         const got = Math.round(Number(r.amount != null ? r.amount : amt) || 0);
@@ -1093,7 +1136,7 @@
       // off the sending animation, whichever way this ends: it is not sending
       this.setState({ reqBusy: false, sendPhase: null });
       // stopped by the person before it was made: nothing to report, and they are home already
-      if (e && e.foxyStopped) return;
+      if (e && e.foxyStopped) { if (this._crossCameFrom) this.crossComeHome(); return; }
       /* Offline, in a unit this phone holds none (or too little) of here: it
        * needs the mint, and nothing was made (`unitHeldRefusal`). Said on a
        * card, and to the phone being paid in words with no figures. */
@@ -1107,6 +1150,7 @@
           W.tapQuote(JSON.stringify({ gaveUp: said })).catch(() => {});
         }
         console.warn('[foxy] the payment was not made: it needs the mint:', W.reason(e));
+        if (this._crossCameFrom) this.crossComeHome();
         if (this.needsMintCard) this.needsMintCard(W.reason(e));
         return;
       }

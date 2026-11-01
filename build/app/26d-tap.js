@@ -2516,6 +2516,31 @@
         }).then((r) => { this._crossAsked = false; return r; }, (e) => { this._crossAsked = false; throw e; });
       }
     }
+    return this.crossMove(plan, theirs, mine).then(() => {
+      console.log('[foxy] tap: the sats are at ' + theirs + '; paying their request now');
+      /* Paid straight from here, with no second confirmation: the screen they
+       * agreed on is this payment's confirmation. */
+      const read = W.decodeRequest(offer.req);
+      if (!read) throw new Error('Their request could not be read.');
+      if (this.tapNotSats && this.tapNotSats(read)) throw new Error(this.tapNotSats(read));
+      read.viaTap = true;
+      if (typeof offer.theirRoute === 'boolean') read.theirRoute = offer.theirRoute;
+      if (offer.theirTill) read.theirTill = offer.theirTill;
+      if (offer.asks) read.asks = true;
+      this.setState({ req: read, reqBusy: false, crossBusy: false,
+                      crossQ: null, note: '', noteDraft: '' });
+      this.makeTokenForRequest();
+    });
+  }
+
+  /* The move itself, once the fee has been agreed: melt at this phone's mint,
+   * claim at theirs, and leave the phone there to pay from. For a tap and for
+   * a scanned request alike (07-history-tokens-mints.js `makeTokenForRequest`),
+   * which is why the tap's own reading of the offer is not in here. Resolves
+   * once the sats are at their mint, with `_crossMovedTo` and `_crossCameFrom`
+   * set for whatever the payment does next. */
+  crossMove(plan, theirs, mine) {
+    const W = window.FoxyWallet;
     this.hushMove(plan);
     this.showMelt('Moving your sats to ' + (this.mintNameOf(theirs) || 'their mint') + '\u2026',
                   0, { sats: plan.net, mint: this.mintNameOf(theirs) });
@@ -2542,7 +2567,6 @@
       loud();
       this.hideMelt();
       this.refreshBalance();
-      console.log('[foxy] tap: the sats are at ' + theirs + '; paying their request now');
       /* From here the money is at their mint whatever happens next, and that is
        * worth knowing about: a failure now leaves the balance at a mint the
        * person was not on when they tapped (`theyRefused`'s chip). */
@@ -2550,18 +2574,6 @@
       /* And the mint to come home to once the payment is made: the crossing is
        * Foxy's business, the mint the person banks at is theirs. */
       this._crossCameFrom = mine;
-      /* Paid straight from here, with no second confirmation: the screen they
-       * agreed on is this payment's confirmation. */
-      const read = W.decodeRequest(offer.req);
-      if (!read) throw new Error('Their request could not be read.');
-      if (this.tapNotSats && this.tapNotSats(read)) throw new Error(this.tapNotSats(read));
-      read.viaTap = true;
-      if (typeof offer.theirRoute === 'boolean') read.theirRoute = offer.theirRoute;
-      if (offer.theirTill) read.theirTill = offer.theirTill;
-        if (offer.asks) read.asks = true;
-      this.setState({ req: read, reqBusy: false, crossBusy: false,
-                      crossQ: null, note: '', noteDraft: '' });
-      this.makeTokenForRequest();
     });
   }
 
