@@ -308,7 +308,8 @@
     /** @type {?function(string): void} */
     _onConvertDue: null,
     onConvertDue: function (fn) { FoxyWallet._onConvertDue = typeof fn === 'function' ? fn : null; },
-    // invoices paid while away, claimed by a sweep (`sweepQuotes`): [{ quote, unit, amount, sats }]
+    /* invoices paid while away, claimed by a sweep (`sweepQuotes`): [{ quote, unit, amount, sats }], and one claimed at
+     * another mint than the phone is on adds { mint, away, awayAt, dir, hash }, a confirmation as it stands */
     /** @type {?function(Array<any>): void} */
     _onSwept: null,
     onSwept: function (fn) { FoxyWallet._onSwept = fn || null; },

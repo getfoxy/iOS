@@ -1258,6 +1258,14 @@
       return;
     }
 
+    /* A payment claimed at another mint (`awayAt`) is said once: the receive screen that watched it may have said it
+     * already (it marks the invoice seen). Marked below, when its screen goes up, so its row, filed at that mint, is
+     * not announced again when the phone gets there. */
+    if (!ev.again && ev.awayAt && ev.hash && this._seenTx && this._seenTx[ev.hash]) {
+      console.log('[foxy] confirmation: a payment claimed at another mint, already said');
+      return;
+    }
+
     // a banner over the app you are already looking at is just noise
     const away = document.visibilityState !== 'visible';
 
@@ -1330,6 +1338,7 @@
     // (`awayAt`: the mint a claim was made at with the phone elsewhere, said only by such claims)
     const nowAt = (!out && ev.awayAt && W && W.mintUrl && canonM(ev.awayAt) !== canonM(W.mintUrl))
       ? ((this.mintNameOf && this.mintNameOf(ev.awayAt)) || String(ev.awayAt).replace(/^https?:\/\//, '')) : '';
+    if (ev.awayAt && ev.hash) { this._seenTx = this._seenTx || {}; this._seenTx[ev.hash] = true; }
     // the confirmation screen already knows how to word a payment going out
     this.setState(p => ({
       screen: 'paid',

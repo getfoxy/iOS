@@ -387,7 +387,8 @@
          * then any melt whose outcome was never learned, and any swap whose
          * answer was lost after the mint made it. One after another, each after
          * a pause, not all in the second the wallet connects (sweepPause). */
-        FoxyWallet.sweepQuotes()
+        // this mint's invoices; the other mints' are walked once all of this is done (below)
+        FoxyWallet.sweepQuotes({ awayLater: true })
           .then(sweepPause).then(function () { return FoxyWallet.sweepMelts(); })
           .then(sweepPause).then(function () { return FoxyWallet.recoverSwaps(); })
           // a store short of room: sent tokens the mint says are claimed let go from their notes (`tidySentTokens`)
@@ -428,7 +429,11 @@
               Object.keys(owedNow).forEach(function (id) { if (!(id in owedBefore)) cardOwed += owedNow[id]; });
               try { FoxyWallet._onCaughtUp({ cardOwed: cardOwed }); } catch (x) {}
             }
-          });
+          })
+          /* Then the invoices this phone made at other mints (`_sweepAway`): after, not in front, so a mint that does not
+           * answer holds back none of the above. */
+          .then(function () { return FoxyWallet._sweepAway(); })
+          .catch(function () {});
         /* Sent tokens are not asked about here. Every connect used to ask the
          * mint about each one still on file: the sender's own exit asking after
          * proofs the receiver then redeems told the mint who paid whom. A

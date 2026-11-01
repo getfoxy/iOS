@@ -153,7 +153,8 @@
      * flight, restore any swap whose answer was lost, and give an interrupted
      * mint switch another go. */
     resumeSweeps: function () {
-      return FoxyWallet.sweepQuotes()
+      var awayNow = function () { FoxyWallet._sweepAway().then(null, function () { return []; }); };
+      return FoxyWallet.sweepQuotes({ awayLater: true })
         .then(sweepPause).then(function () { return FoxyWallet.sweepMelts(); })
         .then(sweepPause).then(function () { return FoxyWallet.recoverSwaps(); })
         // a store short of room: sent tokens the mint says are claimed let go from their notes (`tidySentTokens`)
@@ -161,7 +162,10 @@
         .catch(function (e) { console.warn('[foxy] resume sweep:', e && e.message); })
         /* After the melts are settled, so a crossing whose melt was cut has
          * been paid or given back by the time its note is looked at. */
-        .then(function () { return (mintUrl && FoxyWallet.crossingsWaiting()) ? FoxyWallet.catchUpCrossings() : null; });
+        .then(function () { return (mintUrl && FoxyWallet.crossingsWaiting()) ? FoxyWallet.catchUpCrossings() : null; })
+        /* And then the invoices made at other mints (`_sweepAway`), waited for by nobody: a mint that does not answer
+         * holds back none of the above, nor what the page does once it is done. Told to the page as it lands. */
+        .then(function (r) { awayNow(); return r; }, function (e) { awayNow(); throw e; });
     },
 
     /* There is no wallet-wide event stream: a mint has no account to watch.

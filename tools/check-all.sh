@@ -72,6 +72,7 @@ check "attack 11-01 r3" 1 node tests/attack-2026-11-01-round3.js
 check "attack 11-01 r4" 1 node tests/attack-2026-11-01-round4.js
 check "attack 11-01 r5" 1 node tests/attack-2026-11-01-round5.js
 check "attack 11-01 r6" 1 node tests/attack-2026-11-01-round6.js
+check "attack 11-01 r7" 1 node tests/attack-2026-11-01-round7.js
 check "change twin"    1 node tests/change-twin.js
 check "address kept"   1 node tests/onchain-address-kept.js
 check "lock key kept"  1 node tests/lock-key-kept.js

@@ -155,8 +155,11 @@
          * into dollars when nothing else is going on (26i-swap.js). */
         if (W.onConvertDue) W.onConvertDue(() => this.convertOnReturn(true));
         /* Paid while Foxy was away, and claimed by the sweep a route coming up
-         * ran: no connect or return is there to show the balance after it. */
-        if (W.onSwept) W.onSwept((claimed) => { this.stuckInvoiceLanded(claimed); this.refreshBalance(); this.loadHistory(); });
+         * ran: no connect or return is there to show the balance after it.
+         * And one claimed at another mint (an invoice made on a visit) is
+         * raised as it is, NOW AT that mint: home's balance and history do
+         * not move for it, and a payment nobody saw land is asked for twice. */
+        if (W.onSwept) W.onSwept((claimed) => { this.stuckInvoiceLanded(claimed); this.refreshBalance(); this.loadHistory(); (claimed || []).forEach((c) => c && c.away && c.awayAt && (Number(c.amount) > 0 || Number(c.sats) > 0) && this.announcePayment(c)); });
         /* A payment Foxy was closed in the middle of making. The mint had made
          * it, so it is rebuilt from what was written down and put on its own
          * entry — but it never reached the other phone, and the person has to

@@ -662,8 +662,13 @@ async function run() {
     await settle(50);
     p.hits.length = 0;
     await settle(600);
-    ok(about(THEIR) === 0 && about(HOME) === 0, 'away at another mint, that mint is not asked about it, and nor is its own',
-       about(THEIR) + ' there, ' + about(HOME) + ' at home');
+    /* Asked at its own mint from where the phone is, by a wallet made for that mint: the phone is still on the other,
+     * so no question to home can come from the wallet it is connected with. The mint the phone is on is never asked,
+     * and nothing is claimed with its wallet (below). A watch that did not ask from away left an invoice made on a
+     * visit, and paid once the phone was home, at its mint for as long as nobody switched there. */
+    ok(about(THEIR) === 0 && about(HOME) > 5 && canon(p.W.mintUrl) === THEIR,
+       'away at another mint, that mint is not asked about it; its own is, from here, with a wallet made for it',
+       about(THEIR) + ' there, ' + about(HOME) + ' at home, phone on ' + canon(p.W.mintUrl));
     const e = await p.W.claim(inv.hash).then(() => null, (x) => x);
     ok(!!e && e.foxyElsewhere === true && e.noCounters === true && /another mint/.test(e.message)
        && !p.hits.some((h) => /POST .*\/v1\/mint\/bolt11$/.test(h)),

@@ -352,6 +352,17 @@
    * else connected the wallet, such as a mint switch. Set here, cleared when a
    * sweep really starts, and read when a route comes up (`_privacy`). */
   var quoteSweepHeld = false;
+  /* The walk of the other mints' invoices in flight, if one is (`_sweepAway`), and the mints it could not reach
+   * lately: canonical address → when it may be asked again. */
+  var awaySweep = /** @type {?Promise<Array<any>>} */ (null);
+  var awayDown = /** @type {!Object<string, number>} */ ({});
+  var AWAY_DOWN_MS = 5 * 60 * 1000;
+  /* Claimed invoices told to the page (`onSwept`), when there are any. */
+  function toldSwept(claimed) {
+    if (claimed && claimed.length && typeof FoxyWallet._onSwept === 'function') {
+      try { FoxyWallet._onSwept(claimed); } catch (x) {}
+    }
+  }
   // the claim of payments that waited for a route, set when the route comes back in the same session (11-routing.js)
   var claimOnReturnT = /** @type {any} */ (null);
 
@@ -21515,7 +21526,8 @@
          * then any melt whose outcome was never learned, and any swap whose
          * answer was lost after the mint made it. One after another, each after
          * a pause, not all in the second the wallet connects (sweepPause). */
-        FoxyWallet.sweepQuotes()
+        // this mint's invoices; the other mints' are walked once all of this is done (below)
+        FoxyWallet.sweepQuotes({ awayLater: true })
           .then(sweepPause).then(function () { return FoxyWallet.sweepMelts(); })
           .then(sweepPause).then(function () { return FoxyWallet.recoverSwaps(); })
           // a store short of room: sent tokens the mint says are claimed let go from their notes (`tidySentTokens`)
@@ -21556,7 +21568,11 @@
               Object.keys(owedNow).forEach(function (id) { if (!(id in owedBefore)) cardOwed += owedNow[id]; });
               try { FoxyWallet._onCaughtUp({ cardOwed: cardOwed }); } catch (x) {}
             }
-          });
+          })
+          /* Then the invoices this phone made at other mints (`_sweepAway`): after, not in front, so a mint that does not
+           * answer holds back none of the above. */
+          .then(function () { return FoxyWallet._sweepAway(); })
+          .catch(function () {});
         /* Sent tokens are not asked about here. Every connect used to ask the
          * mint about each one still on file: the sender's own exit asking after
          * proofs the receiver then redeems told the mint who paid whom. A
@@ -23345,6 +23361,9 @@
       var awayFor = function () {
         return !!madeAt && canonicalMint(String(mintUrl || '')) !== madeAt;
       };
+      /* The mint this watch asks: `madeAt` from away. Its "too many" is the one that paces the questions; the
+       * connected mint's said nothing about this one. */
+      var askedMint = function () { return awayFor() ? madeAt : mintUrl; };
       // what the screen is told of a payment claimed away: where its sats are
       var awaySay = function (on) { return on ? { mint: madeAt, away: true } : {}; };
 
@@ -23375,7 +23394,7 @@
            * questions in ten seconds). */
           /* And not at all while the mint is saying "too many": the hurry
            * is then only a shorter wait, never an extra question. */
-          if (!asking && !mintBusy(mintUrl)) { if (timer) clearTimeout(timer); timer = null; poll(); }
+          if (!asking && !mintBusy(askedMint())) { if (timer) clearTimeout(timer); timer = null; poll(); }
           return true;
         },
       };
@@ -23385,7 +23404,7 @@
       function nextDelay() {
         if (o.pollMs) return o.pollMs;
         // a mint that has just said "too many" is asked no more than once in five seconds
-        if (mintBusy(mintUrl)) return 5000;
+        if (mintBusy(askedMint())) return 5000;
         if (Date.now() < fastUntil) return 1000;
         var age = Date.now() - started;
         /* A usd quote lives a minute, and a mint with no socket for mint
@@ -23621,7 +23640,7 @@
        * spent; the sweep collects it when the phone is on that mint again. */
       if (entry.mint && canonicalMint(String(entry.mint)) !== canonicalMint(String(mintOf(w) || ''))) {
         var away = /** @type {any} */ (new Error('That invoice is at ' + hostOf(entry.mint) + ', and this phone is on another mint just now. '
-          + 'It is collected when the phone is back at ' + hostOf(entry.mint) + '.'));
+          + 'Foxy asks ' + hostOf(entry.mint) + ' for it again on its next look.'));
         away.noCounters = true;
         away.foxyElsewhere = true;
         return Promise.reject(away);
@@ -23682,20 +23701,33 @@
      *
      * With no route nothing is asked, and the sweep is marked held: the
      * route coming up runs it (`_sweepHeldNow`). A call while a sweep at the
-     * same mint is running shares that sweep (`quoteSweep`). */
-    sweepQuotes: function () {
+     * same mint is running shares that sweep (`quoteSweep`).
+     *
+     * This mint's invoices first, and the page told of what they brought;
+     * then the other mints (`_sweepAway`). `o.awayLater`: not the other
+     * mints, for a caller that walks them itself once its own catch-up is
+     * done (`connect`, `resumeSweeps`). The walk waited on each other mint
+     * in turn before anything was said, 25 s for one that does not answer,
+     * and the connect's melts, swaps and crossings waited behind it. */
+    sweepQuotes: function (o) {
       if (!routeOpen()) {
         quoteSweepHeld = true;
         console.log('[foxy] quote sweep held \u2014 gate is closed; it runs when a route is up');
         return Promise.resolve([]);
       }
       if (!wallet) return Promise.resolve([]);
+      var awayToo = function (homeRun) {
+        if (o && o.awayLater) return homeRun;
+        return homeRun.then(function (claimed) {
+          return FoxyWallet._sweepAway().then(function (more) { return (claimed || []).concat(more || []); });
+        });
+      };
       var here = String(mintUrl || '').replace(/\/+$/, '');
       if (quoteSweep && quoteSweep.mint === here) {
         console.log('[foxy] quote sweep already running \u2014 this call waits for it');
         // a hold this call came to run is run when the walk ends (`done` below)
         if (quoteSweepHeld) quoteSweep.heldShared = true;
-        return quoteSweep.run;
+        return awayToo(quoteSweep.run);
       }
       quoteSweepHeld = false;
       var mine = { mint: here, heldShared: false, run: /** @type {?Promise<Array<any>>} */ (null) };
@@ -23703,38 +23735,10 @@
       var run;
       try { run = FoxyWallet._sweepQuotesOnce(); }
       catch (e) { run = Promise.reject(e); }
-      /* Then every other mint an invoice of this phone's is at, one at a time, each with a wallet made for it
-       * (`awayWallet`), as the held melts and the lost swaps are (`sweepMelts`, `recoverSwaps`). An invoice made on a
-       * visit, paid once the phone was home, sat at that mint as a PAID quote for as long as nobody switched there.
-       * The wallet is made outside the proof lock; only each claim takes it. */
-      run = run.then(function (claimed) {
-        if (!routeOpen()) return claimed;
-        var away = {};
-        load(K.quotes, []).forEach(function (e) {
-          if (!e || !e.mint || (e.unclaimed && (e.unclaimed.gaveUp || e.unclaimed.badSignatures || e.unclaimed.refused >= 3))) return;
-          var at = String(e.mint).replace(/\/+$/, '');
-          if (canonicalMint(at) !== canonicalMint(here)) away[at] = true;
-        });
-        return Object.keys(away).reduce(function (chain, at) {
-          return chain.then(function (all) {
-            if (!routeOpen()) return all;
-            return awayWallet(at).then(function (ow) { return FoxyWallet._sweepQuotesOnce({ w: ow, here: at }); })
-              .then(function (more) { return all.concat(more || []); }, function (e) {
-                console.warn('[foxy] could not ask', hostOf(at), 'about an invoice made there \u2014', FoxyWallet.reason(e));
-                return all;
-              });
-          });
-        }, Promise.resolve(claimed || []));
-      });
       /* What was claimed is told to the page (`onSwept`): a sweep the route
        * coming up ran has no connect or return to refresh the balance after
        * it, and a card about an invoice just claimed is no longer true. */
-      run = run.then(function (claimed) {
-        if (claimed && claimed.length && typeof FoxyWallet._onSwept === 'function') {
-          try { FoxyWallet._onSwept(claimed); } catch (x) {}
-        }
-        return claimed;
-      });
+      run = run.then(function (claimed) { toldSwept(claimed); return claimed; });
       mine.run = run;
       /* A route that came up while this walk was running had its push
        * share the walk, and the walk may have skipped an invoice to a route
@@ -23749,6 +23753,53 @@
           Promise.resolve().then(function () { return FoxyWallet._sweepHeldNow(); });
         }
       };
+      run.then(done, done);
+      return awayToo(run);
+    },
+
+    /* Every other mint an invoice of this phone's is at, one at a time, each with a wallet made for it
+     * (`awayWallet`), as the held melts and the lost swaps are (`sweepMelts`, `recoverSwaps`). An invoice made on a
+     * visit, paid once the phone was home, sat at that mint as a PAID quote for as long as nobody switched there.
+     * The wallet is made outside the proof lock; only each claim takes it.
+     *
+     * The archive too (`K.quotesOld`): past fifty newer invoices a visit's one is there, and a list of mints read
+     * from the live list alone never walked its mint again (a dollar receive screen makes one a minute).
+     * `_sweepQuotesOnce` takes 25 of a mint's archived ones a pass.
+     *
+     * A mint that could not be reached is left for five minutes (`awayDown`): each try costs a wallet's 25 s on a
+     * mint that does not answer, on every connect and resume. A call while a walk is running shares it. */
+    _sweepAway: function () {
+      if (awaySweep) return awaySweep;
+      if (!routeOpen() || !wallet) return Promise.resolve([]);
+      var here = String(mintUrl || '').replace(/\/+$/, '');
+      var away = {};
+      load(K.quotes, []).concat(load(K.quotesOld, [])).forEach(function (e) {
+        if (!e || !e.mint || (e.unclaimed && (e.unclaimed.gaveUp || e.unclaimed.badSignatures || e.unclaimed.refused >= 3))) return;
+        var at = String(e.mint).replace(/\/+$/, '');
+        if (canonicalMint(at) === canonicalMint(here)) return;
+        if ((awayDown[canonicalMint(at)] || 0) > Date.now()) return;
+        away[at] = true;
+      });
+      var mints = Object.keys(away);
+      if (!mints.length) return Promise.resolve([]);
+      var run = mints.reduce(function (chain, at) {
+        return chain.then(function (all) {
+          if (!routeOpen()) return all;
+          return awayWallet(at).then(function (ow) {
+            delete awayDown[canonicalMint(at)];
+            return FoxyWallet._sweepQuotesOnce({ w: ow, here: at });
+          }, function (e) {
+            awayDown[canonicalMint(at)] = Date.now() + AWAY_DOWN_MS;
+            throw e;
+          }).then(function (more) { return all.concat(more || []); }, function (e) {
+            console.warn('[foxy] could not ask', hostOf(at), 'about an invoice made there \u2014', FoxyWallet.reason(e));
+            return all;
+          });
+        });
+      }, Promise.resolve([]));
+      run = run.then(function (claimed) { toldSwept(claimed); return claimed; });
+      awaySweep = run;
+      var done = function () { if (awaySweep === run) awaySweep = null; };
       run.then(done, done);
       return run;
     },
@@ -23833,9 +23884,11 @@
              * was lost left its sats reachable only by a full seed restore. */
             var u = recordUnit(entry);
             var said = function (got, more) {
-              // and where it went, when that is another mint than the phone is on
+              /* And where it went, when that is another mint than the phone is on: written so the page can raise it as
+               * it is (`announcePayment`, NOW AT `awayAt`). Home's balance and history do not move for it, and its
+               * row is filed at that mint, so nothing else would say it came. */
               return Object.assign({ quote: entry.quote, unit: u, amount: got, sats: u === 'sat' ? got : 0 },
-                other ? { mint: hereQ, away: true } : {}, more || {});
+                other ? { mint: hereQ, away: true, awayAt: hereQ, dir: 'in', hash: entry.quote } : {}, more || {});
             };
             if (q.state === 'ISSUED') {
               return FoxyWallet.recoverIssued(entry.quote, awayArg).then(function (got) {
@@ -23887,6 +23940,7 @@
     /* One more claim on a paid invoice the mint refused three times, asked for
      * by the person. The count starts over, so a refusal here counts again. */
     retryRefusedClaim: function (quoteId) {
+      var madeAt = '';
       [K.quotes, K.quotesOld].forEach(function (key) {
         var list = load(key, []);
         var changed = false;
@@ -23900,13 +23954,25 @@
             q.unclaimed.gaveUp = '';
             changed = true;
           }
+          if (q && q.quote === quoteId && q.mint) madeAt = String(q.mint);
         });
         if (changed) save(key, list);
       });
-      return FoxyWallet.claim(quoteId).catch(function (e) {
+      var fail = function (e) {
         noteClaimTrouble(quoteId, e);
         throw e;
-      });
+      };
+      /* At the mint that made it, wherever the phone is: an invoice at another mint is claimed by a wallet made for that
+       * mint (`awayWallet`), as the sweep claims it. With home's wallet the button never asked the mint at all. */
+      if (madeAt && canonicalMint(madeAt) !== canonicalMint(String(mintUrl || ''))) {
+        return awayWallet(madeAt).then(function (ow) { return FoxyWallet.claim(quoteId, { w: ow }); }, function (e) {
+          // that mint not reached: no counter was spent, so not one of the tries
+          var why = /** @type {any} */ (e instanceof Error ? e : new Error(FoxyWallet.reason(e)));
+          why.noCounters = true;
+          throw why;
+        }).catch(fail);
+      }
+      return FoxyWallet.claim(quoteId).catch(fail);
     },
 
     /* A quote the mint has ISSUED that this device still has on file.
@@ -35475,7 +35541,8 @@
     /** @type {?function(string): void} */
     _onConvertDue: null,
     onConvertDue: function (fn) { FoxyWallet._onConvertDue = typeof fn === 'function' ? fn : null; },
-    // invoices paid while away, claimed by a sweep (`sweepQuotes`): [{ quote, unit, amount, sats }]
+    /* invoices paid while away, claimed by a sweep (`sweepQuotes`): [{ quote, unit, amount, sats }], and one claimed at
+     * another mint than the phone is on adds { mint, away, awayAt, dir, hash }, a confirmation as it stands */
     /** @type {?function(Array<any>): void} */
     _onSwept: null,
     onSwept: function (fn) { FoxyWallet._onSwept = fn || null; },
@@ -36193,7 +36260,8 @@
      * flight, restore any swap whose answer was lost, and give an interrupted
      * mint switch another go. */
     resumeSweeps: function () {
-      return FoxyWallet.sweepQuotes()
+      var awayNow = function () { FoxyWallet._sweepAway().then(null, function () { return []; }); };
+      return FoxyWallet.sweepQuotes({ awayLater: true })
         .then(sweepPause).then(function () { return FoxyWallet.sweepMelts(); })
         .then(sweepPause).then(function () { return FoxyWallet.recoverSwaps(); })
         // a store short of room: sent tokens the mint says are claimed let go from their notes (`tidySentTokens`)
@@ -36201,7 +36269,10 @@
         .catch(function (e) { console.warn('[foxy] resume sweep:', e && e.message); })
         /* After the melts are settled, so a crossing whose melt was cut has
          * been paid or given back by the time its note is looked at. */
-        .then(function () { return (mintUrl && FoxyWallet.crossingsWaiting()) ? FoxyWallet.catchUpCrossings() : null; });
+        .then(function () { return (mintUrl && FoxyWallet.crossingsWaiting()) ? FoxyWallet.catchUpCrossings() : null; })
+        /* And then the invoices made at other mints (`_sweepAway`), waited for by nobody: a mint that does not answer
+         * holds back none of the above, nor what the page does once it is done. Told to the page as it lands. */
+        .then(function (r) { awayNow(); return r; }, function (e) { awayNow(); throw e; });
     },
 
     /* There is no wallet-wide event stream: a mint has no account to watch.

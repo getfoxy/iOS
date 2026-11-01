@@ -351,6 +351,17 @@
    * else connected the wallet, such as a mint switch. Set here, cleared when a
    * sweep really starts, and read when a route comes up (`_privacy`). */
   var quoteSweepHeld = false;
+  /* The walk of the other mints' invoices in flight, if one is (`_sweepAway`), and the mints it could not reach
+   * lately: canonical address → when it may be asked again. */
+  var awaySweep = /** @type {?Promise<Array<any>>} */ (null);
+  var awayDown = /** @type {!Object<string, number>} */ ({});
+  var AWAY_DOWN_MS = 5 * 60 * 1000;
+  /* Claimed invoices told to the page (`onSwept`), when there are any. */
+  function toldSwept(claimed) {
+    if (claimed && claimed.length && typeof FoxyWallet._onSwept === 'function') {
+      try { FoxyWallet._onSwept(claimed); } catch (x) {}
+    }
+  }
   // the claim of payments that waited for a route, set when the route comes back in the same session (11-routing.js)
   var claimOnReturnT = /** @type {any} */ (null);
 

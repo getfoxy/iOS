@@ -30,11 +30,26 @@
     const at = W && W.mintUrl ? canon(W.mintUrl) : '';
     // (limits written with no mint are from before this, and are the connected mint's)
     const mine = !s.ocLimitsMint || (!!at && canon(s.ocLimitsMint) === at);
-    if (W && W.onchainLimits && at && this._ocAsked !== at) {
+    const resting = !!this._ocAgain && this._ocAgain.at === at && Date.now() < this._ocAgain.after;
+    if (W && W.onchainLimits && at && this._ocAsked !== at && !resting) {
       this._ocAsked = at;
       W.onchainLimits().then(limits => {
         // an answer for a mint asked before the one asked last is not this screen's
-        if (this._ocAsked === at) this.setState({ ocLimits: limits || null, ocLimitsMint: at });
+        if (this._ocAsked !== at) return;
+        this.setState({ ocLimits: limits || null, ocLimitsMint: at });
+        /* A question that got no answer (the wallet keeps nothing for it, and says null) is not "this mint does
+         * nothing on chain": let go after a rest of thirty seconds, so the next render asks again, and a redraw
+         * then, so a screen waiting on it (ON-CHAIN receive, blank until the limits are in) is not left with no
+         * clock. One lost request over Tor left on chain off until a mint switch or a relaunch. */
+        if (W.onchainKnown && !W.onchainKnown()) {
+          const rest = 30000;
+          this._ocAsked = null;
+          this._ocAgain = { at, after: Date.now() + rest };
+          setTimeout(() => {
+            if (this._ocAsked || !W.mintUrl || canon(W.mintUrl) !== at) return;
+            this.setState({ ocMade: Date.now() });
+          }, rest + 50);
+        }
       }, () => {});
     }
     return mine ? (s.ocLimits || null) : null;

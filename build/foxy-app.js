@@ -2232,8 +2232,11 @@ class Component extends DCLogic {
          * into dollars when nothing else is going on (26i-swap.js). */
         if (W.onConvertDue) W.onConvertDue(() => this.convertOnReturn(true));
         /* Paid while Foxy was away, and claimed by the sweep a route coming up
-         * ran: no connect or return is there to show the balance after it. */
-        if (W.onSwept) W.onSwept((claimed) => { this.stuckInvoiceLanded(claimed); this.refreshBalance(); this.loadHistory(); });
+         * ran: no connect or return is there to show the balance after it.
+         * And one claimed at another mint (an invoice made on a visit) is
+         * raised as it is, NOW AT that mint: home's balance and history do
+         * not move for it, and a payment nobody saw land is asked for twice. */
+        if (W.onSwept) W.onSwept((claimed) => { this.stuckInvoiceLanded(claimed); this.refreshBalance(); this.loadHistory(); (claimed || []).forEach((c) => c && c.away && c.awayAt && (Number(c.amount) > 0 || Number(c.sats) > 0) && this.announcePayment(c)); });
         /* A payment Foxy was closed in the middle of making. The mint had made
          * it, so it is rebuilt from what was written down and put on its own
          * entry — but it never reached the other phone, and the person has to
@@ -10102,6 +10105,14 @@ class Component extends DCLogic {
       return;
     }
 
+    /* A payment claimed at another mint (`awayAt`) is said once: the receive screen that watched it may have said it
+     * already (it marks the invoice seen). Marked below, when its screen goes up, so its row, filed at that mint, is
+     * not announced again when the phone gets there. */
+    if (!ev.again && ev.awayAt && ev.hash && this._seenTx && this._seenTx[ev.hash]) {
+      console.log('[foxy] confirmation: a payment claimed at another mint, already said');
+      return;
+    }
+
     // a banner over the app you are already looking at is just noise
     const away = document.visibilityState !== 'visible';
 
@@ -10174,6 +10185,7 @@ class Component extends DCLogic {
     // (`awayAt`: the mint a claim was made at with the phone elsewhere, said only by such claims)
     const nowAt = (!out && ev.awayAt && W && W.mintUrl && canonM(ev.awayAt) !== canonM(W.mintUrl))
       ? ((this.mintNameOf && this.mintNameOf(ev.awayAt)) || String(ev.awayAt).replace(/^https?:\/\//, '')) : '';
+    if (ev.awayAt && ev.hash) { this._seenTx = this._seenTx || {}; this._seenTx[ev.hash] = true; }
     // the confirmation screen already knows how to word a payment going out
     this.setState(p => ({
       screen: 'paid',
@@ -18413,11 +18425,26 @@ class Component extends DCLogic {
     const at = W && W.mintUrl ? canon(W.mintUrl) : '';
     // (limits written with no mint are from before this, and are the connected mint's)
     const mine = !s.ocLimitsMint || (!!at && canon(s.ocLimitsMint) === at);
-    if (W && W.onchainLimits && at && this._ocAsked !== at) {
+    const resting = !!this._ocAgain && this._ocAgain.at === at && Date.now() < this._ocAgain.after;
+    if (W && W.onchainLimits && at && this._ocAsked !== at && !resting) {
       this._ocAsked = at;
       W.onchainLimits().then(limits => {
         // an answer for a mint asked before the one asked last is not this screen's
-        if (this._ocAsked === at) this.setState({ ocLimits: limits || null, ocLimitsMint: at });
+        if (this._ocAsked !== at) return;
+        this.setState({ ocLimits: limits || null, ocLimitsMint: at });
+        /* A question that got no answer (the wallet keeps nothing for it, and says null) is not "this mint does
+         * nothing on chain": let go after a rest of thirty seconds, so the next render asks again, and a redraw
+         * then, so a screen waiting on it (ON-CHAIN receive, blank until the limits are in) is not left with no
+         * clock. One lost request over Tor left on chain off until a mint switch or a relaunch. */
+        if (W.onchainKnown && !W.onchainKnown()) {
+          const rest = 30000;
+          this._ocAsked = null;
+          this._ocAgain = { at, after: Date.now() + rest };
+          setTimeout(() => {
+            if (this._ocAsked || !W.mintUrl || canon(W.mintUrl) !== at) return;
+            this.setState({ ocMade: Date.now() });
+          }, rest + 50);
+        }
       }, () => {});
     }
     return mine ? (s.ocLimits || null) : null;
