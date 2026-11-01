@@ -1501,8 +1501,8 @@ class Component extends DCLogic {
      * figures of the payment are kept for the sending screen. */
     /* From another mint than this phone's (PAY FROM, 26l-pay-from.js): a visit there, in the unit of the pile chosen, and
      * home again whichever way it ends (`crossComeHome`). The quote it was chosen on was asked with no seed, so `pay`
-     * is handed it without its wallet and asks that mint again once the phone is there; a dollar payment is still held
-     * to the figure shown (`pay`, `shownMost`). */
+     * is handed it without its wallet and melts it with the phone's own once there, while the mint's expiry allows, and
+     * asks that mint again after that; a dollar payment is still held to the figure shown (`pay`, `keptAway`, `shownMost`). */
     const away = card ? null : (this.pfAwayNow ? this.pfAwayNow() : null);
     const two = !card && !away && !!(this.twoUnitsOn && this.twoUnitsOn());
     const unit = away ? away.unit : two ? (this.walletNow('send') || 'sat') : 'sat';
@@ -10049,37 +10049,10 @@ class Component extends DCLogic {
      * the mint for what is not (below) needs the connection that is not up. */
     if (off) { console.log('[foxy] a connection is on its way; the invoice goes to the confirmation, which holds SEND for it'); overLightning(); return true; }
 
-    /* The mint this wallet pays from made this invoice: paying it by Lightning
-     * shows that mint both sides. Offer a token instead (payThisMintWithToken).
-     * A fraction of a sat is paid by Lightning, which can carry it. */
-    const msat = W.msatOf ? W.msatOf(t) : null;
-    const offer = () => {
-      const name = (this.mintName() || 'mint').toUpperCase();
-      this.blockedCard('sameMintInvoice', {
-        tone: 'warn',
-        title: 'PAYING ANOTHER ' + name + ' USER',
-        reason: 'This payment could have the ultimate privacy. But it requires you to make it over Cashu instead of Lightning.',
-        retry: 'USE CASHU',
-        go: () => this.payThisMintWithToken(sats),
-        shut: { label: 'CONTINUE OVER LIGHTNING', tap: overLightning },
-      });
-    };
-    /* From a card, Lightning it is: the Cashu way (USE CASHU) is paid out of this phone's own pile, not the card. */
-    if (cardOut || !W.invoiceFromThisMint || msat == null || msat % 1000 !== 0) { overLightning(); return true; }
-    if (W.invoiceFromThisMint(t)) { offer(); return true; }
-    /* The mint's node not known yet (no invoice from it on this phone, and the
-     * check after connecting not done): asked now, so the answer does not
-     * depend on which invoice came first. */
-    if (W.mintNodeKnown && !W.mintNodeKnown() && W.learnThisMintNode) {
-      this._checkingInvoice = true;
-      this.showMelt('Checking the invoice\u2026');
-      W.learnThisMintNode().catch(() => null).then(() => {
-        this._checkingInvoice = false;
-        this.hideMelt();
-        if (W.invoiceFromThisMint(t)) offer(); else overLightning();
-      });
-      return true;
-    }
+    /* The mint this wallet pays from made this invoice too: it is paid through the mint like any other, which settles it
+     * inside itself with no Lightning hop and no fee (decided 2026-11-01: a token to show was offered here before, on a
+     * privacy argument that did not hold, since the mint sees both sides either way, and it left the payer holding a
+     * token the other phone had to scan). Offline, with no route, the token is still the only way (above). */
     overLightning();
     return true;
   }
@@ -21287,8 +21260,8 @@ class Component extends DCLogic {
 
   /* Their invoice, paid from the other balance: CONFIRM PAYMENT, as for a
    * scanned invoice, with WALLET set to the balance that pays. Not by way of
-   * `acceptTarget`, which offers USE CASHU for an invoice of this mint's own:
-   * that is the very payment this phone cannot make in their unit. */
+   * `acceptTarget`, which would pay it from this phone's own balance in its
+   * own unit: that is the very payment this phone cannot make in their unit. */
   tapConvertPay(inv, from, offer) {
     const W = window.FoxyWallet;
     const sats = W.amountOf ? (W.amountOf(inv) || 0) : 0;
@@ -21795,7 +21768,9 @@ class Component extends DCLogic {
     let start;
     try { start = visit ? W.connect(mine, null, null, { remember: false }) : W.connect(mine); } catch (e0) { start = Promise.reject(e0); }
     return start
-      .then(() => W.moveRun(plan, () => {}, { visit: true })).then((done) => {
+      /* The plan's own melt quote paid with, not asked for again (`quoted`), and the far mint made ready while the melt
+       * runs (`warm`): the plan was quoted moments ago, on PAY FROM or the crossing card, and the person agreed to its fee. */
+      .then(() => W.moveRun(plan, () => {}, { visit: true, quoted: true, warm: true })).then((done) => {
       const quiet = this.hushSweepEntries ? this.hushSweepEntries() : Promise.resolve();
       return quiet.then(() => done, () => done);
     }).then(() => {
@@ -32826,7 +32801,10 @@ class Component extends DCLogic {
       return this.pfEntry(p, { pref: true, cost: need + fee, fee: fee, rank: fee, ok: !(lack && lack.short),
         why: lack && lack.short ? String(lack.why || '') : '', tag: lack && lack.short ? 'NOT ENOUGH' : '' });
     });
-    const quote = (e) => W.transferQuote(e.mint, need, { to: want, land: true }).then((plan) => {
+    /* One invoice at the request's mint for every source asked (`landing`, this run's): each source's crossing used to
+     * have the request's mint make an invoice of its own, and the one chosen pays the one they share. */
+    const landing = {};
+    const quote = (e) => W.transferQuote(e.mint, need, { to: want, land: true, landing: landing }).then((plan) => {
       const fee = Math.max(0, Math.round(Number(plan && plan.feeSats) || 0));
       return { cost: need + fee, fee: fee, ok: true, rank: fee, full: plan };
     });

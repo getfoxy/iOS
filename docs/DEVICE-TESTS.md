@@ -690,14 +690,12 @@ one phone and a second wallet on that mint. **Test money only.** Debug build.
    the log, never paid). Try once with invoices from the Minibits app and from
    cashu.me on the same mint too: each shows the card.
 2. Phone B (receiver) opens RECEIVE and makes an invoice for 21 sats.
-3. Phone A scans B's QR. **Pass:** PAYING ANOTHER TESTNUT USER, the two lines
-   of text, USE CASHU and CONTINUE OVER LIGHTNING, with the whole card visible:
-   the camera goes away while the card is up, and comes back if you tap outside
-   it.
-4. Tap CONTINUE OVER LIGHTNING on a second invoice first: the usual send
-   confirmation opens. Back out. Scan again and tap USE CASHU.
-5. **Pass:** the ECASH TOKEN screen for 21 sats with "Share this with who you
-   are trying to pay" under the title.
+3. Phone A scans B's QR. **Pass:** the usual send confirmation opens at once,
+   with no card in between (the mint settles its own invoice inside itself; the
+   PAYING ANOTHER … USER card with USE CASHU was removed on 2026-11-01).
+4. Tap SEND. **Pass:** B's invoice is paid within seconds and A's confirmation
+   shows no Lightning fee.
+5. (No token screen is involved any more.)
 6. Phone B taps SCAN on its invoice screen (the fourth round button) and scans
    A's token. **Pass:** B's invoice screen closes, the payment confirmation
    shows 21 sats, and closing it lands on home.

@@ -221,10 +221,11 @@ two, so round figures blend in better than unusual ones.
 offered.** The mint makes the receiver's invoice and is asked to pay it; both
 halves carry one payment hash, so it knows which wallet paid which. A token
 handed over directly leaves it amount and timing. When a scanned or pasted
-invoice was signed by the mint's own Lightning node, Foxy shows PAYING ANOTHER
-<MINT> USER with USE CASHU and CONTINUE OVER LIGHTNING. USE CASHU makes a token
-for the invoice's amount, and its screen says "Share this with who you are
-trying to pay"; the receiver takes it with SCAN on their invoice screen.
+invoice was signed by the mint's own Lightning node, Foxy pays it through the
+mint like any other invoice: the mint settles it inside itself, with no
+Lightning hop and no fee. (Until 2026-11-01 a card offered a token to show
+instead, on the argument that the mint would otherwise see both sides; it sees
+both sides either way, so the card went.) Offline, a token is still the only way.
 
 - **Knowing the mint's node.** Each invoice a mint makes for this wallet names
   its signer, recovered from the BOLT11 signature (05-paying-this-mint.js,

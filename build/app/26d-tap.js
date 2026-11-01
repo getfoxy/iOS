@@ -2124,8 +2124,8 @@
 
   /* Their invoice, paid from the other balance: CONFIRM PAYMENT, as for a
    * scanned invoice, with WALLET set to the balance that pays. Not by way of
-   * `acceptTarget`, which offers USE CASHU for an invoice of this mint's own:
-   * that is the very payment this phone cannot make in their unit. */
+   * `acceptTarget`, which would pay it from this phone's own balance in its
+   * own unit: that is the very payment this phone cannot make in their unit. */
   tapConvertPay(inv, from, offer) {
     const W = window.FoxyWallet;
     const sats = W.amountOf ? (W.amountOf(inv) || 0) : 0;
@@ -2632,7 +2632,9 @@
     let start;
     try { start = visit ? W.connect(mine, null, null, { remember: false }) : W.connect(mine); } catch (e0) { start = Promise.reject(e0); }
     return start
-      .then(() => W.moveRun(plan, () => {}, { visit: true })).then((done) => {
+      /* The plan's own melt quote paid with, not asked for again (`quoted`), and the far mint made ready while the melt
+       * runs (`warm`): the plan was quoted moments ago, on PAY FROM or the crossing card, and the person agreed to its fee. */
+      .then(() => W.moveRun(plan, () => {}, { visit: true, quoted: true, warm: true })).then((done) => {
       const quiet = this.hushSweepEntries ? this.hushSweepEntries() : Promise.resolve();
       return quiet.then(() => done, () => done);
     }).then(() => {

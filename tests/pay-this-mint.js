@@ -3,9 +3,10 @@
  *
  *     node tests/pay-this-mint.js
  *
- * The invoice card (PAYING ANOTHER … USER), USE CASHU and CONTINUE OVER
- * LIGHTNING, the watch that says when the token is redeemed and how long it
- * waits before each question, and SCAN on the receive screen. The methods are
+ * An invoice from this mint goes straight to the confirmation (the card that
+ * offered USE CASHU is gone since 2026-11-01), the watch that says when a
+ * token is redeemed and how long it waits before each question, and SCAN on
+ * the receive screen. The methods are
  * lifted out of build/foxy-app.js and run against a stand-in app and wallet,
  * as switch-guard.js does. MINT-PRIVACY.md C6. */
 const fs = require('fs');
@@ -107,31 +108,10 @@ const check = (name, ok, detail) => results.push((ok ? 'ok    ' : 'FAIL  ') + na
   {
     const W = wallet(), a = app(W);
     a.acceptTarget(INVOICE);
-    const card = a.cards[0];
-    check('an invoice from this mint shows the card, not the confirmation',
-      card && card.kind === 'sameMintInvoice' && a.state.screen === 'sendScan', JSON.stringify(a.cards) + ' ' + a.state.screen);
-    check('the card says what was asked for',
-      card && card.spec.title === 'PAYING ANOTHER MINIBITS USER'
-        && card.spec.reason === 'This payment could have the ultimate privacy. But it requires you to make it over Cashu instead of Lightning.'
-        && card.spec.retry === 'USE CASHU' && card.spec.shut.label === 'CONTINUE OVER LIGHTNING',
-      JSON.stringify(card && card.spec));
-    card.spec.shut.tap();
-    check('CONTINUE OVER LIGHTNING goes to the confirmation for the invoice',
-      a.state.screen === 'sendConfirm' && a.state.recipient === INVOICE && a.state.amount === '2100', JSON.stringify(a.state));
-  }
-  {
-    const W = wallet(), a = app(W);
-    a.acceptTarget(INVOICE);
-    a.cards[0].spec.go();
-    await wait(5);
-    check('USE CASHU makes a token for the invoice amount and opens it with its subtitle',
-      W.calls.indexOf('sendToken 2100') >= 0 && a.state.screen === 'tokenOut' && a.state.tokenForPayee === true
-        && a.state.tokenOutHash === 'token-1' && a.state.tokenOut === 'cashuBtok',
-      JSON.stringify({ calls: W.calls, state: a.state }));
-    check('the token is watched, and kept watching after its screen closes',
-      W.watches.length === 1 && W.watches[0].persist === true, JSON.stringify(W.watches));
-    check('a token made with a swap waits before its first question', W.watches[0].quick === false, JSON.stringify(W.watches));
-    clearTimeout(a._claimT);
+    check('an invoice from this mint goes straight to the confirmation, no card and no token (the mint settles it inside itself)',
+      !a.cards.length && a.state.screen === 'sendConfirm' && a.state.recipient === INVOICE && a.state.amount === '2100'
+        && W.calls.indexOf('sendToken 2100') < 0,
+      JSON.stringify({ cards: a.cards, state: a.state, calls: W.calls }));
   }
   {
     const W = wallet({ invoiceFromThisMint: () => false }), a = app(W);
@@ -139,25 +119,15 @@ const check = (name, ok, detail) => results.push((ok ? 'ok    ' : 'FAIL  ') + na
     check('an invoice from elsewhere goes straight to the confirmation', !a.cards.length && a.state.screen === 'sendConfirm', JSON.stringify(a.cards));
   }
   {
-    // the mint's node not known when the invoice is scanned: asked, then the card
+    // the mint's node not known when the invoice is scanned: nothing is asked, the confirmation is the same either way
     let known = false;
     const W = wallet({ mintNodeKnown: () => known, invoiceFromThisMint: () => known,
       learnThisMintNode() { this.calls.push('learn'); known = true; return Promise.resolve('node'); } });
     const a = app(W);
     a.acceptTarget(INVOICE);
-    check('an invoice scanned before the mint\'s node is known waits for it, with the camera held back',
-      W.calls.indexOf('learn') >= 0 && a._checkingInvoice === true && !a.cards.length && a.state.screen === 'sendScan',
-      JSON.stringify({ calls: W.calls, cards: a.cards }));
-    await wait(5);
-    check('then shows the card for it', a.cards.length === 1 && a._checkingInvoice === false, JSON.stringify(a.cards));
-  }
-  {
-    // asked, and it is not the mint's: straight to the confirmation
-    const W = wallet({ mintNodeKnown: () => false, invoiceFromThisMint: () => false });
-    const a = app(W);
-    a.acceptTarget(INVOICE);
-    await wait(5);
-    check('an invoice from elsewhere, asked about, goes to the confirmation', !a.cards.length && a.state.screen === 'sendConfirm', JSON.stringify(a.cards));
+    check('an invoice scanned before the mint\'s node is known is not held for it',
+      W.calls.indexOf('learn') < 0 && !a._checkingInvoice && !a.cards.length && a.state.screen === 'sendConfirm',
+      JSON.stringify({ calls: W.calls, cards: a.cards, screen: a.state.screen }));
   }
   {
     // the scan screen's camera is a native view over the page: it must not sit over a card

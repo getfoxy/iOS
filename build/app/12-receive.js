@@ -1184,37 +1184,10 @@
      * the mint for what is not (below) needs the connection that is not up. */
     if (off) { console.log('[foxy] a connection is on its way; the invoice goes to the confirmation, which holds SEND for it'); overLightning(); return true; }
 
-    /* The mint this wallet pays from made this invoice: paying it by Lightning
-     * shows that mint both sides. Offer a token instead (payThisMintWithToken).
-     * A fraction of a sat is paid by Lightning, which can carry it. */
-    const msat = W.msatOf ? W.msatOf(t) : null;
-    const offer = () => {
-      const name = (this.mintName() || 'mint').toUpperCase();
-      this.blockedCard('sameMintInvoice', {
-        tone: 'warn',
-        title: 'PAYING ANOTHER ' + name + ' USER',
-        reason: 'This payment could have the ultimate privacy. But it requires you to make it over Cashu instead of Lightning.',
-        retry: 'USE CASHU',
-        go: () => this.payThisMintWithToken(sats),
-        shut: { label: 'CONTINUE OVER LIGHTNING', tap: overLightning },
-      });
-    };
-    /* From a card, Lightning it is: the Cashu way (USE CASHU) is paid out of this phone's own pile, not the card. */
-    if (cardOut || !W.invoiceFromThisMint || msat == null || msat % 1000 !== 0) { overLightning(); return true; }
-    if (W.invoiceFromThisMint(t)) { offer(); return true; }
-    /* The mint's node not known yet (no invoice from it on this phone, and the
-     * check after connecting not done): asked now, so the answer does not
-     * depend on which invoice came first. */
-    if (W.mintNodeKnown && !W.mintNodeKnown() && W.learnThisMintNode) {
-      this._checkingInvoice = true;
-      this.showMelt('Checking the invoice\u2026');
-      W.learnThisMintNode().catch(() => null).then(() => {
-        this._checkingInvoice = false;
-        this.hideMelt();
-        if (W.invoiceFromThisMint(t)) offer(); else overLightning();
-      });
-      return true;
-    }
+    /* The mint this wallet pays from made this invoice too: it is paid through the mint like any other, which settles it
+     * inside itself with no Lightning hop and no fee (decided 2026-11-01: a token to show was offered here before, on a
+     * privacy argument that did not hold, since the mint sees both sides either way, and it left the payer holding a
+     * token the other phone had to scan). Offline, with no route, the token is still the only way (above). */
     overLightning();
     return true;
   }
