@@ -457,10 +457,15 @@ const STATES = [
      * if the card is lost (`fcRestoreLost`). With no card on file it says so; with cards, RESTORE CARD (the design). */
     A.setState({ screen: 'home', stack: [], open0: false });
     await settle();
-    const rv = V().menuItems[1];
-    ok(!!rv && rv.label === 'RESTORE LOST CARD' && /^M/.test(rv.path) && rv.path !== CARD_ICON && rv.path !== CLOCK
+    // (under SETTINGS since the till took the rows after HISTORY: the drawer is opened with SETTINGS open to find it)
+    A.setState({ menuSettingsOpen: true });
+    await settle();
+    const labels = V().menuItems.map((m) => m.label);
+    const rv = V().menuItems.find((m) => m.label === 'RESTORE LOST CARD');
+    ok(!!rv && labels.indexOf('RESTORE LOST CARD') > labels.indexOf('SETTINGS') && labels.indexOf('RESTORE') === labels.indexOf('RESTORE LOST CARD') + 1
+       && /^M/.test(rv.path) && rv.path !== CARD_ICON && rv.path !== CLOCK && rv.indent === '10px'
        && V().menuItems.filter((m) => /RESTORE LOST CARD/.test(m.label)).length === 1,
-      'home’s MENU has RESTORE LOST CARD right after HISTORY, with a drawing of its own', V().menuItems.map((m) => m.label).join());
+      'home’s MENU has RESTORE LOST CARD under SETTINGS, before RESTORE, with a drawing of its own', labels.join());
     const said = [];
     const realBlocked = A.blockedCard;
     A.blockedCard = function (kind, spec) { said.push([kind, spec]); };

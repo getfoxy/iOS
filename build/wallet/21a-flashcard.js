@@ -201,7 +201,8 @@
         // sealed to the card's own PIN key, where it has one: a PIN is not sent in the clear to a card that can take it otherwise
         /* A card of 1.22 whose set-up was cut short after its record (a PIN, a record, no owner) is a holder's card: its PIN is
          * replaced only under itself, so the PIN typed is shown first. It is the one typed for this set-up, tried again. */
-        var resumed = !noPin && !!card.info.guests && !!card.info.pinSet && !!card.info.hasRecord;
+        // (by the card's own word, `recordSet`: a record the card maker wrote counts for the PIN's keeping as any does)
+        var resumed = !noPin && !!card.info.guests && !!card.info.pinSet && !!card.info.recordSet;
         return (noPin ? Promise.resolve() : (resumed ? cardVerify(t, card, pin) : Promise.resolve()).then(function () {
           return cardFirstPin(t, card, pin);
         }).then(function () {
@@ -296,7 +297,8 @@
         var again = card.info.pinSet && empty && (!card.info.hasRecord || cardHolderNoted(card.key));
         if (card.info.pinSet && !again) throw cardError('has-pin', 'This card already has a PIN. Money goes on it with that PIN.');
         // a card with its record keeps its PIN (rule 9): it is shown, not set, and a blocked one cannot be; one with none takes the PIN typed now
-        var keep = again && card.info.hasRecord;
+        // (by the card's own word, `recordSet`: one whose only record is the card maker's keeps the PIN put on it all the same)
+        var keep = again && !!card.info.recordSet;
         if (keep && card.info.pin === 'blocked') throw cardRefused('6983');
         // (1.23: a figure chosen in sats needs a price to be turned into cents, said before anything is written)
         // (and limits on a card of bitcoin with no price to write its rate at are refused: with no owner, nothing could give it one later)

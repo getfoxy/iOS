@@ -175,11 +175,14 @@ class Component extends DCLogic {
     this.setState(p => Object.assign({
       screen: 'switchMint', stack: p.stack.concat([p.screen]),
       trStep: '', trFrom: '', trTo: '',
-      // nor a card's question of which mint to move to (26f-flashcard.js)
-      fcPick: false,
+      // nor a card's question of which mint to move to (26f-flashcard.js), nor the till's of which mint to run at (26m-till.js)
+      fcPick: false, tillPick: false, tillSet: [],
     }, extra || {}));
   }
   back() {
+    /* the till being opened: back off DEFAULT MINT is its set list again; off the set list, the opening stops (26m-till.js,
+     * `tillOpenBack`) */
+    if (this.tillOpenBack && this.tillOpenBack()) return;
     // a card's set-up asking an amount: back is a step back in it, or out of it (26j-card-wheel.js, `fcSuAmountBack`)
     if (this.fcSuAmountBack && this.fcSuAmountBack()) return;
     // NAME CARD: the welcome again, or the card's screen (26j-card-wheel.js, `fcNameBack`)
@@ -558,8 +561,9 @@ class Component extends DCLogic {
    * more than one balance, each receive and send asks). Always 'sat' at a mint with one balance. `flow` is 'receive'
    * or 'send'. */
   walletNow(flow) {
-    // a cashier's till receives in the keeper's unit, the one its code names, whatever this phone holds (26m-till.js)
-    if (flow === 'receive' && this.tillUnit && this.tillUnit()) return this.tillUnit();
+    /* a till receives in its main, whatever this phone holds: its one currency, or the one chosen to come first in a till that
+     * takes both, the keeper's as the one a cashier's code names (26m-till.js, `tillMain`) */
+    if (flow === 'receive' && this.tillMain && this.tillMain()) return this.tillMain();
     if (!this.twoUnitsOn()) return 'sat';
     // a card pays in what it holds, whatever balance this phone's own sends use
     // (a card of software 1.23 that holds both: the currency chosen to pay from, `fcUnit`)

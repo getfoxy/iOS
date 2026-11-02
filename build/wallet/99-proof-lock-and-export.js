@@ -235,6 +235,9 @@
     };
   }());
 
+  // no keeper's till is open as the page opens, whatever an app killed in one left on file (`tillKeeperForget`)
+  tillKeeperForget();
+
   /* The store's growth trimmed as the page opens (`trimStore`): the notes'
    * kept tokens and the audit trail to their budgets, nothing that money or a
    * recovery reads. Here, last, so every budget it reads is set. Measured and

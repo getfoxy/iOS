@@ -422,7 +422,10 @@
       // too. Entries written before mints were recorded carry none, and show
       // everywhere rather than vanishing.
       const here = String(W.mintUrl || '').replace(/\/+$/, '');
-      const list = all.filter(x => !x.mint || x.mint === here);
+      /* Except in a till at more than one mint, whose session is every mint it takes: a payment at one of them stays at that
+       * mint, and is still this session's (26m-till.js, `tillMintsNow`). */
+      const tillAt = (this.tillMintsNow ? this.tillMintsNow() : []).map(u => String(u).replace(/\/+$/, ''));
+      const list = all.filter(x => !x.mint || x.mint === here || (tillAt.length > 1 && tillAt.indexOf(String(x.mint).replace(/\/+$/, '')) >= 0));
 
       // history already showing money in counts, so the prompt survives a
       // relaunch rather than waiting for the next payment
@@ -697,7 +700,11 @@
          * which its own screen reports. */
         const usdHere = t.unit === 'usd' && !!(this.twoUnitsOn && this.twoUnitsOn());
         if (t.kind === 'swap') { this.txIsNew(t.hash); return; }
-        if (this.txIsNew(t.hash) && (!(t.unit && t.unit !== 'sat') || usdHere)) fresh.push(t);
+        /* In the till, nothing from before it opened is a new arrival: a till at another mint than the phone had been on loads that
+         * mint's whole past, and on the phone every row of it came up as PAYMENT RECEIVED, one after another, for minutes. Marked seen,
+         * never raised. */
+        const before = !!(this.state.till && this.txWhen(t).getTime() < Number(this.state.till.since || 0));
+        if (this.txIsNew(t.hash) && !before && (!(t.unit && t.unit !== 'sat') || usdHere)) fresh.push(t);
       });
       this._seenSeeded = true;
 

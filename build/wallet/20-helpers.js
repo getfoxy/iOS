@@ -787,6 +787,46 @@
          * nobody can answer. Caught here rather than left to the catch below,
          * which returns '' — and '' is a receive screen whose QR never
          * appears. */
+        /* The mints it names: the one the phone is on first, where it is paid
+         * as it stands and its invoice is made, then a till's others
+         * (`o.mints`, 08d-till.js; a cashier's are its code's), at any of
+         * which a payer's own ecash pays it as it stands and stays there. A
+         * payer at none of them crosses into the first. One that does not
+         * issue the request's unit is left off (a till in both, at a mint of
+         * sats alone, asked in dollars): its payer crosses into the first as
+         * any other mint's does. The mint the phone is on was held to the unit
+         * above, and refuses the request. Each honours the lock where there is
+         * one: a payer told it may pay at a mint that cannot keep the lock
+         * would be paying in the open. */
+        /* Before any key is taken for it, so a request refused here takes
+         * nothing from the pool. */
+        var tillAt = null;
+        if (o.lockPub) { try { tillAt = tillTermsFor(o.lockPub, unit, mint); } catch (eAt) { tillAt = null; } }
+        var willLock = !!o.lockPub || (o.lock !== false && canLock);
+        var named = tillAt ? tillMintsOf(tillAt) : (Array.isArray(o.mints) && o.mints.length ? o.mints : null);
+        var mints = [mint];
+        if (named) {
+          var listed = tillMintList(named, canonicalMint(mint));
+          if (!listed.length) {
+            console.warn('[foxy] a request at several mints was not made: they are not mint addresses, or do not include ' + hostOf(mint));
+            return '';
+          }
+          var issuing = [];
+          for (var mi = 1; mi < listed.length; mi++) {
+            // (a mint nothing is known of here says no units, and is left off a dollar request: its payer crosses in)
+            var has = unitsOf(listed[mi]);
+            if (unit === 'sat' ? (has.length > 0 && has.indexOf('sat') < 0) : has.indexOf(unit) < 0) {
+              console.log('[foxy] a request in ' + unit + ' leaves ' + hostOf(listed[mi]) + ' off its mints: it does not issue ' + unitName(unit));
+              continue;
+            }
+            if (willLock && !tillMintLocks(listed[mi])) {
+              console.warn('[foxy] a request at several mints was not made: ' + hostOf(listed[mi]) + ' does not honour a lock');
+              return '';
+            }
+            issuing.push(listed[mi]);
+          }
+          mints = [mint].concat(issuing);
+        }
         var lock;
         /* A till's request (`o.lockPub`, 08d-till.js): locked to the keeper's
          * key on the code this phone works by, never to one of this phone's,
@@ -838,8 +878,16 @@
           }
         }
         var text = new CT.PaymentRequest(transport, hexOf(id), n > 0 ? n : undefined, unit,
-          [mint], says || undefined, true, lock).toEncodedRequest();
-        noteOpenRequest(hexOf(id), n > 0 ? n : 0, mint, tillPass ? 'till' : o.purpose, unit, o.kept === true);
+          mints, says || undefined, true, lock).toEncodedRequest();
+        /* The list on the open request whenever one was named, one mint
+         * included: a till's request is paid where it listed, even after the
+         * till has closed and the phone gone home (`readPayment`). */
+        noteOpenRequest(hexOf(id), n > 0 ? n : 0, mint, tillPass ? 'till' : o.purpose, unit, o.kept === true,
+                        named ? [canonicalMint(mint)].concat(mints.slice(1)) : null);
+        /* The other half of a pair (`o.twin`: the text, or the id, of a request made a moment before for the same price in the
+         * other currency, a till in both's: 12-receive.js `tillTwinRequest`). Either answers it, and the first paid closes the
+         * other (`closeTwin`), so one price is never paid twice. */
+        if (o.twin) pairRequests(hexOf(id), o.twin);
         // the keeper's key and where to send what is paid, on the open request (`tillRequestLock`, `tillRequestPaid`)
         if (tillPass) {
           var openTill = openRequests[hexOf(id)];
@@ -972,6 +1020,8 @@
       var theirs = String((req.mints || [])[0] || '').replace(/\/+$/, '');
       var mine = String(mintUrl || '').replace(/\/+$/, '');
       if (!theirs || !mine || theirs === mine) return null;
+      // and any other mint it names (a till's): ecash there pays it as it stands
+      if ((req.mints || []).some(function (m) { return canonicalMint(String(m || '')) === canonicalMint(mine); })) return null;
       var held = FoxyWallet.balanceAt(mine);
       if (!(held > 0)) return null;
       /* What it can hand over, which is less than what it holds at a mint
@@ -1284,7 +1334,10 @@
            * is now gone is still claimable from the twelve words. */
           var where = '';
           try { where = canonicalMint(String((FoxyWallet.tokenInfo(claimText) || {}).mint || '')); } catch (eWhere) {}
-          if (startedAt && where && where !== startedAt) leave();
+          /* A row taken at another of a till's mints (`away`, `_requestPaid`) is claimed there by a wallet made for it,
+           * and the phone does not go: it stays where the till is. */
+          var awayRow = !!one.away && !!where && where !== startedAt;
+          if (startedAt && where && where !== startedAt && !awayRow) leave();
           // the same entry the arrival wrote, finished rather than doubled
           var claim;
           /* Arriving while it is swapped in: counted in the balance as that,
@@ -1297,7 +1350,7 @@
           walkCalling = true;
           var now = spareFree && !!startedAt && (!where || where === startedAt);
           if (now) spareFree = false;
-          try { claim = FoxyWallet.receiveToken(claimText, { hash: 'req-' + id, plain: !!one.plain, visit: true, now: now }); }
+          try { claim = FoxyWallet.receiveToken(claimText, { hash: 'req-' + id, plain: !!one.plain, visit: true, now: now, away: awayRow }); }
           catch (eSync) { arrivingLetGo(id); throw eSync; }
           finally { walkCalling = false; }
           claim = claim.then(function (r) { arrivingLetGo(id); return r; }, function (e) { arrivingLetGo(id); throw e; });
@@ -1450,7 +1503,7 @@
      * or a relay. Both used to come through here indistinguishable, and change can
      * only go back over a link that is still open — so the one thing this function
      * has to know before it can hand any back is which it was. */
-    _requestPaid: function (body, answerId, over, waited) {
+    _requestPaid: function (body, answerId, over, waited, keysAsked) {
       /* What arrives is judged by the route: plain ecash is swapped or
        * refused by it, and an over-payment has its change made or is kept by
        * it. A phone opened a moment ago has a route two seconds off, so the
@@ -1461,6 +1514,21 @@
         return routeSoon(FoxyWallet._routeWaitMs).then(function () {
           return FoxyWallet._requestPaid.call(self, body, answerId, over, true);
         });
+      }
+      /* Paid at another of the mints a request lists (a till's), whose keys
+       * this phone does not have on file, or not for the keyset it came in:
+       * asked for once, with a route, and the payment read again. It was
+       * refused for want of them, and a payment locked to this phone that is
+       * refused is money the payer can no longer take back and this phone
+       * never took (review, cache-evict). */
+      if (!keysAsked && routeOpen()) {
+        var wantKeys = null;
+        try { wantKeys = tillKeysWanted(body, mintUrl); } catch (eW) { wantKeys = null; }
+        if (wantKeys) {
+          var me = this;
+          var readAgain = function () { return FoxyWallet._requestPaid.call(me, body, answerId, over, true, true); };
+          return tillMintLoad(wantKeys.mint, wantKeys.fresh).then(readAgain, readAgain);
+        }
       }
       var answer = function (status, text) {
         return bridgeAsk('inboxAnswer', { answer: String(answerId), status: status, text: text || '' }, 5000)
@@ -1486,14 +1554,18 @@
       /* A till's request (08d-till.js): locked to the keeper, checked at the
        * mint, and sent to the keeper; never into this phone's pile, and no
        * change made. Nothing below is for it. */
-      if (p.purpose === 'till') return tillRequestPaid(p, answer, body, over);
+      if (p.purpose === 'till') return tillRequestPaid(p, answer, body, over, !!keysAsked);
       /* The payment's unit, which `readPayment` has held to the request's:
        * every figure below is in it (sats, or cents), and `sats` is said only
        * of a sat payment. A dollar payment is 0 sats. */
       var pu = unitOf(p.unit) || 'sat';
       var said = function (n) { return pu === 'sat' ? n + ' sats' : moneyWords(n, pu); };
-      // the wallet whose key chain checks this unit's signatures: the unit's own when it has been built
-      var dw = pu === 'sat' ? wallet : (unitWalletNow(pu) || wallet);
+      /* Paid at another of the mints the request named (a till's, `readPayment`): taken there by a wallet made for
+       * that mint, the phone staying where it is, and the money staying at the mint it was paid at (`receiveToken`
+       * with `opts.away`). */
+      var away = canonicalMint(String(p.mint || '')) !== canonicalMint(String(mintUrl || ''));
+      // the wallet whose key chain checks this unit's signatures: the unit's own when it has been built; another mint's on file
+      var dw = away ? tillKeysAt(p.mint, pu) : pu === 'sat' ? wallet : (unitWalletNow(pu) || wallet);
       if (FoxyWallet._requestsBeingPaid[p.id]) { answer(409, 'That request is being paid already.'); return; }
       FoxyWallet._requestsBeingPaid[p.id] = true;
       var token;
@@ -1548,7 +1620,30 @@
        * straight back is not money kept, and showing the gross told the person
        * they had been paid 4 sats for a 3-sat sale — on both phones, and then a
        * second screen for the 1 sat going back. */
-      var giveBack = changeOwed(p, over);
+      /* None at another mint: change is made out of this phone's pile, which is not there. So a payment there is
+       * exact, or over on purpose (`overpaid`), or locked to this phone: refused, ecash locked to this phone is money
+       * the payer can no longer spend and this phone never took. So that is kept whole, as an over-payment no change
+       * can be made for is at the mint the phone is on (`changeOwed` answering 0), and its entry says what stayed. */
+      var giveBack = away ? 0 : changeOwed(p, over);
+      var awayLock = away ? lockPubFor(p.id) : '';
+      var awayLocked = !!awayLock && p.proofs.every(function (pr) { return onlyLockedTo(pr, awayLock); });
+      if (away && Number(p.asked) > 0 && satsOf(p.amount) - (Number(p.inFee) || 0) > Number(p.asked) && !p.overpaid
+          && awayLocked) {
+        console.log('[foxy] a payment at ' + hostOf(p.mint) + ' is over by '
+          + said(satsOf(p.amount) - (Number(p.inFee) || 0) - Number(p.asked)) + ' and locked to this phone; kept whole, no change made there');
+      }
+      if (away && Number(p.asked) > 0 && satsOf(p.amount) - (Number(p.inFee) || 0) > Number(p.asked) && !p.overpaid
+          && !awayLocked) {
+        delete FoxyWallet._requestsBeingPaid[p.id];
+        var exactly = 'This phone cannot give change at ' + hostOf(p.mint) + '. Send exactly ' + said(Number(p.asked)) + '.';
+        console.warn('[foxy] a payment at ' + hostOf(p.mint) + ' was refused: it is over, and no change can be made there');
+        answer(422, exactly);
+        FoxyWallet._requestPaidListeners.forEach(function (fn) {
+          try { fn({ stage: 'failed', sats: 0, amount: 0, unit: pu, id: p.id, purpose: p.purpose, refused: exactly }); }
+          catch (x) { console.warn('[foxy] request paid listener:', x && x.message); }
+        });
+        return;
+      }
       /* Less the mint's fee on the pieces that came, when change goes back:
        * what stays is what arrived after the fee, less the change. Without it
        * a 2,048 sat piece with 851 of change and a 1 sat fee was written as
@@ -1571,7 +1666,8 @@
        * no payment between phones pays dollars to a bitcoin wallet's request
        * (it asks in dollars only where its person picked dollars), so the
        * mirror is not asked here (`convertDue` would answer it for dollars). */
-      var convertable = pu === 'sat' && convertDue(p);
+      // (not at another mint: the swap into dollars is made where the phone is, and this money stays where it was paid)
+      var convertable = pu === 'sat' && !away && convertDue(p);
       /* Told in the payment's unit: `amount` and `unit`, and `sats` as it
        * always was for a sat payment (0 for a dollar one). */
       var tell = function (stage, r) {
@@ -1677,6 +1773,16 @@
        * Nothing is written down on any of these paths, so the payer keeps their
        * ecash and can offer it again to either phone with a route. */
       var bothOffline = !held && !routeOpen();
+      /* At another mint with no route, only ecash locked to this phone and signed by that mint, checked by its keys on
+       * file: it is kept, and taken there when the route returns (`claimUnclaimed`). Nothing else is weighed. */
+      if (away && bothOffline) {
+        console.warn('[foxy] a payment at ' + hostOf(p.mint) + ' arrived not locked to this phone, with no route; refusing it');
+        delete FoxyWallet._requestsBeingPaid[p.id];
+        tell('failed');
+        answer(422, 'This phone is offline, so at ' + hostOf(p.mint) + ' it can only take ecash locked to it.'
+          + ' Try again when either phone is online.');
+        return;
+      }
       /* Not supported for now, so the payer is told plainly rather than being
        * asked a question whose answer cannot be acted on. */
       if (bothOffline && !offlineToOffline()) {
@@ -1753,8 +1859,10 @@
         try {
           /* With no route, who paid (`payer`: their `from`, '' when they named
            * none), so the till caps can count it until it settles (`payerHeld`). */
-          keepUnclaimed(p.id, token, p.amount, trusted, /^carry:/.test(String(p.purpose || '')), pu,
-                        routeOpen() ? null : { payer: p.from || '' });
+          /* And at another mint, `away`: its claim is made there by a wallet made for it, the phone not moving. */
+          var keepExtra = /** @type {any} */ (routeOpen() ? null : { payer: p.from || '' });
+          if (away) keepExtra = Object.assign(keepExtra || {}, { away: true });
+          keepUnclaimed(p.id, token, p.amount, trusted, /^carry:/.test(String(p.purpose || '')), pu, keepExtra);
         } catch (e) {
           console.error('[foxy] a payment arrived and could not be written down; refusing it:',
                         (e && e.message) || e);
@@ -1772,6 +1880,9 @@
          * ecash scanned for the same request is then told it has been paid.
          * A refusal to write is only logged; the payment itself is down. */
         try { markLockTaken(p.id, p.id); } catch (eMark) { console.warn('[foxy] could not mark a request\u2019s lock taken:', eMark && eMark.message); }
+        /* And its other half in the other currency closed, now this one is written down: a claim that waits for a route is
+         * still this payment, and the twin must not be paid beside it in the meantime (`closeTwin`). */
+        closeTwin(p.id);
         // a payment to be brought home: its job learns which request it answered, and the payer's key
         carryArrived(p);
 
@@ -1839,10 +1950,10 @@
             ? { hash: into, keptSats: kept,
                 grossSats: p.sats, changeSats: giveBack,
                 // only passing through this mint: not cut into small change
-                plain: /^carry:/.test(String(p.purpose || '')) }
+                plain: /^carry:/.test(String(p.purpose || '')), away: away }
             // in another unit, the same in that unit's names
             : { hash: into, keptAmount: kept, grossAmount: p.amount, changeAmount: giveBack,
-                plain: /^carry:/.test(String(p.purpose || '')) })
+                plain: /^carry:/.test(String(p.purpose || '')), away: away })
             .then(function (r) {
               delete FoxyWallet._requestsBeingPaid[p.id];
               dropOpenRequest(p.id);
@@ -1917,7 +2028,7 @@
           delete FoxyWallet._requestsBeingPaid[p.id];
           dropOpenRequest(p.id);
           answer(200, '');
-          changeBack(p, over);
+          if (!away) changeBack(p, over);
           // to be swapped into dollars once it is in the pile: owed until a claim lands
           var owes = pu === 'sat' && convertable && convertOwe(p, kept);
           /* In history at once, at the moment it arrived.
@@ -1977,7 +2088,7 @@
         if (pu === 'sat' && convertable) convertOwe(p, kept);
         return claim().then(function (r) {
           answer(200, '');
-          changeBack(p, over);
+          if (!away) changeBack(p, over);
           /* `r.sats` is what the swap took in, which is the gross. What the
            * person was paid is what stays after the change goes back. */
           tell('paid', { sats: pu === 'sat' ? kept : 0, unit: pu, amount: kept, result: r });

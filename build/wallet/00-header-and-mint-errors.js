@@ -165,6 +165,10 @@
      * locked to the keeper's key, until it is sent. The outbox is the keeper's money: written with mustSave. */
     tillCashier: 'foxy.till.cashier',
     tillHome: 'foxy.till.home',
+    // the keeper's own mint while its till runs at another (`tillKeeperOpen`)
+    tillKeeperHome: 'foxy.till.keeper.home',
+    // the keeper's till while it runs: the mints it takes payments at, and the default among them (`tillKeeperOpen`)
+    tillKeeper: 'foxy.till.keeper',
     tillOutbox: 'foxy.till.outbox',
   };
 

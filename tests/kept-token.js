@@ -281,9 +281,10 @@ ok(/keepSentToken\(\{ token: token, sats: sumProofs\(split\.send\), unit: 'sat',
 
 // Money only passing through a mint is not cut into small change there.
 ok(/var shaped = \(isFinite\(expect\) && expect > 0 && !\(opts && opts\.plain\)\)/.test(read('build/wallet/19-bill-split.js'))
-   && /plain: \/\^carry:\/\.test\(String\(p\.purpose \|\| ''\)\) \}\)/.test(read('build/wallet/20-helpers.js'))
+   // (and, since the till at several mints, whether the payment is at a mint the phone is not on: `away`)
+   && /plain: \/\^carry:\/\.test\(String\(p\.purpose \|\| ''\)\)(?:, away: away)? \}\)/.test(read('build/wallet/20-helpers.js'))
    && /if \(plain\) all\[id\]\.plain = true;/.test(read('build/wallet/07-request-delivery.js'))
-   && /plain: !!one\.plain, visit: true(?:, now: now)? \}\)/.test(read('build/wallet/20-helpers.js')),
+   && /plain: !!one\.plain, visit: true(?:, now: now)?(?:, away: awayRow)? \}\)/.test(read('build/wallet/20-helpers.js')),
    'a payment taken to be carried home is received as the fewest pieces, late or not');
 
 // The receiver tells only the payers still owed the door byte, drops one that

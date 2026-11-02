@@ -303,6 +303,8 @@
     this._unlisten = W.listen(ev => {
       this.loadHistory();
       if (!this.txIsNew(ev.hash)) return;
+      // (nor, in the till, a payment from before it opened that the wallet notices again at a mint it has just reached: 16-history-lists.js)
+      if (this.state.till && Number(ev.at) > 0 && Number(ev.at) * (Number(ev.at) > 1e11 ? 1 : 1000) < Number(this.state.till.since || 0)) return;
       const tag = W.tagsFor(ev.hash) || {};
       this.announcePayment(Object.assign({}, ev, { to: tag.to || '' }));
     });

@@ -177,11 +177,14 @@ class Component extends DCLogic {
     this.setState(p => Object.assign({
       screen: 'switchMint', stack: p.stack.concat([p.screen]),
       trStep: '', trFrom: '', trTo: '',
-      // nor a card's question of which mint to move to (26f-flashcard.js)
-      fcPick: false,
+      // nor a card's question of which mint to move to (26f-flashcard.js), nor the till's of which mint to run at (26m-till.js)
+      fcPick: false, tillPick: false, tillSet: [],
     }, extra || {}));
   }
   back() {
+    /* the till being opened: back off DEFAULT MINT is its set list again; off the set list, the opening stops (26m-till.js,
+     * `tillOpenBack`) */
+    if (this.tillOpenBack && this.tillOpenBack()) return;
     // a card's set-up asking an amount: back is a step back in it, or out of it (26j-card-wheel.js, `fcSuAmountBack`)
     if (this.fcSuAmountBack && this.fcSuAmountBack()) return;
     // NAME CARD: the welcome again, or the card's screen (26j-card-wheel.js, `fcNameBack`)
@@ -560,8 +563,9 @@ class Component extends DCLogic {
    * more than one balance, each receive and send asks). Always 'sat' at a mint with one balance. `flow` is 'receive'
    * or 'send'. */
   walletNow(flow) {
-    // a cashier's till receives in the keeper's unit, the one its code names, whatever this phone holds (26m-till.js)
-    if (flow === 'receive' && this.tillUnit && this.tillUnit()) return this.tillUnit();
+    /* a till receives in its main, whatever this phone holds: its one currency, or the one chosen to come first in a till that
+     * takes both, the keeper's as the one a cashier's code names (26m-till.js, `tillMain`) */
+    if (flow === 'receive' && this.tillMain && this.tillMain()) return this.tillMain();
     if (!this.twoUnitsOn()) return 'sat';
     // a card pays in what it holds, whatever balance this phone's own sends use
     // (a card of software 1.23 that holds both: the currency chosen to pay from, `fcUnit`)
@@ -3763,10 +3767,51 @@ class Component extends DCLogic {
    * is made from, and the screen can judge it before the button is pressed
    * (`requestSpec`). A request for another mint is paid after connecting to
    * that mint (`makeTokenForRequest`), which this phone has not done. */
+  /* Any of the mints it names: a till's request names every mint it takes, the default first, and ecash at any of
+   * them pays it as it stands (review, payer-cross). */
   requestHere(req) {
     const W = window.FoxyWallet;
-    const want = String((req && req.mints && req.mints[0]) || '').replace(/\/+$/, '');
-    return !want || !!(W && W.mintHost && ('https://' + W.mintHost()) === want);
+    const listed = this.reqMints(req);
+    if (!listed.length) return true;
+    const here = W && W.mintHost ? this.reqCanon('https://' + W.mintHost()) : '';
+    return !!here && listed.indexOf(here) >= 0;
+  }
+
+  // a mint as the wallet writes one (`canonicalMint`), or with no slash at the end where the wallet is not there to ask
+  reqCanon(u) {
+    const W = window.FoxyWallet;
+    return W && W.canonicalMint ? W.canonicalMint(u) : String(u || '').trim().replace(/\/+$/, '');
+  }
+
+  // the mints a request names, each once, as the wallet writes them, in the request's order
+  reqMints(req) {
+    const out = [];
+    ((req && Array.isArray(req.mints)) ? req.mints : []).forEach((m) => {
+      const c = this.reqCanon(m);
+      if (c && out.indexOf(c) < 0) out.push(c);
+    });
+    return out;
+  }
+
+  /* The mint a request is paid at: the one chosen for it on PAY FROM where that is one it names; else the one the
+   * phone is on, where it names that; else the first it names where this phone holds enough; else the first, its
+   * default, which a crossing goes to. A till of two mints was paid at its first only, so a payer holding 1,000 at
+   * its second was offered a Lightning crossing into the first (review, payer-cross). '' where it names none. */
+  reqPayMint(req) {
+    const W = window.FoxyWallet;
+    const listed = this.reqMints(req);
+    if (!listed.length) return '';
+    const s = this.state || {};
+    const chosen = (s.payFromFlow === 'req' && s.payMint) ? this.reqCanon(s.payMint) : '';
+    if (chosen && listed.indexOf(chosen) >= 0) return chosen;
+    const here = W && W.mintHost ? this.reqCanon('https://' + W.mintHost()) : '';
+    if (here && listed.indexOf(here) >= 0) return here;
+    const need = Math.round(Number(req && req.sats) || 0);
+    if (req && req.unit !== 'usd' && need > 0 && W && W.balanceAt) {
+      const has = listed.filter((m) => Number(W.balanceAt(m)) >= need)[0];
+      if (has) return has;
+    }
+    return listed[0];
   }
 
   /* A payer that cannot cover a payment over the link says so to the phone it
@@ -3830,10 +3875,8 @@ class Component extends DCLogic {
    * on (`requestSpec`), because there is nothing for a connection to add. */
   requestNeedsRoute(req) {
     if (!req || req.viaTap) return false;
-    const W = window.FoxyWallet;
-    const want = String((req.mints && req.mints[0]) || '').replace(/\/+$/, '');
-    const here = !!(W && W.mintHost && ('https://' + W.mintHost()) === want);
-    return !!(req.delivery || req.lockTo || (want && !here));
+    const here = this.requestHere(req);
+    return !!(req.delivery || req.lockTo || !here);
   }
 
   /* Will an over-payment's change come back by itself?
@@ -3991,7 +4034,8 @@ class Component extends DCLogic {
       host = host.replace(/\.+(?=(:\d+)?$)/, '');
       return scheme + '://' + host + (m[3] || '').replace(/\/+$/, '');
     };
-    const want = canon(req.mints[0]);
+    // at any of the mints it names: the phone's own where it is one, else one holding enough, else the default (`reqPayMint`)
+    const want = canon(this.reqPayMint(req));
     const here = !!(W.mintHost && canon('https://' + W.mintHost()) === want);
     // making it somewhere else switches mints, which waits for any payment
     if (want && !here && this.refuseSwitchWhileBusy()) return;
@@ -4822,8 +4866,8 @@ class Component extends DCLogic {
      * and a connect home under it made the payment from home's pile. */
     const canon = (u) => (W && W.canonicalMint ? W.canonicalMint(u) : String(u || '').replace(/\/+$/, ''));
     const here = W && W.mintUrl ? canon(W.mintUrl) : '';
-    const reqAt = s.req && s.req.mints && s.req.mints.length ? canon(s.req.mints[0]) : '';
-    if (here && reqAt === here && (s.screen === 'reqOffer' || s.screen === 'sendDone')) return 'a request at this mint is on screen to be paid';
+    const reqAt = s.req && s.req.mints && s.req.mints.length ? s.req.mints.map(canon) : [];
+    if (here && reqAt.indexOf(here) >= 0 && (s.screen === 'reqOffer' || s.screen === 'sendDone')) return 'a request at this mint is on screen to be paid';
     /* And a request of this phone's own, on show on a receive screen at the mint the phone is on: what is paid to it
      * is ecash of this mint, and the phone refuses a payment at a mint it is no longer on. Kept by the screen
      * (`railRequest`, `tapOnlyRequest`) and cleared when it goes. */
@@ -8897,8 +8941,11 @@ class Component extends DCLogic {
    * address's, for one) is not what was picked, so what is paid to it is swapped as the person's hold says. */
   recvPicked(unit) {
     const s = this.state;
-    // a cashier's till: the keeper's unit, picked by the code it scanned (26m-till.js, `tillUnit`)
+    // a till in one currency: that one, the keeper's, or picked by the code a cashier scanned (26m-till.js, `tillUnit`)
     if (this.tillUnit && this.tillUnit()) return this.tillUnit() === (unit === 'usd' ? 'usd' : 'sat');
+    /* a till in both: either, since it takes both and what comes in one stays in it (the keeper, 2026-11-02: dollars taken as
+     * dollars, with no conversion's fee) */
+    if (this.tillBoth && this.tillBoth()) return true;
     return !!(this.twoUnitsOn && this.twoUnitsOn() && s.flow === 'receive' && (s.wallet === 'usd' || s.wallet === 'sat')
       && s.wallet === (unit === 'usd' ? 'usd' : 'sat'));
   }
@@ -8986,6 +9033,10 @@ class Component extends DCLogic {
      * it goes to the keeper and never into this phone's pile (26m-till.js, `tillLockFor`; the wallet's `paymentRequest`). */
     const tillLock = this.tillLockFor ? this.tillLockFor() : '';
     const why = tillLock ? 'till' : (purpose || 'receive');
+    /* And in either role's till, the mints it takes, the default first, so a payer at any of them pays there and one at
+     * another crosses into the default (26m-till.js, `tillMintsNow`). */
+    const tillMints = this.tillMintsNow ? this.tillMintsNow() : [];
+    const tillOpts = Object.assign({}, tillLock ? { lockPub: tillLock } : {}, tillMints.length ? { mints: tillMints } : {});
     const inUsd = unit === 'usd';
     const cents = inUsd ? 0 : Math.round(Number(usdCents) || 0);
     /* The key a request is kept under: a request in dollars has its unit on
@@ -9005,9 +9056,9 @@ class Component extends DCLogic {
     // `ways` is { onion, nostr }, either of which may be missing
     const make = ways => {
       const text = inUsd
-        ? W.paymentRequest(Math.round(Number(sats) || 0), Object.assign({ deliverTo: ways, purpose: why, unit: 'usd', kept: kept }, tillLock ? { lockPub: tillLock } : {}))
+        ? W.paymentRequest(Math.round(Number(sats) || 0), Object.assign({ deliverTo: ways, purpose: why, unit: 'usd', kept: kept }, tillOpts))
         : W.paymentRequest(cents > 0 ? 0 : sats,
-          Object.assign({ deliverTo: ways, purpose: why, usd: cents > 0 ? cents : 0, kept: kept }, tillLock ? { lockPub: tillLock } : {}));
+          Object.assign({ deliverTo: ways, purpose: why, usd: cents > 0 ? cents : 0, kept: kept }, tillOpts));
       this._creqs[key] = { text: text, inbox: ways };
       this.setState({ creqMade: Date.now() });
       return text;
@@ -9126,11 +9177,51 @@ class Component extends DCLogic {
     const tillLock = this.tillLockFor ? this.tillLockFor() : '';
     if (W.primeLocks && !tillLock) { try { W.primeLocks(); } catch (e) {} }
     const kept = !purpose && this.recvPicked(inUsd ? 'usd' : 'sat');
-    const till = tillLock ? { purpose: 'till', lockPub: tillLock } : {};
+    const tillMints = this.tillMintsNow ? this.tillMintsNow() : [];
+    const till = Object.assign(tillLock ? { purpose: 'till', lockPub: tillLock } : {}, tillMints.length ? { mints: tillMints } : {});
     const text = inUsd ? W.paymentRequest(n, Object.assign({ purpose: purpose || 'receive', unit: 'usd', kept: kept }, till))
       : W.paymentRequest(n, Object.assign({ purpose: purpose || 'receive', kept: kept }, till));
     if (!text) return '';
     this._creqs[key] = { text: text };
+    return text;
+  }
+
+  /* The other half of a till in both's offer: a request for the same price in the currency that is not the till's main, beside
+   * `first`, the main's (the request the screen shows, or the tap's own). The payer pays the one it holds (26d-tap.js,
+   * `tapPickOfTwo`): dollars in dollars and sats in sats, so neither side pays a conversion's fee (the keeper, 2026-11-02).
+   *
+   * The price is what was typed. In dollars for a dollar request, exactly, or sats typed put into cents at this phone's price
+   * (`centsTyped`); in sats for a bitcoin one, the sats typed or the dollars typed at this phone's price (`wantedSats`), and
+   * with no route the dollars alone, as an offline receive asks (`dollarsOnly`): the payer then works the sats out and this
+   * phone agrees them (`tapQuote`). Locked as the main's is (a cashier's to the keeper's key), at the till's mints, and paired
+   * with the main's in the wallet (`twin`), so the first paid closes the other and one price is never paid twice. Made here
+   * and now, with no onion address on it, as `tapOnlyRequest` makes one: it is for a tap, and comes back over the link.
+   * '' outside a till in both, for nothing typed, or where the other currency has no figure (no price). */
+  tillTwinRequest(first) {
+    const W = window.FoxyWallet;
+    if (!W || !W.paymentRequest || !first || !(this.tillBoth && this.tillBoth())) return '';
+    if (this._homeGoing) return '';
+    const s = this.state;
+    const other = this.tillMain() === 'usd' ? 'sat' : 'usd';
+    let n = 0, usd = 0;
+    if (other === 'usd') n = Math.round(Number(this.centsTyped()) || 0);
+    else if (this.dollarsOnly()) usd = Math.round((parseFloat(s.amount) || 0) * 100);
+    else n = Math.round(Number(this.wantedSats()) || 0);
+    if (!(n > 0) && !(usd > 0)) return '';
+    const key = 'twin|' + W.mintUrl + '|' + other + '|' + n + '|$' + usd + '|' + String(first);
+    this._creqs = this._creqs || {};
+    const have = this._creqs[key];
+    if (have && have.text) return have.text;
+    const tillLock = this.tillLockFor ? this.tillLockFor() : '';
+    if (W.primeLocks && !tillLock) { try { W.primeLocks(); } catch (e) {} }
+    const tillMints = this.tillMintsNow ? this.tillMintsNow() : [];
+    const opts = Object.assign({ purpose: tillLock ? 'till' : 'receive', kept: true, twin: String(first) },
+      other === 'usd' ? { unit: 'usd' } : (usd > 0 ? { usd: usd } : {}),
+      tillLock ? { lockPub: tillLock } : {}, tillMints.length ? { mints: tillMints } : {});
+    const text = W.paymentRequest(n, opts);
+    if (!text) return '';
+    this._creqs[key] = { text: text };
+    console.log('[foxy] till: the offer carries a request in ' + (other === 'usd' ? 'dollars' : 'bitcoin') + ' as well, for the same price');
     return text;
   }
 
@@ -9517,8 +9608,8 @@ class Component extends DCLogic {
       { rail: 'LIGHTNING', sub: 'Any Lightning wallet pays the invoice.' },
       { rail: 'CASHU', sub: 'A Cashu wallet answers with a token for this amount. Tap SCAN to take it.' },
     ];
-    // (not at a cashier's till, where an address's deposit would be minted here: `openReceiveNow`)
-    if (this.ocCan('receive') && !(this.tillLockFor && this.tillLockFor())) {
+    // (not in the till, either role: a till takes Lightning and Cashu only, and at a cashier's an address's deposit would be minted here: `openReceiveNow`)
+    if (this.ocCan('receive') && !(this.state && this.state.till)) {
       rails.push({ rail: 'ON-CHAIN', sub: 'An ordinary Bitcoin payment to an address this mint watches.' });
     }
     const W = window.FoxyWallet;
@@ -9570,8 +9661,8 @@ class Component extends DCLogic {
      * network this amount cannot use. */
     let rail = (W && W.defaultRail) ? W.defaultRail() : 'LIGHTNING';
     if (rail === 'ON-CHAIN' && (!this.ocCan('receive') || this.ocReceiveBlocked(sats))) rail = 'LIGHTNING';
-    // nor at a cashier's till: a deposit on chain is minted into the phone that asked, and none of it is this phone's
-    if (rail === 'ON-CHAIN' && this.tillLockFor && this.tillLockFor()) rail = 'LIGHTNING';
+    // nor in the till, either role: a till takes no payment on chain (and at a cashier's, a deposit on chain would be minted into the phone that asked)
+    if (rail === 'ON-CHAIN' && this.state && this.state.till) rail = 'LIGHTNING';
     /* Offline there is one network, and it is Cashu.
      *
      * A Lightning invoice is the mint's to make and an on-chain address is the
@@ -9898,13 +9989,14 @@ class Component extends DCLogic {
   /* WALLET on the invoice: which balance this receive goes into. A new code
    * is made in it, for the same amount; nothing is kept for the next receive. */
   pickRecvWallet() {
-    // a cashier's till takes the keeper's unit, and this phone's own balances are not shown in it (26m-till.js)
-    if (this.tillUnit && this.tillUnit()) return;
+    /* Never in the till: one in one currency takes that one, and one that takes both receives in its main, a tap being offered
+     * a request in each (26m-till.js, `tillMain`) */
+    if (this.state && this.state.till) return;
     const now = this.walletNow('receive') || 'sat';
     this.chooseFrom('WALLET', () => ['usd', 'sat'].map(u => ({
       label: this.unitWord(u),
-      sub: 'Holds ' + this.unitFigure(this.unitBalance(u), u) + (u === 'usd'
-        ? '. Asked in dollars, exactly.' : '. Asked in bitcoin.'),
+      sub: 'Holds ' + this.unitFigure(this.unitBalance(u), u) + '. ' + (u === 'usd'
+        ? 'Asked in dollars, exactly.' : 'Asked in bitcoin.'),
       on: u === now,
       tap: () => this.recvSwitchWallet(u),
     })));
@@ -11117,6 +11209,8 @@ class Component extends DCLogic {
     this._unlisten = W.listen(ev => {
       this.loadHistory();
       if (!this.txIsNew(ev.hash)) return;
+      // (nor, in the till, a payment from before it opened that the wallet notices again at a mint it has just reached: 16-history-lists.js)
+      if (this.state.till && Number(ev.at) > 0 && Number(ev.at) * (Number(ev.at) > 1e11 ? 1 : 1000) < Number(this.state.till.since || 0)) return;
       const tag = W.tagsFor(ev.hash) || {};
       this.announcePayment(Object.assign({}, ev, { to: tag.to || '' }));
     });
@@ -11915,7 +12009,10 @@ class Component extends DCLogic {
       // too. Entries written before mints were recorded carry none, and show
       // everywhere rather than vanishing.
       const here = String(W.mintUrl || '').replace(/\/+$/, '');
-      const list = all.filter(x => !x.mint || x.mint === here);
+      /* Except in a till at more than one mint, whose session is every mint it takes: a payment at one of them stays at that
+       * mint, and is still this session's (26m-till.js, `tillMintsNow`). */
+      const tillAt = (this.tillMintsNow ? this.tillMintsNow() : []).map(u => String(u).replace(/\/+$/, ''));
+      const list = all.filter(x => !x.mint || x.mint === here || (tillAt.length > 1 && tillAt.indexOf(String(x.mint).replace(/\/+$/, '')) >= 0));
 
       // history already showing money in counts, so the prompt survives a
       // relaunch rather than waiting for the next payment
@@ -12190,7 +12287,11 @@ class Component extends DCLogic {
          * which its own screen reports. */
         const usdHere = t.unit === 'usd' && !!(this.twoUnitsOn && this.twoUnitsOn());
         if (t.kind === 'swap') { this.txIsNew(t.hash); return; }
-        if (this.txIsNew(t.hash) && (!(t.unit && t.unit !== 'sat') || usdHere)) fresh.push(t);
+        /* In the till, nothing from before it opened is a new arrival: a till at another mint than the phone had been on loads that
+         * mint's whole past, and on the phone every row of it came up as PAYMENT RECEIVED, one after another, for minutes. Marked seen,
+         * never raised. */
+        const before = !!(this.state.till && this.txWhen(t).getTime() < Number(this.state.till.since || 0));
+        if (this.txIsNew(t.hash) && !before && (!(t.unit && t.unit !== 'sat') || usdHere)) fresh.push(t);
       });
       this._seenSeeded = true;
 
@@ -13862,12 +13963,15 @@ class Component extends DCLogic {
       // landing on a token's own screen: ask the mint about it at once
       if (this.state.screen === 'tokenOut') this.tokenWatchNow();
       if (this.state.screen === 'home') this.endReceiveAtHome();
-      /* The till's SET AMOUNT is its home (26m-till.js, `tillIdle`): a receive ends there as it ends at home, and a keeper's
-       * next customer is asked which balance again. A cashier's is the keeper's unit whatever this says (`walletNow`). */
+      /* The till's SET AMOUNT is its home (26m-till.js, `tillIdle`): a receive ends there as it ends at home, and in a till
+       * that takes both the next customer is asked which again. A till in one currency is in it whatever this says
+       * (`walletNow`). */
       const idle = this.state.screen === 'home' || !!(this.tillIdle && this.tillIdle());
       if (idle && this.state.screen !== 'home') this.endReceiveAtHome();
-      // home ends a flow: the next one asks again (or takes home's one balance), not this one's
-      if (idle && (this.state.wallet || this.state.walletAuto || this.state.walletTapped)) {
+      /* Home ends a flow: the next one asks again (or takes home's one balance), not this one's. Not the till's SET AMOUNT
+       * reached from CURRENCY: that is the question just answered, for the receive about to be typed there. */
+      const answered = prevState.screen === 'currency' && this.state.screen !== 'home';
+      if (idle && !answered && (this.state.wallet || this.state.walletAuto || this.state.walletTapped)) {
         this.setState({ wallet: '', walletAuto: false, walletTapped: false, feeQ: null });
       }
       // a code somebody was asked to scan goes with the token it belonged to
@@ -15046,9 +15150,16 @@ class Component extends DCLogic {
     const historyRow = { label: 'HISTORY', path: MENU_ICON.history, tap: shut(() => this.go('history')),
       ringInk: v.histRingInk, ringInk2: v.histRingInk2, ring: v.histRing };
     /* RESTORE LOST CARD: the money of a card this phone loaded, taken back if the card is lost (26f-flashcard.js `fcRestoreLost`: the
-     * RESTORE CARD screen, or a card saying this phone has loaded none). Here, not on a card's screens: a lost card cannot be tapped. */
+     * RESTORE CARD screen, or a card saying this phone has loaded none). Under SETTINGS, not on a card's screens: a lost card cannot be tapped. */
     const restoreCardRow = { label: 'RESTORE LOST CARD', path: MENU_ICON.cardBack, tap: shut(() => this.fcRestoreLost()) };
-    v.menuItems = /** @type {any[]} */ ([historyRow, restoreCardRow]).concat(verified ? [] : [backupRow]).concat([
+    /* The till (26m-till.js): this phone as a point of sale, receive and this session's history only. In the menu itself,
+     * right after HISTORY, behind the lock this phone already has (`tillGate`). The cashier code is on the till's own screen
+     * (23-render-home-and-amount.js `amtCodeTap`), so it follows the mints and currency the till was opened with. */
+    const tillRows = [
+      { label: 'POINT OF SALE', path: MENU_ICON.receive,
+        tap: shut(() => this.tillGate(() => this.tillOpen(), 'To open the till.')) },
+    ];
+    v.menuItems = /** @type {any[]} */ ([historyRow]).concat(tillRows).concat(verified ? [] : [backupRow]).concat([
       /* Hiding the balance moved here from the pill, where its button sat on
        * top of the figures. The label says what the tap
        * will do, so it reads the same whichever way round it is. */
@@ -15140,13 +15251,7 @@ class Component extends DCLogic {
       /* What this phone takes with no route before it settles: from one payer,
        * and in all (26j-till-caps.js). Dollars, with the sats under. */
     ]).concat(this.tillCapRows ? this.tillCapRows(MENU_ICON.receive, shut) : []).concat([
-      /* The till (26m-till.js): this phone as a point of sale, receive and this session's history only, and a code that
-       * puts another Foxy into it for this phone. Both behind the lock this phone already has (`tillGate`). */
-      { label: 'POINT OF SALE', path: MENU_ICON.receive,
-        tap: shut(() => this.tillGate(() => this.tillStart(), 'To open the till.')) },
-      { label: 'CASHIER CODE', path: MENU_ICON.scan,
-        tap: shut(() => this.tillGate(() => this.tillPassShow(), 'To show a cashier code.')) },
-    ]).concat([
+      restoreCardRow,
       /* The phone's own screens, straight over home: no Foxy screen before
        * RESTORE A WALLET or after YOUR SEED PHRASE. */
       { label: 'RESTORE', path: MENU_ICON.restore, tap: shut(() => this.restoreFromMenu()) },
@@ -16028,6 +16133,11 @@ class Component extends DCLogic {
       amtHistShown: tillHere,
       amtHistPath: 'M12 7v5l3.5 2M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.5 8.5 0 0 0 12 3.5Z',
       amtHistTap: () => this.go('history'),
+      /* And CASHIER CODE, the keeper's only (26m-till.js `tillPassShow`): on the till's own screen, so the code follows the mints and
+       * the currency the till was opened with, and nowhere else. Behind the lock, as opening the till was. */
+      amtCodeShown: tillHere && !!(this.tillRole && this.tillRole() === 'keeper'),
+      amtCodePath: 'M3.5 3.5h7v7h-7zM13.5 3.5h7v7h-7zM3.5 13.5h7v7h-7zM13.5 13.5h3v3h-3zM20.5 13.5v3M17.5 20.5h3M13.5 20.5h1',
+      amtCodeTap: () => this.tillGate(() => this.tillPassShow(), 'To show a cashier code.'),
       nextFur: (val > 0 && !sendOver)
         ? "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),"
           + "rgba(255,240,220,0) 62%),"
@@ -16056,7 +16166,9 @@ class Component extends DCLogic {
       priceWarnShown: (sendHeld || this.keypadStale()) ? '1' : '0',
       /* A card's set-up names its two amounts (the design): NO PIN AMOUNT? and, typed rather than chosen, MAX SPEND PER SECOND
        * (26j-card-wheel.js), as LIMITS does for the rate of a card that waits for its limit. */
-      amountTitle: s.flow === 'cardSuNoPin' ? 'NO PIN AMOUNT?'
+      // the till's own screen is named for what it is (either role)
+      amountTitle: tillHere ? 'POS MODE'
+        : s.flow === 'cardSuNoPin' ? 'NO PIN AMOUNT?'
         : (s.flow === 'cardSuTap' || (s.flow === 'cardLimit' && this._fcLimitTap && this.fcPacedNow && this.fcPacedNow())) ? 'MAX SPEND PER SECOND'
         : 'SET AMOUNT',
       amountSubtitle: s.flow === 'onchain'
@@ -16082,8 +16194,10 @@ class Component extends DCLogic {
       swapRateLine: s.flow === 'swap' && this.swapRateLine ? this.swapRateLine() : '',
       swapRateShown: !!(s.flow === 'swap' && this.swapRateLine && this.swapRateLine()),
       // what a till cap is, in a plain line under the question (26j-till-caps.js, `tillCapNote`)
-      amountNote: s.flow === 'tillCap' && this.tillCapNote ? this.tillCapNote() : '',
-      amountNoteShown: !!(s.flow === 'tillCap' && this.tillCapNote),
+      amountNote: s.flow === 'tillCap' && this.tillCapNote ? this.tillCapNote()
+        // and on a till's SET AMOUNT at more than one mint, where it is (26m-till.js, `tillWhereLine`)
+        : tillHere && this.tillWhereLine ? this.tillWhereLine() : '',
+      amountNoteShown: !!(s.flow === 'tillCap' && this.tillCapNote) || !!(tillHere && this.tillWhereLine && this.tillWhereLine()),
       // the space that balances the back button, which the till's HISTORY takes
       hideSkip: !tillHere,
       /* The set-up's max per tap: what the figure typed means in seconds, under it, as it is typed (26j-card-wheel.js, `fcSuAmountLine`). */
@@ -16288,12 +16402,14 @@ class Component extends DCLogic {
     const usdCents = usdIn ? (s.recvAmount != null ? s.recvAmount : this.centsTyped()) : 0;
     const usdPx = (usdIn && usdCents > 0 && this.unitPx) ? this.unitPx() : 0;
     const usdSats = usdPx > 0 ? Math.round(usdCents / 100 / usdPx * 1e8) : 0;
+    // a till that takes both has no WALLET chip: it receives in its main, and a tap is offered either (26m-till.js, `tillMain`)
+    const tillBoth = !!(this.tillBoth && this.tillBoth());
     return {
       isConfirm: sc === 'confirm',
       recvHeadOne: !two,
       recvHeadTwo: two,
-      recvChipsOne: !two,
-      recvChipsTwo: two,
+      recvChipsOne: !two || tillBoth,
+      recvChipsTwo: two && !tillBoth,
       recvWalletWord: two ? this.walletLabel(this.walletNow('receive') || 'sat') : '',
       // offline too: only the request changes, and that needs no mint
       pickRecvWallet: () => this.pickRecvWallet(),
@@ -17140,7 +17256,9 @@ class Component extends DCLogic {
       ? (req.delivery || (req.viaTap ? { kind: 'tap' } : null)) : null;
     const onion = !!(d && d.kind === 'onion');
     const sats = req ? amt : 0;
-    const mint = req && req.mints[0] ? String(req.mints[0]).replace(/^https?:\/\//, '') : 'any mint';
+    // the mint it is paid at, of those it names (`reqPayMint`)
+    const paidAt = req ? this.reqPayMint(req) : '';
+    const mint = paidAt ? String(paidAt).replace(/^https?:\/\//, '') : 'any mint';
     /* Paid by tap: the phone it goes to is the one being held against this
      * one, and the four digits are what says so. They are the thing to check
      * before sending, so they are the value of this row rather than a note
@@ -17161,7 +17279,7 @@ class Component extends DCLogic {
      * crosses was quoted on PAY FROM, whose quote is what said it covers it. */
     const src = this.pfReqSource ? this.pfReqSource(req) : null;
     const crossFee = (src && src.plan) ? Math.max(0, Math.round(Number(src.plan.feeSats) || 0)) : 0;
-    const want = String((req && req.mints && req.mints[0]) || '').replace(/\/+$/, '');
+    const want = paidAt;
     const judgeAt = src ? src.mint : want;
     const atHere = !judgeAt || this.requestHere({ mints: [judgeAt] });
     const thereHas = (!atHere && !usdReq && W && W.balanceAt) ? Math.round(Number(W.balanceAt(judgeAt)) || 0) : null;
@@ -19302,6 +19420,14 @@ class Component extends DCLogic {
      * another mint pays the invoice. Offline there is no invoice, and the
      * request alone is offered. */
     const usdIn = !!(this.walletNow && this.walletNow('receive') === 'usd');
+    /* A till that takes both: beside the main's request, one in the other currency for the same price (`req2`,
+     * 12-receive.js `tillTwinRequest`), of which the payer pays the one it holds. Nothing beside it anywhere else, and an
+     * offer with no `req2` is the offer it always was. */
+    const twin = (out) => {
+      if (!out || !out.req || !(this.tillBoth && this.tillBoth())) return out;
+      const req2 = this.tillTwinRequest ? this.tillTwinRequest(out.req) : '';
+      return req2 ? Object.assign({}, out, { req2: req2 }) : out;
+    };
     // the receive invoice screen
     if (s.screen === 'confirm' && s.flow === 'receive') {
       if (s.recvRail === 'ON-CHAIN' || s.invoiceIsAddress) return null;
@@ -19320,7 +19446,7 @@ class Component extends DCLogic {
         const req = this.cashuRequest();
         const inv = W.classify(String(s.invoice || '')) === 'invoice' ? String(s.invoice) : '';
         if (!req && !inv) return { inv: '', req: '', waiting: true };
-        return { inv: inv, req: req || '', waiting: false };
+        return twin({ inv: inv, req: req || '', waiting: false });
       }
       /* No invoice yet is *waiting*, not *no*.
        *
@@ -19351,12 +19477,12 @@ class Component extends DCLogic {
         const cents = Math.round(Number(s.recvAmount != null ? s.recvAmount : this.centsTyped()) || 0);
         const ureq = cents > 0 ? (this.tapOnlyRequest(cents, '', 'usd') || '') : '';
         if (!inv && !ureq) return { inv: '', req: '', waiting: true };
-        return { inv: inv, req: ureq, waiting: false };
+        return twin({ inv: inv, req: ureq, waiting: false });
       }
       const want = this.wantedSats() || W.amountOf(inv) || 0;
       const req = this.tapOnlyRequest(want) || '';
       if (!inv && !req) return { inv: '', req: '', waiting: true };
-      return { inv: inv, req: req, waiting: false };
+      return twin({ inv: inv, req: req, waiting: false });
     }
 
     /* The split's payer screen: one share, one code, held up to one phone.
@@ -19439,6 +19565,8 @@ class Component extends DCLogic {
      * railRequest stops waiting and the invoice goes out alone, which is the
      * right fallback and not this case. */
     const req = (asking && asking.req) || '';
+    // (and a till in both's request in its other currency, `tapOffering`)
+    const req2 = (asking && asking.req2) || '';
     const waiting = advertise && !req && asking.waiting;
     /* Current, not merely known: `priceAgo()` is '' only while the figure on
      * screen is one this app still treats as live. */
@@ -19446,7 +19574,8 @@ class Component extends DCLogic {
     /* Not on a receive into dollars: dollars paid in dollars need no bitcoin
      * price, so none goes on the air with them (a payer paying the dollar
      * invoice from bitcoin is shown the mint's rate on CONFIRM PAYMENT). */
-    const usdOffer = s.flow === 'receive' && !!(this.walletNow && this.walletNow('receive') === 'usd');
+    // (a till in both offers bitcoin beside its dollars, so its price goes with them as a bitcoin receive's does)
+    const usdOffer = s.flow === 'receive' && !req2 && !!(this.walletNow && this.walletNow('receive') === 'usd');
     const fresh = (!usdOffer && !this.offlineNow() && !this.priceAgo() && Number(mine.rate) > 0)
       ? Number(mine.rate) : 0;
     /* A wallet that holds dollars takes sats for a request in dollars, and
@@ -19479,6 +19608,8 @@ class Component extends DCLogic {
        * to what it did before, which is to make the payment and let the
        * receiver refuse it. */
       : JSON.stringify({ v: 2, inv: inv || undefined, req: req || undefined,
+                         // the other currency's request, a till in both's alone (`tapOffering`); absent on every other offer
+                         req2: req2 || undefined,
                          up: !this.offlineNow(),
                          /* With no route, this phone's till tag: a payer names
                           * itself to this phone by it, in a name for this
@@ -20808,6 +20939,57 @@ class Component extends DCLogic {
       : 'That request asks for ' + unit.toUpperCase() + ', which Foxy cannot pay over tap.';
   }
 
+  /* Which of a till's two requests for one price this phone pays (`req` the till's main currency's, `req2` the other's,
+   * 26d-tap.js `tapOffering`), by what it holds where it is:
+   *
+   *   - at a mint one of them lists, holding enough of that one's currency here: that one, in it, with nothing converted
+   *     (the keeper, 2026-11-02: "the POS will accept the dollars as dollars to save any conversion fees"); holding enough
+   *     of both, the one this phone's holder chose to hold ('dollars' or 'bitcoin'), else the main;
+   *   - anywhere else: the main's, whose invoice (`inv`, made in the main) is paid from another mint and lands in the main;
+   *     with no invoice on the offer, the one in sats, since only sats cross between mints (`tapCrossMint`), into the
+   *     default's sats.
+   *
+   * Holding too little of either here, the main's, and the screens after say what they say of any request this phone
+   * cannot cover (`tapUnitHeld`). Whatever is picked, the other is never paid: the till closes it once one is. */
+  tapPickOfTwo(main, other, inv) {
+    const W = window.FoxyWallet;
+    const a = W.decodeRequest ? W.decodeRequest(main) : null;
+    const b = W.decodeRequest ? W.decodeRequest(other) : null;
+    if (!a || !b) return a ? main : (b ? other : main);
+    const unitOf = (r) => (r.unit === 'usd' ? 'usd' : 'sat');
+    if (unitOf(a) === unitOf(b)) return main;
+    const strip = (u) => String(u || '').replace(/\/+$/, '');
+    const mine = strip(W.mintUrl);
+    const here = (r) => !!mine && (r.mints || []).some((m) => strip(m) === mine);
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn());
+    // what this phone holds here in a request's currency against what it asks (a request with no figure: anything held)
+    const covers = (r) => {
+      const u = unitOf(r);
+      if (u === 'usd' && !two) return false;
+      const have = this.unitBalance ? this.unitBalance(u) : 0;
+      const want = Math.round(Number(r.amount) || 0);
+      return have > 0 && (!(want > 0) || have >= want);
+    };
+    const fit = [a, b].filter((r) => here(r) && covers(r));
+    const word = (r) => (unitOf(r) === 'usd' ? 'dollars' : 'bitcoin');
+    if (fit.length === 1) {
+      console.log('[foxy] tap: a till offered dollars and bitcoin; paying in ' + word(fit[0]) + ', which this phone holds here');
+      return fit[0] === a ? main : other;
+    }
+    if (fit.length === 2) {
+      const hold = this.walletChoiceNow ? this.walletChoiceNow().hold : '';
+      const want = hold === 'dollars' ? 'usd' : hold === 'bitcoin' ? 'sat' : unitOf(a);
+      console.log('[foxy] tap: a till offered dollars and bitcoin, and this phone holds enough of both here; paying in ' + (want === 'usd' ? 'dollars' : 'bitcoin'));
+      return unitOf(a) === want ? main : other;
+    }
+    const sat = unitOf(a) === 'sat' ? a : b;
+    if (!inv && !here(a) && !here(b)) {
+      console.log('[foxy] tap: a till offered dollars and bitcoin, at mints this phone is not on, and no invoice; crossing in bitcoin');
+      return sat === a ? main : other;
+    }
+    return main;
+  }
+
   /* What the other phone offered, and whether ecash can pay it.
    *
    * `sameMint` is this wallet's own mint being named by their request — the
@@ -20819,7 +21001,10 @@ class Component extends DCLogic {
     try { o = JSON.parse(String(text || '')); } catch (e) { return null; }
     if (!o || o.v !== 2) return null;
     const inv = typeof o.inv === 'string' && W.classify(o.inv) === 'invoice' ? o.inv : '';
-    const req = typeof o.req === 'string' ? o.req : '';
+    /* A till that takes both offers a request in each currency for one price (`req2` beside `req`, the main's): this phone
+     * pays the one it can, and from here on it is that one request's offer like any other (`tapPickOfTwo`). */
+    const req = typeof o.req === 'string'
+      ? (typeof o.req2 === 'string' && o.req2 ? this.tapPickOfTwo(o.req, o.req2, inv) : o.req) : '';
     if (!inv && !req) return null;
     let sameMint = false;
     let theirs = [];
@@ -20865,7 +21050,7 @@ class Component extends DCLogic {
     /* A request at a mint this phone could move money to: one mint named, and
      * it is not this one. Nothing about whether it is worth doing — that is the
      * quote's answer, and the fee card's. */
-    const crossable = !usdUnit && !sameMint && theirs.length === 1 && !!String(theirs[0] || '').trim();
+    const crossable = !usdUnit && !sameMint && theirs.length >= 1 && !!String(theirs[0] || '').trim();
     /* Tri-state on purpose: true, false, and "they did not say". An older Foxy
      * says nothing, and nothing must not read as offline. */
     const theirRoute = typeof o.up === 'boolean' ? o.up : null;
@@ -24369,7 +24554,7 @@ class Component extends DCLogic {
       body: 'The card has signed and the mint has not answered yet.',
       dots: true, forMs: 70000, button: 'CLOSE',
       // (a card at another mint: the asking is over, and this phone goes home, `fcXmHome`)
-      go: () => { clearTimeout(this._fcCheckT); if (opt.xm) this.fcXmHome(); },
+      go: () => { clearTimeout(this._fcCheckT); if (opt.xm || opt.away) this.fcXmHome(); },
     });
     const settled = (how, row) => {
       clearTimeout(this._fcCheckT);
@@ -24377,7 +24562,7 @@ class Component extends DCLogic {
       /* A card at another mint: what the mint's answer comes to has been worked out there (`cardSettle`), and this phone goes home
        * before it is said. Its pieces were held for this phone's invoice and never melted, so a late "paid" is the card's, back on
        * it at its next tap, as a payment out of a card's own screen. */
-      if (opt.xm) this.fcXmHome();
+      if (opt.xm || opt.away) this.fcXmHome();
       /* Paying out of this phone: the mint's answer came too late, and the payment it was for was never made. The wallet has
        * owed all of it back to the card (21a-flashcard.js, `cardSettle`), and its next tap puts it back. */
       /* The same for a dollar card's cents held for this phone's own bitcoin invoice (`opt.btc.holding`): the invoice was never
@@ -24395,7 +24580,8 @@ class Component extends DCLogic {
         /* A dollar card paid a dollar receive in cents, straight into this phone's dollars: there is no invoice for its sats to
          * pay (`fcMoved`). And one paid for sats asked has its cents pay the sats invoice (`fcBtcPay`): the cents are not announced. */
         if (opt.usd && this.fcUnitOf(row) === 'usd') { opt.usd = null; this._fcUsd = null; }
-        if (opt.usd) this.fcUsdHush(id);
+        // (only where they pay a code: a dollar receive's card pays none now, its sats announced as they are, `payUsdByCard`)
+        if (opt.usd && opt.usd.bolt11) this.fcUsdHush(id);
         if (opt.btc && this.fcUnitOf(row) !== 'usd') opt.btc = null;
         if (opt.btc) this.fcBtcHush(id);
         this.fcMoved(opt);
@@ -24513,6 +24699,10 @@ class Component extends DCLogic {
      * swapped into the phone that reads them, and a cashier's phone holds nothing of the keeper's. Said here as well, so no
      * other way to this button reaches it. */
     if (this.tillRole && this.tillRole() === 'cashier') { console.log('[foxy] card: a cashier’s till takes no card'); return; }
+    // (a card taken at another of the till's mints is that payment's alone: `fcTillAway`)
+    this._fcTillAway = null;
+    // a till that takes both: the card pays in what it holds, and it stays in that (`payBothByCard`)
+    if (this.tillBoth && this.tillBoth()) { this.payBothByCard(); return; }
     // a receive into the dollar balance: a dollar card pays its cents, a bitcoin card the dollar invoice's sats (`payUsdByCard`)
     if (s.recvUnit === 'usd' && this.walletNow && this.walletNow('receive') === 'usd') { this.payUsdByCard(); return; }
     const W = this.fcW();
@@ -24520,6 +24710,67 @@ class Component extends DCLogic {
     const sats = (!s.invoiceIsAddress && W.amountOf && W.amountOf(s.invoice)) || this.wantedSats();
     if (!(sats > 0)) { this.toast('Enter an amount first.', true); return; }
     this.fcPayBegin(sats);
+  }
+
+  /* ---- a till that takes both, paid by a card ----------------------------------------------------------------------
+   *
+   * The card is asked the price in each currency, the dollars typed (or the sats typed put into cents at this phone's price)
+   * and the sats they come to, and pays in the one it holds, which stays in that one: a dollar card's cents are dollars here,
+   * a bitcoin card's sats are sats, and no invoice is paid with either, so nothing is converted and no fee is paid for it (the
+   * keeper, 2026-11-02: "the POS will accept the dollars as dollars to save any conversion fees and to make things faster").
+   * The invoice on screen, in the till's main, is for a card at a mint the till does not take, which pays it from there
+   * (`fcXmBegin`); a card at another mint the till does take is taken there (`fcTillAway`). */
+  payBothByCard() {
+    const s = this.state;
+    const W = window.FoxyWallet;
+    if (this.cardFlowBusy && this.cardFlowBusy()) return;
+    const main = this.tillMain ? this.tillMain() : 'sat';
+    const cents = Math.round(Number(main === 'usd' && s.recvAmount != null ? s.recvAmount : (this.centsTyped ? this.centsTyped() : 0)) || 0);
+    const sats = main === 'sat'
+      ? Math.round(Number((!s.invoiceIsAddress && W && W.amountOf && W.amountOf(s.invoice)) || this.wantedSats()) || 0)
+      : Math.round(Number(this.wantedSats()) || 0);
+    if (!(cents > 0) && !(sats > 0)) { this.toast('Enter an amount first.', true); return; }
+    // (`both`: no invoice for a bitcoin card's sats to pay, as a dollar receive's has, `fcPayRun`)
+    const usd = { cents, bolt11: '', hash: '', sats: 0, both: true, main };
+    if (W && W.cardOnline && !W.cardOnline()) {
+      if (!(W.cardOffline && W.cardOffline()) || !this.fcW()) { this.offlineNo('A card payment'); return; }
+      this.fcPayStart(sats, true, null, null, usd);
+      return;
+    }
+    if (!this.fcW()) return;
+    if (this.offlineNow()) { this.offlineNo('A card payment'); return; }
+    console.log('[foxy] card: a till in both asks the card for ' + cents + ' cents or ' + sats + ' sats, whichever it holds');
+    this.fcPayStart(sats, false, null, null, usd);
+  }
+
+  /* A card whose money is at another of the keeper's till's mints, not the one the phone is on (`fcXmBegin`): taken there, in
+   * what it holds, as a phone's token at that mint is (the keeper, 2026-11-02), with no crossing and no invoice. The phone
+   * visits the card's mint for the tap (`fcXmGo`, the same visit a card paying from its mint makes), the card pays this
+   * phone's pile there as it pays one at the mint the phone is on, and the phone comes home when the card's part is over
+   * (`fcTillAwayHome`). A dollar till's code is not handed to a bitcoin card there: dollars only. */
+  fcTillAway(e, sats, usd) {
+    const x = { mint: this.fcMintKey(e.mint), tillAway: true };
+    const ask = (usd && !usd.both) ? { cents: Math.round(Number(usd.cents) || 0), bolt11: '', hash: '', sats: 0 } : usd;
+    const n = (usd && !usd.both) ? 0 : sats;
+    this._fcTillAway = x;
+    console.log('[foxy] card: its money is at ' + x.mint + ', one of the till’s mints; taken there');
+    this.fcXmGo(x, () => this.fcPayStart(n, false, null, null, ask));
+  }
+
+  /* Home from a card taken at another of the till's mints, once the card's part is over: at once, or where change is still to
+   * go back on at a second tap, when that is done (a card flow no longer running), and in ten minutes whatever. */
+  fcTillAwayHome() {
+    const x = this._fcTillAway;
+    this._fcTillAway = null;
+    clearTimeout(this._fcTillAwayT);
+    if (!x) return;
+    const until = Date.now() + 600000;
+    const go = () => {
+      if (this.cardFlowBusy && this.cardFlowBusy() && Date.now() < until) { this._fcTillAwayT = setTimeout(go, 1500); return; }
+      this._fcTillAwayT = null;
+      this.fcXmHome();
+    };
+    go();
   }
 
   /* ---- a dollar receive, paid by a card -----------------------------------------------------------------------------
@@ -24532,106 +24783,49 @@ class Component extends DCLogic {
    * route (24-render-receive-and-send.js, `recvCardShown`); with no route the card signs its cents over to this phone as a
    * bitcoin card signs its sats (`cardKeepSigned`).
    *
-   * A bitcoin card is asked for sats as well, where there are sats to ask. Online, the dollar invoice on the receive screen is a
-   * Lightning invoice the mint made for the cents asked, naming its own number of sats at the mint's rate: the card pays
-   * exactly that number, read off the invoice as every invoice's amount is read (`amountOf`), and never a figure this phone
-   * works out at its own price, since a till that converted would take the wrong amount whenever its price and the mint's
-   * differ. The tap is the bitcoin receive's in every way (the sheet, the PIN, the limits, the refusals, the change), and then
-   * the sats it brought pay the dollar invoice, from this phone, as any payment is made (`fcUsdPay`). The mint says that
-   * invoice is paid, and the dollars land exactly as they land for a dollar invoice paid from anywhere else (12-receive.js,
-   * `usdInvoiceUp`).
+   * A bitcoin card is asked for sats as well: the dollars shown, at this phone's own price, as a tap pays a dollar price in
+   * sats (`sats4usd`, tests/sats-for-dollars-tap.js). Online or not, nothing waits for the mint's dollar invoice: that code is
+   * for a Lightning payer, and a card tapped the moment the screen opened was held up by it for nothing (the keeper,
+   * 2026-11-02). The card's sheet says the dollars with the sats under them, which is the figure its holder agrees to by
+   * paying; the price is kept with the payment (`terms`), and the sats become dollars once they have settled with the mint
+   * (`convert`), as the offline payment's always have. With no price, one too old, or a build that cannot turn sats into
+   * dollars (`W.convertOne`), a bitcoin card is asked for nothing it holds, and is told why once it is read (`fcFailed`, before
+   * its PIN); a dollar card pays as ever. With the card's switch off and no route, the words are the ones a card payment with
+   * no connection always has.
    *
-   * The card's money here is at this phone's own mint (one at another mint pays the code from its own mint instead, with the
-   * charge shown first: `fcXmBegin`), so the invoice the sats pay is one the same mint made. That is the common case of the mint
-   * paying its own invoice, which it settles in its own books with no Lightning payment in between.
-   *
-   * Offline there is no invoice to pay. Where this build can turn sats into dollars later (`W.convertOne`, a wallet with
-   * two balances), a bitcoin card is asked for the sats the dollars come to at this phone's own last price, and that price is
-   * kept with the payment (`terms`) so the sats become dollars once the payment has settled with the mint. With no price, one
-   * too old, or no such build, a bitcoin card is asked for nothing it holds, and is told why once it is read (`fcFailed`,
-   * before its PIN); a dollar card pays as ever. With the card's switch off, the words are the ones a card payment with no
-   * connection always has.
-   *
-   * The invoice lives as long as the mint said it would (the clock on screen, `recvExpiresAt`), and a melt sent after
-   * that is refused. A tap, a PIN and the mint's answer take seconds, so a code with less than a quarter of a minute left
-   * is not handed to a card: a new one is asked for first, and CARD pressed again pays that. */
+   * A card at another mint than this phone's pays the code on screen from its own mint, with the charge shown first
+   * (`fcXmBegin`): that one does need the code, and waits for it there. */
   payUsdByCard() {
     const s = this.state;
     const W = window.FoxyWallet;
-    // (nor here, which the code's own wait presses again: `payByCard`)
+    // (nor here, which the code's own wait pressed again: `payByCard`)
     if (this.tillRole && this.tillRole() === 'cashier') return;
-    /* A card flow already going (a sheet up, its PIN asked, a card asking to be tapped again): CARD starts no second one. The
-     * wait's own timer pressed CARD again after the person had, and two sheets were begun for one code, the second taking over
-     * `_fcUsd` from the payment the first was making. */
-    if (this.cardFlowBusy && this.cardFlowBusy()) { clearTimeout(this._fcUsdCodeWaitT); this._fcUsdCodeWait = null; return; }
+    /* A card flow already going (a sheet up, its PIN asked, a card asking to be tapped again): CARD starts no second one. */
+    if (this.cardFlowBusy && this.cardFlowBusy()) return;
     // the cents asked, as the receive screen holds them, or as typed while the mint is still making the code
     const cents = Math.round(Number(s.recvAmount != null ? s.recvAmount : (this.centsTyped ? this.centsTyped() : 0)) || 0);
-    if (W && W.cardOnline && !W.cardOnline()) {
-      if (!(W.cardOffline && W.cardOffline()) || !this.fcW()) { this.offlineNo('A card payment'); return; }
-      if (!(cents > 0)) { this.toast('Enter an amount first.', true); return; }
-      const lp = (W.lastPrice && W.lastPrice()) || { rate: 0, at: 0, ageMs: 0 };
-      const old = !(lp.rate > 0) || !!(W.priceTooOld && W.priceTooOld(lp.at));
-      // (no invoice to melt: `usd` names the cents alone, and a bitcoin card's sats are kept as bitcoin until they settle and convert)
-      const usd = { cents, bolt11: '', hash: '', sats: 0 };
-      if (!W.convertOne || old) {
-        // why a bitcoin card is not asked for sats here, said if one is tapped (`fcFailed`)
-        usd.satsWhy = !W.convertOne ? 'build' : lp.rate > 0 ? 'old' : 'none';
-        usd.price = lp;
-        this.fcPayStart(0, true, null, null, usd);
-        return;
-      }
-      const sats = Math.round(cents / 100 / lp.rate * 1e8);
-      // the price is this phone's own (`own`), which the payment's screens and history say it is
-      this.fcPayStart(sats, true, null, null, usd, { usd: cents, rate: lp.rate, ageMs: lp.ageMs, seenAt: lp.at, convert: true, own: true });
-      return;
+    const cardOff = !!(W && W.cardOnline && !W.cardOnline());
+    if (cardOff && (!(W.cardOffline && W.cardOffline()) || !this.fcW())) { this.offlineNo('A card payment'); return; }
+    if (!cardOff) {
+      if (!this.fcW()) return;
+      if (this.offlineNow()) { this.offlineNo('A card payment'); return; }
     }
-    const bolt11 = s.invoiceIsAddress ? '' : String(s.invoice || '');
-    /* The code still being made by the mint (12-receive.js, `_usdCodeMaking`; or asked again, `_requoting`): a bitcoin card
-     * needs it, and reading the card now refused it ("tap it again when the dollar code is on screen"), as the owner found
-     * pressing CARD the moment the screen opened. Wait for the code, two and a half seconds at most (the mint answers in about
-     * one; a dollar card needs no code, and is not kept waiting on a mint that is slow), then go on as before. The wait is this
-     * receive's (`run`): one begun for another, or for this one and left when its screen was, is not this one's, and its start
-     * no longer cuts this one short. */
-    if (!bolt11 && (this._usdCodeMaking === this._invoiceRun || this._requoting)) {
-      const was = this._fcUsdCodeWait;
-      if (!was || was.run !== this._invoiceRun) {
-        this._fcUsdCodeWait = { at: Date.now(), run: this._invoiceRun };
-        this.toast('One moment: the code is being made.', false);
-      }
-      const wait = this._fcUsdCodeWait;
-      if (Date.now() - wait.at < 2500) {
-        clearTimeout(this._fcUsdCodeWaitT);
-        this._fcUsdCodeWaitT = setTimeout(() => {
-          // the receive screen left, or another receive on it: the wait is over, and nothing is pressed for it
-          if (this.state.screen !== 'confirm' || this._invoiceRun !== wait.run) { if (this._fcUsdCodeWait === wait) this._fcUsdCodeWait = null; return; }
-          this.payUsdByCard();
-        }, 250);
-        return;
-      }
-    }
-    // past the wait, or none: its timer, if one is armed, would press CARD a second time
-    clearTimeout(this._fcUsdCodeWaitT);
-    this._fcUsdCodeWait = null;
-    const sats = bolt11 && W && W.amountOf ? Math.round(Number(W.amountOf(bolt11)) || 0) : 0;
-    // a code on screen that names no sats is not one to pay, nor to pay around
-    if (bolt11 && !(sats > 0)) { this.toast('The invoice is still being made.', true); return; }
-    if (!this.fcW()) return;
-    if (this.offlineNow()) { this.offlineNo('A card payment'); return; }
     if (!(cents > 0)) { this.toast('Enter an amount first.', true); return; }
-    const ends = Number(s.recvExpiresAt) || 0;
-    if (bolt11 && ends && ends - Date.now() < 15000) {
-      this.toast('This code has almost run out. A new one is being made; press CARD when it is up.', true);
-      if (this.recvRequote) this.recvRequote(this._invoiceRun);
+    const lp = (W && W.lastPrice && W.lastPrice()) || { rate: 0, at: 0, ageMs: 0 };
+    const old = !(lp.rate > 0) || !!(W.priceTooOld && W.priceTooOld(lp.at));
+    // (no invoice in it: a bitcoin card's sats are kept as bitcoin until they settle and convert, and announced as they land)
+    const usd = { cents, bolt11: '', hash: '', sats: 0 };
+    if (!W.convertOne || old) {
+      // why a bitcoin card is not asked for sats here, said if one is tapped (`fcFailed`)
+      usd.satsWhy = !W.convertOne ? 'build' : lp.rate > 0 ? 'old' : 'none';
+      usd.price = lp;
+      this.fcPayStart(0, cardOff, null, null, usd);
       return;
     }
-    // no code yet: a dollar card needs none, and a bitcoin card is told to tap again once it is up
-    if (!bolt11) { this.fcPayStart(0, false, null, null, { cents, bolt11: '', hash: '', sats: 0 }); return; }
-    // the code on screen paid by a card already, its dollars landing: no second sheet for it (`fcUsdLanding`, as `fcPayBegin`)
-    if (this.fcUsdLanding()) { this.toast('The card has paid this code. The dollars land in a moment.', true); return; }
-    const usd = { bolt11, hash: String(s.invoiceHash || ''), cents, sats, run: this._invoiceRun, ends };
-    // the code on screen is kept while the card pays it (`fcUsdHolds`), and not replaced when its minute runs out
-    this._fcUsd = usd;
-    this.fcPayStart(sats, false, null, null, usd);
+    const sats = Math.round(cents / 100 / lp.rate * 1e8);
+    console.log('[foxy] card: a dollar receive asks a bitcoin card for ' + sats + ' sats at this phone’s price, with no invoice waited for');
+    // the price is this phone's own (`own`), which the payment's screens and history say it is
+    this.fcPayStart(sats, cardOff, null, null, usd, { usd: cents, rate: lp.rate, ageMs: lp.ageMs, seenAt: lp.at, convert: true, own: true });
   }
 
   /* Whether the dollar code `hash` is being paid by a card at this moment: tapped, its PIN asked for, waiting for the
@@ -24962,7 +25156,7 @@ class Component extends DCLogic {
       // a card at another mint: backing out of the pad ends the visit to its mint (`fcXmHome`)
       /* and the currency its holder chose for this payment is this payment's alone (`fcPayChoose`): backed out of, the next payment asks
        * again */
-      onBack: () => { this._fcFrom = null; if (terms && terms.xm) this.fcXmHome(); },
+      onBack: () => { this._fcFrom = null; if (terms && terms.xm) this.fcXmHome(); if (this._fcTillAway) { this._fcTillAway = null; this.fcXmHome(); } },
     }, (pin) => this.fcPayRun(sats, pin, offline, resuming, share, send, usd, terms));
   }
 
@@ -25019,7 +25213,11 @@ class Component extends DCLogic {
                   /* (the pad asked again is in the unit of the card that refused, where it said: `opt.cardUnit`, set as it refuses) */
                   again: () => (pin ? this.fcPayAsk(sats, offline, false, share, send, usd, terms, opt.cardUnit) : this.fcPayStart(sats, offline, share, send, usd, terms)) };
     // a dollar receive: when the mint has said paid, a bitcoin card's sats pay its invoice (`fcMoved`, `fcUsdPay`)
-    if (usd) opt.usd = usd;
+    // (not a till in both's, whose card's sats stay sats: `payBothByCard`)
+    if (usd && !usd.both) opt.usd = usd;
+    // a card taken at another of the till's mints, the phone there for it: home when the card's part is over (`fcTillAway`)
+    const away = !!(this._fcTillAway && this.fcXmThere(this._fcTillAway));
+    if (away) opt.away = true;
     // a bitcoin receive paid by a dollar card online: its cents pay the receive's own invoice (`fcMoved`, `fcBtcPay`)
     if (cross && terms.online) opt.btc = terms;
     if (btcHold) terms.holding = true;
@@ -25089,6 +25287,8 @@ class Component extends DCLogic {
          * mint takes (a dollar code's melt says its own words a moment later, `fcUsdPay`). The paid screen takes it down. */
         // (not where the card is owed change: the next thing is its second tap, said by TAP TO RECEIVE, not a wait)
         const owesChange = !!(r && r.change && this.fcAmt(r.change) > 0);
+        // taken at another of the till's mints: home, once the change (if any) is back on the card (`fcTillAwayHome`)
+        if (away) this.fcTillAwayHome();
         /* For every card payment of the code on screen (the design's rule: never the code read as unpaid while the mint works): at the
          * card's own mint PAYMENT RECEIVED follows in the next moment and takes it down; a melt (another mint, a dollar card paying
          * sats, sats paying a dollar code) keeps it up until the mint answers. */
@@ -25129,7 +25329,7 @@ class Component extends DCLogic {
          * before anything else is done with the payment, which is not announced on top of them. */
         if (opt.share) this.fcShareMoved(opt.share, r && r.hash);
         // a dollar receive: the card's sats are not announced; the dollars they buy are (and the mirror: the sats the cents buy)
-        if (opt.usd) this.fcUsdHush(r && r.hash);
+        if (opt.usd && opt.usd.bolt11) this.fcUsdHush(r && r.hash);
         if (opt.btc) this.fcBtcHush(r && r.hash);
         const ch = r && r.change;
         const owe = this.fcAmt(ch);
@@ -25158,6 +25358,9 @@ class Component extends DCLogic {
         /* A card at another mint than this phone's, at a receive (not a share of a bill, nor a card paying out of this phone): it pays
          * this phone's own invoice from its mint, online, with the charge shown first (`fcXmBegin`); with no route it is refused. */
         if (e && e.card === 'other-mint' && !send && !share && !xm) { this.fcXmBegin(e, sats, offline, usd); return; }
+        /* Taken at another of the till's mints, and not paid: home, except for a PIN's second tap, which is at the same mint (its
+         * pad's back comes home, `fcPayAsk`), or a tap left part way, taken up there (`fcTillAwayHome` waits for it). */
+        if (away && !(e && e.card === 'pin-needed' && !pin) && !(e && e.card === 'waiting')) this.fcTillAwayHome();
         /* Paying from another mint, and not paid: home again, except where the card's own flows go on at that mint (a tap left part way,
          * to be taken up there; a mint that has not answered, asked again there), which come home when they end (`fcXmStay`). */
         /* (And the card wanting its PIN, whose pad comes up next: the tap after it is at the same mint, and backing out of the pad comes
@@ -25645,6 +25848,25 @@ class Component extends DCLogic {
     const s = this.state;
     if (!W) return;
     if (offline || this.offlineNow() || (W.cardOnline && !W.cardOnline())) { this.fcXmOffline(); return; }
+    /* At another of the keeper's till's mints: taken there, in what the card holds, and no invoice paid (`fcTillAway`). Only a
+     * card at a mint the till does not take pays the till's invoice from its own. */
+    const key = this.fcMintKey(e && e.mint);
+    if (this.tillRole && this.tillRole() === 'keeper' && key && (this.tillMintsNow ? this.tillMintsNow() : []).some((m) => this.fcMintKey(m) === key)) {
+      this.fcTillAway(e, sats, usd);
+      return;
+    }
+    /* A till in both: the invoice on screen is in its main, and that is what the card pays from its mint, so a payment from a
+     * mint the till does not take lands in the main (the keeper, 2026-11-02). */
+    if (usd && usd.both) {
+      usd = usd.main === 'usd' && !s.invoiceIsAddress && s.invoice
+        ? { cents: Math.round(Number(usd.cents) || 0), bolt11: String(s.invoice), hash: String(s.invoiceHash || ''), sats: 0, ends: Number(s.recvExpiresAt) || 0 }
+        : null;
+    }
+    /* A dollar receive's card carries no code (`payUsdByCard` waits for none): a card at a mint this phone does not take pays the
+     * one on screen, which it needs, and waits for it here. */
+    if (usd && !usd.bolt11 && !s.invoiceIsAddress && s.invoice) {
+      usd = Object.assign({}, usd, { bolt11: String(s.invoice), hash: String(s.invoiceHash || ''), ends: Number(s.recvExpiresAt) || 0 });
+    }
     const bolt11 = usd ? String(usd.bolt11 || '') : (s.invoiceIsAddress ? '' : String(s.invoice || ''));
     if (!bolt11) { this.toast('The invoice is still being made. Press CARD when it is up.', true); return; }
     /* A card of software 1.23 that holds dollars and bitcoin pays from there in either: its holder is asked which, every time, on the
@@ -28611,7 +28833,8 @@ class Component extends DCLogic {
             n.card = 'needs-set-up';
             n.sheetText = cut ? 'Finish setting up the card' : 'Set up the card first';
             // (and its key, for the name typed for it on NAME CARD, 26j-card-wheel.js `fcNameSettle`)
-            n.info = Object.assign({}, card.info, { keepPin: cut && !!card.info.hasRecord, key: card.key });
+            // (a PIN on a card with any record is kept by the card, the card maker's design-only record among them: `recordSet`)
+            n.info = Object.assign({}, card.info, { keepPin: cut && !!(card.info.hasRecord || card.info.recordSet), key: card.key });
             throw n;
           }
           /* A card whose money is at another mint than this phone's: loaded there, online, from this phone's balance (`fcXlBegin`), with
@@ -32985,14 +33208,17 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     if (!req || req.unit === 'usd' || !W || !W.balances || !W.transferQuote) return false;
     if (this.offlineNow()) return false;
-    const want = this.pfMint(req.mints && req.mints[0]);
+    /* Every mint it names pays it as it stands, with no crossing (a till's, the default first); any other crosses into
+     * the default, `want`. It read the first alone, and offered a crossing from a mint the request also takes. */
+    const listed = this.reqMints(req).map((m) => this.pfMint(m));
+    const want = listed[0] || '';
     const need = Math.round(Number(req.sats) || 0);
     if (!want || !(need > 0)) return false;
     const here = this.pfHere();
     const piles = this.pfPiles().filter((p) => p.unit === 'sat' && p.have >= need);
     if (piles.length < 2) return false;
     const list = piles.map((p) => {
-      if (p.mint !== want) return this.pfEntry(p);
+      if (listed.indexOf(p.mint) < 0) return this.pfEntry(p);
       // at their mint: no fee, or where it is this phone's own, the mint's fee for the pieces (`sendShortfall`)
       let lack = null;
       try {
@@ -33031,9 +33257,10 @@ class Component extends DCLogic {
   pfReqSource(req) {
     const s = this.state;
     if (s.payFromFlow !== 'req' || !s.payMint || !req) return null;
-    const want = this.pfMint(req.mints && req.mints[0]);
+    // a crossing only from a mint the request does not name: one it names pays it there (`pfRequest`)
+    const listed = this.reqMints(req).map((m) => this.pfMint(m));
     const mint = this.pfMint(s.payMint);
-    return { mint: mint, plan: (want && mint !== want) ? this.pfFull(this.pfKey(mint, 'sat')) : null };
+    return { mint: mint, plan: (listed.length && listed.indexOf(mint) < 0) ? this.pfFull(this.pfKey(mint, 'sat')) : null };
   }
 
   /* For `makeTokenForRequest`: the crossing to make before the payment, when the source chosen is another mint than the
@@ -33181,7 +33408,9 @@ class Component extends DCLogic {
    * A phone put into the till can only RECEIVE and look at the HISTORY of this session. Everything else (send, cards, the
    * menu, the balance, scan and paste on the amount screen, the home screen) is out of reach until the till is closed.
    *
-   * Two roles, in `state.till` ({ role, since, pass }), which the app does not save:
+   * Two roles, in `state.till` ({ role, since, pass } for a cashier, { role, since, unit, main, mint, mints } for a keeper: `mint`
+   * the default of the mints the till takes, `unit` what it takes: 'sat', 'usd' or 'both', and `main` the one its QR invoice is
+   * made in and a payment from a mint it does not take lands in), which the app does not save:
    *
    *   keeper   the phone whose money it is. It opens the till from SETTINGS > POINT OF SALE behind the lock it already has
    *            (Face ID or the PIN), and closes it behind the same lock, so a phone handed across a counter cannot be
@@ -33191,9 +33420,10 @@ class Component extends DCLogic {
    *            never holds it. Its own money is hidden and untouched. It leaves with no PIN, and by itself when the code
    *            runs out. Its till survives a relaunch, after the ordinary lock (`tillResume`).
    *
-   * Every screen is one the app already has: SET AMOUNT, the receive screen, PAID, HISTORY, the cards, the PIN pad and the
-   * stage screen that shows a code. The one rule that holds it together is that every road home ends at the till's SET
-   * AMOUNT instead (`homeState`), and a home reached some other way is turned into it (`syncTill`). */
+   * Every screen is one the app already has: SET AMOUNT, the receive screen, PAID, HISTORY, the cards, the PIN pad, the
+   * stage screen that shows a code, and CURRENCY once, as the till opens, for the main currency of a till that takes both
+   * (`tillAskMain`). The one rule that holds it together is that every road home ends at the till's SET AMOUNT instead
+   * (`homeState`), and a home reached some other way is turned into it (`syncTill`). */
 
   // the screens a till has: its SET AMOUNT, the receive screen, PAID and HISTORY (`syncTill`)
   TILL_SCREENS = ['amount', 'confirm', 'paid', 'history'];
@@ -33204,17 +33434,43 @@ class Component extends DCLogic {
     return t && (t.role === 'keeper' || t.role === 'cashier') ? t.role : '';
   }
 
-  /** The cashier's pass ({ id, mint, unit, lock, to, exp }), or null for a keeper and outside the till. */
+  /** The cashier's pass ({ id, mint, mints, unit, lock, to, exp }), or null for a keeper and outside the till. */
   tillPassNow() {
     const t = this.state && this.state.till;
     return (t && t.role === 'cashier' && t.pass) ? t.pass : null;
   }
 
-  /* The cashier's unit, which every receive is asked in: the keeper's, written into the code. '' otherwise, so a keeper's
-   * till asks which balance as home's RECEIVE does (`walletNow`). */
+  /* What a till takes: 'sat', 'usd' or 'both'. The keeper's is what it holds at the default mint, as it chose when it set
+   * the wallet up (`tillUnitAt`); a cashier's is the code's, which carries the keeper's. '' outside the till. */
+  tillTakes(till) {
+    const t = till === undefined ? (this.state && this.state.till) : till;
+    if (!t) return '';
+    const u = t.role === 'cashier' ? (t.pass ? t.pass.unit : '') : t.unit;
+    return u === 'usd' || u === 'sat' || u === 'both' ? u : '';
+  }
+
+  /* The till's one currency, where it takes one, which every receive is in and nothing asks about. '' outside the till, and
+   * in a till that takes both, whose receives are in its main (`tillMain`) and take either. */
   tillUnit() {
-    const p = this.tillPassNow();
-    return p ? (p.unit === 'usd' ? 'usd' : 'sat') : '';
+    const u = this.tillTakes();
+    return u === 'usd' || u === 'sat' ? u : '';
+  }
+
+  /* A till that takes dollars and bitcoin both. Nothing asks at a receive: the receive is in the till's main, and a tap is
+   * offered a request in each, of which the payer pays the one it holds (12-receive.js, `tillTwinRequest`). */
+  tillBoth() {
+    return this.tillTakes() === 'both';
+  }
+
+  /* The currency a till's receives are in: its one, or in a till that takes both the main the keeper chose as it opened
+   * (`tillAskMain`), which a cashier's code carries (a code from before it did is in sats). Its QR invoice is made in it, and
+   * a payment from a mint the till does not take crosses into it. '' outside the till. */
+  tillMain(till) {
+    const t = till === undefined ? (this.state && this.state.till) : till;
+    const takes = this.tillTakes(t);
+    if (takes !== 'both') return takes;
+    const m = t.role === 'cashier' ? (t.pass && t.pass.main) : t.main;
+    return m === 'usd' ? 'usd' : 'sat';
   }
 
   /* The lock every cashier payment goes to: the keeper's key, from the code. '' for a keeper and outside the till, where
@@ -33232,16 +33488,16 @@ class Component extends DCLogic {
   }
 
   /* Where a road home ends: home, or in the till its SET AMOUNT, set up as home's RECEIVE sets it up (23-render-home-and-amount.js,
-   * `goReceive`). `till` is the till about to be, for the step that opens one; the one in state otherwise. A cashier's
-   * receive is in the keeper's unit, picked for it (`tillUnit`), so no question about this phone's own balances is put. */
+   * `goReceive`). `till` is the till about to be, for the step that opens one; the one in state otherwise. Every receive is in
+   * the till's main (`tillMain`), picked for it, so no question about this phone's own balances is put. The keypad starts in
+   * dollars whatever the main is, with its swap to sats as ever: the price is what was typed. */
   homeState(till) {
     const t = till === undefined ? (this.state && this.state.till) : till;
     if (!t) return { screen: 'home', stack: [] };
-    const unit = (t.role === 'cashier' && t.pass) ? (t.pass.unit === 'usd' ? 'usd' : 'sat') : '';
     return {
       screen: 'amount', stack: [], flow: 'receive', amount: '', unit: 'USD',
       asset: '', network: '', note: '', noteDraft: '', recipient: '', recipientKind: '',
-      wallet: unit, walletAuto: false, walletTapped: false,
+      wallet: this.tillMain(t), walletAuto: false, walletTapped: false,
     };
   }
 
@@ -33290,13 +33546,225 @@ class Component extends DCLogic {
     }, () => pad());
   }
 
-  // POINT OF SALE, past the lock: this phone's own till, on SET AMOUNT as home's RECEIVE opens it
-  tillStart() {
-    const till = { role: 'keeper', since: Date.now() };
-    console.log('[foxy] till: opened on this phone');
+  /* POINT OF SALE, past the lock: which mints the till takes, where this phone uses more than one (the SWITCH MINT list, asked
+   * as `tillPick` 'set': tick every mint, NEXT), then the default among them (`tillPick` 'default'), then the till. The till
+   * takes what the keeper said it holds when it set the wallet up, at the default (`tillUnitAt`); where that is both, one
+   * question more, DEFAULT CURRENCY (`tillAskMain`): the one the QR invoice is made in and a payment from a mint the till does
+   * not take lands in. A payment at a mint of the set stays at that mint; one from any other crosses into the default, the
+   * payer paying the crossing, which is the payer's own screen's to show. One set, one default, one currency or both, and
+   * one main, for the whole session: the cashier code carries them all. */
+  tillOpen() {
+    const W = window.FoxyWallet;
+    const mints = this.tillMints();
+    if (mints.length > 1) {
+      // the mint this phone is on ticked at first: a till at one mint is still one tap away
+      this.goSwitchMint({ tillPick: 'set', tillSet: mints.filter((m) => this.onMint(m.url)).map((m) => m.url) });
+      return;
+    }
+    const one = mints.length ? mints[0].url : ((W && W.mintUrl) || this.mintHost() || '');
+    this.tillAtMints([one], one);
+  }
+
+  /* The mints a till could take: the ones this phone uses (the wallet's list, the shipped list left out unless money is at one)
+   * and the one it is on, as SWITCH MINT shows them (06-wallet-boot-and-restore.js `allMints`). */
+  tillMints() {
+    const W = window.FoxyWallet;
+    let used = [];
+    try { used = (W && W.mints) ? W.mints() : []; } catch (e) { used = []; }
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const usedSet = {};
+    (Array.isArray(used) ? used : []).forEach((u) => { usedSet[strip(u)] = true; });
+    const all = this.allMints ? this.allMints() : [];
+    return all.filter((m) => this.onMint(m.url) || usedSet[strip(m.url)] || this.mintPile(m.url).sats > 0 || (this.mintPile(m.url).units || []).length > 0);
+  }
+
+  // whether `url` is ticked on the set list (compared without the scheme or a trailing slash, as `onMint` compares)
+  tillTicked(url) {
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    return ((this.state && this.state.tillSet) || []).some((u) => strip(u) === strip(url));
+  }
+
+  // the ticked mints, in the list's own order (the one this phone is on first)
+  tillSetNow() {
+    return this.tillMints().filter((m) => this.tillTicked(m.url)).map((m) => m.url);
+  }
+
+  // a row of the set list tapped: ticked, or not
+  tillSetToggle(url) {
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    this.setState((p) => {
+      const set = p.tillSet || [];
+      const had = set.some((u) => strip(u) === strip(url));
+      return { tillSet: had ? set.filter((u) => strip(u) !== strip(url)) : set.concat([url]) };
+    });
+  }
+
+  /* NEXT under the set list: grey, and nothing, with none ticked; with one, that one is the default and nothing is asked;
+   * with more, DEFAULT MINT asks which, on the same list. */
+  tillSetNext() {
+    const set = this.tillSetNow();
+    if (!set.length) return;
+    if (set.length === 1) { this.tillMintPick(set[0]); return; }
+    this.setState({ tillPick: 'default' });
+  }
+
+  // the default picked (or the one mint ticked): off the list, and on to the till at the ticked set
+  tillMintPick(url) {
+    const set = this.tillSetNow();
+    this.setState((p) => ({ screen: (p.stack || []).length ? p.stack[p.stack.length - 1] : 'home', stack: (p.stack || []).slice(0, -1), tillPick: false, tillSet: [] }));
+    this.tillAtMints(set.length ? set : [url], url);
+  }
+
+  /* The till at the mints in `set`, `def` the default among them: the wallet told of the set (`tillKeeperOpen`, which checks
+   * every mint takes a lock and visits the default where it is not the mint this phone is on, keeping the way home), then
+   * the till, in what the keeper holds at the default (`tillUnitAt`). An opening that fails opens no till. A till at the one mint this phone is on is told to the
+   * wallet too, with nothing on screen while it is: the wallet's record of the till is what a cashier code reads its mints
+   * from, and one left by an earlier till (an app killed in it) handed this till's cashiers that till's mints
+   * (review, stale-keeper). */
+  tillAtMints(set, def) {
+    const W = window.FoxyWallet;
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const list = (set || []).filter((u, i, a) => !!u && a.findIndex((x) => strip(x) === strip(u)) === i);
+    if (!list.some((u) => strip(u) === strip(def))) list.unshift(def);
+    // the default first, which is the order every request names them in (`tillMintsNow`)
+    const ordered = [def].concat(list.filter((u) => strip(u) !== strip(def)));
+    const away = !this.onMint(def);
+    if (!W || !W.tillKeeperOpen) {
+      const unit = this.tillUnitAt(def);
+      if (unit === 'both') { this.tillAskMain(def, ordered, false); return; }
+      this.tillStart({ unit: unit, mint: def, mints: ordered });
+      return;
+    }
+    // a payment or a claim under way finishes at the mint it started on (`refuseSwitchWhileBusy`)
+    if (away && this.refuseSwitchWhileBusy && this.refuseSwitchWhileBusy()) return;
+    let cancelled = false;
+    // nothing to wait on worth a screen at the one mint the phone is on
+    const staged = away || list.length > 1;
+    if (staged) {
+      this.stageScreen('tillOpen', {
+        art: '', title: 'POINT OF SALE', body: 'Opening the till at ' + this.mintNameOf(def), dots: true, button: 'CANCEL',
+        go: () => { cancelled = true; },
+      });
+    }
+    Promise.resolve(W.tillKeeperOpen(list, def)).then((r) => {
+      if (staged) this.hideStage('tillOpen');
+      const moved = away || !!(r && r.moved);
+      if (cancelled) {
+        Promise.resolve(W.tillKeeperClose ? W.tillKeeperClose() : null).then((b) => { if (moved || (b && b.moved)) this.walletReady({ name: this.mintHost() }); }, () => {});
+        return;
+      }
+      if (moved) this.walletReady({ name: this.mintHost() });
+      const unit = this.tillUnitAt(def);
+      if (unit === 'both') { this.tillAskMain(def, ordered, moved); return; }
+      this.tillStart({ unit: unit, mint: def, mints: ordered });
+    }, (e) => {
+      if (staged) this.hideStage('tillOpen');
+      if (cancelled) return;
+      this.blockedCard('tillOpenFailed', { title: 'NO TILL', reason: (W.reason ? W.reason(e) : String((e && e.message) || e)), chip: 'This phone is where it was.' });
+    });
+  }
+
+  /* What the till takes at its default mint, `def`: what the keeper chose to hold when it set the wallet up (`walletChoiceNow`),
+   * of what that mint issues. Dollars for 'dollars', sats for 'bitcoin', and both for 'both' at a mint that issues both;
+   * sats where nothing was chosen, or the mint issues one (dollars only at a mint that issued no sats). A choice the mint
+   * cannot meet falls to what it does issue. The mint's own keys on file say what it issues, and the connected mint's flag
+   * as well where the phone is on it: the keys were read a moment after a visit and said one unit, at a mint that issues
+   * both. Never asked: the keeper said it once, at set-up. */
+  tillUnitAt(def) {
+    const W = window.FoxyWallet;
+    let have = [];
+    try { have = (W && W.mintUnits) ? W.mintUnits(def) : []; } catch (e) { have = []; }
+    if (!Array.isArray(have)) have = [];
+    const here = !!(this.onMint && this.onMint(def)) && !!(this.twoUnitsOn && this.twoUnitsOn());
+    const usd = have.indexOf('usd') >= 0 || here;
+    const sat = have.indexOf('sat') >= 0 || here || !have.length;
+    if (!usd) return 'sat';
+    if (!sat) return 'usd';
+    const hold = this.walletChoiceNow ? this.walletChoiceNow().hold : '';
+    return hold === 'dollars' ? 'usd' : hold === 'both' ? 'both' : 'sat';
+  }
+
+  /* DEFAULT CURRENCY, for a till that takes both (`tillUnitAt`): asked once, as it opens, after DEFAULT MINT, on the CURRENCY
+   * screen the cards ask on (26f-flashcard.js, `fcPickUnit`), with what this phone holds of each at the default and nothing
+   * greyed: either can be the main. The answer is the till's `main`; it takes both all the same. The wallet's visit to the
+   * default is already made (`moved`), and stands while it is asked. */
+  tillAskMain(def, mints, moved) {
+    this._tillMainAsk = { def: def, moved: !!moved };
+    this.fcPickUnit({
+      question: 'DEFAULT CURRENCY',
+      foot: 'The QR invoice is made in it, and a payment from a mint you did not pick lands in it. A tap pays in either.',
+      bal: null, short: { usd: '', sat: '' }, why: '',
+    }, (u) => {
+      this._tillMainAsk = null;
+      this.tillStart({ unit: 'both', main: u === 'usd' ? 'usd' : 'sat', mint: def, mints: mints });
+    });
+  }
+
+  /* The round back button while the till is being opened (01-ui-basics.js, `back`): off DEFAULT MINT, the set list again with
+   * its ticks; off the set list, the list is left as any screen is; off DEFAULT CURRENCY, the opening stops: no till, the
+   * wallet's record of it let go and the phone home from a visit to the default (`tillKeeperClose`), and the screen it was
+   * opened from, as back off any question. True where it was handled here. */
+  tillOpenBack() {
+    const s = this.state || {};
+    if (s.screen === 'switchMint' && s.tillPick === 'default') { this.setState({ tillPick: 'set' }); return true; }
+    if (s.screen === 'switchMint' && s.tillPick) { this.setState({ tillPick: false, tillSet: [] }); return false; }
+    if (s.screen === 'currency' && s.currencyFlow === 'card' && this._tillMainAsk && !s.till) {
+      const W = window.FoxyWallet;
+      const was = this._tillMainAsk;
+      this._tillMainAsk = null;
+      this._fcUnitThen = null;
+      this.setState({ currencyFlow: '', curCard: null, curBoth: false });
+      console.log('[foxy] till: back off DEFAULT CURRENCY; no till');
+      Promise.resolve(W && W.tillKeeperClose ? W.tillKeeperClose() : null)
+        .then((b) => { if (was.moved || (b && b.moved)) this.walletReady({ name: this.mintHost() }); }, () => {});
+      return false;
+    }
+    return false;
+  }
+
+  /* The till itself, on SET AMOUNT as home's RECEIVE opens it, in what it takes (`o.unit`: 'sat', 'usd' or 'both'), with its
+   * main (`o.main`, for both: sats where none is named), at the mints chosen (`o.mints`, `o.mint` the default, where the phone
+   * now is). A till opened with none named is at the mint the phone is on. */
+  tillStart(o) {
+    const W = window.FoxyWallet;
+    const unit = o && (o.unit === 'usd' || o.unit === 'both') ? o.unit : 'sat';
+    const main = unit === 'both' ? (o && o.main === 'usd' ? 'usd' : 'sat') : unit;
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const def = String((o && o.mint) || (W && W.mintUrl) || this.mintHost() || '');
+    const named = (o && Array.isArray(o.mints)) ? o.mints.filter((u) => !!u) : [];
+    const mints = [def].concat(named.filter((u, i) => strip(u) !== strip(def) && named.findIndex((x) => strip(x) === strip(u)) === i));
+    const till = { role: 'keeper', since: Date.now(), unit: unit, main: main, mint: def, mints: mints };
+    console.log('[foxy] till: opened on this phone, in ' + unit + (unit === 'both' ? ' (' + main + ' first)' : '') + ' at ' + strip(def)
+      + (mints.length > 1 ? ' and ' + (mints.length - 1) + ' more mint' + (mints.length > 2 ? 's' : '') : ''));
     // the requests made before it are let go, so none from before is shown in the till (`forgetRequests`)
     if (this.forgetRequests) this.forgetRequests();
     this.setState(Object.assign({ till: till, open0: false, menuSettingsOpen: false }, this.homeState(till)));
+    /* The rows at the till's mints are read once now and marked seen, not raised: a mint the phone had not been on this session
+     * has a whole past that is not this session's (16-history-lists.js). */
+    this._seenSeeded = false;
+    this._seededFor = this.mintHost();
+    this.loadHistory();
+  }
+
+  /* The mints a till's requests name, the default first: the keeper's set, or the one a cashier's code carries (a code from
+   * before codes carried a set names its one mint). [] outside the till. */
+  tillMintsNow() {
+    const t = this.state && this.state.till;
+    if (!t) return [];
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const src = t.role === 'cashier' ? (t.pass || null) : t.role === 'keeper' ? t : null;
+    if (!src || !src.mint) return [];
+    const list = (Array.isArray(src.mints) && src.mints.length ? src.mints : [src.mint]).filter((u) => !!u);
+    return [String(src.mint)].concat(list.filter((u, i) => strip(u) !== strip(src.mint) && list.findIndex((x) => strip(x) === strip(u)) === i).map(String));
+  }
+
+  /* A line on the till's SET AMOUNT for a till at more than one mint: the default, which is where it is, and how many more it
+   * takes. '' for a till at one mint, which says nothing as it never did. */
+  tillWhereLine() {
+    const m = this.tillMintsNow();
+    if (m.length < 2) return '';
+    const more = m.length - 1;
+    return 'At ' + this.mintNameOf(m[0]) + ' and ' + more + ' more mint' + (more > 1 ? 's' : '');
   }
 
   /* The X on the till's SET AMOUNT. The keeper's is behind the lock; the cashier's asks only whether, since the money it
@@ -33351,12 +33819,18 @@ class Component extends DCLogic {
     this._tillRunOutT = null;
     this._tillRunOut = false;
     this._tillRunOutSaid = false;
+    const wasKeeper = !!(this.state.till && this.state.till.role === 'keeper');
     if (this.state.till) console.log('[foxy] till: closed');
     // and a request locked to a keeper is never shown again once the till is closed (12-receive.js, `forgetRequests`)
     if (this.forgetRequests) this.forgetRequests();
     this.setState({ till: null, screen: 'home', stack: [], amount: '', flow: '', wallet: '', walletAuto: false, walletTapped: false });
     this.loadHistory();
     this.refreshBalance();
+    // a keeper's till run at another of its mints: home to its own, said as a switch is said
+    const W = window.FoxyWallet;
+    if (wasKeeper && W && W.tillKeeperClose) {
+      Promise.resolve(W.tillKeeperClose()).then((r) => { if (r && r.moved) this.walletReady({ name: this.mintHost() }); }, () => {});
+    }
   }
 
   // when a cashier code runs out, in the words the clock on the phone would use: "Mon, 2:45 PM"
@@ -33380,7 +33854,15 @@ class Component extends DCLogic {
       art: '', title: 'CASHIER CODE', body: 'Making the code', dots: true, button: 'CANCEL',
       go: () => { if (this._tillPassRun === run) this._tillPassRun = 0; },
     });
-    Promise.resolve(W.tillPassMake()).then((p) => {
+    /* In what the till takes where one is open ('sat', 'usd' or 'both': `s.till.unit`), at the till's mints, the default
+     * first: the screen's own till, not whatever the wallet has on record. The wallet's own default otherwise. */
+    const keeper = this.tillRole() === 'keeper';
+    const unit = keeper ? this.tillTakes() : '';
+    const mints = keeper ? this.tillMintsNow() : [];
+    // (and a till in both, its main: the code carries it, so a cashier's QR invoice is in it too)
+    const main = keeper && unit === 'both' ? this.tillMain() : '';
+    const ask = unit || mints.length ? Object.assign(unit ? { unit } : {}, main ? { main } : {}, mints.length ? { mints } : {}) : undefined;
+    Promise.resolve(W.tillPassMake(ask)).then((p) => {
       if (this._tillPassRun !== run) return;
       if (!p || !p.text) throw new Error('No code was made.');
       this.stageScreen('tillPass', {
@@ -33573,12 +34055,48 @@ class Component extends DCLogic {
   tillAccept(text, kind) {
     if (kind === 'token') {
       if (this.tillRole() === 'cashier') this.tillTokenIn(text);
+      else if (this.tillAwayToken(text)) this.tillTakeAway(text);
       else this.takeTokenFromPaste(text);
       return true;
     }
     if (kind === 'till') { this.toast('Leave the till first.', true); return false; }
     this.toast('The till only receives. Ask them to pay this till’s code.', true);
     return false;
+  }
+
+  /* Whether a token scanned at a keeper's till is at another of the till's mints than the one the phone is on: taken
+   * there, where it stays (`tillTakeAway`). It went to the paste's way in, which offered to switch the phone to that mint
+   * or move the money to this one, when the till takes that mint as it stands (review). */
+  tillAwayToken(text) {
+    const W = window.FoxyWallet;
+    if (this.tillRole() !== 'keeper' || !W || !W.tokenInfo) return false;
+    let info = null;
+    try { info = W.tokenInfo(text); } catch (e) { info = null; }
+    if (!info || !info.mint) return false;
+    const canon = (u) => (W.canonicalMint ? W.canonicalMint(u) : String(u || '').replace(/\/+$/, ''));
+    const at = canon(info.mint);
+    return at !== canon(W.mintUrl) && this.tillMintsNow().some((m) => canon(m) === at);
+  }
+
+  /* A token at another of the till's mints, taken there by the wallet without the phone moving (`receiveToken` with
+   * `opts.away`), the money staying at that mint; the confirmation as a paste's. */
+  tillTakeAway(text) {
+    const W = window.FoxyWallet;
+    this.takingToken(() => {
+      this._preSettle = this.balNow();
+      this.receivingUp('VERIFYING ECASH');
+      return W.receiveToken(text, { away: true }).then((r) => {
+        this.receivingDown();
+        this.tookToken(r);
+        this.announceTaken(r);
+        this.keptOfflineSaid(r);
+        this.settleAnimate('btc');
+        this.noteReceived();
+      }).catch((e) => {
+        this.receivingDown();
+        this.claimFailed(e, () => this.tillTakeAway(text));
+      });
+    });
   }
 
   /* A token taken at a cashier's till: never into this phone's pile. The wallet takes it only locked to the keeper's key,
@@ -33660,6 +34178,11 @@ class Component extends DCLogic {
     const t0 = Number(s.till && s.till.since) || 0;
     const cashier = this.tillRole() === 'cashier';
     const ok = 'var(--ok)', amber = 'var(--btc-ink)';
+    /* A till at more than one mint: a row taken at a mint other than the default says which, after its time, since that
+     * money stays at the mint it was taken at. */
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const tillMints = this.tillMintsNow ? this.tillMintsNow() : [];
+    const where = (t) => (tillMints.length > 1 && t.mint && strip(t.mint) !== strip(tillMints[0]) ? ' \u00b7 ' + this.mintNameOf(t.mint) : '');
     const groups = (s.fresh ? [] : (s.history || [])).map((g) => ({
       label: g.label,
       items: (g.items || []).filter((t) => t && t.dir === 'in' && !t.split && !t.changeRow
@@ -33677,8 +34200,8 @@ class Component extends DCLogic {
             : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).main),
           amtSub: t.unit ? this.unitLabel(t.unit) + ' ecash' : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).sub,
           balText: '',
-          line2: rail || t.time,
-          line3: rail ? t.time : '',
+          line2: rail || (t.time + where(t)),
+          line3: rail ? t.time + where(t) : '',
           line2Color: rail ? (waiting ? amber : 'rgba(var(--ink-rgb),.5)') : 'rgba(var(--ink-rgb),.45)',
           line2Weight: rail ? '600' : '500',
           open: () => {},
@@ -33719,19 +34242,28 @@ class Component extends DCLogic {
   /** @param {RenderContext} c */
   renderMints(c) {
     const { s, sc } = c;
+    const tillOn = s.tillPick === 'set' && !!this.tillSetNow && this.tillSetNow().length > 0;
+    const FUR = "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),"
+      + "linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),url('foxy-fur.webp')";
     return {
       isSwitchMint: sc === 'switchMint',
       // adding a mint belongs to switching, not to picking one to move between
-      mintPickers: !s.trStep && !s.fcPick,
+      mintPickers: !s.trStep && !s.fcPick && !s.tillPick,
       /* The same list does three jobs: switching, and the two steps of a
        * transfer between your own mints. */
       /* And a fourth, for a card: which mint it moves to (26f-flashcard.js).
        * `fcPick` says so, and like trStep it is named by whoever opens the
        * list and cleared by every other way in. */
-      mintTitle: s.fcPick ? 'TO WHICH MINT?'
+      /* And the till's two (26m-till.js): every mint it takes, ticked, then NEXT (`tillPick` 'set'); then which of those is
+       * the default (`tillPick` 'default'). */
+      mintTitle: s.tillPick === 'default' ? 'DEFAULT MINT'
+        : s.tillPick ? 'TILL AT WHICH MINTS?'
+        : s.fcPick ? 'TO WHICH MINT?'
         : s.trStep === 'from' ? 'FROM WHICH MINT?'
         : s.trStep === 'to' ? 'TO WHICH MINT?' : 'SWITCH MINT',
-      mintNowLine: s.fcPick ? 'This card is at ' + this.mintNameOf(s.fc && s.fc.mint) + '.'
+      mintNowLine: s.tillPick === 'default' ? 'Payments from mints you did not pick are moved here. Invoices are made here.'
+        : s.tillPick ? 'Pick every mint this till takes. Payments from other mints cross into the default, the payer paying the fee.'
+        : s.fcPick ? 'This card is at ' + this.mintNameOf(s.fc && s.fc.mint) + '.'
         : s.trStep === 'from' ? 'Move money between the mints you use.'
         : s.trStep === 'to' ? 'Moving from ' + this.mintNameOf(s.trFrom) + '.'
         : 'Connected to ' + (this.mintHost() || 'no mint')
@@ -33766,10 +34298,20 @@ class Component extends DCLogic {
             border: here ? 'rgba(var(--acc-rgb),.75)' : 'rgba(var(--ink-rgb),.12)',
             // tapping the one you are already on should do nothing at all
             tap: !reach ? (() => this.offlineNo('Switching to ' + m.name))
+              : s.tillPick === 'default' ? (() => this.tillMintPick(m.url))
+              : s.tillPick ? (() => this.tillSetToggle(m.url))
               : s.fcPick ? (() => this.fcSwitchPick(m.url))
               : s.trStep ? (() => this.trPick(m.url)) : here ? (() => {}) : (() => this.justSwitch(m.url)),
           };
         };
+        /* The till's questions: the mints this phone uses (26m-till.js `tillMints`), the one it is on first, each ticked or
+         * not in the look of the mint you are on; then only the ticked, to pick the default from. */
+        if (s.tillPick) {
+          const use = this.tillMints ? this.tillMints() : all;
+          const ordered = use.filter(m => this.onMint(m.url)).concat(use.filter(m => !this.onMint(m.url)));
+          if (s.tillPick === 'default') return ordered.filter(m => this.tillTicked(m.url)).map(m => row(m, false));
+          return ordered.map(m => row(m, this.tillTicked(m.url)));
+        }
         if (s.fcPick) {
           // every mint but the one the card is at
           const at = String((s.fc && s.fc.mint) || '').replace(/\/+$/, '');
@@ -33786,6 +34328,13 @@ class Component extends DCLogic {
         return all.filter(m => this.onMint(m.url)).map(m => row(m, true))
           .concat(all.filter(m => !this.onMint(m.url)).map(m => row(m, false)));
       })(),
+      // NEXT under the till's set list: the fur once a mint is ticked, grey and nothing before (26m-till.js, `tillSetNext`)
+      tillNextShown: s.tillPick === 'set',
+      tillNext: () => this.tillSetNext(),
+      tillNextBg: tillOn ? 'var(--acc)' : 'rgba(var(--ink-rgb),.14)',
+      tillNextFur: tillOn ? FUR : 'none,none,none',
+      tillNextInk: tillOn ? '#fff' : 'rgba(var(--ink-rgb),.4)',
+      tillNextSh: tillOn ? 'inset 0 2px 0 rgba(255,255,255,.4),inset 0 -4px 0 rgba(0,0,0,.16),0 12px 24px rgba(var(--acc-rgb),.34)' : 'none',
       scanOtherMint: () => this.scanOtherMint(),
       typeOtherMint: () => this.typeMint(),
     };

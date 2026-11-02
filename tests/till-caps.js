@@ -295,7 +295,8 @@ async function run() {
     ok(t.tillCapNote() === 'The most this phone holds unsettled from everyone while offline. It warns at half.',
       'the total’s own line', t.tillCapNote());
     const amountVals = method('renderAmount(c) {');
-    ok(/amountNote: s\.flow === 'tillCap' && this\.tillCapNote \? this\.tillCapNote\(\) : '',/.test(amountVals)
+    // (the same line carries a till's own note at more than one mint, 26m-till.js `tillWhereLine`)
+    ok(/amountNote: s\.flow === 'tillCap' && this\.tillCapNote \? this\.tillCapNote\(\)\n\s*\/\/[^\n]*\n\s*: tillHere && this\.tillWhereLine \? this\.tillWhereLine\(\) : '',/.test(amountVals)
       && /\{\{ amountNote \}\}/.test(fs.readFileSync(path.join(__dirname, '..', 'build', 'markup.html'), 'utf8')),
       'SET AMOUNT draws it under the question');
     t.state.tillCapWhich = 'payer';

@@ -3,19 +3,18 @@
  *
  *     node tests/flashcard-usd-receive.js
  *
- * At a mint with two balances, a receive into dollars shows an invoice the mint made for the cents asked: a Lightning
- * invoice naming its own number of sats at the mint's rate. A card holds bitcoin. CARD on that screen taps the card for
- * exactly the invoice's sats (read off the invoice, never priced on this phone), and those sats then pay the invoice from
- * this phone; the mint says the invoice is paid, and the dollars land as they land for any payer (12-receive.js,
- * `usdInvoiceUp`). The card's money is at this phone's own mint, so the mint is paying an invoice it made itself.
+ * At a mint with two balances, a receive into dollars asks the card in both: a dollar card pays the cents, and a bitcoin card
+ * the sats those dollars come to at this phone's own price, as a tap pays a dollar price in sats (tests/sats-for-dollars-tap.js).
+ * Nothing waits for the mint's dollar invoice, which is for a Lightning payer (the keeper, 2026-11-02): CARD is there, and the
+ * card is taken, the moment the screen is up. The sats land as sats and are owed into dollars for a wallet that holds dollars
+ * (`convert`), and a wallet that holds both keeps them as bitcoin.
  *
  * The till is build/app/26f-flashcard.js with the receive's own parts lifted out of their files (flashcard-ui-kit.js,
  * `receive: true`), over the real wallet, the test mint with two balances (tests/harness.js, `units`) and the model of a
- * card (tests/flashcard-card.js). What is checked: CARD appears once the invoice is there; the card pays the invoice's
- * sats and only those; the dollar balance rises by the cents and the bitcoin balance does not move; the figures the card's
- * screens show; a refusal leaves the invoice unpaid and every balance as it was; a mint that charges for the payment
- * takes its fee from this phone's bitcoin, and where there is none to pay it the sats are kept as bitcoin and said so;
- * and a bitcoin receive's CARD is exactly what it was. */
+ * card (tests/flashcard-card.js). What is checked: CARD before any invoice; a bitcoin card pays the sats at this phone's price,
+ * which land as sats with no invoice paid and no melt, the figures its screens show, and their swap into dollars owed; with no
+ * price, a bitcoin card is asked for nothing; a refusal leaves every balance as it was; a bitcoin receive's CARD is exactly what
+ * it was; and the hold on a code a card pays from another mint (`fcUsdHolds`). */
 const { page, newCard, history, MINT, OTHER_WORDS } = require('./flashcard-kit');
 const { appOn, until, pad, card, stage, behind, settle } = require('./flashcard-ui-kit');
 const { booksWrong } = require('./harness');
@@ -75,153 +74,88 @@ async function receiveDollars(till, R, amount) {
 }
 
 (async () => {
-  /* ---- 1: $1.00, paid by a card ---------------------------------------------------------------------------------- */
+  /* ---- 1: $1.00, paid by a bitcoin card before any invoice --------------------------------------------------------- */
   const { H, R, k, till } = await world({ satFeeReserve: 0 }, 0);
   {
+    // this phone's price: $76,923.08, so $1.00 is 1,300 sats
+    R.W._rate = 76923.08; R.W._rateAt = Date.now();
+    R.W.setWalletChoice({ hold: 'dollars' });
     ok(till.twoUnitsOn() && till.walletNow('receive') === 'usd', 'a mint with two balances, and this receive is into dollars');
-    till.setState({ amount: '1.00', invoice: '' });
-    let v = screen(till);
-    // (a dollar card pays the cents and needs no invoice, so CARD is there already; a bitcoin card is told to tap again: tests/flashcard-usd-ui.js)
-    ok(v.recvTapShown === true && v.recvCardShown === true, 'before the mint has made the invoice: TAP, and CARD for a dollar card');
-    /* CARD pressed while the mint is still making the code (the owner pressed it the moment the screen opened, and the bitcoin
-     * card was read and refused): no sheet yet, a word, and CARD tries again by itself until the code is there. */
-    {
-      const was = { screen: till.state.screen, run: till._invoiceRun, making: till._usdCodeMaking, toasts: till.toasts.length };
-      till._invoiceRun = (till._invoiceRun || 0) + 1;
-      till._usdCodeMaking = till._invoiceRun;
-      till.setState({ screen: 'confirm', invoice: '', recvAmount: 100, recvUnit: 'usd' });
-      R.sheet.length = 0;
-      till.payByCard();
-      ok(!R.sheet.some((x) => /^begin: /.test(x)) && till.toasts.slice(-1)[0] === 'One moment: the code is being made.',
-         'CARD while the code is being made: no sheet, "One moment: the code is being made."', (till.toasts.slice(-1)[0] || '') + ' | ' + R.sheet.join(' / '));
-      // the screen left before the code came: the retry does nothing
-      till.setState({ screen: 'home' });
-      await new Promise((ok2) => setTimeout(ok2, 400));
-      ok(!R.sheet.some((x) => /^begin: /.test(x)), 'and no sheet comes up for a screen that was left');
-      ok(!till._fcUsdCodeWait, 'and the wait ends with the screen: its start is not kept for the next receive', JSON.stringify(till._fcUsdCodeWait));
-      /* The next dollar receive, CARD pressed as it opens: it waits for its own code, as the first did. A wait left behind used
-       * to stand, and every later receive skipped the wait for the rest of the run. */
-      till._invoiceRun += 1;
-      till._usdCodeMaking = till._invoiceRun;
-      till.setState({ screen: 'confirm', invoice: '', recvAmount: 100, recvUnit: 'usd' });
-      const toasts = till.toasts.length;
-      till.payByCard();
-      ok(!R.sheet.some((x) => /^begin: /.test(x)) && till.toasts.length === toasts + 1 && till.toasts.slice(-1)[0] === 'One moment: the code is being made.'
-         && till._fcUsdCodeWait && till._fcUsdCodeWait.run === till._invoiceRun,
-         'a later receive waits for its own code, with its own word', (till.toasts.slice(-1)[0] || '') + ' | ' + JSON.stringify(till._fcUsdCodeWait));
-      till.setState({ screen: 'home' });
-      await new Promise((ok2) => setTimeout(ok2, 400));
-      ok(!till._fcUsdCodeWait && !R.sheet.some((x) => /^begin: /.test(x)), 'and left, it ends too');
-      till._usdCodeMaking = was.making;
-      till.setState({ screen: was.screen });
-    }
-    const inv = await receiveDollars(till, R, '1.00');
-    /* CARD while the code is being made arms a retry; CARD pressed again once the code is up begins the sheet, and the retry
-     * armed before must not begin a second one for the same code. Nor does CARD begin one while a card flow is going. (The
-     * sheet itself is stood in for here: what is counted is how many are begun.) */
-    {
-      const realStart = till.fcPayStart;
-      const starts = [];
-      till.fcPayStart = (n, off, share, x, usd) => { starts.push((usd && usd.bolt11) || '(none)'); };
-      const kept = { invoice: till.state.invoice, invoiceHash: till.state.invoiceHash, run: till._invoiceRun, making: till._usdCodeMaking, fcUsd: till._fcUsd };
-      till._usdCodeMaking = till._invoiceRun;
-      till.setState({ invoice: '', invoiceHash: '' });
-      till.payByCard();
-      await new Promise((ok2) => setTimeout(ok2, 100));
-      till._usdCodeMaking = kept.making;
-      till.setState({ invoice: kept.invoice, invoiceHash: kept.invoiceHash });
-      till.payByCard();
-      await new Promise((ok2) => setTimeout(ok2, 600));
-      ok(starts.length === 1 && starts[0] === kept.invoice, 'CARD pressed again once the code is up: one sheet, and the retry armed before begins none',
-         JSON.stringify(starts.map((x) => x.slice(0, 12))));
-      till._fcUsd = kept.fcUsd;
-      till._fcTaps = 1;
-      till.payByCard();
-      till._fcTaps = 0;
-      ok(starts.length === 1, 'and CARD while a card flow is going begins no second one', String(starts.length));
-      till.fcPayStart = realStart;
-      till._fcUsd = kept.fcUsd;
-    }
-    v = screen(till);
-    ok(v.recvCardShown === true && v.recvTapShown === true && v.confirmAmount === '$ 1.00',
-       'once the invoice is there, CARD is beside TAP, under $ 1.00', JSON.stringify({ card: v.recvCardShown, amount: v.confirmAmount }));
-    ok(typeof v.cardPay === 'function', 'and it is the same button, with the same handler, as on a bitcoin receive');
-    ok(inv.sats === 1300 && quoteState(R, inv.hash) === 'UNPAID',
-       'the invoice is the mint’s for 100 cents, naming 1,300 sats at its rate, and unpaid', JSON.stringify(inv));
-
+    till.setState({ screen: 'confirm', flow: 'receive', wallet: 'usd', unit: 'USD', amount: '1.00', invoice: '', invoiceHash: '', recvAmount: null, recvUnit: 'usd' });
+    const v = screen(till);
+    ok(v.recvTapShown === true && v.recvCardShown === true && !till.state.invoice, 'before the mint has made any invoice: TAP, and CARD');
     const cardBefore = k.balance();
     const satsBefore = sats(R), centsBefore = cents(R);
     const meltsBefore = meltsAsked(R);
     k.tap();
     k.sent.length = 0;
     R.sheet.length = 0;
+    till.toasts.length = 0;
     till.payByCard();
-    ok(!pad(till) && /^begin: /.test(R.sheet[0] || ''), 'CARD brings up the sheet at once, as it does for bitcoin', R.sheet[0]);
+    ok(/^begin: /.test(R.sheet[0] || '') && !till.toasts.some((m) => /code is being made/.test(m)), 'CARD brings up the sheet at once, with no invoice waited for', R.sheet[0]);
     await until('the card to want its PIN', () => !!pad(till));
     ok(pad(till).title === 'CARD PIN' && pad(till).sub === 'To pay $1.00 (₿1,300). The card’s owner types its PIN here.' && pad(till).cta === 'TAP AGAIN',
-       'the PIN pad names the dollars asked and the sats the card pays', pad(till).sub);
+       'the PIN pad names the dollars asked and the sats the card pays at this phone’s price', pad(till).sub);
     ok(behind(R) && behind(R).amount === '$1.00' && subLine(R) === '₿1,300',
-       'behind the sheet: $1.00, with ₿1,300 under it', JSON.stringify({ amount: behind(R) && behind(R).amount, sub: subLine(R) }));
-    // the dollar code is kept while the card pays it, even with its minute run out
-    const kept = till.state.recvExpiresAt;
-    till.setState({ recvExpiresAt: Date.now() - 1 });
-    ok(till.fcUsdHolds(inv.hash), 'the code on screen is held while the card pays it');
-    till.recvClockTick(till._invoiceRun);
-    ok(till.state.invoice === inv.bolt11 && !till._requoting, 'and its minute running out asks for no new code meanwhile');
-    till.setState({ recvExpiresAt: kept });
+       'behind the sheet: $1.00, with ₿1,300 under it: the figure the holder agrees to', JSON.stringify({ amount: behind(R) && behind(R).amount, sub: subLine(R) }));
+    ok(!till._fcUsd && !till.fcUsdHolds(''), 'no code is held for the card: nothing pays one');
     pad(till).type('1234');
-    /* From the card's payment to PAYMENT RECEIVED the screen says VERIFYING over the code, instead of the code read as unpaid
-     * (the owner tapped the card at it again); the receive's watch takes it down as it says paid. */
-    let verifying = false, verifyingBody = '';
-    await until('VERIFYING or the dollars', () => {
-      if (stage(R) === 'paidCheck') { verifying = true; verifyingBody = (R.window.document.getElementById('foxy-stage') || {}).textContent || ''; }
-      return till.state.screen === 'paid';
-    });
-    ok(verifying && /Verifying/.test(verifyingBody) && /The card paid ₿1,300\. Foxy is confirming the payment with your mint\./.test(verifyingBody),
-       'VERIFYING over the code while the card’s sats pay it, naming what the card paid', verifyingBody.replace(/\s+/g, ' ').slice(0, 160));
+    await until('the payment', () => till.state.screen !== 'confirm');
     await until('the tap to be over', () => !(till._fcTaps > 0) && R.W.cardOwed().length === 0 && !stage(R));
     await settle();
-    ok(!stage(R), 'and VERIFYING is gone with PAYMENT RECEIVED');
-    ok(till.state.paidUnit === 'usd' && till.state.paidAmount === 100,
-       'PAYMENT RECEIVED in dollars: 100 cents, by the dollar invoice’s own watch', JSON.stringify({ unit: till.state.paidUnit, amount: till.state.paidAmount }));
-    ok(cardBefore - k.balance() === 1300, 'the card paid the invoice’s 1,300 sats, and only those', String(cardBefore - k.balance()));
-    /* Between the card's payment and PAYMENT RECEIVED the code is still on screen: CARD pressed again then brings no second
-     * sheet, which read the card again for the same code and refused it as short on the phone. */
-    {
-      const was = { fcUsd: till._fcUsd, screen: till.state.screen, invoiceHash: till.state.invoiceHash };
-      till._fcUsd = { hash: inv.hash, bolt11: inv.bolt11, sats: 1300, melting: true };
-      till.setState({ screen: 'confirm', invoiceHash: inv.hash });
-      R.sheet.length = 0;
-      const toastsBefore = till.toasts.length;
-      till.payByCard();
-      ok(!R.sheet.some((x) => /^begin: /.test(x)) && till.toasts.length === toastsBefore + 1 && /The card has paid this code/.test(till.toasts.slice(-1)[0]),
-         'CARD pressed again while the card’s payment settles: no second sheet, a word instead', (till.toasts.slice(-1)[0] || '') + ' | ' + R.sheet.join(' / '));
-      till._fcUsd = { hash: inv.hash, bolt11: inv.bolt11, sats: 1300, landingUntil: Date.now() + 20000 };
-      till.payByCard();
-      ok(!R.sheet.some((x) => /^begin: /.test(x)), 'nor while the paid code’s dollars are landing');
-      till._fcUsd = was.fcUsd;
-      till.setState({ screen: was.screen, invoiceHash: was.invoiceHash });
-    }
-    ok(cents(R) - centsBefore === 100 && sats(R) === satsBefore,
-       'the dollar balance rose by 100 cents, and the bitcoin balance did not move', JSON.stringify({ usd: cents(R), sat: sats(R) }));
-    ok(quoteState(R, inv.hash) === 'ISSUED', 'the mint says its dollar invoice was paid, and its dollars issued', quoteState(R, inv.hash));
-    ok(meltsAsked(R) - meltsBefore === 2, 'the sats paid it in one payment: a fee asked, and one melt', String(meltsAsked(R) - meltsBefore));
-    const h = history(R);
-    const fromCard = h.find((e) => e.memo === 'card' && e.dir === 'in');
-    const melt = h.find((e) => e.dir === 'out' && e.bolt11 === inv.bolt11);
-    const landed = h.find((e) => e.hash === inv.hash);
-    ok(fromCard && fromCard.sats === 1300 && melt && melt.sats === 1300 && (melt.unit === undefined || melt.unit === 'sat') && landed && landed.unit === 'usd',
-       'HISTORY: 1,300 sats from the card, 1,300 sats paying the dollar invoice, and the dollars in', JSON.stringify({ card: fromCard && fromCard.sats, melt: melt && melt.sats, usd: landed && landed.unit }));
-    ok(fromCard && melt && till.seen[fromCard.hash] && till.seen[melt.hash],
-       'neither the card’s sats nor their paying of the invoice is announced as a payment of its own: the dollars are');
+    ok(cardBefore - k.balance() === 1300, 'the card paid 1,300 sats', String(cardBefore - k.balance()));
+    const fromCard = history(R).find((e) => e.memo === 'card' && e.dir === 'in' && e.sats === 1300);
+    const recs = JSON.parse(R.window.localStorage.getItem('foxy.cashu.convert') || '[]');
+    const rec = (Array.isArray(recs) ? recs : Object.values(recs || {})).find((r) => r && fromCard && r.id === fromCard.hash);
+    ok(!!fromCard && meltsAsked(R) === meltsBefore && ((sats(R) - satsBefore === 1300 && cents(R) === centsBefore) || cents(R) > centsBefore),
+       'the sats landed in this phone’s bitcoin, no invoice paid and no melt sent', JSON.stringify({ sat: sats(R) - satsBefore, usd: cents(R) - centsBefore, melts: meltsAsked(R) - meltsBefore }));
+    ok(rec && rec.from === 'sat' && rec.to === 'usd' && rec.usd === 100 && rec.hash === fromCard.hash && ['claimed', 'quoting', 'swapping', 'done'].indexOf(rec.state) >= 0,
+       'and owed into dollars, for the 100 cents asked, on its own entry (this wallet holds dollars)', JSON.stringify(rec));
+    ok(fromCard && fromCard.convert && fromCard.convert !== '', 'its entry says it is to become dollars', JSON.stringify(fromCard && fromCard.convert));
     ok(booksWrong(R).length === 0, 'the till’s books add up, per unit', booksWrong(R).join(' / '));
+  }
+
+  /* ---- 1b: a wallet holding both keeps the card's sats as bitcoin ------------------------------------------------- */
+  {
+    R.W.setWalletChoice({ hold: 'both' });
+    R.W._rate = 76923.08; R.W._rateAt = Date.now();
+    till.setState({ screen: 'confirm', flow: 'receive', wallet: 'usd', unit: 'USD', amount: '0.50', invoice: '', invoiceHash: '', recvAmount: null, recvUnit: 'usd' });
+    const satsBefore = sats(R);
+    k.tap();
+    till.payByCard();
+    await until('the PIN pad', () => !!pad(till));
+    pad(till).type('1234');
+    await until('the payment', () => till.state.screen !== 'confirm');
+    await until('the tap to be over', () => !(till._fcTaps > 0) && R.W.cardOwed().length === 0 && !stage(R));
+    await settle();
+    const e650 = history(R).find((e) => e.memo === 'card' && e.dir === 'in' && e.sats === 650);
+    const recs = JSON.parse(R.window.localStorage.getItem('foxy.cashu.convert') || '[]');
+    const rec = (Array.isArray(recs) ? recs : Object.values(recs || {})).find((r) => r && e650 && r.id === e650.hash);
+    ok(!!e650 && sats(R) - satsBefore === 650 && !rec, 'holding both: 650 sats for $0.50 land as bitcoin, and nothing is owed into dollars', JSON.stringify({ sat: sats(R) - satsBefore, rec }));
+    R.W.setWalletChoice({ hold: 'dollars' });
+  }
+
+  /* ---- 1c: no price: a bitcoin card is asked for nothing it holds ------------------------------------------------- */
+  {
+    R.W._rate = 0; R.W._rateAt = 0;
+    till.setState({ screen: 'confirm', flow: 'receive', wallet: 'usd', unit: 'USD', amount: '1.00', invoice: '', invoiceHash: '', recvAmount: null, recvUnit: 'usd' });
+    const cardBefore = k.balance(), satsBefore = sats(R);
+    const starts = [];
+    const realStart = till.fcPayStart;
+    till.fcPayStart = (n, off, share, send, usd, terms) => { starts.push({ n, usd, terms }); };
+    till.payByCard();
+    till.fcPayStart = realStart;
+    ok(starts.length === 1 && starts[0].n === 0 && starts[0].usd && starts[0].usd.satsWhy === 'none' && !starts[0].terms,
+       'no price on this phone: the card is asked for the cents alone, and a bitcoin card is told why once read', JSON.stringify(starts));
+    ok(k.balance() === cardBefore && sats(R) === satsBefore, 'and nothing moved');
+    R.W._rate = 76923.08; R.W._rateAt = Date.now();
   }
 
   /* ---- 2: a refusal: over the card's daily limit ----------------------------------------------------------------- */
   {
     k.tap();
     await H.W.cardSetLimit(k, { sats: 1000 });
-    const inv = await receiveDollars(till, R, '1.00');
+    till.setState({ screen: 'confirm', flow: 'receive', wallet: 'usd', unit: 'USD', amount: '1.00', invoice: '', invoiceHash: '', recvAmount: null, recvUnit: 'usd' });
     const cardBefore = k.balance();
     const satsBefore = sats(R), centsBefore = cents(R);
     k.tap();
@@ -230,11 +164,10 @@ async function receiveDollars(till, R, amount) {
     await until('the limit to refuse', () => card(till) && card(till).title === 'OVER THE CARD’S DAILY LIMIT');
     ok(/Nothing was taken/.test(card(till).reason) && !k.sent.some((a) => /^b0(40|20)/.test(a)),
        'over the card’s daily limit: the bitcoin receive’s own card and words, before any PIN or signature', card(till).reason);
-    ok(quoteState(R, inv.hash) === 'UNPAID' && k.balance() === cardBefore && sats(R) === satsBefore && cents(R) === centsBefore && till.state.screen === 'confirm',
-       'the invoice is left unpaid, nothing moved, and the invoice is still up', JSON.stringify({ q: quoteState(R, inv.hash), usd: cents(R), sat: sats(R) }));
+    ok(k.balance() === cardBefore && sats(R) === satsBefore && cents(R) === centsBefore && till.state.screen === 'confirm',
+       'nothing moved, and the receive is still up', JSON.stringify({ usd: cents(R), sat: sats(R) }));
     card(till).press('CLOSE');
     await settle();
-    ok(!till.fcUsdHolds(inv.hash), 'and the code is no longer held: its minute counts on as before');
     till.stopReceive();
     k.tap();
     await H.W.cardSetLimit(k, { sats: 0 });
@@ -266,97 +199,6 @@ async function receiveDollars(till, R, amount) {
     ok(booksWrong(R).length === 0, 'the books add up', booksWrong(R).join(' / '));
   }
 
-  /* ---- 4: a mint that charges to pay the invoice ----------------------------------------------------------------- */
-  {
-    // a reserve of 10 sats and a fee of 2 (tests/harness.js): the till's own bitcoin pays the fee, and the card still pays 1,300
-    const w2 = await world({}, 50);
-    const inv = await receiveDollars(w2.till, w2.R, '1.00');
-    const cardBefore = w2.k.balance();
-    w2.k.tap();
-    w2.till.payByCard();
-    await until('the PIN pad', () => !!pad(w2.till));
-    pad(w2.till).type('1234');
-    await until('the dollars to land', () => w2.till.state.screen === 'paid');
-    await until('the tap to be over', () => !(w2.till._fcTaps > 0) && w2.R.W.cardOwed().length === 0 && !stage(w2.R));
-    await settle();
-    ok(cardBefore - w2.k.balance() === 1300 && cents(w2.R) === 100 && sats(w2.R) === 48,
-       'the card pays the invoice’s 1,300 sats; the dollars land; the mint’s 2-sat fee comes out of this phone’s bitcoin',
-       JSON.stringify({ card: cardBefore - w2.k.balance(), usd: cents(w2.R), sat: sats(w2.R) }));
-    ok(booksWrong(w2.R).length === 0, 'the books add up', booksWrong(w2.R).join(' / '));
-    w2.till.stopReceive();
-  }
-  {
-    // with no bitcoin of its own to pay the reserve, the payment cannot be made: the card's sats stay, as bitcoin, and it is said
-    const w3 = await world({}, 0);
-    const inv = await receiveDollars(w3.till, w3.R, '1.00');
-    const meltsBefore = meltsAsked(w3.R);
-    w3.k.tap();
-    w3.till.payByCard();
-    await until('the PIN pad', () => !!pad(w3.till));
-    pad(w3.till).type('1234');
-    await until('the sats to be said to be kept as bitcoin', () => card(w3.till) && card(w3.till).title === 'PAID IN BITCOIN');
-    ok(card(w3.till).reason === 'The card paid ₿1,300, and the mint did not turn it into dollars. This phone’s bitcoin could not cover the mint’s fee. It is in your bitcoin balance.',
-       'PAID IN BITCOIN: what the card paid, that no dollars were made, why in plain words, and where the money is', card(w3.till).reason);
-    ok(meltsAsked(w3.R) - meltsBefore === 1, 'the fee was asked, and no melt was sent that the till could not cover', String(meltsAsked(w3.R) - meltsBefore));
-    await until('the tap to be over', () => !(w3.till._fcTaps > 0) && w3.R.W.cardOwed().length === 0 && !stage(w3.R));
-    await settle();
-    ok(sats(w3.R) === 1300 && cents(w3.R) === 0 && quoteState(w3.R, inv.hash) === 'UNPAID' && w3.till.state.screen === 'confirm',
-       'the 1,300 sats are in the bitcoin balance, no dollars, and the dollar invoice is still unpaid on screen', JSON.stringify({ sat: sats(w3.R), usd: cents(w3.R) }));
-    ok(!w3.till.fcUsdHolds(inv.hash), 'and the code is let go, to be renewed when its minute runs out');
-    ok(booksWrong(w3.R).length === 0, 'the books add up', booksWrong(w3.R).join(' / '));
-    card(w3.till).press('OK');
-    w3.till.stopReceive();
-  }
-
-  /* ---- 5: a code with too little of its life left ---------------------------------------------------------------- */
-  {
-    // the mint's dollar invoices live ten seconds: CARD asks for a new code rather than hand a card one about to run out
-    const w5 = await world({ satFeeReserve: 0, usdQuoteTtl: 10 }, 0);
-    const inv = await receiveDollars(w5.till, w5.R, '1.00');
-    const cardBefore = w5.k.balance();
-    w5.k.tap();
-    w5.k.sent.length = 0;
-    w5.R.sheet.length = 0;
-    w5.till.toasts.length = 0;
-    w5.till.payByCard();
-    ok(w5.R.sheet.length === 0 && !pad(w5.till) && w5.k.sent.length === 0 && !w5.till.fcUsdHolds(inv.hash),
-       'with under fifteen seconds of the code left, CARD brings up no sheet and asks nothing of the card', JSON.stringify(w5.R.sheet));
-    ok(w5.till.toasts.some((m) => /A new one is being made/.test(m)), 'and says a new code is being made', JSON.stringify(w5.till.toasts));
-    await until('the new code', () => !!w5.till.state.invoiceHash && w5.till.state.invoiceHash !== inv.hash);
-    ok(w5.k.balance() === cardBefore && quoteState(w5.R, inv.hash) === 'UNPAID' && sats(w5.R) === 0 && cents(w5.R) === 0,
-       'a new code is on screen, and nothing moved', JSON.stringify({ old: quoteState(w5.R, inv.hash), now: w5.till.state.invoiceHash }));
-    w5.till.stopReceive();
-  }
-
-  /* ---- 6: the code runs out while the card's PIN is typed ------------------------------------------------------- */
-  {
-    // seventeen seconds: enough to begin, and gone by the time the PIN is in
-    const w6 = await world({ satFeeReserve: 0, usdQuoteTtl: 17 }, 0);
-    const inv = await receiveDollars(w6.till, w6.R, '1.00');
-    const cardBefore = w6.k.balance();
-    w6.k.tap();
-    w6.till.payByCard();
-    await until('the PIN pad', () => !!pad(w6.till));
-    const ends = w6.till._fcUsd && w6.till._fcUsd.ends;
-    ok(ends > 0 && ends === w6.till.state.recvExpiresAt, 'the card is paying a code whose end the mint gave', String(ends));
-    // the PIN is slow: typed with four seconds of the code left, under the five a melt needs to be sent
-    while (Date.now() <= ends - 4000) await new Promise((r) => setTimeout(r, 200));
-    ok(w6.till.state.invoice === inv.bolt11 && w6.till.fcUsdHolds(inv.hash), 'the code stays on screen while the PIN pad is up');
-    const meltsBefore = meltsAsked(w6.R);
-    pad(w6.till).type('1234');
-    await until('the sats to be said to be kept as bitcoin', () => card(w6.till) && card(w6.till).title === 'PAID IN BITCOIN');
-    ok(/The code ran out while the card paid\. It is in your bitcoin balance\.$/.test(card(w6.till).reason),
-       'PAID IN BITCOIN, saying the code ran out', card(w6.till).reason);
-    await until('the tap to be over', () => !(w6.till._fcTaps > 0) && w6.R.W.cardOwed().length === 0 && !stage(w6.R));
-    await settle();
-    ok(meltsAsked(w6.R) === meltsBefore, 'no fee was asked and no melt sent for a code the mint would refuse', String(meltsAsked(w6.R) - meltsBefore));
-    ok(cardBefore - w6.k.balance() === 1300 && sats(w6.R) === 1300 && cents(w6.R) === 0 && quoteState(w6.R, inv.hash) === 'UNPAID',
-       'the card’s 1,300 sats are in the bitcoin balance, and no dollars', JSON.stringify({ sat: sats(w6.R), usd: cents(w6.R) }));
-    ok(!w6.till.fcUsdHolds(inv.hash), 'and the code is let go, so a new one is made');
-    ok(booksWrong(w6.R).length === 0, 'the books add up', booksWrong(w6.R).join(' / '));
-    card(w6.till).press('OK');
-    w6.till.stopReceive();
-  }
 
   /* ---- 7: a payment of the invoice still with the mint holds the code -------------------------------------------- */
   {

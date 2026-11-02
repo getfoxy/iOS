@@ -42,12 +42,14 @@
     const usdCents = usdIn ? (s.recvAmount != null ? s.recvAmount : this.centsTyped()) : 0;
     const usdPx = (usdIn && usdCents > 0 && this.unitPx) ? this.unitPx() : 0;
     const usdSats = usdPx > 0 ? Math.round(usdCents / 100 / usdPx * 1e8) : 0;
+    // a till that takes both has no WALLET chip: it receives in its main, and a tap is offered either (26m-till.js, `tillMain`)
+    const tillBoth = !!(this.tillBoth && this.tillBoth());
     return {
       isConfirm: sc === 'confirm',
       recvHeadOne: !two,
       recvHeadTwo: two,
-      recvChipsOne: !two,
-      recvChipsTwo: two,
+      recvChipsOne: !two || tillBoth,
+      recvChipsTwo: two && !tillBoth,
       recvWalletWord: two ? this.walletLabel(this.walletNow('receive') || 'sat') : '',
       // offline too: only the request changes, and that needs no mint
       pickRecvWallet: () => this.pickRecvWallet(),
@@ -894,7 +896,9 @@
       ? (req.delivery || (req.viaTap ? { kind: 'tap' } : null)) : null;
     const onion = !!(d && d.kind === 'onion');
     const sats = req ? amt : 0;
-    const mint = req && req.mints[0] ? String(req.mints[0]).replace(/^https?:\/\//, '') : 'any mint';
+    // the mint it is paid at, of those it names (`reqPayMint`)
+    const paidAt = req ? this.reqPayMint(req) : '';
+    const mint = paidAt ? String(paidAt).replace(/^https?:\/\//, '') : 'any mint';
     /* Paid by tap: the phone it goes to is the one being held against this
      * one, and the four digits are what says so. They are the thing to check
      * before sending, so they are the value of this row rather than a note
@@ -915,7 +919,7 @@
      * crosses was quoted on PAY FROM, whose quote is what said it covers it. */
     const src = this.pfReqSource ? this.pfReqSource(req) : null;
     const crossFee = (src && src.plan) ? Math.max(0, Math.round(Number(src.plan.feeSats) || 0)) : 0;
-    const want = String((req && req.mints && req.mints[0]) || '').replace(/\/+$/, '');
+    const want = paidAt;
     const judgeAt = src ? src.mint : want;
     const atHere = !judgeAt || this.requestHere({ mints: [judgeAt] });
     const thereHas = (!atHere && !usdReq && W && W.balanceAt) ? Math.round(Number(W.balanceAt(judgeAt)) || 0) : null;

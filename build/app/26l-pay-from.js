@@ -494,14 +494,17 @@
     const W = window.FoxyWallet;
     if (!req || req.unit === 'usd' || !W || !W.balances || !W.transferQuote) return false;
     if (this.offlineNow()) return false;
-    const want = this.pfMint(req.mints && req.mints[0]);
+    /* Every mint it names pays it as it stands, with no crossing (a till's, the default first); any other crosses into
+     * the default, `want`. It read the first alone, and offered a crossing from a mint the request also takes. */
+    const listed = this.reqMints(req).map((m) => this.pfMint(m));
+    const want = listed[0] || '';
     const need = Math.round(Number(req.sats) || 0);
     if (!want || !(need > 0)) return false;
     const here = this.pfHere();
     const piles = this.pfPiles().filter((p) => p.unit === 'sat' && p.have >= need);
     if (piles.length < 2) return false;
     const list = piles.map((p) => {
-      if (p.mint !== want) return this.pfEntry(p);
+      if (listed.indexOf(p.mint) < 0) return this.pfEntry(p);
       // at their mint: no fee, or where it is this phone's own, the mint's fee for the pieces (`sendShortfall`)
       let lack = null;
       try {
@@ -540,9 +543,10 @@
   pfReqSource(req) {
     const s = this.state;
     if (s.payFromFlow !== 'req' || !s.payMint || !req) return null;
-    const want = this.pfMint(req.mints && req.mints[0]);
+    // a crossing only from a mint the request does not name: one it names pays it there (`pfRequest`)
+    const listed = this.reqMints(req).map((m) => this.pfMint(m));
     const mint = this.pfMint(s.payMint);
-    return { mint: mint, plan: (want && mint !== want) ? this.pfFull(this.pfKey(mint, 'sat')) : null };
+    return { mint: mint, plan: (listed.length && listed.indexOf(mint) < 0) ? this.pfFull(this.pfKey(mint, 'sat')) : null };
   }
 
   /* For `makeTokenForRequest`: the crossing to make before the payment, when the source chosen is another mint than the

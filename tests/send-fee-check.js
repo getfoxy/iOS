@@ -62,8 +62,8 @@ const method = (sig) => {
 };
 // several, as one object
 const lift = (sigs) => new Function('return {' + sigs.map(method).join(',\n') + '}')();
-const { confirmSpec, requestSpec, requestNeedsRoute, requestHere, tellPayerShort, shortForReceiver, saidToReceiver } =
-  lift(['confirmSpec() {', 'requestSpec() {', 'requestNeedsRoute(req) {', 'requestHere(req) {', 'tellPayerShort(req) {', 'shortForReceiver() {', 'saidToReceiver(why) {']);
+const { confirmSpec, reqMints, reqCanon, reqPayMint, requestSpec, requestNeedsRoute, requestHere, tellPayerShort, shortForReceiver, saidToReceiver } =
+  lift(['confirmSpec() {', 'reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'requestSpec() {', 'requestNeedsRoute(req) {', 'requestHere(req) {', 'tellPayerShort(req) {', 'shortForReceiver() {', 'saidToReceiver(why) {']);
 
 /* The sentence, as it is to be said: the wallet's (Web/foxy-wallet.js pins the
  * wallet's own copy), written out here so a change to it fails in two places. */
@@ -242,7 +242,7 @@ function reqSpec(sats, balance, shortfall, o) {
     heldBlocks(shortBy) { return (opt.held > 0 && shortBy > 0 && shortBy <= opt.held) ? 'PENDING' : ''; },
     mintName: () => 'MINT', px: () => 0, peerRateRow: () => [],
     connecting: () => !!opt.connecting, offlineNow: () => !!opt.connecting,
-    requestNeedsRoute, requestHere, makeTokenForRequest() { sent.made += 1; },
+    requestNeedsRoute, requestHere, reqMints, reqCanon, reqPayMint, makeTokenForRequest() { sent.made += 1; },
   };
   const any = new Proxy(app, { get: (t, k) => (k in t ? t[k] : () => '') });
   const s = requestSpec.call(any);
@@ -333,7 +333,7 @@ const NOSTR = { delivery: { kind: 'nostr', target: 'npub1…' }, transports: ['n
     const told = [];
     global.window = { FoxyWallet: { sendShortfall: () => o.lack, mintHost: () => 'mint.example',
       tapQuote: o.noQuote ? undefined : (t) => { told.push(JSON.parse(t)); return Promise.resolve('ok'); } } };
-    const app = { offlineNow: () => false, requestHere, tellPayerShort, shortForReceiver };
+    const app = { offlineNow: () => false, requestHere, reqMints, reqCanon, tellPayerShort, shortForReceiver };
     const req = Object.assign({ id: 'r1', sats: 980, mints: ['https://mint.example'], viaTap: true }, o.req || {});
     app.tellPayerShort(req);
     if (o.twice) app.tellPayerShort(req);

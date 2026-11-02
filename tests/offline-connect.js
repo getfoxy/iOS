@@ -231,12 +231,13 @@ async function run() {
      String(stranger.W.mintUrl));
 
   /* ---- the cache is capped ----------------------------------------------
-   * Five entries are already on file, oldest first by `at`, and a sixth mint is
+   * Twelve entries are already on file (a till's eight mints and four more,
+   * 03-seed-counters-logs.js), oldest first by `at`, and a thirteenth mint is
    * connected to. The oldest must go, the newest must stay. Written straight
-   * into storage rather than connected to five times: what is being tested is
-   * the cap, not the fake mint's ability to answer on six paths. */
+   * into storage rather than connected to twelve times: what is being tested is
+   * the cap, not the fake mint's ability to answer on thirteen paths. */
   const older = {};
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 12; i++) {
     older['https://old' + i + '.test'] = {
       info: { name: 'old' + i }, at: 1000 + i,
       keys: { mintUrl: 'https://old' + i + '.test', savedAt: 0,
@@ -248,11 +249,11 @@ async function run() {
   }) });
   await capped.W.connect(MINT, null, null, { remember: true });
   const all = JSON.parse(capped.storage.getItem('foxy.cashu.mint.cache') || '{}');
-  ok(Object.keys(all).length === 5, 'the cache holds at most five mints',
+  ok(Object.keys(all).length === 12, 'the cache holds at most twelve mints',
      String(Object.keys(all).length));
   ok(!!all[MINT], 'and keeps the one just connected to', Object.keys(all).join(','));
   ok(!all['https://old0.test'], 'dropping the oldest', Object.keys(all).join(','));
-  ok(!!all['https://old4.test'], 'and keeping the rest', Object.keys(all).join(','));
+  ok(!!all['https://old11.test'], 'and keeping the rest', Object.keys(all).join(','));
 
   // ---- remember: false now means what it says -----------------------------
   const nr = page({ storage: { 'foxy.cashu.mint': 'https://kept.test' } });

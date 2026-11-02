@@ -56,7 +56,7 @@ const LIFTED = [
   'pfChosen() {', 'pfMany(flow) {', 'pfAway(flow) {', 'pfOpen(flow, list, o) {', 'pfAsk(e, run) {', 'pfIn(run, key, r) {',
   'pfSettled(run) {', 'pfTap(key) {', 'pfNext() {', 'pfBack() {', 'pfClose() {', 'pfCostText(e) {', 'pfRows(LOOK, SHADOW) {',
   'pfFoot() {', 'pfNextOn() {', 'pfTidy() {', 'syncPayFrom() {', 'pfQuoteHere(pr, unit) {', 'pfLnCost(e, q) {', 'pfPre(pr) {',
-  'pfSendGo(e, shown) {', 'pfAwayNow() {', 'pfRequote() {', 'payAwaySpec() {', 'pfRequest(req) {', 'pfReqSource(req) {',
+  'pfSendGo(e, shown) {', 'pfAwayNow() {', 'pfRequote() {', 'payAwaySpec() {', 'reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'pfRequest(req) {', 'pfReqSource(req) {',
   'pfReqCrossing(want) {', 'pfTapCross(offer, want, theirs, mine, there) {', 'pfOnchain() {', 'pfOnchainGo(e, shown) {', 'pfOcHome() {',
   'crossComeHome() {', 'startSendNow(to, o) {', 'toConfirm() {', 'requestSpec() {', 'requestHere(req) {', 'requestNeedsRoute(req) {',
   'makeTokenForRequest(go) {', 'ocCancel() {', 'cfRow(label, value, opt) {', 'unitWord(unit) {', 'unitFigure(amount, unit) {',

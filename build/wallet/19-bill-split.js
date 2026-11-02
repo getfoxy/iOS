@@ -643,7 +643,12 @@
       });
 
       var here = String(mintUrl || '').replace(/\/+$/, '');
-      var switched = tok.mint && tok.mint !== here;
+      /* `opts.away`: taken at its own mint by a wallet made for it (`awayWallet`), the phone staying on the mint it is
+       * on, and filed in that mint's pile: a payment at another of a till's mints (08d-till.js), which stays where it
+       * was paid. Without it a token from another mint is taken by going there, as ever. */
+      var awayAt = (opts && opts.away && tok.mint && canonicalMint(String(tok.mint)) !== canonicalMint(here))
+        ? canonicalMint(String(tok.mint)) : '';
+      var switched = !awayAt && tok.mint && tok.mint !== here;
 
       /* The seed first, before the mint is asked anything: this claim's
        * secrets come from it, and read here the Face ID belongs to the tap
@@ -808,9 +813,10 @@
         }
         /* And in the unit that request asked for: the row says which (a row
          * with none is a sat request's). The same number in the other unit is
-         * a different amount of money, and offline nobody can swap it. */
+         * a different amount of money, and offline nobody can swap it. A
+         * cashier code's key that takes both takes either (08d-till.js). */
         var rowUnit = lockRowUnit(row);
-        if (rowUnit !== unit) {
+        if (rowUnit !== unit && !(rowUnit === 'both' && (unit === 'sat' || unit === 'usd'))) {
           throw new Error('That ecash is in ' + balanceWord(unit) + ' and the request was for ' + balanceWord(rowUnit)
             + ', so it was not taken. It is still theirs.');
         }
@@ -880,10 +886,19 @@
         /* On the circuit kept ready when the caller is a person's wait
          * (`opts.now`: a card's payment, whose swap is the last thing between
          * a till and "paid"). */
-        var connected = (opts && opts.now) ? needNow() : need();
+        // (at another mint, a wallet made for it on a circuit of its own, below)
+        if (awayAt) assertRoute();
+        var connected = awayAt ? null : (opts && opts.now) ? needNow() : need();
         /* room for what this swap writes, or it is refused before anything is sent (`roomFor`): the token stays with whoever holds
          * it. A receive needs little (`small`); a card's signed pieces, whose step is behind them, only room for the swap (`inner`). */
         roomFor('small', !!(opts && opts.signed));
+        if (awayAt) {
+          return awayWallet(awayAt).then(function (ow) {
+            var aw = onCircuit(ow);
+            intoMint = mintOf(aw);
+            return unit === 'sat' ? aw : unitWallet(ow, unit).then(function (uw) { return sameCircuit(aw, uw); });
+          });
+        }
         intoMint = mintOf(connected);
         /* A token in another unit is swapped by a wallet of its own, on the circuit this job has, so that its swap
          * is looked into when it goes silent like any other's (`swapGuard`). */

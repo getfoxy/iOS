@@ -390,7 +390,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     const at2 = R.trace.length;
     k.tap();
     till.payByCard();
-    ok(!!till._fcUsd && till._fcUsd.hash === inv, 'the code is held while the card is read (a bitcoin card would pay it)');
+    ok(!till._fcUsd, 'the code is not held for the card: no card pays it, a bitcoin card’s sats being taken at this phone’s price (`payUsdByCard`)');
     await until('the PIN pad', () => !!pad(till));
     ok(pad(till).sub === 'To pay $ 1.00. The card’s owner types its PIN here.', 'the dollar card is asked the cents, whatever else the till asked', pad(till).sub);
     pad(till).type('1234');
@@ -435,10 +435,23 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     k.sent.length = 0;
     till.payByCard();
     await until('the card to be refused', () => !!card(till));
-    ok(card(till).title === 'THIS CARD HOLDS BITCOIN' && card(till).reason === 'This card holds bitcoin. Tap it again when the dollar code is on screen, and it pays that.'
-       && card(till).has('Nothing was taken.') && !pad(till) && !signed(k) && k.balance() === 3000,
-       'a bitcoin card before the code: tap again when it is up, said before its PIN and before it signs', card(till).all);
+    ok(card(till).title === 'BITCOIN PRICE TOO OLD' && /has not seen the Bitcoin price/.test(card(till).reason)
+       && /Nothing was taken\./.test(card(till).all) && !pad(till) && !signed(k) && k.balance() === 3000,
+       'a bitcoin card before the code, with no price on this phone: refused for that, before its PIN and before it signs', card(till).all);
     card(till).press('CLOSE');
+    /* With a price: it pays the sats the dollars come to at this phone's price, the code not waited for (the keeper,
+     * 2026-11-02), and they land as sats (tests/flashcard-usd-receive.js has their swap into dollars). */
+    R.W._rate = 80000; R.W._rateAt = Date.now();
+    const satBefore = sats(R);
+    k.tap();
+    till.payByCard();
+    await until('the card to want its PIN', () => !!pad(till));
+    ok(/^To pay \$ ?1\.00 \(₿1,250\)/.test(pad(till).sub) && !till.state.invoice, 'with a price, before the code: the pad asks $1.00 (₿1,250)', pad(till).sub);
+    pad(till).type('1234');
+    await until('the payment', () => till.state.screen !== 'confirm');
+    await tapDone(till, R);
+    await settle();
+    ok(3000 - k.balance() === 1250 && sats(R) - satBefore === 1250, 'and the card’s 1,250 sats land in this phone’s bitcoin', JSON.stringify({ card: 3000 - k.balance(), sat: sats(R) - satBefore }));
     till.stopReceive();
     booksGood('a bitcoin card before the dollar code', H, R);
   }

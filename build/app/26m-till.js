@@ -3,7 +3,9 @@
    * A phone put into the till can only RECEIVE and look at the HISTORY of this session. Everything else (send, cards, the
    * menu, the balance, scan and paste on the amount screen, the home screen) is out of reach until the till is closed.
    *
-   * Two roles, in `state.till` ({ role, since, pass }), which the app does not save:
+   * Two roles, in `state.till` ({ role, since, pass } for a cashier, { role, since, unit, main, mint, mints } for a keeper: `mint`
+   * the default of the mints the till takes, `unit` what it takes: 'sat', 'usd' or 'both', and `main` the one its QR invoice is
+   * made in and a payment from a mint it does not take lands in), which the app does not save:
    *
    *   keeper   the phone whose money it is. It opens the till from SETTINGS > POINT OF SALE behind the lock it already has
    *            (Face ID or the PIN), and closes it behind the same lock, so a phone handed across a counter cannot be
@@ -13,9 +15,10 @@
    *            never holds it. Its own money is hidden and untouched. It leaves with no PIN, and by itself when the code
    *            runs out. Its till survives a relaunch, after the ordinary lock (`tillResume`).
    *
-   * Every screen is one the app already has: SET AMOUNT, the receive screen, PAID, HISTORY, the cards, the PIN pad and the
-   * stage screen that shows a code. The one rule that holds it together is that every road home ends at the till's SET
-   * AMOUNT instead (`homeState`), and a home reached some other way is turned into it (`syncTill`). */
+   * Every screen is one the app already has: SET AMOUNT, the receive screen, PAID, HISTORY, the cards, the PIN pad, the
+   * stage screen that shows a code, and CURRENCY once, as the till opens, for the main currency of a till that takes both
+   * (`tillAskMain`). The one rule that holds it together is that every road home ends at the till's SET AMOUNT instead
+   * (`homeState`), and a home reached some other way is turned into it (`syncTill`). */
 
   // the screens a till has: its SET AMOUNT, the receive screen, PAID and HISTORY (`syncTill`)
   TILL_SCREENS = ['amount', 'confirm', 'paid', 'history'];
@@ -26,17 +29,43 @@
     return t && (t.role === 'keeper' || t.role === 'cashier') ? t.role : '';
   }
 
-  /** The cashier's pass ({ id, mint, unit, lock, to, exp }), or null for a keeper and outside the till. */
+  /** The cashier's pass ({ id, mint, mints, unit, lock, to, exp }), or null for a keeper and outside the till. */
   tillPassNow() {
     const t = this.state && this.state.till;
     return (t && t.role === 'cashier' && t.pass) ? t.pass : null;
   }
 
-  /* The cashier's unit, which every receive is asked in: the keeper's, written into the code. '' otherwise, so a keeper's
-   * till asks which balance as home's RECEIVE does (`walletNow`). */
+  /* What a till takes: 'sat', 'usd' or 'both'. The keeper's is what it holds at the default mint, as it chose when it set
+   * the wallet up (`tillUnitAt`); a cashier's is the code's, which carries the keeper's. '' outside the till. */
+  tillTakes(till) {
+    const t = till === undefined ? (this.state && this.state.till) : till;
+    if (!t) return '';
+    const u = t.role === 'cashier' ? (t.pass ? t.pass.unit : '') : t.unit;
+    return u === 'usd' || u === 'sat' || u === 'both' ? u : '';
+  }
+
+  /* The till's one currency, where it takes one, which every receive is in and nothing asks about. '' outside the till, and
+   * in a till that takes both, whose receives are in its main (`tillMain`) and take either. */
   tillUnit() {
-    const p = this.tillPassNow();
-    return p ? (p.unit === 'usd' ? 'usd' : 'sat') : '';
+    const u = this.tillTakes();
+    return u === 'usd' || u === 'sat' ? u : '';
+  }
+
+  /* A till that takes dollars and bitcoin both. Nothing asks at a receive: the receive is in the till's main, and a tap is
+   * offered a request in each, of which the payer pays the one it holds (12-receive.js, `tillTwinRequest`). */
+  tillBoth() {
+    return this.tillTakes() === 'both';
+  }
+
+  /* The currency a till's receives are in: its one, or in a till that takes both the main the keeper chose as it opened
+   * (`tillAskMain`), which a cashier's code carries (a code from before it did is in sats). Its QR invoice is made in it, and
+   * a payment from a mint the till does not take crosses into it. '' outside the till. */
+  tillMain(till) {
+    const t = till === undefined ? (this.state && this.state.till) : till;
+    const takes = this.tillTakes(t);
+    if (takes !== 'both') return takes;
+    const m = t.role === 'cashier' ? (t.pass && t.pass.main) : t.main;
+    return m === 'usd' ? 'usd' : 'sat';
   }
 
   /* The lock every cashier payment goes to: the keeper's key, from the code. '' for a keeper and outside the till, where
@@ -54,16 +83,16 @@
   }
 
   /* Where a road home ends: home, or in the till its SET AMOUNT, set up as home's RECEIVE sets it up (23-render-home-and-amount.js,
-   * `goReceive`). `till` is the till about to be, for the step that opens one; the one in state otherwise. A cashier's
-   * receive is in the keeper's unit, picked for it (`tillUnit`), so no question about this phone's own balances is put. */
+   * `goReceive`). `till` is the till about to be, for the step that opens one; the one in state otherwise. Every receive is in
+   * the till's main (`tillMain`), picked for it, so no question about this phone's own balances is put. The keypad starts in
+   * dollars whatever the main is, with its swap to sats as ever: the price is what was typed. */
   homeState(till) {
     const t = till === undefined ? (this.state && this.state.till) : till;
     if (!t) return { screen: 'home', stack: [] };
-    const unit = (t.role === 'cashier' && t.pass) ? (t.pass.unit === 'usd' ? 'usd' : 'sat') : '';
     return {
       screen: 'amount', stack: [], flow: 'receive', amount: '', unit: 'USD',
       asset: '', network: '', note: '', noteDraft: '', recipient: '', recipientKind: '',
-      wallet: unit, walletAuto: false, walletTapped: false,
+      wallet: this.tillMain(t), walletAuto: false, walletTapped: false,
     };
   }
 
@@ -112,13 +141,225 @@
     }, () => pad());
   }
 
-  // POINT OF SALE, past the lock: this phone's own till, on SET AMOUNT as home's RECEIVE opens it
-  tillStart() {
-    const till = { role: 'keeper', since: Date.now() };
-    console.log('[foxy] till: opened on this phone');
+  /* POINT OF SALE, past the lock: which mints the till takes, where this phone uses more than one (the SWITCH MINT list, asked
+   * as `tillPick` 'set': tick every mint, NEXT), then the default among them (`tillPick` 'default'), then the till. The till
+   * takes what the keeper said it holds when it set the wallet up, at the default (`tillUnitAt`); where that is both, one
+   * question more, DEFAULT CURRENCY (`tillAskMain`): the one the QR invoice is made in and a payment from a mint the till does
+   * not take lands in. A payment at a mint of the set stays at that mint; one from any other crosses into the default, the
+   * payer paying the crossing, which is the payer's own screen's to show. One set, one default, one currency or both, and
+   * one main, for the whole session: the cashier code carries them all. */
+  tillOpen() {
+    const W = window.FoxyWallet;
+    const mints = this.tillMints();
+    if (mints.length > 1) {
+      // the mint this phone is on ticked at first: a till at one mint is still one tap away
+      this.goSwitchMint({ tillPick: 'set', tillSet: mints.filter((m) => this.onMint(m.url)).map((m) => m.url) });
+      return;
+    }
+    const one = mints.length ? mints[0].url : ((W && W.mintUrl) || this.mintHost() || '');
+    this.tillAtMints([one], one);
+  }
+
+  /* The mints a till could take: the ones this phone uses (the wallet's list, the shipped list left out unless money is at one)
+   * and the one it is on, as SWITCH MINT shows them (06-wallet-boot-and-restore.js `allMints`). */
+  tillMints() {
+    const W = window.FoxyWallet;
+    let used = [];
+    try { used = (W && W.mints) ? W.mints() : []; } catch (e) { used = []; }
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const usedSet = {};
+    (Array.isArray(used) ? used : []).forEach((u) => { usedSet[strip(u)] = true; });
+    const all = this.allMints ? this.allMints() : [];
+    return all.filter((m) => this.onMint(m.url) || usedSet[strip(m.url)] || this.mintPile(m.url).sats > 0 || (this.mintPile(m.url).units || []).length > 0);
+  }
+
+  // whether `url` is ticked on the set list (compared without the scheme or a trailing slash, as `onMint` compares)
+  tillTicked(url) {
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    return ((this.state && this.state.tillSet) || []).some((u) => strip(u) === strip(url));
+  }
+
+  // the ticked mints, in the list's own order (the one this phone is on first)
+  tillSetNow() {
+    return this.tillMints().filter((m) => this.tillTicked(m.url)).map((m) => m.url);
+  }
+
+  // a row of the set list tapped: ticked, or not
+  tillSetToggle(url) {
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    this.setState((p) => {
+      const set = p.tillSet || [];
+      const had = set.some((u) => strip(u) === strip(url));
+      return { tillSet: had ? set.filter((u) => strip(u) !== strip(url)) : set.concat([url]) };
+    });
+  }
+
+  /* NEXT under the set list: grey, and nothing, with none ticked; with one, that one is the default and nothing is asked;
+   * with more, DEFAULT MINT asks which, on the same list. */
+  tillSetNext() {
+    const set = this.tillSetNow();
+    if (!set.length) return;
+    if (set.length === 1) { this.tillMintPick(set[0]); return; }
+    this.setState({ tillPick: 'default' });
+  }
+
+  // the default picked (or the one mint ticked): off the list, and on to the till at the ticked set
+  tillMintPick(url) {
+    const set = this.tillSetNow();
+    this.setState((p) => ({ screen: (p.stack || []).length ? p.stack[p.stack.length - 1] : 'home', stack: (p.stack || []).slice(0, -1), tillPick: false, tillSet: [] }));
+    this.tillAtMints(set.length ? set : [url], url);
+  }
+
+  /* The till at the mints in `set`, `def` the default among them: the wallet told of the set (`tillKeeperOpen`, which checks
+   * every mint takes a lock and visits the default where it is not the mint this phone is on, keeping the way home), then
+   * the till, in what the keeper holds at the default (`tillUnitAt`). An opening that fails opens no till. A till at the one mint this phone is on is told to the
+   * wallet too, with nothing on screen while it is: the wallet's record of the till is what a cashier code reads its mints
+   * from, and one left by an earlier till (an app killed in it) handed this till's cashiers that till's mints
+   * (review, stale-keeper). */
+  tillAtMints(set, def) {
+    const W = window.FoxyWallet;
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const list = (set || []).filter((u, i, a) => !!u && a.findIndex((x) => strip(x) === strip(u)) === i);
+    if (!list.some((u) => strip(u) === strip(def))) list.unshift(def);
+    // the default first, which is the order every request names them in (`tillMintsNow`)
+    const ordered = [def].concat(list.filter((u) => strip(u) !== strip(def)));
+    const away = !this.onMint(def);
+    if (!W || !W.tillKeeperOpen) {
+      const unit = this.tillUnitAt(def);
+      if (unit === 'both') { this.tillAskMain(def, ordered, false); return; }
+      this.tillStart({ unit: unit, mint: def, mints: ordered });
+      return;
+    }
+    // a payment or a claim under way finishes at the mint it started on (`refuseSwitchWhileBusy`)
+    if (away && this.refuseSwitchWhileBusy && this.refuseSwitchWhileBusy()) return;
+    let cancelled = false;
+    // nothing to wait on worth a screen at the one mint the phone is on
+    const staged = away || list.length > 1;
+    if (staged) {
+      this.stageScreen('tillOpen', {
+        art: '', title: 'POINT OF SALE', body: 'Opening the till at ' + this.mintNameOf(def), dots: true, button: 'CANCEL',
+        go: () => { cancelled = true; },
+      });
+    }
+    Promise.resolve(W.tillKeeperOpen(list, def)).then((r) => {
+      if (staged) this.hideStage('tillOpen');
+      const moved = away || !!(r && r.moved);
+      if (cancelled) {
+        Promise.resolve(W.tillKeeperClose ? W.tillKeeperClose() : null).then((b) => { if (moved || (b && b.moved)) this.walletReady({ name: this.mintHost() }); }, () => {});
+        return;
+      }
+      if (moved) this.walletReady({ name: this.mintHost() });
+      const unit = this.tillUnitAt(def);
+      if (unit === 'both') { this.tillAskMain(def, ordered, moved); return; }
+      this.tillStart({ unit: unit, mint: def, mints: ordered });
+    }, (e) => {
+      if (staged) this.hideStage('tillOpen');
+      if (cancelled) return;
+      this.blockedCard('tillOpenFailed', { title: 'NO TILL', reason: (W.reason ? W.reason(e) : String((e && e.message) || e)), chip: 'This phone is where it was.' });
+    });
+  }
+
+  /* What the till takes at its default mint, `def`: what the keeper chose to hold when it set the wallet up (`walletChoiceNow`),
+   * of what that mint issues. Dollars for 'dollars', sats for 'bitcoin', and both for 'both' at a mint that issues both;
+   * sats where nothing was chosen, or the mint issues one (dollars only at a mint that issued no sats). A choice the mint
+   * cannot meet falls to what it does issue. The mint's own keys on file say what it issues, and the connected mint's flag
+   * as well where the phone is on it: the keys were read a moment after a visit and said one unit, at a mint that issues
+   * both. Never asked: the keeper said it once, at set-up. */
+  tillUnitAt(def) {
+    const W = window.FoxyWallet;
+    let have = [];
+    try { have = (W && W.mintUnits) ? W.mintUnits(def) : []; } catch (e) { have = []; }
+    if (!Array.isArray(have)) have = [];
+    const here = !!(this.onMint && this.onMint(def)) && !!(this.twoUnitsOn && this.twoUnitsOn());
+    const usd = have.indexOf('usd') >= 0 || here;
+    const sat = have.indexOf('sat') >= 0 || here || !have.length;
+    if (!usd) return 'sat';
+    if (!sat) return 'usd';
+    const hold = this.walletChoiceNow ? this.walletChoiceNow().hold : '';
+    return hold === 'dollars' ? 'usd' : hold === 'both' ? 'both' : 'sat';
+  }
+
+  /* DEFAULT CURRENCY, for a till that takes both (`tillUnitAt`): asked once, as it opens, after DEFAULT MINT, on the CURRENCY
+   * screen the cards ask on (26f-flashcard.js, `fcPickUnit`), with what this phone holds of each at the default and nothing
+   * greyed: either can be the main. The answer is the till's `main`; it takes both all the same. The wallet's visit to the
+   * default is already made (`moved`), and stands while it is asked. */
+  tillAskMain(def, mints, moved) {
+    this._tillMainAsk = { def: def, moved: !!moved };
+    this.fcPickUnit({
+      question: 'DEFAULT CURRENCY',
+      foot: 'The QR invoice is made in it, and a payment from a mint you did not pick lands in it. A tap pays in either.',
+      bal: null, short: { usd: '', sat: '' }, why: '',
+    }, (u) => {
+      this._tillMainAsk = null;
+      this.tillStart({ unit: 'both', main: u === 'usd' ? 'usd' : 'sat', mint: def, mints: mints });
+    });
+  }
+
+  /* The round back button while the till is being opened (01-ui-basics.js, `back`): off DEFAULT MINT, the set list again with
+   * its ticks; off the set list, the list is left as any screen is; off DEFAULT CURRENCY, the opening stops: no till, the
+   * wallet's record of it let go and the phone home from a visit to the default (`tillKeeperClose`), and the screen it was
+   * opened from, as back off any question. True where it was handled here. */
+  tillOpenBack() {
+    const s = this.state || {};
+    if (s.screen === 'switchMint' && s.tillPick === 'default') { this.setState({ tillPick: 'set' }); return true; }
+    if (s.screen === 'switchMint' && s.tillPick) { this.setState({ tillPick: false, tillSet: [] }); return false; }
+    if (s.screen === 'currency' && s.currencyFlow === 'card' && this._tillMainAsk && !s.till) {
+      const W = window.FoxyWallet;
+      const was = this._tillMainAsk;
+      this._tillMainAsk = null;
+      this._fcUnitThen = null;
+      this.setState({ currencyFlow: '', curCard: null, curBoth: false });
+      console.log('[foxy] till: back off DEFAULT CURRENCY; no till');
+      Promise.resolve(W && W.tillKeeperClose ? W.tillKeeperClose() : null)
+        .then((b) => { if (was.moved || (b && b.moved)) this.walletReady({ name: this.mintHost() }); }, () => {});
+      return false;
+    }
+    return false;
+  }
+
+  /* The till itself, on SET AMOUNT as home's RECEIVE opens it, in what it takes (`o.unit`: 'sat', 'usd' or 'both'), with its
+   * main (`o.main`, for both: sats where none is named), at the mints chosen (`o.mints`, `o.mint` the default, where the phone
+   * now is). A till opened with none named is at the mint the phone is on. */
+  tillStart(o) {
+    const W = window.FoxyWallet;
+    const unit = o && (o.unit === 'usd' || o.unit === 'both') ? o.unit : 'sat';
+    const main = unit === 'both' ? (o && o.main === 'usd' ? 'usd' : 'sat') : unit;
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const def = String((o && o.mint) || (W && W.mintUrl) || this.mintHost() || '');
+    const named = (o && Array.isArray(o.mints)) ? o.mints.filter((u) => !!u) : [];
+    const mints = [def].concat(named.filter((u, i) => strip(u) !== strip(def) && named.findIndex((x) => strip(x) === strip(u)) === i));
+    const till = { role: 'keeper', since: Date.now(), unit: unit, main: main, mint: def, mints: mints };
+    console.log('[foxy] till: opened on this phone, in ' + unit + (unit === 'both' ? ' (' + main + ' first)' : '') + ' at ' + strip(def)
+      + (mints.length > 1 ? ' and ' + (mints.length - 1) + ' more mint' + (mints.length > 2 ? 's' : '') : ''));
     // the requests made before it are let go, so none from before is shown in the till (`forgetRequests`)
     if (this.forgetRequests) this.forgetRequests();
     this.setState(Object.assign({ till: till, open0: false, menuSettingsOpen: false }, this.homeState(till)));
+    /* The rows at the till's mints are read once now and marked seen, not raised: a mint the phone had not been on this session
+     * has a whole past that is not this session's (16-history-lists.js). */
+    this._seenSeeded = false;
+    this._seededFor = this.mintHost();
+    this.loadHistory();
+  }
+
+  /* The mints a till's requests name, the default first: the keeper's set, or the one a cashier's code carries (a code from
+   * before codes carried a set names its one mint). [] outside the till. */
+  tillMintsNow() {
+    const t = this.state && this.state.till;
+    if (!t) return [];
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const src = t.role === 'cashier' ? (t.pass || null) : t.role === 'keeper' ? t : null;
+    if (!src || !src.mint) return [];
+    const list = (Array.isArray(src.mints) && src.mints.length ? src.mints : [src.mint]).filter((u) => !!u);
+    return [String(src.mint)].concat(list.filter((u, i) => strip(u) !== strip(src.mint) && list.findIndex((x) => strip(x) === strip(u)) === i).map(String));
+  }
+
+  /* A line on the till's SET AMOUNT for a till at more than one mint: the default, which is where it is, and how many more it
+   * takes. '' for a till at one mint, which says nothing as it never did. */
+  tillWhereLine() {
+    const m = this.tillMintsNow();
+    if (m.length < 2) return '';
+    const more = m.length - 1;
+    return 'At ' + this.mintNameOf(m[0]) + ' and ' + more + ' more mint' + (more > 1 ? 's' : '');
   }
 
   /* The X on the till's SET AMOUNT. The keeper's is behind the lock; the cashier's asks only whether, since the money it
@@ -173,12 +414,18 @@
     this._tillRunOutT = null;
     this._tillRunOut = false;
     this._tillRunOutSaid = false;
+    const wasKeeper = !!(this.state.till && this.state.till.role === 'keeper');
     if (this.state.till) console.log('[foxy] till: closed');
     // and a request locked to a keeper is never shown again once the till is closed (12-receive.js, `forgetRequests`)
     if (this.forgetRequests) this.forgetRequests();
     this.setState({ till: null, screen: 'home', stack: [], amount: '', flow: '', wallet: '', walletAuto: false, walletTapped: false });
     this.loadHistory();
     this.refreshBalance();
+    // a keeper's till run at another of its mints: home to its own, said as a switch is said
+    const W = window.FoxyWallet;
+    if (wasKeeper && W && W.tillKeeperClose) {
+      Promise.resolve(W.tillKeeperClose()).then((r) => { if (r && r.moved) this.walletReady({ name: this.mintHost() }); }, () => {});
+    }
   }
 
   // when a cashier code runs out, in the words the clock on the phone would use: "Mon, 2:45 PM"
@@ -202,7 +449,15 @@
       art: '', title: 'CASHIER CODE', body: 'Making the code', dots: true, button: 'CANCEL',
       go: () => { if (this._tillPassRun === run) this._tillPassRun = 0; },
     });
-    Promise.resolve(W.tillPassMake()).then((p) => {
+    /* In what the till takes where one is open ('sat', 'usd' or 'both': `s.till.unit`), at the till's mints, the default
+     * first: the screen's own till, not whatever the wallet has on record. The wallet's own default otherwise. */
+    const keeper = this.tillRole() === 'keeper';
+    const unit = keeper ? this.tillTakes() : '';
+    const mints = keeper ? this.tillMintsNow() : [];
+    // (and a till in both, its main: the code carries it, so a cashier's QR invoice is in it too)
+    const main = keeper && unit === 'both' ? this.tillMain() : '';
+    const ask = unit || mints.length ? Object.assign(unit ? { unit } : {}, main ? { main } : {}, mints.length ? { mints } : {}) : undefined;
+    Promise.resolve(W.tillPassMake(ask)).then((p) => {
       if (this._tillPassRun !== run) return;
       if (!p || !p.text) throw new Error('No code was made.');
       this.stageScreen('tillPass', {
@@ -395,12 +650,48 @@
   tillAccept(text, kind) {
     if (kind === 'token') {
       if (this.tillRole() === 'cashier') this.tillTokenIn(text);
+      else if (this.tillAwayToken(text)) this.tillTakeAway(text);
       else this.takeTokenFromPaste(text);
       return true;
     }
     if (kind === 'till') { this.toast('Leave the till first.', true); return false; }
     this.toast('The till only receives. Ask them to pay this till’s code.', true);
     return false;
+  }
+
+  /* Whether a token scanned at a keeper's till is at another of the till's mints than the one the phone is on: taken
+   * there, where it stays (`tillTakeAway`). It went to the paste's way in, which offered to switch the phone to that mint
+   * or move the money to this one, when the till takes that mint as it stands (review). */
+  tillAwayToken(text) {
+    const W = window.FoxyWallet;
+    if (this.tillRole() !== 'keeper' || !W || !W.tokenInfo) return false;
+    let info = null;
+    try { info = W.tokenInfo(text); } catch (e) { info = null; }
+    if (!info || !info.mint) return false;
+    const canon = (u) => (W.canonicalMint ? W.canonicalMint(u) : String(u || '').replace(/\/+$/, ''));
+    const at = canon(info.mint);
+    return at !== canon(W.mintUrl) && this.tillMintsNow().some((m) => canon(m) === at);
+  }
+
+  /* A token at another of the till's mints, taken there by the wallet without the phone moving (`receiveToken` with
+   * `opts.away`), the money staying at that mint; the confirmation as a paste's. */
+  tillTakeAway(text) {
+    const W = window.FoxyWallet;
+    this.takingToken(() => {
+      this._preSettle = this.balNow();
+      this.receivingUp('VERIFYING ECASH');
+      return W.receiveToken(text, { away: true }).then((r) => {
+        this.receivingDown();
+        this.tookToken(r);
+        this.announceTaken(r);
+        this.keptOfflineSaid(r);
+        this.settleAnimate('btc');
+        this.noteReceived();
+      }).catch((e) => {
+        this.receivingDown();
+        this.claimFailed(e, () => this.tillTakeAway(text));
+      });
+    });
   }
 
   /* A token taken at a cashier's till: never into this phone's pile. The wallet takes it only locked to the keeper's key,
@@ -482,6 +773,11 @@
     const t0 = Number(s.till && s.till.since) || 0;
     const cashier = this.tillRole() === 'cashier';
     const ok = 'var(--ok)', amber = 'var(--btc-ink)';
+    /* A till at more than one mint: a row taken at a mint other than the default says which, after its time, since that
+     * money stays at the mint it was taken at. */
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const tillMints = this.tillMintsNow ? this.tillMintsNow() : [];
+    const where = (t) => (tillMints.length > 1 && t.mint && strip(t.mint) !== strip(tillMints[0]) ? ' \u00b7 ' + this.mintNameOf(t.mint) : '');
     const groups = (s.fresh ? [] : (s.history || [])).map((g) => ({
       label: g.label,
       items: (g.items || []).filter((t) => t && t.dir === 'in' && !t.split && !t.changeRow
@@ -499,8 +795,8 @@
             : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).main),
           amtSub: t.unit ? this.unitLabel(t.unit) + ' ecash' : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).sub,
           balText: '',
-          line2: rail || t.time,
-          line3: rail ? t.time : '',
+          line2: rail || (t.time + where(t)),
+          line3: rail ? t.time + where(t) : '',
           line2Color: rail ? (waiting ? amber : 'rgba(var(--ink-rgb),.5)') : 'rgba(var(--ink-rgb),.45)',
           line2Weight: rail ? '600' : '500',
           open: () => {},

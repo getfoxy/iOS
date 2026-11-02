@@ -43,6 +43,10 @@
    * the owner's proof and the whole record fit one command (the card's spec,
    * docs/FOXY-CARD-DAILY-LIMIT.md in https://github.com/getfoxy/card, section 4). */
   var CARD_MINT_MAX = 77;   // 80 before the design (card software 1.10): the proof, the record, the mint and it in one APDU
+  /* The mint of a record a card is given before it is anybody's: one character, which no mint's address is. A card maker writes
+   * it with the design the card is printed in (the shortest record the card takes: it refuses a mint of none), so that the card
+   * names its design from the first tap; such a record is no set-up (`cardFactoryRecord`). */
+  var CARD_FACTORY_MINT = '-';
   var CARD_DAY = 86400;
 
   function cardHexOk(s, bytes) {
@@ -504,6 +508,12 @@
              design: design, designKnown: withDesign,
              // from 1.15: the hardest difficulty taken and the last header's hash ('' for none)
              headerBits: /^0*$/.test(headerBits) ? '' : headerBits, headerHash: /^0*$/.test(headerHash) ? '' : headerHash };
+  }
+
+  /* A record written before the card is anybody's: the card maker's, with the design the card is printed in, no refund key and the
+   * mint `CARD_FACTORY_MINT`. Set-up keeps its design (`cardSetUp`, `cardSetUpFor`) and writes this phone's mint over it. */
+  function cardFactoryRecord(record) {
+    return !!record && record.mint === CARD_FACTORY_MINT && !record.refundKey;
   }
 
   /* The design this phone chose for a card whose software cannot carry one
@@ -1896,6 +1906,16 @@
       return t.want(cardCommand(CARD_INS.card, 0, '', 0), 'to give its record');
     }).then(function (d) {
       card.record = cardRecordOf(d, card.info);
+      /* `recordSet`: the card's own word that it has a record, which its rules go by (from 1.22 a PIN put on a card with a record
+       * is kept, and a new one wants it given). A record the card maker wrote (`cardFactoryRecord`: its design and no mint) is no
+       * set-up and names no mint: the card reads as new, in the design it was printed in, and set-up writes its record over it. */
+      card.info.recordSet = !!card.info.hasRecord;
+      if (card.info.hasRecord && !card.info.owner && cardFactoryRecord(card.record)) {
+        card.info.hasRecord = false;
+        card.info.setUp = false;
+        card.record.mint = '';
+        card.record.factory = true;
+      }
       // the screen behind the sheet draws the card as itself from here on
       try { if (FoxyWallet._card) FoxyWallet._card({ stage: 'seen', text: '', design: card.record.design || '' }); } catch (e) {}
       // a card of 1.15 and on says its clock's proof in its record: the hardest difficulty it has taken, and the hash of the last header
@@ -6096,6 +6116,33 @@
    * in its pile but held to one side for the payment (`holdAs`, 19-bill-split.js), and the entry is the holder's own move
    * (`to: 'card'`), never announced as money received. A later asking (`again`: the answer was lost, and the payment never
    * made) puts them in the pile as any swap does, and the settling owes them all back to the card (`cardSettle`). */
+  /* A bitcoin card's sats taken online for a dollar price (the app's `payUsdByCard`: the dollars shown, at this phone's price,
+   * `terms.convert`): what was agreed is written on the entry, and the sats are owed into dollars as soon as they are in the
+   * pile, as a tap's sats for a dollar request are (20-helpers.js `_requestPaid`, `convertClaimed`) and an offline card's are
+   * once settled (`cardKeepSigned`). Only for a wallet that holds dollars (`convertDue`); a wallet holding both keeps the sats.
+   * Nothing here can fail the payment: a record not written leaves the sats as bitcoin, the safe way to be wrong. */
+  function cardConvertOnline(row, unit, opts, got, w) {
+    var t = opts && opts.terms;
+    if (!t || unit !== 'sat' || !row || !row.id) return;
+    try {
+      var n = Math.max(0, Math.round(Number(got && (got.amount != null ? got.amount : got.sats)) || 0));
+      var at = mintOf(w);
+      var p = { id: row.id, unit: 'sat', mint: at, purpose: 'card-online', terms: t, kept: opts.kept === true };
+      try { amendTx(row.id, termsFields(t, 'sat')); } catch (eT) { /* the figures are words on the entry; the payment stands */ }
+      // in the pile already: claimed from the start, as a payment swapped in as it arrived is (`convertClaimed` with `p`)
+      if (n > 0 && convertDue(p) && convertClaimed(row.id, n, at, p, 'sat')) {
+        // (the card's entry is under its own id, not a request's 'req-' one: the record names the entry it is for)
+        var rec = convertRec(row.id);
+        if (rec && rec.hash !== row.id) { rec.hash = row.id; putConvert(rec); }
+        amendTx(row.id, { convert: 'claimed' });
+        convertTell(row.id);
+        console.log('[foxy] card: ' + n + ' sats taken for a dollar price, to be swapped into dollars');
+      }
+    } catch (e) {
+      console.warn('[foxy] card: sats taken for a dollar price were not set to be swapped into dollars:', (e && e.message) || e);
+    }
+  }
+
   function cardSwapTaken(row, again) {
     var holdAs = (row.send && !again) ? { id: 'cardout-' + row.id, card: row.card, forHash: row.id, token: row.token, tillKeeps: !!row.tillKeeps } : undefined;
     /* What stays, what goes back and what came, under the names of the row's own unit (`receiveToken`): a dollar card's are
@@ -7409,7 +7456,7 @@
         /* `change`: something is coming back to the card in this sheet, so its holder is told the second tap is on its way
          * (26f-flashcard.js: three buzzes), as the sheet is kept open for it. */
         on(released ? 'checking' : 'mint', { hash: row.id, change: changeComing });
-        return cardSwapTaken(row, false);
+        return cardSwapTaken(row, false).then(function (got) { cardConvertOnline(row, cu, keepOpts, got, w); return got; });
       }).then(function (got) {
         // the other signatures of a whole card taken off, each its own swap
         return moreRows.reduce(function (chain, r) {

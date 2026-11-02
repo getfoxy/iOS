@@ -19,10 +19,14 @@ const { loadReal, fakeMint, nativePhone, PHONE_WORDS, noBooks } = require('./har
 
 const MINT = 'https://m.test';
 const HOME = 'https://home.test';
+// a third mint, issuing dollars as well, for a till at several mints
+const USDM = 'https://usd.test';
 const OTHER_WORDS = 'legal winner thank year wave sausage worth useful legal winner thank yellow';
 const PAYER_WORDS = 'letter advice cage absurd amount doctor acoustic avoid letter advice cage above';
 const URL0 = 'https://getfoxy.io/till#';
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+// waits until `fn` says yes, or `ms` have passed
+const until = async (fn, ms) => { const end = Date.now() + (ms || 5000); while (Date.now() < end) { if (await fn()) return true; await wait(25); } return false; };
 
 let failed = 0, passed = 0;
 const ok = (good, name, detail) => {
@@ -42,7 +46,10 @@ function page(words) {
     bridge: (w, m) => {
       if (m.action === 'mintRequest') {
         const url = String(m.url || '');
-        const mint = url.indexOf('home.test') >= 0 ? mints.home : mints.main;
+        // any other host (x0.test …, for a till of eight) answered by a fake mint of its own, made the first time it is asked
+        const host = new URL(url).host;
+        const extra = /^x\d+\.test$/.test(host) ? (mints[host] || (mints[host] = fakeMint(w, { p2pk: true, fill: 13 + Number(host.slice(1, -5)), quoteFrom: 90000 }))) : null;
+        const mint = extra || (url.indexOf('home.test') >= 0 ? mints.home : url.indexOf('usd.test') >= 0 ? mints.usd : mints.main);
         said.mintCalls.push(url);
         return reply(w, m.id, mint.handle(m));
       }
@@ -69,6 +76,7 @@ function page(words) {
       phone.attach(w);
       if (!mints.main) mints.main = fakeMint(w, { p2pk: true });
       if (!mints.home) mints.home = fakeMint(w, { p2pk: true, fill: 9, quoteFrom: 50000 });
+      if (!mints.usd) mints.usd = fakeMint(w, { p2pk: true, fill: 11, quoteFrom: 70000, units: ['sat', 'usd'] });
     },
   });
   ctx.W._nodeProbeDelay = [86400000, 86400000];
@@ -242,11 +250,11 @@ async function run() {
   const ans4 = C.said.answers.find((a) => a.answer === 'a4') || {};
   ok(ans4.status === 422 && /not locked to the keeper/.test(ans4.text), 'ecash locked to another key is refused', JSON.stringify(ans4));
 
-  const send25 = await P.W.sendToken(25, { unit: 'sat', lockTo: pass.lock });
+  const send25 = await P.W.sendToken(25, { unit: 'sat' });
   const p25 = proofsOf(P, send25.token);
   await C.W._requestPaid(bodyFor(req3.id, p25), 'a5', '');
   const ans5 = C.said.answers.find((a) => a.answer === 'a5') || {};
-  ok(ans5.status === 422 && /cannot give change/.test(ans5.text), 'an over-payment the payer did not mark is refused', JSON.stringify(ans5));
+  ok(ans5.status === 422 && /cannot give change/.test(ans5.text), 'a plain over-payment the payer did not mark is refused, still the payer’s', JSON.stringify(ans5));
 
   C.W._privacy({ tor: 'connecting', progress: 40, everUp: true });
   const send21b = await P.W.sendToken(21, { unit: 'sat', lockTo: pass.lock });
@@ -265,10 +273,21 @@ async function run() {
   ok(ans7.status === 409 && /spent/.test(ans7.text), 'ecash already spent is refused, as not confirmed (409)', JSON.stringify(ans7));
   ok(outN() === n0, 'none of those refusals put anything in the outbox', outN() + ' vs ' + n0);
 
+  /* Over, unmarked, and locked to the keeper: a refusal would strand it (the payer cannot spend it back), so it is taken
+   * whole into the outbox, its row saying what came, as the keeper's own till takes one at another mint (below). */
+  const reqOver = C.W.decodeRequest(C.W.paymentRequest(21, { unit: 'sat', lockPub: pass.lock })) || {};
+  const lock25 = proofsOf(P, (await P.W.sendToken(25, { unit: 'sat', lockTo: pass.lock })).token);
+  await C.W._requestPaid(bodyFor(reqOver.id, lock25), 'a5l', '');
+  const ans5l = C.said.answers.find((a) => a.answer === 'a5l') || {};
+  const rowOverC = C.store('foxy.till.outbox', []).find((r) => r.hash === 'till-' + reqOver.id) || {};
+  ok(ans5l.status === 200 && rowOverC.amount === 25 && outN() === n0 + 1,
+    'a locked over-payment is taken whole for the keeper, the outbox row saying 25, never refused and stranded', JSON.stringify([ans5l, rowOverC.amount]));
+
   // the over-payment, marked: taken, no change
-  await C.W._requestPaid(bodyFor(req3.id, p25, { overpaid: true }), 'a8', '');
+  const p25m = proofsOf(P, (await P.W.sendToken(25, { unit: 'sat', lockTo: pass.lock })).token);
+  await C.W._requestPaid(bodyFor(req3.id, p25m, { overpaid: true }), 'a8', '');
   const ans8 = C.said.answers.find((a) => a.answer === 'a8') || {};
-  ok(ans8.status === 200 && outN() === n0 + 1, 'an over-payment the payer marked is taken, whole', JSON.stringify(ans8));
+  ok(ans8.status === 200 && outN() === n0 + 2, 'an over-payment the payer marked is taken, whole', JSON.stringify(ans8));
   await wait(60);
 
   /* ---- delivery: sent only on success, tried again ------------------------ */
@@ -357,17 +376,27 @@ async function run() {
   ok((await K.W._tillArrived(pass.id, bodyFor('till:x:9', proofsOf(P, ownK.token)))) === 'refused', 'one locked to another key is refused');
   ok((await K.W._tillArrived(pass.id, 'not json')) === 'refused', 'and something that is not a payment');
 
-  // at another mint: kept, and taken on the next listen at the code's mint
+  // at another mint, with a route: taken at the code's mint by a wallet made for it, the phone staying where it is
   const second = relay.find((r) => JSON.parse(r.body).id === 'till:' + pass.id + ':2');
   await K.W.connect(HOME, { remember: true });
-  ok((await K.W._tillArrived(pass.id, second.body)) === 'kept', 'a delivery while the keeper is at another mint is kept');
+  const atMintBefore = K.W.balanceAt(MINT);
+  const homeBefore = await K.W.balanceSats();
+  ok((await K.W._tillArrived(pass.id, second.body)) === 'taken', 'a delivery while the keeper is at another mint is taken at the code’s mint');
+  ok(K.W.mintUrl === HOME && K.W.balanceAt(MINT) === atMintBefore + 25 && (await K.W.balanceSats()) === homeBefore,
+    'into that mint’s pile, the phone not moving and its own balance as it was', K.W.balanceAt(MINT) + ' vs ' + atMintBefore);
+  // and with no route: kept, and taken on the next listen once there is one
+  const third = relay.find((r) => JSON.parse(r.body).id === 'till:' + pass.id + ':3');
+  K.W._privacy({ tor: 'connecting', progress: 40, everUp: true });
+  ok((await K.W._tillArrived(pass.id, third.body)) === 'kept', 'a delivery with no route is kept');
   ok(K.store('foxy.till.inbox', []).length === 1, 'in the till’s inbox');
+  K.W._privacy({ tor: 'up', progress: 100, everUp: true });
   await K.W.connect(MINT, { remember: true });
   const kMid = await K.W.balanceSats();
+  const thirdSum = JSON.parse(third.body).proofs.reduce((n, pr) => n + Number(pr.amount), 0);
   await K.W.tillListen();
   await wait(50);
-  ok(K.store('foxy.till.inbox', []).length === 0 && (await K.W.balanceSats()) === kMid + 25, 'and taken at its own mint on the next listen',
-    (await K.W.balanceSats()) + ' vs ' + kMid);
+  ok(K.store('foxy.till.inbox', []).length === 0 && (await K.W.balanceSats()) === kMid + thirdSum, 'and taken on the next listen with a route',
+    (await K.W.balanceSats()) + ' vs ' + kMid + ' + ' + thirdSum + ', inbox ' + K.store('foxy.till.inbox', []).length);
   const opens = K.said.open.length;
   await K.W.tillListen();
   ok(K.said.open.length === opens + 1 && K.said.open[K.said.open.length - 1].length === 1, 'listening asks the phone for the code’s inbox each time');
@@ -396,8 +425,9 @@ async function run() {
   ok((await K.W._tillArrived(pass.id, JSON.stringify({ id: 'till:x:5', mint: MINT, unit: 'sat', proofs: forged(1), pad: 'x'.repeat(70000) }))) === 'refused',
     'and a body over 64 KB, before it is read');
   await K.W.connect(HOME, { remember: true });
+  K.W._privacy({ tor: 'connecting', progress: 40, everUp: true });
   ok((await K.W._tillArrived(pass.id, bodyFor('till:x:6', forged(3)))) === 'refused' && K.store('foxy.till.inbox', []).length === 0,
-    'at another mint a forged body is refused, not kept for later');
+    'at another mint with no route a forged body is refused, not kept for later');
   const late = await P.W.sendToken(6, { unit: 'sat', lockTo: pass.lock });
   const lateP = proofsOf(P, late.token);
   ok((await K.W._tillArrived(pass.id, bodyFor('till:' + pass.id + ':7', lateP))) === 'kept', 'a real one there is kept, checked by the mint’s keys on file');
@@ -411,6 +441,7 @@ async function run() {
   ok((await K.W._tillArrived(pass.id, late2Body)) === 'refused' && K.store('foxy.till.inbox', []).length === 50
     && K.store('foxy.till.inbox', []).every((r) => /^j/.test(r.key)), 'a full inbox (50) refuses the next and pushes none out');
   K.storage.setItem('foxy.till.inbox', JSON.stringify([realRow]));
+  K.W._privacy({ tor: 'up', progress: 100, everUp: true });
   await K.W.connect(MINT, { remember: true });
   const kTook = await K.W.balanceSats();
   await K.W.tillListen();
@@ -617,6 +648,423 @@ async function run() {
   K.storage.setItem('foxy.till.passes', JSON.stringify(pr));
   const usdNo = await K.W.tillPassMake({ unit: 'usd' }).then(() => '', (e) => e.message);
   ok(/does not issue dollars/.test(usdNo), 'a dollar code at a mint without dollars is refused', usdNo);
+
+  /* ---- a code in the unit asked ------------------------------------------- */
+  const satCode = await K.W.tillPassMake({ unit: 'sat' });
+  ok(/^[0-9a-f]{16}$/.test(satCode.id) && K.store('foxy.till.passes', []).some((r) => r.id === satCode.id && r.unit === 'sat'), 'tillPassMake({ unit }) makes a code in that unit once none is live in it', satCode.id);
+  ok((await K.W.tillPassMake({ unit: 'sat' })).id === satCode.id && (await K.W.tillPassMake()).id === satCode.id, 'and answers it again, asked in that unit or in none', satCode.id);
+
+  /* ---- the keeper's till at another of its mints ---------------------------- */
+  const atBefore = K.W.mintUrl;
+  const opened = await K.W.tillKeeperOpen(HOME);
+  ok(opened.moved === true && K.W.mintUrl === HOME, 'tillKeeperOpen visits the mint named for the till', K.W.mintUrl);
+  const wayHome = K.store('foxy.till.keeper.home', null);
+  ok(wayHome && String(wayHome.mint).replace(/\/+$/, '') === String(atBefore).replace(/\/+$/, ''), 'and keeps the way home', JSON.stringify(wayHome));
+  ok((await K.W.tillKeeperOpen(HOME)).moved === false && K.store('foxy.till.keeper.home', null), 'opened again where it is: nothing moves, the way home stays');
+  const closed = await K.W.tillKeeperClose();
+  ok(closed.moved === true && K.W.mintUrl === atBefore && !K.store('foxy.till.keeper.home', null), 'tillKeeperClose comes home and forgets the way', K.W.mintUrl);
+  ok((await K.W.tillKeeperClose()).moved === false && K.W.mintUrl === atBefore, 'closed again: nothing to do');
+  ok((await K.W.tillKeeperOpen(atBefore)).moved === false && !K.store('foxy.till.keeper.home', null), 'opened at the mint it is on: no visit, and no way home kept');
+
+
+  /* ---- the till at several mints -------------------------------------------- */
+  const sumOf = (list) => list.reduce((n, pr) => n + Number(pr.amount), 0);
+  const MINTc = String(MINT).replace(/\/+$/, '');
+  ok(K.W.mintUrl === MINT, '(set-up) the keeper is at its own mint', K.W.mintUrl);
+  const set2 = await K.W.tillKeeperOpen([MINT, HOME], MINT);
+  ok(set2.moved === false && JSON.stringify(set2.mints) === JSON.stringify([MINT, HOME]) && set2.def === MINT,
+    'tillKeeperOpen([MINT, HOME], MINT) opens the till at both, the default first, with no visit', JSON.stringify(set2));
+  const kRec = K.store('foxy.till.keeper', null);
+  ok(kRec && JSON.stringify(kRec.mints) === JSON.stringify([MINT, HOME]) && kRec.def === MINT && JSON.stringify(K.W.tillKeeper()) === JSON.stringify({ mints: [MINT, HOME], def: MINT }),
+    'and keeps the till as foxy.till.keeper, read back by tillKeeper()', JSON.stringify(kRec));
+  ok(!!K.store('foxy.cashu.mint.cache', {})[HOME], 'every mint of the till has its keys on file');
+  const openNo = async (a, d) => K.W.tillKeeperOpen(a, d).then(() => '', (e) => e.message);
+  ok(/default mint has to be one/.test(await openNo([MINT, HOME], USDM)), 'a default that is not among the mints is refused');
+  ok(/at most/.test(await openNo(Array.from({ length: 9 }, (_, i) => 'https://m' + i + '.test'))), 'more than eight mints is refused');
+  ok(/not a mint address/.test(await openNo([MINT, 'http://plain.test'])), 'a mint address Foxy would not use is refused');
+  K.W._privacy({ tor: 'connecting', progress: 40, everUp: true });
+  const unseen = await openNo([MINT, USDM], MINT);
+  ok(/usd\.test has not been seen/.test(unseen) && K.store('foxy.till.keeper', null).mints.length === 2 && K.store('foxy.till.keeper', null).mints[1] === HOME,
+    'with no route, a mint never seen is refused by name, and the open till is left as it was', unseen);
+  K.W._privacy({ tor: 'up', progress: 100, everUp: true });
+
+  // the cashier code carries the set; a live code for another set is not answered for this one
+  const liveSat = K.W.tillPasses().find((r) => r.id === satCode.id);
+  const code2 = await K.W.tillPassMake({ unit: 'sat' });
+  ok(code2.id !== satCode.id && JSON.stringify(code2.mints) === JSON.stringify([MINT, HOME]), 'a code for the two mints is a new code, answered with its mints', JSON.stringify(code2.mints));
+  const pass2 = K.W.tillDecode(code2.text);
+  ok(pass2 && pass2.mint === MINT && JSON.stringify(pass2.mints) === JSON.stringify([MINT, HOME]), 'it decodes to mint: the default, and mints: both', JSON.stringify(pass2 && pass2.mints));
+  const raw2 = JSON.parse(Buffer.from(code2.text.slice(URL0.length).replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString());
+  ok(raw2.mint === MINT && JSON.stringify(raw2.mints) === JSON.stringify([MINT, HOME]), 'and its text says so, mint first for a Foxy from before');
+  ok((await K.W.tillPassMake({ unit: 'sat' })).id === code2.id, 'asked again, the same code');
+  ok(!!liveSat && K.W.tillPasses().some((r) => r.id === satCode.id), 'and the one-mint code stays live for the cashiers already on it');
+  const oldShape = Object.assign({}, pass2); delete oldShape.mints;
+  ok(JSON.stringify((K.W.tillDecode(enc(oldShape)) || {}).mints) === JSON.stringify([MINT]), 'a code with no mints reads as its one mint');
+  ok(K.W.tillDecode(enc(Object.assign({}, pass2, { mints: [HOME] }))) === null, 'a code whose mints leave out its mint is null');
+  ok(K.W.tillDecode(enc(Object.assign({}, pass2, { mints: Array.from({ length: 9 }, (_, i) => 'https://m' + i + '.test').concat([MINT]) }))) === null,
+    'one with more than eight mints is null');
+  ok(K.W.tillDecode(enc(Object.assign({}, pass2, { mints: [MINT, 'http://plain.test'] }))) === null && K.W.tillDecode(enc(Object.assign({}, pass2, { mints: 'x' }))) === null,
+    'one naming an address Foxy would not use, or no list at all, is null');
+
+  // the keeper's request names both, the default first
+  const kReq = K.W.decodeRequest(K.W.paymentRequest(30, { unit: 'sat', mints: [HOME, MINT] })) || {};
+  ok(JSON.stringify(kReq.mints) === JSON.stringify([MINT, HOME]) && !!kReq.lockTo, 'a request from the till lists both mints, the one the phone is on first', JSON.stringify(kReq.mints));
+  ok(JSON.stringify((K.store('foxy.req.open', {})[kReq.id] || {}).mints) === JSON.stringify([MINT, HOME]), 'and its open row keeps them');
+  const kReq1 = K.W.decodeRequest(K.W.paymentRequest(30, { unit: 'sat' })) || {};
+  ok(JSON.stringify(kReq1.mints) === JSON.stringify([MINT]) && !('mints' in (K.store('foxy.req.open', {})[kReq1.id] || {})), 'one with no mints named lists the phone’s own, as ever');
+  ok(K.W.paymentRequest(30, { unit: 'sat', mints: [HOME, USDM] }) === '', 'one whose mints leave out the mint the phone is on is not made');
+
+  // the payer pays at HOME: read, and kept in HOME's pile, the keeper staying at MINT
+  await P.W.connect(HOME, { remember: true });
+  await P.W.claim((await P.W.invoice(500, '')).hash);
+  const atHome = proofsOf(P, (await P.W.sendToken(30, { unit: 'sat', lockTo: kReq.lockTo })).token);
+  const kHome0 = K.W.balanceAt(HOME), kMint0 = await K.W.balanceSats();
+  const paidK = [];
+  K.W.onRequestPaid((x) => paidK.push(x));
+  await K.W._requestPaid(JSON.stringify({ id: kReq.id, mint: HOME, unit: 'sat', proofs: atHome }), 'k1', '');
+  await until(() => K.W.balanceAt(HOME) > kHome0);
+  const ansK1 = K.said.answers.find((a) => a.answer === 'k1') || {};
+  ok(ansK1.status === 200 && paidK.some((x) => x.stage === 'paid' && x.id === kReq.id && x.amount === 30), 'a payment at HOME is answered 200 and told paid, 30', JSON.stringify(ansK1));
+  ok(K.W.mintUrl === MINT && K.W.balanceAt(HOME) === kHome0 + 30 && (await K.W.balanceSats()) === kMint0,
+    'and swapped into HOME’s pile, the phone at MINT and MINT’s balance as it was', K.W.balanceAt(HOME) + ' vs ' + kHome0 + ', MINT ' + (await K.W.balanceSats()) + ' vs ' + kMint0);
+  const kRowH = K.store('foxy.cashu.log', []).find((e) => e.hash === 'req-' + kReq.id) || {};
+  ok(kRowH.dir === 'in' && kRowH.sats === 30 && String(kRowH.mint).replace(/\/+$/, '') === HOME && kRowH.settled === true, 'one history row, in, 30, at HOME', JSON.stringify(kRowH));
+  ok(!Object.keys(K.store('foxy.req.unclaimed', {})).length, 'with nothing left waiting');
+
+  // at a mint the request does not name: refused; and one naming a single mint is answered only there
+  const kReq2 = K.W.decodeRequest(K.W.paymentRequest(30, { unit: 'sat', mints: [MINT, HOME] })) || {};
+  await K.W._requestPaid(JSON.stringify({ id: kReq2.id, mint: USDM, unit: 'sat', proofs: atHome }), 'k2', '');
+  ok((K.said.answers.find((a) => a.answer === 'k2') || {}).status === 422 && /not at the mint the request named/.test((K.said.answers.find((a) => a.answer === 'k2') || {}).text),
+    'a payment at a third mint is refused');
+  const rpNo = (b) => { try { K.W.readPayment(b); return ''; } catch (e) { return e.message; } };
+  ok(/not at the mint the request named/.test(rpNo(JSON.stringify({ id: kReq1.id, mint: HOME, unit: 'sat', proofs: atHome }))),
+    'readPayment refuses HOME for a request that names MINT alone');
+  ok(rpNo(JSON.stringify({ id: kReq2.id, mint: HOME, unit: 'sat', proofs: atHome })) === '' && /not at the mint/.test(rpNo(JSON.stringify({ id: kReq2.id, mint: USDM, unit: 'sat', proofs: atHome }))),
+    'and reads HOME for one that names it, but not a mint it leaves out');
+
+  /* A payment at HOME over what was asked, not marked: no change can be made there. Plain, it is refused, and the payer
+   * keeps it; locked to the keeper, a refusal would strand it (the payer cannot spend it back), so it is kept whole, as an
+   * over-payment no change can be made for is at the mint the phone is on (review). */
+  const kReqP = K.W.decodeRequest(K.W.paymentRequest(30, { unit: 'sat', mints: [MINT, HOME] })) || {};
+  const plain35 = proofsOf(P, (await P.W.sendToken(35, { unit: 'sat' })).token);
+  await K.W._requestPaid(JSON.stringify({ id: kReqP.id, mint: HOME, unit: 'sat', proofs: plain35 }), 'k3p', 'tap');
+  ok((K.said.answers.find((a) => a.answer === 'k3p') || {}).status === 422 && /cannot give change at home\.test/.test((K.said.answers.find((a) => a.answer === 'k3p') || {}).text),
+    'a plain over-payment at another mint is refused: no change can be made there, and the ecash is still the payer’s');
+  const hOver = K.W.balanceAt(HOME);
+  const over35 = proofsOf(P, (await P.W.sendToken(35, { unit: 'sat', lockTo: kReq2.lockTo })).token);
+  await K.W._requestPaid(JSON.stringify({ id: kReq2.id, mint: HOME, unit: 'sat', proofs: over35 }), 'k3', 'tap');
+  await until(() => K.W.balanceAt(HOME) > hOver);
+  const rowOver = K.store('foxy.cashu.log', []).find((e) => e.hash === 'req-' + kReq2.id) || {};
+  ok((K.said.answers.find((a) => a.answer === 'k3') || {}).status === 200 && K.W.balanceAt(HOME) === hOver + 35 && rowOver.sats === 35
+     && String(rowOver.mint).replace(/\/+$/, '') === HOME && K.W.mintUrl === MINT,
+    'a locked over-payment at another mint is taken whole into its pile, the row saying 35, never refused and stranded',
+    JSON.stringify([K.said.answers.find((a) => a.answer === 'k3'), K.W.balanceAt(HOME) - hOver, rowOver.sats]));
+
+  // offline: a locked HOME token is kept under HOME, and swept there when the route returns, the phone not moving
+  const kReq3 = K.W.decodeRequest(K.W.paymentRequest(20, { unit: 'sat', mints: [MINT, HOME] })) || {};
+  const lock20 = proofsOf(P, (await P.W.sendToken(20, { unit: 'sat', lockTo: kReq3.lockTo })).token);
+  const plain20 = proofsOf(P, (await P.W.sendToken(20, { unit: 'sat' })).token);
+  K.W._privacy({ tor: 'connecting', progress: 40, everUp: true });
+  await K.W._requestPaid(JSON.stringify({ id: kReq3.id, mint: HOME, unit: 'sat', proofs: plain20 }), 'k4', 'tap');
+  ok((K.said.answers.find((a) => a.answer === 'k4') || {}).status === 422 && /offline/.test((K.said.answers.find((a) => a.answer === 'k4') || {}).text),
+    'with no route, plain ecash at another mint is refused', JSON.stringify(K.said.answers.find((a) => a.answer === 'k4')));
+  const kHome1 = K.W.balanceAt(HOME);
+  await K.W._requestPaid(JSON.stringify({ id: kReq3.id, mint: HOME, unit: 'sat', proofs: lock20 }), 'k5', 'tap');
+  await wait(60);
+  const unc = K.store('foxy.req.unclaimed', {})[kReq3.id] || {};
+  ok((K.said.answers.find((a) => a.answer === 'k5') || {}).status === 200 && String(unc.mint).replace(/\/+$/, '') === HOME && unc.away === true && unc.amount === 20,
+    'with no route, ecash at HOME locked to the keeper is taken, kept unclaimed under HOME', JSON.stringify(unc).slice(0, 120));
+  ok(K.W.unclaimedSats(HOME) === 20 && K.W.unclaimedSats(MINTc) === 0 && K.W.balanceAt(HOME) === kHome1, 'counted as waiting at HOME, nowhere else');
+  K.W._privacy({ tor: 'up', progress: 100, everUp: true });
+  await K.W.claimUnclaimed();
+  await until(() => K.W.balanceAt(HOME) > kHome1);
+  ok(K.W.balanceAt(HOME) === kHome1 + 20 && !K.store('foxy.req.unclaimed', {})[kReq3.id] && K.W.mintUrl === MINT,
+    'and swept into HOME’s pile when the route returns, the phone still at MINT', K.W.balanceAt(HOME) + ' vs ' + kHome1 + ', at ' + K.W.mintUrl);
+
+  // at a mint of sats alone, a dollar request is not made, whatever mints it names: the mint the phone is on asks it
+  ok(K.W.paymentRequest(500, { unit: 'usd', mints: [MINT, USDM] }) === '', 'a dollar request at the mint the phone is on, which issues no dollars, is not made');
+  // and a code for both is refused there: a cashier's dollar invoices are made at the default
+  const bothNo = await K.W.tillPassMake({ unit: 'both' }).then(() => '', (e) => e.message);
+  ok(/m\.test does not issue dollars/.test(bothNo), 'a code for both at a default of sats alone is refused, naming it', bothNo);
+
+  // a till at a dollar mint and HOME, which issues sats alone: HOME drops off a dollar request's list, and stays on a sat one's
+  await K.W.tillKeeperClose();
+  const usdOpen = await K.W.tillKeeperOpen([USDM, HOME], USDM);
+  ok(usdOpen.moved === true && K.W.mintUrl === USDM, '(set-up) a till opened at a dollar mint and HOME', K.W.mintUrl);
+  const usdReq = K.W.decodeRequest(K.W.paymentRequest(500, { unit: 'usd', mints: [USDM, HOME] })) || {};
+  ok(usdReq.unit === 'usd' && JSON.stringify(usdReq.mints) === JSON.stringify([USDM]) && JSON.stringify((K.store('foxy.req.open', {})[usdReq.id] || {}).mints) === JSON.stringify([USDM]),
+    'a dollar request naming HOME, which issues no dollars, is made with HOME dropped from its list, the open row too', JSON.stringify(usdReq.mints));
+  const satReqU = K.W.decodeRequest(K.W.paymentRequest(30, { unit: 'sat', mints: [USDM, HOME] })) || {};
+  ok(JSON.stringify(satReqU.mints) === JSON.stringify([USDM, HOME]), 'a sat request at the same till lists both', JSON.stringify(satReqU.mints));
+  const usdCode = await K.W.tillPassMake({ unit: 'usd' }).then((c) => c, (e) => ({ no: e.message }));
+  const usdPass = usdCode.text ? K.W.tillDecode(usdCode.text) : null;
+  ok(!!usdPass && usdPass.unit === 'usd' && JSON.stringify(usdPass.mints) === JSON.stringify([USDM, HOME]),
+    'a dollar code for the set is made: its default issues dollars, and HOME may issue sats alone', usdCode.no || JSON.stringify(usdPass));
+  const bothCode = await K.W.tillPassMake({ unit: 'both' }).then((c) => c, (e) => ({ no: e.message }));
+  const bothPass = bothCode.text ? K.W.tillDecode(bothCode.text) : null;
+  ok(!!bothPass && bothPass.unit === 'both' && bothCode.id !== usdCode.id && JSON.stringify(bothPass.mints) === JSON.stringify([USDM, HOME]),
+    'a code for both at a default issuing both is a code of its own, unit both, at the set', bothCode.no || JSON.stringify(bothPass));
+  const rawBoth = bothCode.text ? JSON.parse(Buffer.from(bothCode.text.slice(URL0.length).replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString()) : {};
+  ok(rawBoth.unit === 'both', 'and its text says both', JSON.stringify(rawBoth.unit));
+  ok((await K.W.tillPassMake({ unit: 'both' })).id === bothCode.id && (await K.W.tillPassMake({ unit: 'usd' })).id === usdCode.id,
+    'each asked again answers its own: a live code is reused only for the same unit and set');
+
+  /* A till in both, its main said on the code: `main` on a code for both alone (sats on one from before it said), and a code
+   * for both with dollars first is a code of its own. */
+  ok(rawBoth.main === 'sat' && bothPass.main === 'sat' && !('main' in (usdCode.text ? JSON.parse(Buffer.from(usdCode.text.slice(URL0.length).replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString()) : { main: 1 })),
+    'a code for both says its main, sats where none was asked; a dollar code says nothing of one', JSON.stringify([rawBoth.main, bothPass.main]));
+  const bothUsdCode = await K.W.tillPassMake({ unit: 'both', main: 'usd' }).then((c) => c, (e) => ({ no: e.message }));
+  const bothUsdPass = bothUsdCode.text ? K.W.tillDecode(bothUsdCode.text) : null;
+  ok(!!bothUsdPass && bothUsdPass.unit === 'both' && bothUsdPass.main === 'usd' && bothUsdCode.main === 'usd' && bothUsdCode.id !== bothCode.id
+    && (await K.W.tillPassMake({ unit: 'both', main: 'sat' })).id === bothCode.id,
+    'a code for both, dollars first, is a code of its own, and each main asked again answers its own', bothUsdCode.no || JSON.stringify(bothUsdPass));
+  const noMain = Object.assign({}, rawBoth); delete noMain.main;
+  ok((K.W.tillDecode(URL0 + Buffer.from(JSON.stringify(noMain)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')) || {}).main === 'sat'
+    && K.W.tillDecode(URL0 + Buffer.from(JSON.stringify(Object.assign({}, rawBoth, { main: 'eur' }))).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')) === null,
+    'a code for both from before codes said a main reads as sats first; one naming another main is null');
+
+  /* The keeper's pair: one price, a request in each currency, each naming the other (12-receive.js `tillTwinRequest`). A payment
+   * to either is taken in its own unit, and the other is closed: paid to as well, it is refused as already paid. */
+  await P.W.connect(USDM, { remember: true });
+  await P.W.claim((await P.W.invoice(300, '')).hash);
+  await P.W.claim((await P.W.invoice(800, '', { unit: 'usd' })).hash);
+  const kpSatText = K.W.paymentRequest(30, { unit: 'sat', mints: [USDM, HOME], kept: true });
+  const kpSat = K.W.decodeRequest(kpSatText) || {};
+  const kpUsd = K.W.decodeRequest(K.W.paymentRequest(150, { unit: 'usd', mints: [USDM, HOME], kept: true, twin: kpSatText })) || {};
+  const openK = () => K.store('foxy.req.open', {});
+  ok(kpSat.unit === 'sat' && kpUsd.unit === 'usd' && openK()[kpSat.id].twin === kpUsd.id && openK()[kpUsd.id].twin === kpSat.id && !!kpSat.lockTo && !!kpUsd.lockTo,
+    'a pair is made: a sat request and a dollar one, each naming the other, each locked to this phone', JSON.stringify([openK()[kpSat.id], openK()[kpUsd.id]]));
+  const kU0 = K.W.balanceOf('usd'), kS0 = K.W.balanceOf('sat');
+  const payUsd = proofsOf(P, (await P.W.sendToken(150, { unit: 'usd', lockTo: kpUsd.lockTo })).token);
+  await K.W._requestPaid(JSON.stringify({ id: kpUsd.id, mint: USDM, unit: 'usd', proofs: payUsd }), 'kp1', '');
+  await until(() => K.W.balanceOf('usd') >= kU0 + 150);
+  const ansKp = (k) => K.said.answers.find((a) => a.answer === k) || {};
+  ok(ansKp('kp1').status === 200 && K.W.balanceOf('usd') === kU0 + 150 && K.W.balanceOf('sat') === kS0,
+    'a dollar payment to the pair lands in dollars, the sats as they were', JSON.stringify([ansKp('kp1'), K.W.balanceOf('usd') - kU0, K.W.balanceOf('sat') - kS0]));
+  ok(openK()[kpSat.id] && openK()[kpSat.id].twinPaid === kpUsd.id && !openK()[kpUsd.id], 'and its sat twin is closed, the dollar one gone as paid', JSON.stringify(openK()[kpSat.id]));
+  const paySat = proofsOf(P, (await P.W.sendToken(30, { unit: 'sat', lockTo: kpSat.lockTo })).token);
+  await K.W._requestPaid(JSON.stringify({ id: kpSat.id, mint: USDM, unit: 'sat', proofs: paySat }), 'kp2', '');
+  await wait(150);
+  ok(ansKp('kp2').status === 422 && /already been paid/.test(ansKp('kp2').text) && K.W.balanceOf('sat') === kS0,
+    'a second payment, to the closed twin, is refused as already paid, and nothing taken', JSON.stringify([ansKp('kp2'), K.W.balanceOf('sat') - kS0]));
+  // and the other way round: sats paid, the dollar twin closed
+  const kq = K.W.paymentRequest(25, { unit: 'sat', mints: [USDM, HOME], kept: true });
+  const kqSat = K.W.decodeRequest(kq) || {};
+  const kqUsd = K.W.decodeRequest(K.W.paymentRequest(120, { unit: 'usd', mints: [USDM, HOME], kept: true, twin: kqSat.id })) || {};
+  const kS1 = K.W.balanceOf('sat'), kU1 = K.W.balanceOf('usd');
+  await P.W.claim((await P.W.invoice(200, '')).hash);
+  const paySat2 = proofsOf(P, (await P.W.sendToken(25, { unit: 'sat', lockTo: kqSat.lockTo })).token);
+  await K.W._requestPaid(JSON.stringify({ id: kqSat.id, mint: USDM, unit: 'sat', proofs: paySat2 }), 'kp3', '');
+  await until(() => K.W.balanceOf('sat') >= kS1 + 25);
+  ok(ansKp('kp3').status === 200 && K.W.balanceOf('sat') === kS1 + 25 && K.W.balanceOf('usd') === kU1 && openK()[kqUsd.id] && openK()[kqUsd.id].twinPaid === kqSat.id,
+    'a sat payment to a pair (paired by id) lands in sats, and its dollar twin is closed', JSON.stringify([ansKp('kp3'), K.W.balanceOf('sat') - kS1, openK()[kqUsd.id]]));
+  const payUsd2 = proofsOf(P, (await P.W.sendToken(120, { unit: 'usd', lockTo: kqUsd.lockTo })).token);
+  await K.W._requestPaid(JSON.stringify({ id: kqUsd.id, mint: USDM, unit: 'usd', proofs: payUsd2 }), 'kp4', '');
+  await wait(150);
+  ok(ansKp('kp4').status === 422 && K.W.balanceOf('usd') === kU1, 'and dollars sent to it after are refused', JSON.stringify(ansKp('kp4')));
+  // nothing pairs a request that is not open here, nor one with itself
+  const lone = K.W.decodeRequest(K.W.paymentRequest(10, { unit: 'sat', twin: 'ffffffffffffffff' })) || {};
+  ok(!!lone.id && !('twin' in (openK()[lone.id] || {})), 'a request named the twin of one not open here is made unpaired');
+
+  // a cashier on the code for both takes sats and dollars, each in its own unit, and the keeper takes both in
+  ok(C.W.mintUrl === HOME && C.W.tillCashier() === null, '(set-up) the cashier is home, out of the till', C.W.mintUrl);
+  const jBoth = await C.W.tillJoin(bothCode.text);
+  ok(jBoth && jBoth.pass.unit === 'both' && C.W.mintUrl === USDM, 'the cashier joins the code for both, at its default', C.W.mintUrl);
+  await P.W.connect(USDM, { remember: true });
+  await P.W.claim((await P.W.invoice(300, '')).hash);
+  await P.W.claim((await P.W.invoice(800, '', { unit: 'usd' })).hash);
+  const cbSat = C.W.decodeRequest(C.W.paymentRequest(30, { unit: 'sat', lockPub: bothPass.lock, purpose: 'till' })) || {};
+  const cbUsd = C.W.decodeRequest(C.W.paymentRequest(150, { unit: 'usd', lockPub: bothPass.lock, purpose: 'till' })) || {};
+  ok(cbSat.unit === 'sat' && cbSat.lockTo === bothPass.lock && JSON.stringify(cbSat.mints) === JSON.stringify([USDM, HOME]),
+    'its sat request: locked to the keeper, at both mints', JSON.stringify([cbSat.unit, cbSat.mints]));
+  ok(cbUsd.unit === 'usd' && cbUsd.lockTo === bothPass.lock && JSON.stringify(cbUsd.mints) === JSON.stringify([USDM]),
+    'its dollar request: locked to the keeper, at the dollar mint alone', JSON.stringify([cbUsd.unit, cbUsd.mints]));
+  const cbInv = await C.W.invoice(150, '', { unit: 'usd', lockPub: bothPass.lock }).then((q) => q, (e) => ({ no: e.message }));
+  ok(!cbInv.no && cbInv.unit === 'usd', 'and a dollar invoice is made for it, in the unit of the receive', cbInv.no || JSON.stringify(cbInv.unit));
+  const pbSat = proofsOf(P, (await P.W.sendToken(30, { unit: 'sat', lockTo: bothPass.lock })).token);
+  const pbUsd = proofsOf(P, (await P.W.sendToken(150, { unit: 'usd', lockTo: bothPass.lock })).token);
+  relay = [];
+  await C.W._requestPaid(JSON.stringify({ id: cbSat.id, mint: USDM, unit: 'sat', proofs: pbSat }), 'cb1', '');
+  await C.W._requestPaid(JSON.stringify({ id: cbUsd.id, mint: USDM, unit: 'usd', proofs: pbUsd }), 'cb2', '');
+  const ansB = (k) => C.said.answers.find((a) => a.answer === k) || {};
+  ok(ansB('cb1').status === 200 && ansB('cb2').status === 200, 'the cashier takes a sat payment and a dollar one on the one code', JSON.stringify([ansB('cb1'), ansB('cb2')]));
+  const obSat = C.store('foxy.till.outbox', []).find((r) => r.hash === 'till-' + cbSat.id) || {};
+  const obUsd = C.store('foxy.till.outbox', []).find((r) => r.hash === 'till-' + cbUsd.id) || {};
+  ok(obSat.unit === 'sat' && obSat.amount === 30 && obUsd.unit === 'usd' && obUsd.amount === 150 && obUsd.passId === bothPass.id,
+    'into the outbox, each in its own unit, for the keeper', JSON.stringify([[obSat.unit, obSat.amount], [obUsd.unit, obUsd.amount]]));
+  const tokUsd = await P.W.sendToken(40, { unit: 'usd', lockTo: bothPass.lock });
+  const tookUsd = await C.W.tillTakeToken(tokUsd.token).then((r) => r, (e) => ({ no: e.message }));
+  ok(tookUsd.till === true && tookUsd.unit === 'usd' && tookUsd.amount === 40, 'a dollar token scanned at the till is taken for the keeper too', tookUsd.no || JSON.stringify(tookUsd));
+  await until(() => relay.length >= 3);
+  const kbSat = K.W.balanceOf('sat'), kbUsd = K.W.balanceOf('usd');
+  const bodiesB = relay.map((r) => r.body).filter((b) => { try { return JSON.parse(b).id.indexOf('till:' + bothPass.id + ':') === 0; } catch (e) { return false; } });
+  const tookB = [];
+  for (const b of bodiesB) tookB.push(await K.W._tillArrived(bothPass.id, b));
+  await until(() => K.W.balanceOf('usd') >= kbUsd + 190);
+  ok(bodiesB.length === 3 && tookB.every((x) => x === 'taken') && K.W.balanceOf('sat') === kbSat + 30 && K.W.balanceOf('usd') === kbUsd + 190,
+    'the keeper takes all three in: 30 sats and $1.90, each into its own balance', JSON.stringify([tookB, K.W.balanceOf('sat') - kbSat, K.W.balanceOf('usd') - kbUsd]));
+  const eurBody = Object.assign(JSON.parse(bodiesB[0] || '{}'), { unit: 'eur' });
+  ok((await K.W._tillArrived(bothPass.id, JSON.stringify(eurBody))) === 'refused', 'and a delivery in neither unit is refused');
+  // the cashier's pair, both locked to the keeper: the dollar half paid goes to the outbox in dollars, and the sat half is closed
+  const cpSatText = C.W.paymentRequest(20, { unit: 'sat', lockPub: bothPass.lock, purpose: 'till', kept: true });
+  const cpSat = C.W.decodeRequest(cpSatText) || {};
+  const cpUsd = C.W.decodeRequest(C.W.paymentRequest(100, { unit: 'usd', lockPub: bothPass.lock, purpose: 'till', kept: true, twin: cpSatText })) || {};
+  const openC = () => C.store('foxy.req.open', {});
+  ok(cpSat.lockTo === bothPass.lock && cpUsd.lockTo === bothPass.lock && openC()[cpSat.id].twin === cpUsd.id && openC()[cpUsd.id].twin === cpSat.id,
+    'a cashier’s pair: both locked to the keeper, each naming the other', JSON.stringify([cpSat.lockTo, cpUsd.lockTo]));
+  const cpPayUsd = proofsOf(P, (await P.W.sendToken(100, { unit: 'usd', lockTo: bothPass.lock })).token);
+  await C.W._requestPaid(JSON.stringify({ id: cpUsd.id, mint: USDM, unit: 'usd', proofs: cpPayUsd }), 'cp1', '');
+  const obCp = C.store('foxy.till.outbox', []).find((r) => r.hash === 'till-' + cpUsd.id) || {};
+  ok(ansB('cp1').status === 200 && obCp.unit === 'usd' && obCp.amount === 100 && openC()[cpSat.id] && openC()[cpSat.id].twinPaid === cpUsd.id,
+    'its dollar half paid: into the outbox in dollars, for the keeper, and the sat half closed', JSON.stringify([ansB('cp1'), obCp.unit, obCp.amount, openC()[cpSat.id]]));
+  const cpPaySat = proofsOf(P, (await P.W.sendToken(20, { unit: 'sat', lockTo: bothPass.lock })).token);
+  await C.W._requestPaid(JSON.stringify({ id: cpSat.id, mint: USDM, unit: 'sat', proofs: cpPaySat }), 'cp2', '');
+  ok(ansB('cp2').status === 422 && /already been paid/.test(ansB('cp2').text) && !C.store('foxy.till.outbox', []).some((r) => r.hash === 'till-' + cpSat.id),
+    'a payment to the closed sat half after: refused as already paid, nothing in the outbox', JSON.stringify(ansB('cp2')));
+  await C.W.tillLeave();
+  ok(C.W.mintUrl === HOME && C.W.tillCashier() === null, 'the cashier leaves for home', C.W.mintUrl);
+  // (and forgets the dollar mint's keys, for the join below that finds a mint it never saw)
+  { const c = C.store('foxy.cashu.mint.cache', {}); delete c[USDM]; C.storage.setItem('foxy.cashu.mint.cache', JSON.stringify(c)); }
+
+  await K.W.tillKeeperClose();
+  ok(K.W.mintUrl === MINT && K.store('foxy.till.keeper', null) === null, 'tillKeeperClose comes home and forgets the till', K.W.mintUrl);
+  await K.W.tillKeeperOpen([MINT, HOME], MINT);
+
+  // the cashier: a join loads the keys of every mint the code takes, and refuses one it cannot ask
+  await P.W.connect(MINT, { remember: true });
+  ok(C.W.mintUrl === HOME && C.W.tillCashier() === null, '(set-up) the cashier is home, out of the till', C.W.mintUrl);
+  const withUsd = Object.assign({}, pass2, { mints: [MINT, USDM] });
+  C.W._privacy({ tor: 'connecting', progress: 40, everUp: true });
+  const joinNo = await C.W.tillJoin(withUsd).then(() => '', (e) => e.message);
+  ok(/usd\.test/.test(joinNo) && C.W.tillCashier() === null && C.W.mintUrl === HOME, 'with no route, a code naming a mint the cashier never saw is refused by name, nothing written', joinNo);
+  C.W._privacy({ tor: 'up', progress: 100, everUp: true });
+  await C.W.tillJoin(withUsd);
+  ok(!!C.store('foxy.cashu.mint.cache', {})[USDM] && C.W.mintUrl === MINT, 'with one, the join puts that mint’s keys on file and goes to the default', C.W.mintUrl);
+  await C.W.tillLeave();
+  const j2 = await C.W.tillJoin(code2.text);
+  const cache2 = C.store('foxy.cashu.mint.cache', {});
+  ok(j2 && JSON.stringify(j2.pass.mints) === JSON.stringify([MINT, HOME]) && C.W.mintUrl === MINT && !!cache2[MINTc] && !!cache2[HOME],
+    'joined by the two-mint code: at MINT, both mints’ keys on file', C.W.mintUrl);
+  const cReq = C.W.decodeRequest(C.W.paymentRequest(30, { unit: 'sat', lockPub: pass2.lock, purpose: 'till' })) || {};
+  ok(JSON.stringify(cReq.mints) === JSON.stringify([MINT, HOME]) && cReq.lockTo === pass2.lock, 'the cashier’s request lists the code’s mints, locked to the keeper', JSON.stringify(cReq.mints));
+  await P.W.connect(HOME, { remember: true });
+  const cHome = proofsOf(P, (await P.W.sendToken(30, { unit: 'sat', lockTo: pass2.lock })).token);
+  relay = [];
+  const cPile = await C.W.balanceSats();
+  await C.W._requestPaid(JSON.stringify({ id: cReq.id, mint: HOME, unit: 'sat', proofs: cHome }), 'c1', '');
+  await until(() => relay.length > 0);
+  ok((C.said.answers.find((a) => a.answer === 'c1') || {}).status === 200, 'a HOME payment to the cashier is answered 200', JSON.stringify(C.said.answers.find((a) => a.answer === 'c1')));
+  const cRow = C.store('foxy.till.outbox', []).find((r) => r.hash === 'till-' + cReq.id) || {};
+  ok(String(cRow.mint).replace(/\/+$/, '') === HOME && cRow.amount === 30 && cRow.passId === pass2.id && (await C.W.balanceSats()) === cPile,
+    'into the outbox under HOME, for the keeper, nothing in the cashier’s pile', JSON.stringify({ m: cRow.mint, a: cRow.amount }));
+  const cSent = relay.map((r) => JSON.parse(r.body)).find((b) => b.id === 'till:' + pass2.id + ':' + cRow.n) || {};
+  ok(String(cSent.mint).replace(/\/+$/, '') === HOME && (C.store('foxy.till.outbox', []).find((r) => r.hash === 'till-' + cReq.id) || {}).sentAt > 0,
+    'and delivered, the body naming HOME', JSON.stringify({ id: cSent.id, m: cSent.mint }));
+  const cScan = await P.W.sendToken(7, { unit: 'sat', lockTo: pass2.lock });
+  const cTook = await C.W.tillTakeToken(cScan.token);
+  ok(cTook.till === true && cTook.amount === 7 && String(cTook.mint).replace(/\/+$/, '') === HOME, 'a HOME token scanned at the till is taken for the keeper, at HOME', JSON.stringify(cTook));
+  await wait(80);
+  const kHome2 = K.W.balanceAt(HOME), kMint2 = await K.W.balanceSats();
+  const forK = relay.find((r) => JSON.parse(r.body).id === 'till:' + pass2.id + ':' + cRow.n);
+  ok(!!forK, '(set-up) the delivery is on the relay');
+  const kTake = forK ? await K.W._tillArrived(pass2.id, forK.body) : '';
+  ok(kTake === 'taken' && K.W.balanceAt(HOME) === kHome2 + 30 && (await K.W.balanceSats()) === kMint2 && K.W.mintUrl === MINT,
+    'the keeper takes it into HOME’s pile, staying at MINT', kTake + ', ' + K.W.balanceAt(HOME) + ' vs ' + kHome2);
+  const kTill = K.store('foxy.cashu.log', []).filter((e) => e.till === true && String(e.mint).replace(/\/+$/, '') === HOME);
+  ok(kTill.length >= 1 && kTill.some((e) => e.sats === 30 && e.who === 'cashier'), 'with a till row at HOME', JSON.stringify(kTill.map((e) => [e.sats, e.mint])));
+  ok((await K.W._tillArrived(pass2.id, JSON.stringify(Object.assign(JSON.parse(forK.body), { mint: USDM })))) === 'refused', 'a delivery naming a mint the code does not take is refused');
+
+  /* ---- a till's mints keep their keys, and fetch them again when they have gone (review, cache-evict) -------------- */
+  const CACHE = 'foxy.cashu.mint.cache';
+  const dropKeys = (ctx, m) => { const c = ctx.store(CACHE, {}); delete c[m]; ctx.storage.setItem(CACHE, JSON.stringify(c)); };
+  // a cache full of other mints, HOME's entry the oldest of all: the oldest of the rest go, never a till mint's
+  const filled = K.store(CACHE, {});
+  const homeEntry = filled[HOME];
+  for (let i = 0; i < 14; i++) filled['https://old' + i + '.test'] = Object.assign({}, homeEntry, { at: 1000 + i });
+  filled[HOME] = Object.assign({}, homeEntry, { at: 10 });
+  K.storage.setItem(CACHE, JSON.stringify(filled));
+  await K.W.connect(MINT, { remember: true });
+  const cacheNow = K.store(CACHE, {});
+  ok(Object.keys(cacheNow).length === 12 && !!cacheNow[HOME] && !!cacheNow[MINTc] && !cacheNow['https://old0.test'] && !!cacheNow['https://old13.test'],
+    'a full mint cache keeps twelve, dropping the oldest of the rest and never the open till’s mints', Object.keys(cacheNow).join(' '));
+  await K.W.tillKeeperClose();
+  filled[HOME] = Object.assign({}, cacheNow[HOME], { at: 10 });
+  K.storage.setItem(CACHE, JSON.stringify(Object.assign({}, cacheNow, { 'https://old0.test': filled['https://old0.test'], [HOME]: filled[HOME] })));
+  await K.W.connect(MINT, { remember: true });
+  ok(!!K.store(CACHE, {})[HOME], 'with the till closed, a cashier code still listened on keeps its mints’ keys', Object.keys(K.store(CACHE, {})).join(' '));
+  await K.W.tillKeeperOpen([MINT, HOME], MINT);
+
+  // the cashier's next HOME payments, delivered: the keeper's copy of HOME's keys gone
+  const deliver = async (n) => {
+    relay = [];
+    const t = await P.W.sendToken(n, { unit: 'sat', lockTo: pass2.lock });
+    await C.W.tillTakeToken(t.token);
+    await until(() => relay.length > 0);
+    return (relay.find((r) => sumOf(JSON.parse(r.body).proofs) === n) || {}).body;
+  };
+  const body9 = await deliver(9);
+  dropKeys(K, HOME);
+  const h9 = K.W.balanceAt(HOME);
+  const got9 = body9 ? await K.W._tillArrived(pass2.id, body9) : '';
+  ok(got9 === 'taken' && K.W.balanceAt(HOME) === h9 + 9 && !!K.store(CACHE, {})[HOME] && K.W.mintUrl === MINT,
+    'a cashier’s HOME payment, HOME’s keys gone: asked for once, and taken into HOME’s pile', got9 + ', ' + (K.W.balanceAt(HOME) - h9));
+  const body11 = await deliver(11);
+  const notSigned = JSON.parse(body9);
+  notSigned.proofs = notSigned.proofs.map((pr, i) => Object.assign({}, pr, { secret: pr.secret.replace(/"nonce":"[0-9a-f]+"/, '"nonce":"' + 'ab'.repeat(16) + String(i) + '"') }));
+  dropKeys(K, HOME);
+  K.W._privacy({ tor: 'connecting', progress: 40, everUp: true });
+  const h11 = K.W.balanceAt(HOME);
+  const got11 = body11 ? await K.W._tillArrived(pass2.id, body11) : '';
+  const gotF = await K.W._tillArrived(pass2.id, JSON.stringify(notSigned));
+  ok(got11 === 'kept' && gotF === 'kept' && K.store('foxy.till.inbox', []).length === 2,
+    'with no route and no keys for HOME, a delivery is kept in the inbox, not refused', got11 + ' ' + gotF + ', inbox ' + K.store('foxy.till.inbox', []).length);
+  K.W._privacy({ tor: 'up', progress: 100, everUp: true });
+  await K.W.tillListen();
+  await until(() => K.W.balanceAt(HOME) >= h11 + 11 && !K.store('foxy.till.inbox', []).length);
+  ok(K.W.balanceAt(HOME) === h11 + 11 && K.store('foxy.till.inbox', []).length === 0 && !!K.store(CACHE, {})[HOME],
+    'when the route returns the keys are asked for: the real one taken at HOME, the one HOME never signed refused and let go',
+    (K.W.balanceAt(HOME) - h11) + ', inbox ' + K.store('foxy.till.inbox', []).length);
+
+  // the keeper's own request at HOME, HOME's keys gone: asked for once and read again
+  const kReq4 = K.W.decodeRequest(K.W.paymentRequest(25, { unit: 'sat', mints: [MINT, HOME] })) || {};
+  const pay25 = proofsOf(P, (await P.W.sendToken(25, { unit: 'sat', lockTo: kReq4.lockTo })).token);
+  dropKeys(K, HOME);
+  const h25 = K.W.balanceAt(HOME);
+  await K.W._requestPaid(JSON.stringify({ id: kReq4.id, mint: HOME, unit: 'sat', proofs: pay25 }), 'k6', 'tap');
+  await until(() => K.W.balanceAt(HOME) > h25);
+  ok((K.said.answers.find((a) => a.answer === 'k6') || {}).status === 200 && K.W.balanceAt(HOME) === h25 + 25 && !!K.store(CACHE, {})[HOME],
+    'a payment at HOME to the keeper’s request, HOME’s keys gone: the keys asked for once, the payment read again and taken',
+    JSON.stringify(K.said.answers.find((a) => a.answer === 'k6')));
+  // and the cashier's
+  const cReq5 = C.W.decodeRequest(C.W.paymentRequest(15, { unit: 'sat', lockPub: pass2.lock, purpose: 'till' })) || {};
+  const pay15 = proofsOf(P, (await P.W.sendToken(15, { unit: 'sat', lockTo: pass2.lock })).token);
+  dropKeys(C, HOME);
+  await C.W._requestPaid(JSON.stringify({ id: cReq5.id, mint: HOME, unit: 'sat', proofs: pay15 }), 'c5', '');
+  await until(() => (C.said.answers.find((a) => a.answer === 'c5') || {}).status > 0);
+  ok((C.said.answers.find((a) => a.answer === 'c5') || {}).status === 200 && !!C.store('foxy.till.outbox', []).find((r) => r.hash === 'till-' + cReq5.id),
+    'and the cashier’s, the same: taken for the keeper, into the outbox', JSON.stringify(C.said.answers.find((a) => a.answer === 'c5')));
+  await C.W.tillLeave();
+  await K.W.tillKeeperClose();
+
+  /* ---- a till of eight: every key on file at the end, or the true reason (review, cache-evict) ------------------- */
+  const eight = [MINT, HOME].concat(Array.from({ length: 6 }, (_, i) => 'https://x' + i + '.test'));
+  const open8 = await K.W.tillKeeperOpen(eight, MINT).then((r) => r, (e) => ({ no: e.message }));
+  const cache8 = K.store(CACHE, {});
+  ok(!open8.no && eight.every((m) => !!cache8[String(m).replace(/\/+$/, '')]), 'a till of eight mints opens with every one’s keys on file', open8.no || Object.keys(cache8).join(' '));
+  ok(!!K.W.paymentRequest(30, { unit: 'sat', mints: eight }), 'and its request names all eight');
+  await K.W.tillKeeperClose();
+  // keys lost between their loading and the end of the opening (the store dropping one): refused by that, by name
+  const SP = K.window.Storage.prototype;
+  const setItem0 = SP.setItem;
+  SP.setItem = function (k, v) {
+    if (k === CACHE && /x5\.test/.test(String(v))) { const all = JSON.parse(v); delete all[HOME]; v = JSON.stringify(all); }
+    return setItem0.call(this, k, v);
+  };
+  dropKeys(K, 'https://x5.test');
+  const open8b = await K.W.tillKeeperOpen(eight, MINT).then(() => '', (e) => e.message);
+  SP.setItem = setItem0;
+  ok(/keys of home\.test could not be kept/.test(open8b) && K.store('foxy.till.keeper', null) === null,
+    'keys gone by the end of the opening: refused for that, naming the mint, no till written', open8b);
 
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
   if (failed) process.exitCode = 1;

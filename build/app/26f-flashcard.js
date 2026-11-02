@@ -1074,7 +1074,7 @@
       body: 'The card has signed and the mint has not answered yet.',
       dots: true, forMs: 70000, button: 'CLOSE',
       // (a card at another mint: the asking is over, and this phone goes home, `fcXmHome`)
-      go: () => { clearTimeout(this._fcCheckT); if (opt.xm) this.fcXmHome(); },
+      go: () => { clearTimeout(this._fcCheckT); if (opt.xm || opt.away) this.fcXmHome(); },
     });
     const settled = (how, row) => {
       clearTimeout(this._fcCheckT);
@@ -1082,7 +1082,7 @@
       /* A card at another mint: what the mint's answer comes to has been worked out there (`cardSettle`), and this phone goes home
        * before it is said. Its pieces were held for this phone's invoice and never melted, so a late "paid" is the card's, back on
        * it at its next tap, as a payment out of a card's own screen. */
-      if (opt.xm) this.fcXmHome();
+      if (opt.xm || opt.away) this.fcXmHome();
       /* Paying out of this phone: the mint's answer came too late, and the payment it was for was never made. The wallet has
        * owed all of it back to the card (21a-flashcard.js, `cardSettle`), and its next tap puts it back. */
       /* The same for a dollar card's cents held for this phone's own bitcoin invoice (`opt.btc.holding`): the invoice was never
@@ -1100,7 +1100,8 @@
         /* A dollar card paid a dollar receive in cents, straight into this phone's dollars: there is no invoice for its sats to
          * pay (`fcMoved`). And one paid for sats asked has its cents pay the sats invoice (`fcBtcPay`): the cents are not announced. */
         if (opt.usd && this.fcUnitOf(row) === 'usd') { opt.usd = null; this._fcUsd = null; }
-        if (opt.usd) this.fcUsdHush(id);
+        // (only where they pay a code: a dollar receive's card pays none now, its sats announced as they are, `payUsdByCard`)
+        if (opt.usd && opt.usd.bolt11) this.fcUsdHush(id);
         if (opt.btc && this.fcUnitOf(row) !== 'usd') opt.btc = null;
         if (opt.btc) this.fcBtcHush(id);
         this.fcMoved(opt);
@@ -1218,6 +1219,10 @@
      * swapped into the phone that reads them, and a cashier's phone holds nothing of the keeper's. Said here as well, so no
      * other way to this button reaches it. */
     if (this.tillRole && this.tillRole() === 'cashier') { console.log('[foxy] card: a cashier’s till takes no card'); return; }
+    // (a card taken at another of the till's mints is that payment's alone: `fcTillAway`)
+    this._fcTillAway = null;
+    // a till that takes both: the card pays in what it holds, and it stays in that (`payBothByCard`)
+    if (this.tillBoth && this.tillBoth()) { this.payBothByCard(); return; }
     // a receive into the dollar balance: a dollar card pays its cents, a bitcoin card the dollar invoice's sats (`payUsdByCard`)
     if (s.recvUnit === 'usd' && this.walletNow && this.walletNow('receive') === 'usd') { this.payUsdByCard(); return; }
     const W = this.fcW();
@@ -1225,6 +1230,67 @@
     const sats = (!s.invoiceIsAddress && W.amountOf && W.amountOf(s.invoice)) || this.wantedSats();
     if (!(sats > 0)) { this.toast('Enter an amount first.', true); return; }
     this.fcPayBegin(sats);
+  }
+
+  /* ---- a till that takes both, paid by a card ----------------------------------------------------------------------
+   *
+   * The card is asked the price in each currency, the dollars typed (or the sats typed put into cents at this phone's price)
+   * and the sats they come to, and pays in the one it holds, which stays in that one: a dollar card's cents are dollars here,
+   * a bitcoin card's sats are sats, and no invoice is paid with either, so nothing is converted and no fee is paid for it (the
+   * keeper, 2026-11-02: "the POS will accept the dollars as dollars to save any conversion fees and to make things faster").
+   * The invoice on screen, in the till's main, is for a card at a mint the till does not take, which pays it from there
+   * (`fcXmBegin`); a card at another mint the till does take is taken there (`fcTillAway`). */
+  payBothByCard() {
+    const s = this.state;
+    const W = window.FoxyWallet;
+    if (this.cardFlowBusy && this.cardFlowBusy()) return;
+    const main = this.tillMain ? this.tillMain() : 'sat';
+    const cents = Math.round(Number(main === 'usd' && s.recvAmount != null ? s.recvAmount : (this.centsTyped ? this.centsTyped() : 0)) || 0);
+    const sats = main === 'sat'
+      ? Math.round(Number((!s.invoiceIsAddress && W && W.amountOf && W.amountOf(s.invoice)) || this.wantedSats()) || 0)
+      : Math.round(Number(this.wantedSats()) || 0);
+    if (!(cents > 0) && !(sats > 0)) { this.toast('Enter an amount first.', true); return; }
+    // (`both`: no invoice for a bitcoin card's sats to pay, as a dollar receive's has, `fcPayRun`)
+    const usd = { cents, bolt11: '', hash: '', sats: 0, both: true, main };
+    if (W && W.cardOnline && !W.cardOnline()) {
+      if (!(W.cardOffline && W.cardOffline()) || !this.fcW()) { this.offlineNo('A card payment'); return; }
+      this.fcPayStart(sats, true, null, null, usd);
+      return;
+    }
+    if (!this.fcW()) return;
+    if (this.offlineNow()) { this.offlineNo('A card payment'); return; }
+    console.log('[foxy] card: a till in both asks the card for ' + cents + ' cents or ' + sats + ' sats, whichever it holds');
+    this.fcPayStart(sats, false, null, null, usd);
+  }
+
+  /* A card whose money is at another of the keeper's till's mints, not the one the phone is on (`fcXmBegin`): taken there, in
+   * what it holds, as a phone's token at that mint is (the keeper, 2026-11-02), with no crossing and no invoice. The phone
+   * visits the card's mint for the tap (`fcXmGo`, the same visit a card paying from its mint makes), the card pays this
+   * phone's pile there as it pays one at the mint the phone is on, and the phone comes home when the card's part is over
+   * (`fcTillAwayHome`). A dollar till's code is not handed to a bitcoin card there: dollars only. */
+  fcTillAway(e, sats, usd) {
+    const x = { mint: this.fcMintKey(e.mint), tillAway: true };
+    const ask = (usd && !usd.both) ? { cents: Math.round(Number(usd.cents) || 0), bolt11: '', hash: '', sats: 0 } : usd;
+    const n = (usd && !usd.both) ? 0 : sats;
+    this._fcTillAway = x;
+    console.log('[foxy] card: its money is at ' + x.mint + ', one of the till’s mints; taken there');
+    this.fcXmGo(x, () => this.fcPayStart(n, false, null, null, ask));
+  }
+
+  /* Home from a card taken at another of the till's mints, once the card's part is over: at once, or where change is still to
+   * go back on at a second tap, when that is done (a card flow no longer running), and in ten minutes whatever. */
+  fcTillAwayHome() {
+    const x = this._fcTillAway;
+    this._fcTillAway = null;
+    clearTimeout(this._fcTillAwayT);
+    if (!x) return;
+    const until = Date.now() + 600000;
+    const go = () => {
+      if (this.cardFlowBusy && this.cardFlowBusy() && Date.now() < until) { this._fcTillAwayT = setTimeout(go, 1500); return; }
+      this._fcTillAwayT = null;
+      this.fcXmHome();
+    };
+    go();
   }
 
   /* ---- a dollar receive, paid by a card -----------------------------------------------------------------------------
@@ -1237,106 +1303,49 @@
    * route (24-render-receive-and-send.js, `recvCardShown`); with no route the card signs its cents over to this phone as a
    * bitcoin card signs its sats (`cardKeepSigned`).
    *
-   * A bitcoin card is asked for sats as well, where there are sats to ask. Online, the dollar invoice on the receive screen is a
-   * Lightning invoice the mint made for the cents asked, naming its own number of sats at the mint's rate: the card pays
-   * exactly that number, read off the invoice as every invoice's amount is read (`amountOf`), and never a figure this phone
-   * works out at its own price, since a till that converted would take the wrong amount whenever its price and the mint's
-   * differ. The tap is the bitcoin receive's in every way (the sheet, the PIN, the limits, the refusals, the change), and then
-   * the sats it brought pay the dollar invoice, from this phone, as any payment is made (`fcUsdPay`). The mint says that
-   * invoice is paid, and the dollars land exactly as they land for a dollar invoice paid from anywhere else (12-receive.js,
-   * `usdInvoiceUp`).
+   * A bitcoin card is asked for sats as well: the dollars shown, at this phone's own price, as a tap pays a dollar price in
+   * sats (`sats4usd`, tests/sats-for-dollars-tap.js). Online or not, nothing waits for the mint's dollar invoice: that code is
+   * for a Lightning payer, and a card tapped the moment the screen opened was held up by it for nothing (the keeper,
+   * 2026-11-02). The card's sheet says the dollars with the sats under them, which is the figure its holder agrees to by
+   * paying; the price is kept with the payment (`terms`), and the sats become dollars once they have settled with the mint
+   * (`convert`), as the offline payment's always have. With no price, one too old, or a build that cannot turn sats into
+   * dollars (`W.convertOne`), a bitcoin card is asked for nothing it holds, and is told why once it is read (`fcFailed`, before
+   * its PIN); a dollar card pays as ever. With the card's switch off and no route, the words are the ones a card payment with
+   * no connection always has.
    *
-   * The card's money here is at this phone's own mint (one at another mint pays the code from its own mint instead, with the
-   * charge shown first: `fcXmBegin`), so the invoice the sats pay is one the same mint made. That is the common case of the mint
-   * paying its own invoice, which it settles in its own books with no Lightning payment in between.
-   *
-   * Offline there is no invoice to pay. Where this build can turn sats into dollars later (`W.convertOne`, a wallet with
-   * two balances), a bitcoin card is asked for the sats the dollars come to at this phone's own last price, and that price is
-   * kept with the payment (`terms`) so the sats become dollars once the payment has settled with the mint. With no price, one
-   * too old, or no such build, a bitcoin card is asked for nothing it holds, and is told why once it is read (`fcFailed`,
-   * before its PIN); a dollar card pays as ever. With the card's switch off, the words are the ones a card payment with no
-   * connection always has.
-   *
-   * The invoice lives as long as the mint said it would (the clock on screen, `recvExpiresAt`), and a melt sent after
-   * that is refused. A tap, a PIN and the mint's answer take seconds, so a code with less than a quarter of a minute left
-   * is not handed to a card: a new one is asked for first, and CARD pressed again pays that. */
+   * A card at another mint than this phone's pays the code on screen from its own mint, with the charge shown first
+   * (`fcXmBegin`): that one does need the code, and waits for it there. */
   payUsdByCard() {
     const s = this.state;
     const W = window.FoxyWallet;
-    // (nor here, which the code's own wait presses again: `payByCard`)
+    // (nor here, which the code's own wait pressed again: `payByCard`)
     if (this.tillRole && this.tillRole() === 'cashier') return;
-    /* A card flow already going (a sheet up, its PIN asked, a card asking to be tapped again): CARD starts no second one. The
-     * wait's own timer pressed CARD again after the person had, and two sheets were begun for one code, the second taking over
-     * `_fcUsd` from the payment the first was making. */
-    if (this.cardFlowBusy && this.cardFlowBusy()) { clearTimeout(this._fcUsdCodeWaitT); this._fcUsdCodeWait = null; return; }
+    /* A card flow already going (a sheet up, its PIN asked, a card asking to be tapped again): CARD starts no second one. */
+    if (this.cardFlowBusy && this.cardFlowBusy()) return;
     // the cents asked, as the receive screen holds them, or as typed while the mint is still making the code
     const cents = Math.round(Number(s.recvAmount != null ? s.recvAmount : (this.centsTyped ? this.centsTyped() : 0)) || 0);
-    if (W && W.cardOnline && !W.cardOnline()) {
-      if (!(W.cardOffline && W.cardOffline()) || !this.fcW()) { this.offlineNo('A card payment'); return; }
-      if (!(cents > 0)) { this.toast('Enter an amount first.', true); return; }
-      const lp = (W.lastPrice && W.lastPrice()) || { rate: 0, at: 0, ageMs: 0 };
-      const old = !(lp.rate > 0) || !!(W.priceTooOld && W.priceTooOld(lp.at));
-      // (no invoice to melt: `usd` names the cents alone, and a bitcoin card's sats are kept as bitcoin until they settle and convert)
-      const usd = { cents, bolt11: '', hash: '', sats: 0 };
-      if (!W.convertOne || old) {
-        // why a bitcoin card is not asked for sats here, said if one is tapped (`fcFailed`)
-        usd.satsWhy = !W.convertOne ? 'build' : lp.rate > 0 ? 'old' : 'none';
-        usd.price = lp;
-        this.fcPayStart(0, true, null, null, usd);
-        return;
-      }
-      const sats = Math.round(cents / 100 / lp.rate * 1e8);
-      // the price is this phone's own (`own`), which the payment's screens and history say it is
-      this.fcPayStart(sats, true, null, null, usd, { usd: cents, rate: lp.rate, ageMs: lp.ageMs, seenAt: lp.at, convert: true, own: true });
-      return;
+    const cardOff = !!(W && W.cardOnline && !W.cardOnline());
+    if (cardOff && (!(W.cardOffline && W.cardOffline()) || !this.fcW())) { this.offlineNo('A card payment'); return; }
+    if (!cardOff) {
+      if (!this.fcW()) return;
+      if (this.offlineNow()) { this.offlineNo('A card payment'); return; }
     }
-    const bolt11 = s.invoiceIsAddress ? '' : String(s.invoice || '');
-    /* The code still being made by the mint (12-receive.js, `_usdCodeMaking`; or asked again, `_requoting`): a bitcoin card
-     * needs it, and reading the card now refused it ("tap it again when the dollar code is on screen"), as the owner found
-     * pressing CARD the moment the screen opened. Wait for the code, two and a half seconds at most (the mint answers in about
-     * one; a dollar card needs no code, and is not kept waiting on a mint that is slow), then go on as before. The wait is this
-     * receive's (`run`): one begun for another, or for this one and left when its screen was, is not this one's, and its start
-     * no longer cuts this one short. */
-    if (!bolt11 && (this._usdCodeMaking === this._invoiceRun || this._requoting)) {
-      const was = this._fcUsdCodeWait;
-      if (!was || was.run !== this._invoiceRun) {
-        this._fcUsdCodeWait = { at: Date.now(), run: this._invoiceRun };
-        this.toast('One moment: the code is being made.', false);
-      }
-      const wait = this._fcUsdCodeWait;
-      if (Date.now() - wait.at < 2500) {
-        clearTimeout(this._fcUsdCodeWaitT);
-        this._fcUsdCodeWaitT = setTimeout(() => {
-          // the receive screen left, or another receive on it: the wait is over, and nothing is pressed for it
-          if (this.state.screen !== 'confirm' || this._invoiceRun !== wait.run) { if (this._fcUsdCodeWait === wait) this._fcUsdCodeWait = null; return; }
-          this.payUsdByCard();
-        }, 250);
-        return;
-      }
-    }
-    // past the wait, or none: its timer, if one is armed, would press CARD a second time
-    clearTimeout(this._fcUsdCodeWaitT);
-    this._fcUsdCodeWait = null;
-    const sats = bolt11 && W && W.amountOf ? Math.round(Number(W.amountOf(bolt11)) || 0) : 0;
-    // a code on screen that names no sats is not one to pay, nor to pay around
-    if (bolt11 && !(sats > 0)) { this.toast('The invoice is still being made.', true); return; }
-    if (!this.fcW()) return;
-    if (this.offlineNow()) { this.offlineNo('A card payment'); return; }
     if (!(cents > 0)) { this.toast('Enter an amount first.', true); return; }
-    const ends = Number(s.recvExpiresAt) || 0;
-    if (bolt11 && ends && ends - Date.now() < 15000) {
-      this.toast('This code has almost run out. A new one is being made; press CARD when it is up.', true);
-      if (this.recvRequote) this.recvRequote(this._invoiceRun);
+    const lp = (W && W.lastPrice && W.lastPrice()) || { rate: 0, at: 0, ageMs: 0 };
+    const old = !(lp.rate > 0) || !!(W.priceTooOld && W.priceTooOld(lp.at));
+    // (no invoice in it: a bitcoin card's sats are kept as bitcoin until they settle and convert, and announced as they land)
+    const usd = { cents, bolt11: '', hash: '', sats: 0 };
+    if (!W.convertOne || old) {
+      // why a bitcoin card is not asked for sats here, said if one is tapped (`fcFailed`)
+      usd.satsWhy = !W.convertOne ? 'build' : lp.rate > 0 ? 'old' : 'none';
+      usd.price = lp;
+      this.fcPayStart(0, cardOff, null, null, usd);
       return;
     }
-    // no code yet: a dollar card needs none, and a bitcoin card is told to tap again once it is up
-    if (!bolt11) { this.fcPayStart(0, false, null, null, { cents, bolt11: '', hash: '', sats: 0 }); return; }
-    // the code on screen paid by a card already, its dollars landing: no second sheet for it (`fcUsdLanding`, as `fcPayBegin`)
-    if (this.fcUsdLanding()) { this.toast('The card has paid this code. The dollars land in a moment.', true); return; }
-    const usd = { bolt11, hash: String(s.invoiceHash || ''), cents, sats, run: this._invoiceRun, ends };
-    // the code on screen is kept while the card pays it (`fcUsdHolds`), and not replaced when its minute runs out
-    this._fcUsd = usd;
-    this.fcPayStart(sats, false, null, null, usd);
+    const sats = Math.round(cents / 100 / lp.rate * 1e8);
+    console.log('[foxy] card: a dollar receive asks a bitcoin card for ' + sats + ' sats at this phone’s price, with no invoice waited for');
+    // the price is this phone's own (`own`), which the payment's screens and history say it is
+    this.fcPayStart(sats, cardOff, null, null, usd, { usd: cents, rate: lp.rate, ageMs: lp.ageMs, seenAt: lp.at, convert: true, own: true });
   }
 
   /* Whether the dollar code `hash` is being paid by a card at this moment: tapped, its PIN asked for, waiting for the
@@ -1667,7 +1676,7 @@
       // a card at another mint: backing out of the pad ends the visit to its mint (`fcXmHome`)
       /* and the currency its holder chose for this payment is this payment's alone (`fcPayChoose`): backed out of, the next payment asks
        * again */
-      onBack: () => { this._fcFrom = null; if (terms && terms.xm) this.fcXmHome(); },
+      onBack: () => { this._fcFrom = null; if (terms && terms.xm) this.fcXmHome(); if (this._fcTillAway) { this._fcTillAway = null; this.fcXmHome(); } },
     }, (pin) => this.fcPayRun(sats, pin, offline, resuming, share, send, usd, terms));
   }
 
@@ -1724,7 +1733,11 @@
                   /* (the pad asked again is in the unit of the card that refused, where it said: `opt.cardUnit`, set as it refuses) */
                   again: () => (pin ? this.fcPayAsk(sats, offline, false, share, send, usd, terms, opt.cardUnit) : this.fcPayStart(sats, offline, share, send, usd, terms)) };
     // a dollar receive: when the mint has said paid, a bitcoin card's sats pay its invoice (`fcMoved`, `fcUsdPay`)
-    if (usd) opt.usd = usd;
+    // (not a till in both's, whose card's sats stay sats: `payBothByCard`)
+    if (usd && !usd.both) opt.usd = usd;
+    // a card taken at another of the till's mints, the phone there for it: home when the card's part is over (`fcTillAway`)
+    const away = !!(this._fcTillAway && this.fcXmThere(this._fcTillAway));
+    if (away) opt.away = true;
     // a bitcoin receive paid by a dollar card online: its cents pay the receive's own invoice (`fcMoved`, `fcBtcPay`)
     if (cross && terms.online) opt.btc = terms;
     if (btcHold) terms.holding = true;
@@ -1794,6 +1807,8 @@
          * mint takes (a dollar code's melt says its own words a moment later, `fcUsdPay`). The paid screen takes it down. */
         // (not where the card is owed change: the next thing is its second tap, said by TAP TO RECEIVE, not a wait)
         const owesChange = !!(r && r.change && this.fcAmt(r.change) > 0);
+        // taken at another of the till's mints: home, once the change (if any) is back on the card (`fcTillAwayHome`)
+        if (away) this.fcTillAwayHome();
         /* For every card payment of the code on screen (the design's rule: never the code read as unpaid while the mint works): at the
          * card's own mint PAYMENT RECEIVED follows in the next moment and takes it down; a melt (another mint, a dollar card paying
          * sats, sats paying a dollar code) keeps it up until the mint answers. */
@@ -1834,7 +1849,7 @@
          * before anything else is done with the payment, which is not announced on top of them. */
         if (opt.share) this.fcShareMoved(opt.share, r && r.hash);
         // a dollar receive: the card's sats are not announced; the dollars they buy are (and the mirror: the sats the cents buy)
-        if (opt.usd) this.fcUsdHush(r && r.hash);
+        if (opt.usd && opt.usd.bolt11) this.fcUsdHush(r && r.hash);
         if (opt.btc) this.fcBtcHush(r && r.hash);
         const ch = r && r.change;
         const owe = this.fcAmt(ch);
@@ -1863,6 +1878,9 @@
         /* A card at another mint than this phone's, at a receive (not a share of a bill, nor a card paying out of this phone): it pays
          * this phone's own invoice from its mint, online, with the charge shown first (`fcXmBegin`); with no route it is refused. */
         if (e && e.card === 'other-mint' && !send && !share && !xm) { this.fcXmBegin(e, sats, offline, usd); return; }
+        /* Taken at another of the till's mints, and not paid: home, except for a PIN's second tap, which is at the same mint (its
+         * pad's back comes home, `fcPayAsk`), or a tap left part way, taken up there (`fcTillAwayHome` waits for it). */
+        if (away && !(e && e.card === 'pin-needed' && !pin) && !(e && e.card === 'waiting')) this.fcTillAwayHome();
         /* Paying from another mint, and not paid: home again, except where the card's own flows go on at that mint (a tap left part way,
          * to be taken up there; a mint that has not answered, asked again there), which come home when they end (`fcXmStay`). */
         /* (And the card wanting its PIN, whose pad comes up next: the tap after it is at the same mint, and backing out of the pad comes
@@ -2350,6 +2368,25 @@
     const s = this.state;
     if (!W) return;
     if (offline || this.offlineNow() || (W.cardOnline && !W.cardOnline())) { this.fcXmOffline(); return; }
+    /* At another of the keeper's till's mints: taken there, in what the card holds, and no invoice paid (`fcTillAway`). Only a
+     * card at a mint the till does not take pays the till's invoice from its own. */
+    const key = this.fcMintKey(e && e.mint);
+    if (this.tillRole && this.tillRole() === 'keeper' && key && (this.tillMintsNow ? this.tillMintsNow() : []).some((m) => this.fcMintKey(m) === key)) {
+      this.fcTillAway(e, sats, usd);
+      return;
+    }
+    /* A till in both: the invoice on screen is in its main, and that is what the card pays from its mint, so a payment from a
+     * mint the till does not take lands in the main (the keeper, 2026-11-02). */
+    if (usd && usd.both) {
+      usd = usd.main === 'usd' && !s.invoiceIsAddress && s.invoice
+        ? { cents: Math.round(Number(usd.cents) || 0), bolt11: String(s.invoice), hash: String(s.invoiceHash || ''), sats: 0, ends: Number(s.recvExpiresAt) || 0 }
+        : null;
+    }
+    /* A dollar receive's card carries no code (`payUsdByCard` waits for none): a card at a mint this phone does not take pays the
+     * one on screen, which it needs, and waits for it here. */
+    if (usd && !usd.bolt11 && !s.invoiceIsAddress && s.invoice) {
+      usd = Object.assign({}, usd, { bolt11: String(s.invoice), hash: String(s.invoiceHash || ''), ends: Number(s.recvExpiresAt) || 0 });
+    }
     const bolt11 = usd ? String(usd.bolt11 || '') : (s.invoiceIsAddress ? '' : String(s.invoice || ''));
     if (!bolt11) { this.toast('The invoice is still being made. Press CARD when it is up.', true); return; }
     /* A card of software 1.23 that holds dollars and bitcoin pays from there in either: its holder is asked which, every time, on the
@@ -5316,7 +5353,8 @@
             n.card = 'needs-set-up';
             n.sheetText = cut ? 'Finish setting up the card' : 'Set up the card first';
             // (and its key, for the name typed for it on NAME CARD, 26j-card-wheel.js `fcNameSettle`)
-            n.info = Object.assign({}, card.info, { keepPin: cut && !!card.info.hasRecord, key: card.key });
+            // (a PIN on a card with any record is kept by the card, the card maker's design-only record among them: `recordSet`)
+            n.info = Object.assign({}, card.info, { keepPin: cut && !!(card.info.hasRecord || card.info.recordSet), key: card.key });
             throw n;
           }
           /* A card whose money is at another mint than this phone's: loaded there, online, from this phone's balance (`fcXlBegin`), with

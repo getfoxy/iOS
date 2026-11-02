@@ -7,8 +7,10 @@
      * locked to the keeper into an outbox that is sent at once
      * (`tillDeliver`), and leaves (`tillLeave`). */
 
-    /* A cashier code's text, checked: { v, id, mint, unit, lock, to, exp },
-     * or null (malformed, ended, or not a till address). Never throws.
+    /* A cashier code's text, checked: { v, id, mint, mints, unit, lock, to,
+     * exp }, or null (malformed, ended, or not a till address). `mints` are
+     * the mints the till takes payments at, the default (`mint`) first; a code
+     * from before names one, and reads as `[mint]`. Never throws.
      * `tillProblem` says why in a sentence, '' for a good one. */
     tillDecode: function (text) {
       try { var c = tillRead(text); return c.pass || null; } catch (e) { return null; }
@@ -19,23 +21,27 @@
     },
 
     /* Keeper: the code for cashiers, at the connected mint, for 72 hours.
-     * Resolves { text, id, exp } (`exp` in unix seconds); `text` is what the
-     * QR shows. While a code is live this answers that one again, for every
-     * cashier; a new one is made only once none is. `opts.unit` ('sat' or
+     * Resolves { text, id, exp, mints } (`exp` in unix seconds); `text` is
+     * what the QR shows, `mints` the mints it takes payments at: the open
+     * till's (`tillKeeperOpen`), the connected mint first, or that mint alone.
+     * Each must honour a lock and issue the code's unit, or this refuses
+     * naming the first that does not. While a code is live for those mints
+     * this answers that one again, for every cashier; a new one is made only
+     * once none is. `opts.unit` ('sat' or
      * 'usd') picks a new one's unit; without it, dollars where this phone
      * holds dollars at a mint that issues them. A live code is never
      * dropped; up to four are kept, and only an ended one goes. */
     tillPassMake: function (opts) { return tillPassMake(opts); },
 
-    /* Keeper: the codes still live, newest last: { id, unit, mint, exp, made,
-     * text }. Codes long past the time anything sent by them could still be
+    /* Keeper: the codes still live, newest last: { id, unit, mint, mints,
+     * exp, made, text }. Codes long past the time anything sent by them could still be
      * read are dropped on the way, with their keys. */
     tillPasses: function () {
       var now = Date.now();
       return tillPrune().filter(function (r) { return Number(r.exp) * 1000 > now; })
         .sort(function (a, b) { return Number(a.made) - Number(b.made); })
         .map(function (r) {
-          return { id: r.id, unit: r.unit, mint: r.mint, exp: r.exp, made: r.made, text: tillPassText(r) };
+          return { id: r.id, unit: r.unit, main: tillMainOf(r), mint: r.mint, mints: tillMintsOf(r), exp: r.exp, made: r.made, text: tillPassText(r) };
         });
     },
 
@@ -54,8 +60,21 @@
     _tillArrived: function (id, body) { return tillArrived(id, body); },
 
     /* Cashier: work the till by this code (the decoded pass, or its text).
-     * Resolves { pass, since } once the phone is at the code's mint. */
+     * Resolves { pass, since } once the keys of every mint the code takes are
+     * on file and the phone is at the code's default mint; refuses, naming
+     * the mint, where one of them cannot be asked. */
     tillJoin: function (pass) { return tillJoinNow(pass); },
+
+    /* Keeper: the till opens at `mints` (one to eight), `def` the default
+     * among them (the first where none is named; a mint alone is a one-mint
+     * till). Every mint's keys are put on file, asked for once where they are
+     * not (refused with no route); several must each honour a lock. The phone
+     * visits the default for the till where it is not there already. Resolves
+     * { mint, moved, mints, def }. `tillKeeperClose` ends it and comes home;
+     * `tillKeeper` is the open till, { mints, def }, or null. */
+    tillKeeperOpen: function (mints, def) { return tillKeeperOpen(mints, def); },
+    tillKeeperClose: function () { return tillKeeperClose(); },
+    tillKeeper: function () { return tillKeeperNow(); },
 
     /* Cashier: the till this phone works, { pass, since }, or null. Null once
      * the code has ended, which clears it and takes the phone home. */
@@ -87,8 +106,8 @@
     },
 
     /* Cashier: a token scanned or pasted at the till, taken for the keeper:
-     * locked to the keeper's key, signed by the mint, unspent, at the code's
-     * mint in its unit. Resolves as `receiveToken` does, with `till: true`;
+     * locked to the keeper's key, signed by the mint, unspent, at one of the
+     * code's mints in its unit. Resolves as `receiveToken` does, with `till: true`;
      * nothing goes into this phone's pile. */
     tillTakeToken: function (text) { return tillTake(text); },
 

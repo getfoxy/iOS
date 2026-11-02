@@ -231,9 +231,16 @@
     const historyRow = { label: 'HISTORY', path: MENU_ICON.history, tap: shut(() => this.go('history')),
       ringInk: v.histRingInk, ringInk2: v.histRingInk2, ring: v.histRing };
     /* RESTORE LOST CARD: the money of a card this phone loaded, taken back if the card is lost (26f-flashcard.js `fcRestoreLost`: the
-     * RESTORE CARD screen, or a card saying this phone has loaded none). Here, not on a card's screens: a lost card cannot be tapped. */
+     * RESTORE CARD screen, or a card saying this phone has loaded none). Under SETTINGS, not on a card's screens: a lost card cannot be tapped. */
     const restoreCardRow = { label: 'RESTORE LOST CARD', path: MENU_ICON.cardBack, tap: shut(() => this.fcRestoreLost()) };
-    v.menuItems = /** @type {any[]} */ ([historyRow, restoreCardRow]).concat(verified ? [] : [backupRow]).concat([
+    /* The till (26m-till.js): this phone as a point of sale, receive and this session's history only. In the menu itself,
+     * right after HISTORY, behind the lock this phone already has (`tillGate`). The cashier code is on the till's own screen
+     * (23-render-home-and-amount.js `amtCodeTap`), so it follows the mints and currency the till was opened with. */
+    const tillRows = [
+      { label: 'POINT OF SALE', path: MENU_ICON.receive,
+        tap: shut(() => this.tillGate(() => this.tillOpen(), 'To open the till.')) },
+    ];
+    v.menuItems = /** @type {any[]} */ ([historyRow]).concat(tillRows).concat(verified ? [] : [backupRow]).concat([
       /* Hiding the balance moved here from the pill, where its button sat on
        * top of the figures. The label says what the tap
        * will do, so it reads the same whichever way round it is. */
@@ -325,13 +332,7 @@
       /* What this phone takes with no route before it settles: from one payer,
        * and in all (26j-till-caps.js). Dollars, with the sats under. */
     ]).concat(this.tillCapRows ? this.tillCapRows(MENU_ICON.receive, shut) : []).concat([
-      /* The till (26m-till.js): this phone as a point of sale, receive and this session's history only, and a code that
-       * puts another Foxy into it for this phone. Both behind the lock this phone already has (`tillGate`). */
-      { label: 'POINT OF SALE', path: MENU_ICON.receive,
-        tap: shut(() => this.tillGate(() => this.tillStart(), 'To open the till.')) },
-      { label: 'CASHIER CODE', path: MENU_ICON.scan,
-        tap: shut(() => this.tillGate(() => this.tillPassShow(), 'To show a cashier code.')) },
-    ]).concat([
+      restoreCardRow,
       /* The phone's own screens, straight over home: no Foxy screen before
        * RESTORE A WALLET or after YOUR SEED PHRASE. */
       { label: 'RESTORE', path: MENU_ICON.restore, tap: shut(() => this.restoreFromMenu()) },

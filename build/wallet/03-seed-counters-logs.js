@@ -1725,8 +1725,16 @@
    *
    * Capped, oldest dropped first. Each mint's entry is a few tens of kilobytes
    * (one hex public key per amount per keyset), and localStorage is not
-   * generous. Five is more mints than a phone switches between. */
-  var MINT_CACHE_MAX = 5;
+   * generous. Five was more mints than a phone switches between, and then a
+   * till took eight (`TILL_MINTS_MAX`, 08d-till.js), each checked by the keys
+   * on file here: a till of six lost one of its mints' keys to the next visit
+   * anywhere else, and from then on made no request at all and refused what
+   * its cashiers sent from that mint (review, cache-evict). So the cap is a
+   * till's eight and four more, and the mints that must keep their keys are
+   * never the ones dropped (`tillPinnedMints`): an open till's, a cashier
+   * code's still listened for, the code a cashier works by, the mint the
+   * phone is on and the one it calls home. The oldest of the rest goes. */
+  var MINT_CACHE_MAX = 12;
 
   function mintCacheSave(u, w) {
     var key = String(u || '').replace(/\/+$/, '');
@@ -1753,8 +1761,14 @@
       all[key] = entry;
       var urls = Object.keys(all);
       if (urls.length > MINT_CACHE_MAX) {
-        urls.sort(function (a, b) { return (all[a].at || 0) - (all[b].at || 0); });
-        urls.slice(0, urls.length - MINT_CACHE_MAX).forEach(function (old) { delete all[old]; });
+        /* Pinned past the cap: a till's mints are at most eight, so the pins
+         * alone fit, and where they ever do not the cache holds them all
+         * rather than lose one a payment is checked by. */
+        var pinned = [key, mintUrl || '', load(K.mint, '') || ''].concat(tillPinnedMints())
+          .map(function (m) { return canonicalMint(String(m || '')); }).filter(Boolean);
+        var loose = urls.filter(function (m) { return pinned.indexOf(canonicalMint(m)) < 0; });
+        loose.sort(function (a, b) { return (all[a].at || 0) - (all[b].at || 0); });
+        loose.slice(0, Math.min(loose.length, urls.length - MINT_CACHE_MAX)).forEach(function (old) { delete all[old]; });
       }
       save(K.mintCache, all);
     } catch (e) {

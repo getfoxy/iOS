@@ -45,6 +45,14 @@
      * another mint pays the invoice. Offline there is no invoice, and the
      * request alone is offered. */
     const usdIn = !!(this.walletNow && this.walletNow('receive') === 'usd');
+    /* A till that takes both: beside the main's request, one in the other currency for the same price (`req2`,
+     * 12-receive.js `tillTwinRequest`), of which the payer pays the one it holds. Nothing beside it anywhere else, and an
+     * offer with no `req2` is the offer it always was. */
+    const twin = (out) => {
+      if (!out || !out.req || !(this.tillBoth && this.tillBoth())) return out;
+      const req2 = this.tillTwinRequest ? this.tillTwinRequest(out.req) : '';
+      return req2 ? Object.assign({}, out, { req2: req2 }) : out;
+    };
     // the receive invoice screen
     if (s.screen === 'confirm' && s.flow === 'receive') {
       if (s.recvRail === 'ON-CHAIN' || s.invoiceIsAddress) return null;
@@ -63,7 +71,7 @@
         const req = this.cashuRequest();
         const inv = W.classify(String(s.invoice || '')) === 'invoice' ? String(s.invoice) : '';
         if (!req && !inv) return { inv: '', req: '', waiting: true };
-        return { inv: inv, req: req || '', waiting: false };
+        return twin({ inv: inv, req: req || '', waiting: false });
       }
       /* No invoice yet is *waiting*, not *no*.
        *
@@ -94,12 +102,12 @@
         const cents = Math.round(Number(s.recvAmount != null ? s.recvAmount : this.centsTyped()) || 0);
         const ureq = cents > 0 ? (this.tapOnlyRequest(cents, '', 'usd') || '') : '';
         if (!inv && !ureq) return { inv: '', req: '', waiting: true };
-        return { inv: inv, req: ureq, waiting: false };
+        return twin({ inv: inv, req: ureq, waiting: false });
       }
       const want = this.wantedSats() || W.amountOf(inv) || 0;
       const req = this.tapOnlyRequest(want) || '';
       if (!inv && !req) return { inv: '', req: '', waiting: true };
-      return { inv: inv, req: req, waiting: false };
+      return twin({ inv: inv, req: req, waiting: false });
     }
 
     /* The split's payer screen: one share, one code, held up to one phone.
@@ -182,6 +190,8 @@
      * railRequest stops waiting and the invoice goes out alone, which is the
      * right fallback and not this case. */
     const req = (asking && asking.req) || '';
+    // (and a till in both's request in its other currency, `tapOffering`)
+    const req2 = (asking && asking.req2) || '';
     const waiting = advertise && !req && asking.waiting;
     /* Current, not merely known: `priceAgo()` is '' only while the figure on
      * screen is one this app still treats as live. */
@@ -189,7 +199,8 @@
     /* Not on a receive into dollars: dollars paid in dollars need no bitcoin
      * price, so none goes on the air with them (a payer paying the dollar
      * invoice from bitcoin is shown the mint's rate on CONFIRM PAYMENT). */
-    const usdOffer = s.flow === 'receive' && !!(this.walletNow && this.walletNow('receive') === 'usd');
+    // (a till in both offers bitcoin beside its dollars, so its price goes with them as a bitcoin receive's does)
+    const usdOffer = s.flow === 'receive' && !req2 && !!(this.walletNow && this.walletNow('receive') === 'usd');
     const fresh = (!usdOffer && !this.offlineNow() && !this.priceAgo() && Number(mine.rate) > 0)
       ? Number(mine.rate) : 0;
     /* A wallet that holds dollars takes sats for a request in dollars, and
@@ -222,6 +233,8 @@
        * to what it did before, which is to make the payment and let the
        * receiver refuse it. */
       : JSON.stringify({ v: 2, inv: inv || undefined, req: req || undefined,
+                         // the other currency's request, a till in both's alone (`tapOffering`); absent on every other offer
+                         req2: req2 || undefined,
                          up: !this.offlineNow(),
                          /* With no route, this phone's till tag: a payer names
                           * itself to this phone by it, in a name for this
@@ -1551,6 +1564,57 @@
       : 'That request asks for ' + unit.toUpperCase() + ', which Foxy cannot pay over tap.';
   }
 
+  /* Which of a till's two requests for one price this phone pays (`req` the till's main currency's, `req2` the other's,
+   * 26d-tap.js `tapOffering`), by what it holds where it is:
+   *
+   *   - at a mint one of them lists, holding enough of that one's currency here: that one, in it, with nothing converted
+   *     (the keeper, 2026-11-02: "the POS will accept the dollars as dollars to save any conversion fees"); holding enough
+   *     of both, the one this phone's holder chose to hold ('dollars' or 'bitcoin'), else the main;
+   *   - anywhere else: the main's, whose invoice (`inv`, made in the main) is paid from another mint and lands in the main;
+   *     with no invoice on the offer, the one in sats, since only sats cross between mints (`tapCrossMint`), into the
+   *     default's sats.
+   *
+   * Holding too little of either here, the main's, and the screens after say what they say of any request this phone
+   * cannot cover (`tapUnitHeld`). Whatever is picked, the other is never paid: the till closes it once one is. */
+  tapPickOfTwo(main, other, inv) {
+    const W = window.FoxyWallet;
+    const a = W.decodeRequest ? W.decodeRequest(main) : null;
+    const b = W.decodeRequest ? W.decodeRequest(other) : null;
+    if (!a || !b) return a ? main : (b ? other : main);
+    const unitOf = (r) => (r.unit === 'usd' ? 'usd' : 'sat');
+    if (unitOf(a) === unitOf(b)) return main;
+    const strip = (u) => String(u || '').replace(/\/+$/, '');
+    const mine = strip(W.mintUrl);
+    const here = (r) => !!mine && (r.mints || []).some((m) => strip(m) === mine);
+    const two = !!(this.twoUnitsOn && this.twoUnitsOn());
+    // what this phone holds here in a request's currency against what it asks (a request with no figure: anything held)
+    const covers = (r) => {
+      const u = unitOf(r);
+      if (u === 'usd' && !two) return false;
+      const have = this.unitBalance ? this.unitBalance(u) : 0;
+      const want = Math.round(Number(r.amount) || 0);
+      return have > 0 && (!(want > 0) || have >= want);
+    };
+    const fit = [a, b].filter((r) => here(r) && covers(r));
+    const word = (r) => (unitOf(r) === 'usd' ? 'dollars' : 'bitcoin');
+    if (fit.length === 1) {
+      console.log('[foxy] tap: a till offered dollars and bitcoin; paying in ' + word(fit[0]) + ', which this phone holds here');
+      return fit[0] === a ? main : other;
+    }
+    if (fit.length === 2) {
+      const hold = this.walletChoiceNow ? this.walletChoiceNow().hold : '';
+      const want = hold === 'dollars' ? 'usd' : hold === 'bitcoin' ? 'sat' : unitOf(a);
+      console.log('[foxy] tap: a till offered dollars and bitcoin, and this phone holds enough of both here; paying in ' + (want === 'usd' ? 'dollars' : 'bitcoin'));
+      return unitOf(a) === want ? main : other;
+    }
+    const sat = unitOf(a) === 'sat' ? a : b;
+    if (!inv && !here(a) && !here(b)) {
+      console.log('[foxy] tap: a till offered dollars and bitcoin, at mints this phone is not on, and no invoice; crossing in bitcoin');
+      return sat === a ? main : other;
+    }
+    return main;
+  }
+
   /* What the other phone offered, and whether ecash can pay it.
    *
    * `sameMint` is this wallet's own mint being named by their request — the
@@ -1562,7 +1626,10 @@
     try { o = JSON.parse(String(text || '')); } catch (e) { return null; }
     if (!o || o.v !== 2) return null;
     const inv = typeof o.inv === 'string' && W.classify(o.inv) === 'invoice' ? o.inv : '';
-    const req = typeof o.req === 'string' ? o.req : '';
+    /* A till that takes both offers a request in each currency for one price (`req2` beside `req`, the main's): this phone
+     * pays the one it can, and from here on it is that one request's offer like any other (`tapPickOfTwo`). */
+    const req = typeof o.req === 'string'
+      ? (typeof o.req2 === 'string' && o.req2 ? this.tapPickOfTwo(o.req, o.req2, inv) : o.req) : '';
     if (!inv && !req) return null;
     let sameMint = false;
     let theirs = [];
@@ -1608,7 +1675,7 @@
     /* A request at a mint this phone could move money to: one mint named, and
      * it is not this one. Nothing about whether it is worth doing — that is the
      * quote's answer, and the fee card's. */
-    const crossable = !usdUnit && !sameMint && theirs.length === 1 && !!String(theirs[0] || '').trim();
+    const crossable = !usdUnit && !sameMint && theirs.length >= 1 && !!String(theirs[0] || '').trim();
     /* Tri-state on purpose: true, false, and "they did not say". An older Foxy
      * says nothing, and nothing must not read as offline. */
     const theirRoute = typeof o.up === 'boolean' ? o.up : null;

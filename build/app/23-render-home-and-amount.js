@@ -539,6 +539,11 @@
       amtHistShown: tillHere,
       amtHistPath: 'M12 7v5l3.5 2M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.5 8.5 0 0 0 12 3.5Z',
       amtHistTap: () => this.go('history'),
+      /* And CASHIER CODE, the keeper's only (26m-till.js `tillPassShow`): on the till's own screen, so the code follows the mints and
+       * the currency the till was opened with, and nowhere else. Behind the lock, as opening the till was. */
+      amtCodeShown: tillHere && !!(this.tillRole && this.tillRole() === 'keeper'),
+      amtCodePath: 'M3.5 3.5h7v7h-7zM13.5 3.5h7v7h-7zM3.5 13.5h7v7h-7zM13.5 13.5h3v3h-3zM20.5 13.5v3M17.5 20.5h3M13.5 20.5h1',
+      amtCodeTap: () => this.tillGate(() => this.tillPassShow(), 'To show a cashier code.'),
       nextFur: (val > 0 && !sendOver)
         ? "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),"
           + "rgba(255,240,220,0) 62%),"
@@ -567,7 +572,9 @@
       priceWarnShown: (sendHeld || this.keypadStale()) ? '1' : '0',
       /* A card's set-up names its two amounts (the design): NO PIN AMOUNT? and, typed rather than chosen, MAX SPEND PER SECOND
        * (26j-card-wheel.js), as LIMITS does for the rate of a card that waits for its limit. */
-      amountTitle: s.flow === 'cardSuNoPin' ? 'NO PIN AMOUNT?'
+      // the till's own screen is named for what it is (either role)
+      amountTitle: tillHere ? 'POS MODE'
+        : s.flow === 'cardSuNoPin' ? 'NO PIN AMOUNT?'
         : (s.flow === 'cardSuTap' || (s.flow === 'cardLimit' && this._fcLimitTap && this.fcPacedNow && this.fcPacedNow())) ? 'MAX SPEND PER SECOND'
         : 'SET AMOUNT',
       amountSubtitle: s.flow === 'onchain'
@@ -593,8 +600,10 @@
       swapRateLine: s.flow === 'swap' && this.swapRateLine ? this.swapRateLine() : '',
       swapRateShown: !!(s.flow === 'swap' && this.swapRateLine && this.swapRateLine()),
       // what a till cap is, in a plain line under the question (26j-till-caps.js, `tillCapNote`)
-      amountNote: s.flow === 'tillCap' && this.tillCapNote ? this.tillCapNote() : '',
-      amountNoteShown: !!(s.flow === 'tillCap' && this.tillCapNote),
+      amountNote: s.flow === 'tillCap' && this.tillCapNote ? this.tillCapNote()
+        // and on a till's SET AMOUNT at more than one mint, where it is (26m-till.js, `tillWhereLine`)
+        : tillHere && this.tillWhereLine ? this.tillWhereLine() : '',
+      amountNoteShown: !!(s.flow === 'tillCap' && this.tillCapNote) || !!(tillHere && this.tillWhereLine && this.tillWhereLine()),
       // the space that balances the back button, which the till's HISTORY takes
       hideSkip: !tillHere,
       /* The set-up's max per tap: what the figure typed means in seconds, under it, as it is typed (26j-card-wheel.js, `fcSuAmountLine`). */

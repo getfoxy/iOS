@@ -4,8 +4,11 @@
    * address's, for one) is not what was picked, so what is paid to it is swapped as the person's hold says. */
   recvPicked(unit) {
     const s = this.state;
-    // a cashier's till: the keeper's unit, picked by the code it scanned (26m-till.js, `tillUnit`)
+    // a till in one currency: that one, the keeper's, or picked by the code a cashier scanned (26m-till.js, `tillUnit`)
     if (this.tillUnit && this.tillUnit()) return this.tillUnit() === (unit === 'usd' ? 'usd' : 'sat');
+    /* a till in both: either, since it takes both and what comes in one stays in it (the keeper, 2026-11-02: dollars taken as
+     * dollars, with no conversion's fee) */
+    if (this.tillBoth && this.tillBoth()) return true;
     return !!(this.twoUnitsOn && this.twoUnitsOn() && s.flow === 'receive' && (s.wallet === 'usd' || s.wallet === 'sat')
       && s.wallet === (unit === 'usd' ? 'usd' : 'sat'));
   }
@@ -93,6 +96,10 @@
      * it goes to the keeper and never into this phone's pile (26m-till.js, `tillLockFor`; the wallet's `paymentRequest`). */
     const tillLock = this.tillLockFor ? this.tillLockFor() : '';
     const why = tillLock ? 'till' : (purpose || 'receive');
+    /* And in either role's till, the mints it takes, the default first, so a payer at any of them pays there and one at
+     * another crosses into the default (26m-till.js, `tillMintsNow`). */
+    const tillMints = this.tillMintsNow ? this.tillMintsNow() : [];
+    const tillOpts = Object.assign({}, tillLock ? { lockPub: tillLock } : {}, tillMints.length ? { mints: tillMints } : {});
     const inUsd = unit === 'usd';
     const cents = inUsd ? 0 : Math.round(Number(usdCents) || 0);
     /* The key a request is kept under: a request in dollars has its unit on
@@ -112,9 +119,9 @@
     // `ways` is { onion, nostr }, either of which may be missing
     const make = ways => {
       const text = inUsd
-        ? W.paymentRequest(Math.round(Number(sats) || 0), Object.assign({ deliverTo: ways, purpose: why, unit: 'usd', kept: kept }, tillLock ? { lockPub: tillLock } : {}))
+        ? W.paymentRequest(Math.round(Number(sats) || 0), Object.assign({ deliverTo: ways, purpose: why, unit: 'usd', kept: kept }, tillOpts))
         : W.paymentRequest(cents > 0 ? 0 : sats,
-          Object.assign({ deliverTo: ways, purpose: why, usd: cents > 0 ? cents : 0, kept: kept }, tillLock ? { lockPub: tillLock } : {}));
+          Object.assign({ deliverTo: ways, purpose: why, usd: cents > 0 ? cents : 0, kept: kept }, tillOpts));
       this._creqs[key] = { text: text, inbox: ways };
       this.setState({ creqMade: Date.now() });
       return text;
@@ -233,11 +240,51 @@
     const tillLock = this.tillLockFor ? this.tillLockFor() : '';
     if (W.primeLocks && !tillLock) { try { W.primeLocks(); } catch (e) {} }
     const kept = !purpose && this.recvPicked(inUsd ? 'usd' : 'sat');
-    const till = tillLock ? { purpose: 'till', lockPub: tillLock } : {};
+    const tillMints = this.tillMintsNow ? this.tillMintsNow() : [];
+    const till = Object.assign(tillLock ? { purpose: 'till', lockPub: tillLock } : {}, tillMints.length ? { mints: tillMints } : {});
     const text = inUsd ? W.paymentRequest(n, Object.assign({ purpose: purpose || 'receive', unit: 'usd', kept: kept }, till))
       : W.paymentRequest(n, Object.assign({ purpose: purpose || 'receive', kept: kept }, till));
     if (!text) return '';
     this._creqs[key] = { text: text };
+    return text;
+  }
+
+  /* The other half of a till in both's offer: a request for the same price in the currency that is not the till's main, beside
+   * `first`, the main's (the request the screen shows, or the tap's own). The payer pays the one it holds (26d-tap.js,
+   * `tapPickOfTwo`): dollars in dollars and sats in sats, so neither side pays a conversion's fee (the keeper, 2026-11-02).
+   *
+   * The price is what was typed. In dollars for a dollar request, exactly, or sats typed put into cents at this phone's price
+   * (`centsTyped`); in sats for a bitcoin one, the sats typed or the dollars typed at this phone's price (`wantedSats`), and
+   * with no route the dollars alone, as an offline receive asks (`dollarsOnly`): the payer then works the sats out and this
+   * phone agrees them (`tapQuote`). Locked as the main's is (a cashier's to the keeper's key), at the till's mints, and paired
+   * with the main's in the wallet (`twin`), so the first paid closes the other and one price is never paid twice. Made here
+   * and now, with no onion address on it, as `tapOnlyRequest` makes one: it is for a tap, and comes back over the link.
+   * '' outside a till in both, for nothing typed, or where the other currency has no figure (no price). */
+  tillTwinRequest(first) {
+    const W = window.FoxyWallet;
+    if (!W || !W.paymentRequest || !first || !(this.tillBoth && this.tillBoth())) return '';
+    if (this._homeGoing) return '';
+    const s = this.state;
+    const other = this.tillMain() === 'usd' ? 'sat' : 'usd';
+    let n = 0, usd = 0;
+    if (other === 'usd') n = Math.round(Number(this.centsTyped()) || 0);
+    else if (this.dollarsOnly()) usd = Math.round((parseFloat(s.amount) || 0) * 100);
+    else n = Math.round(Number(this.wantedSats()) || 0);
+    if (!(n > 0) && !(usd > 0)) return '';
+    const key = 'twin|' + W.mintUrl + '|' + other + '|' + n + '|$' + usd + '|' + String(first);
+    this._creqs = this._creqs || {};
+    const have = this._creqs[key];
+    if (have && have.text) return have.text;
+    const tillLock = this.tillLockFor ? this.tillLockFor() : '';
+    if (W.primeLocks && !tillLock) { try { W.primeLocks(); } catch (e) {} }
+    const tillMints = this.tillMintsNow ? this.tillMintsNow() : [];
+    const opts = Object.assign({ purpose: tillLock ? 'till' : 'receive', kept: true, twin: String(first) },
+      other === 'usd' ? { unit: 'usd' } : (usd > 0 ? { usd: usd } : {}),
+      tillLock ? { lockPub: tillLock } : {}, tillMints.length ? { mints: tillMints } : {});
+    const text = W.paymentRequest(n, opts);
+    if (!text) return '';
+    this._creqs[key] = { text: text };
+    console.log('[foxy] till: the offer carries a request in ' + (other === 'usd' ? 'dollars' : 'bitcoin') + ' as well, for the same price');
     return text;
   }
 
@@ -624,8 +671,8 @@
       { rail: 'LIGHTNING', sub: 'Any Lightning wallet pays the invoice.' },
       { rail: 'CASHU', sub: 'A Cashu wallet answers with a token for this amount. Tap SCAN to take it.' },
     ];
-    // (not at a cashier's till, where an address's deposit would be minted here: `openReceiveNow`)
-    if (this.ocCan('receive') && !(this.tillLockFor && this.tillLockFor())) {
+    // (not in the till, either role: a till takes Lightning and Cashu only, and at a cashier's an address's deposit would be minted here: `openReceiveNow`)
+    if (this.ocCan('receive') && !(this.state && this.state.till)) {
       rails.push({ rail: 'ON-CHAIN', sub: 'An ordinary Bitcoin payment to an address this mint watches.' });
     }
     const W = window.FoxyWallet;
@@ -677,8 +724,8 @@
      * network this amount cannot use. */
     let rail = (W && W.defaultRail) ? W.defaultRail() : 'LIGHTNING';
     if (rail === 'ON-CHAIN' && (!this.ocCan('receive') || this.ocReceiveBlocked(sats))) rail = 'LIGHTNING';
-    // nor at a cashier's till: a deposit on chain is minted into the phone that asked, and none of it is this phone's
-    if (rail === 'ON-CHAIN' && this.tillLockFor && this.tillLockFor()) rail = 'LIGHTNING';
+    // nor in the till, either role: a till takes no payment on chain (and at a cashier's, a deposit on chain would be minted into the phone that asked)
+    if (rail === 'ON-CHAIN' && this.state && this.state.till) rail = 'LIGHTNING';
     /* Offline there is one network, and it is Cashu.
      *
      * A Lightning invoice is the mint's to make and an on-chain address is the
@@ -1005,13 +1052,14 @@
   /* WALLET on the invoice: which balance this receive goes into. A new code
    * is made in it, for the same amount; nothing is kept for the next receive. */
   pickRecvWallet() {
-    // a cashier's till takes the keeper's unit, and this phone's own balances are not shown in it (26m-till.js)
-    if (this.tillUnit && this.tillUnit()) return;
+    /* Never in the till: one in one currency takes that one, and one that takes both receives in its main, a tap being offered
+     * a request in each (26m-till.js, `tillMain`) */
+    if (this.state && this.state.till) return;
     const now = this.walletNow('receive') || 'sat';
     this.chooseFrom('WALLET', () => ['usd', 'sat'].map(u => ({
       label: this.unitWord(u),
-      sub: 'Holds ' + this.unitFigure(this.unitBalance(u), u) + (u === 'usd'
-        ? '. Asked in dollars, exactly.' : '. Asked in bitcoin.'),
+      sub: 'Holds ' + this.unitFigure(this.unitBalance(u), u) + '. ' + (u === 'usd'
+        ? 'Asked in dollars, exactly.' : 'Asked in bitcoin.'),
       on: u === now,
       tap: () => this.recvSwitchWallet(u),
     })));

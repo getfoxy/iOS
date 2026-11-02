@@ -840,10 +840,51 @@
    * is made from, and the screen can judge it before the button is pressed
    * (`requestSpec`). A request for another mint is paid after connecting to
    * that mint (`makeTokenForRequest`), which this phone has not done. */
+  /* Any of the mints it names: a till's request names every mint it takes, the default first, and ecash at any of
+   * them pays it as it stands (review, payer-cross). */
   requestHere(req) {
     const W = window.FoxyWallet;
-    const want = String((req && req.mints && req.mints[0]) || '').replace(/\/+$/, '');
-    return !want || !!(W && W.mintHost && ('https://' + W.mintHost()) === want);
+    const listed = this.reqMints(req);
+    if (!listed.length) return true;
+    const here = W && W.mintHost ? this.reqCanon('https://' + W.mintHost()) : '';
+    return !!here && listed.indexOf(here) >= 0;
+  }
+
+  // a mint as the wallet writes one (`canonicalMint`), or with no slash at the end where the wallet is not there to ask
+  reqCanon(u) {
+    const W = window.FoxyWallet;
+    return W && W.canonicalMint ? W.canonicalMint(u) : String(u || '').trim().replace(/\/+$/, '');
+  }
+
+  // the mints a request names, each once, as the wallet writes them, in the request's order
+  reqMints(req) {
+    const out = [];
+    ((req && Array.isArray(req.mints)) ? req.mints : []).forEach((m) => {
+      const c = this.reqCanon(m);
+      if (c && out.indexOf(c) < 0) out.push(c);
+    });
+    return out;
+  }
+
+  /* The mint a request is paid at: the one chosen for it on PAY FROM where that is one it names; else the one the
+   * phone is on, where it names that; else the first it names where this phone holds enough; else the first, its
+   * default, which a crossing goes to. A till of two mints was paid at its first only, so a payer holding 1,000 at
+   * its second was offered a Lightning crossing into the first (review, payer-cross). '' where it names none. */
+  reqPayMint(req) {
+    const W = window.FoxyWallet;
+    const listed = this.reqMints(req);
+    if (!listed.length) return '';
+    const s = this.state || {};
+    const chosen = (s.payFromFlow === 'req' && s.payMint) ? this.reqCanon(s.payMint) : '';
+    if (chosen && listed.indexOf(chosen) >= 0) return chosen;
+    const here = W && W.mintHost ? this.reqCanon('https://' + W.mintHost()) : '';
+    if (here && listed.indexOf(here) >= 0) return here;
+    const need = Math.round(Number(req && req.sats) || 0);
+    if (req && req.unit !== 'usd' && need > 0 && W && W.balanceAt) {
+      const has = listed.filter((m) => Number(W.balanceAt(m)) >= need)[0];
+      if (has) return has;
+    }
+    return listed[0];
   }
 
   /* A payer that cannot cover a payment over the link says so to the phone it
@@ -907,10 +948,8 @@
    * on (`requestSpec`), because there is nothing for a connection to add. */
   requestNeedsRoute(req) {
     if (!req || req.viaTap) return false;
-    const W = window.FoxyWallet;
-    const want = String((req.mints && req.mints[0]) || '').replace(/\/+$/, '');
-    const here = !!(W && W.mintHost && ('https://' + W.mintHost()) === want);
-    return !!(req.delivery || req.lockTo || (want && !here));
+    const here = this.requestHere(req);
+    return !!(req.delivery || req.lockTo || !here);
   }
 
   /* Will an over-payment's change come back by itself?
@@ -1068,7 +1107,8 @@
       host = host.replace(/\.+(?=(:\d+)?$)/, '');
       return scheme + '://' + host + (m[3] || '').replace(/\/+$/, '');
     };
-    const want = canon(req.mints[0]);
+    // at any of the mints it names: the phone's own where it is one, else one holding enough, else the default (`reqPayMint`)
+    const want = canon(this.reqPayMint(req));
     const here = !!(W.mintHost && canon('https://' + W.mintHost()) === want);
     // making it somewhere else switches mints, which waits for any payment
     if (want && !here && this.refuseSwitchWhileBusy()) return;
@@ -1899,8 +1939,8 @@
      * and a connect home under it made the payment from home's pile. */
     const canon = (u) => (W && W.canonicalMint ? W.canonicalMint(u) : String(u || '').replace(/\/+$/, ''));
     const here = W && W.mintUrl ? canon(W.mintUrl) : '';
-    const reqAt = s.req && s.req.mints && s.req.mints.length ? canon(s.req.mints[0]) : '';
-    if (here && reqAt === here && (s.screen === 'reqOffer' || s.screen === 'sendDone')) return 'a request at this mint is on screen to be paid';
+    const reqAt = s.req && s.req.mints && s.req.mints.length ? s.req.mints.map(canon) : [];
+    if (here && reqAt.indexOf(here) >= 0 && (s.screen === 'reqOffer' || s.screen === 'sendDone')) return 'a request at this mint is on screen to be paid';
     /* And a request of this phone's own, on show on a receive screen at the mint the phone is on: what is paid to it
      * is ecash of this mint, and the phone refuses a payment at a mint it is no longer on. Kept by the screen
      * (`railRequest`, `tapOnlyRequest`) and cleared when it goes. */

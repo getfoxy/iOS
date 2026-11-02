@@ -48,11 +48,53 @@
     try { window.localStorage.setItem(OPEN_REQUESTS, JSON.stringify(openRequests)); } catch (e) {}
   }
 
-  /* Paid, or given up on. Both halves — memory and store. */
+  /* Paid. Both halves — memory and store; and the other of a pair, which is now paid by this one (`closeTwin`). */
   function dropOpenRequest(id) {
     if (!(id in openRequests)) return;
+    closeTwin(id);
     delete openRequests[id];
     saveOpenRequests();
+  }
+
+  /* Two requests for one price, one in each currency (a till that takes both, 12-receive.js `tillTwinRequest`): each names
+   * the other, so whichever is paid first closes the other. `other` is the text of the first or its id. Nothing is paired
+   * that is not open here, nor a request with itself. */
+  function pairRequests(id, other) {
+    var them = '';
+    if (typeof other === 'string' && /^[0-9a-f]{8,64}$/.test(other)) them = other;
+    else {
+      var read = null;
+      try { read = FoxyWallet.decodeRequest(String(other || '')); } catch (e) { read = null; }
+      them = read && typeof read.id === 'string' ? read.id : '';
+    }
+    if (!id || !them || id === them) return false;
+    if (!Object.prototype.hasOwnProperty.call(openRequests, id) || !Object.prototype.hasOwnProperty.call(openRequests, them)) return false;
+    openRequests[id].twin = them;
+    openRequests[them].twin = id;
+    saveOpenRequests();
+    return true;
+  }
+
+  /* The request `id` has been paid, or its payment written down to be claimed: its twin, if it has one, is closed, so a
+   * payment to it is refused as already paid (`readPayment`, `answerIntent`), and its lock row is marked taken, so a token
+   * scanned for it with no route is too. Kept, not dropped: "already paid" is the true answer, where "no request open
+   * here" would send the payer looking for one. */
+  function closeTwin(id) {
+    var open = Object.prototype.hasOwnProperty.call(openRequests, id) ? openRequests[id] : null;
+    var t = open && typeof open.twin === 'string' ? open.twin : '';
+    if (!t || !Object.prototype.hasOwnProperty.call(openRequests, t) || openRequests[t].twinPaid) return;
+    openRequests[t].twinPaid = id;
+    saveOpenRequests();
+    console.log('[foxy] a request was paid, so its other half in the other currency is closed');
+    try { if (lockKeys()[t]) markLockTaken(t, 'twin:' + id); } catch (e) { /* the open request's mark refuses it all the same */ }
+  }
+
+  // why a request cannot be paid now that its twin has been, or ''
+  function twinShut(open) {
+    if (!open || typeof open.twin !== 'string' || !open.twin) return '';
+    if (open.twinPaid) return 'That request has already been paid on this phone in the other currency. Nothing was taken.';
+    if (FoxyWallet._requestsBeingPaid && FoxyWallet._requestsBeingPaid[open.twin]) return 'That request is being paid already.';
+    return '';
   }
 
   /* The key a payer's ecash is locked to, kept where it survives the app.
@@ -1587,9 +1629,15 @@
     var open = id && Object.prototype.hasOwnProperty.call(openRequests, id) ? openRequests[id] : null;
     if (!open) return no('That request is no longer open here.');
     if (FoxyWallet._requestsBeingPaid && FoxyWallet._requestsBeingPaid[id]) return no('That request is being paid already.');
+    // its other half in the other currency paid, or being paid (`closeTwin`)
+    var shut = twinShut(open);
+    if (shut) return no(shut);
     var here = String(mintUrl || '').replace(/\/+$/, '');
     var at = typeof x.mint === 'string' ? x.mint.replace(/\/+$/, '') : '';
-    if (!at || at !== here || at !== open.mint) {
+    /* A request with its mints listed (a till's) is paid at any of them, as `readPayment` takes it: a payer at another of the
+     * till's mints asking first was told no, and its ecash was never made. */
+    var atListed = !!at && Array.isArray(open.mints) && open.mints.some(function (m) { return canonicalMint(String(m || '')) === canonicalMint(at); });
+    if (!at || !(atListed || (at === here && at === open.mint))) {
       return no('This phone takes that payment at ' + hostOf(open.mint || here) + ', not at ' + (hostOf(at) || 'another mint') + '.');
     }
     /* The unit first: a request names its unit, and a payment in the other
@@ -1619,8 +1667,12 @@
       /* A keyset this phone holds the keys of, and of the request's unit:
        * the DLEQ is checked against it, and a dollar payment made on a sat
        * keyset is cents counted as sats. */
-      if (typeof x.keyset === 'string' && x.keyset && wallet
-          && (!keysetFor(wallet, x.keyset) || (keysetUnit(here, x.keyset, wallet) || 'sat') !== openUnit)) {
+      // (at another of a till's mints, by the keys on file for it: `tillKeysAt`)
+      var onHereAt = canonicalMint(at) === canonicalMint(here);
+      var kwAt = onHereAt ? wallet : tillKeysAt(at, openUnit);
+      if (typeof x.keyset === 'string' && x.keyset && (kwAt
+          ? (!keysetFor(kwAt, x.keyset) || (keysetUnit(onHereAt ? here : canonicalMint(at), x.keyset, kwAt) || 'sat') !== openUnit)
+          : !onHereAt)) {
         return no('This phone is offline and cannot check ecash from that keyset. Try again when either phone is online.');
       }
       /* And within what this phone takes before it settles (`tillRefusal`): from
@@ -2520,7 +2572,9 @@
    * nothing that reads sats finds cents there. */
   /* `kept`: the person picked this request's unit for this receive (`paymentRequest`'s `kept`), so what is paid in it
    * stays in it (08c-units.js, `convertDue`). */
-  function noteOpenRequest(id, amount, mint, purpose, unit, kept) {
+  /* `mints`: every mint the request names, `mint` first, where a list was named for it (a till's, 08d-till.js, one
+   * mint or several); a payment at any of them answers it (`readPayment`), wherever the phone is by then. */
+  function noteOpenRequest(id, amount, mint, purpose, unit, kept, mints) {
     var now = Date.now();
     Object.keys(openRequests).forEach(function (k) {
       if (now - openRequests[k].at > OPEN_REQUEST_MS) delete openRequests[k];
@@ -2529,6 +2583,7 @@
     var n = Math.max(0, Math.round(Number(amount) || 0));
     openRequests[id] = { amount: n, sats: u === 'sat' ? n : 0, unit: u, mint: mint, at: now, purpose: purpose || 'receive' };
     if (kept === true) openRequests[id].kept = true;
+    if (Array.isArray(mints) && mints.length >= 1) openRequests[id].mints = mints.slice();
     saveOpenRequests();
   }
 
@@ -2703,6 +2758,14 @@
   /* The payment a payer posted, read and checked against the request it
    * answers, or a throw with foxyStatus. `here` is the mint this wallet is on.
    * Nothing here touches the mint. */
+  /* A request with its mints listed (a till's, `open.mints`, one or several)
+   * is answered at any of them, whichever the phone is on: one at another is
+   * checked by that mint's keys on file (`tillKeysAt`) and taken there
+   * (`receiveToken` with `opts.away`). A till that ran at another mint and
+   * has closed, the phone gone home, is still paid where it asked to be: a
+   * one-mint till's list was not kept, and its payment, locked to this phone,
+   * was refused for the phone not being there (review, close-away). Any
+   * other request is answered at its mint, with the phone on it, as ever. */
   function readPayment(body, here) {
     var j = null;
     try { j = parseBody(String(body || '')); } catch (e) {}
@@ -2710,10 +2773,21 @@
     var id = typeof j.id === 'string' ? j.id : '';
     var open = id && Object.prototype.hasOwnProperty.call(openRequests, id) ? openRequests[id] : null;
     if (!open) throw refundable(paymentRefused(422, 'That payment answers no request open here.'));
+    /* Its other half paid first (a till in both, `closeTwin`): already paid, and nothing taken. Being paid at this moment:
+     * 409, as a second payment to the one request is (`_requestPaid`). */
+    var shut = twinShut(open);
+    if (shut) throw open.twinPaid ? refundable(paymentRefused(422, shut)) : paymentRefused(409, shut);
     var mint = typeof j.mint === 'string' ? j.mint.replace(/\/+$/, '') : '';
-    if (!mint || mint !== open.mint || mint !== String(here || '').replace(/\/+$/, '')) {
+    var onHere = !!mint && mint === String(here || '').replace(/\/+$/, '');
+    var listed = Array.isArray(open.mints) && open.mints.length >= 1
+      && open.mints.some(function (m) { return canonicalMint(String(m || '')) === canonicalMint(mint); });
+    if (listed) mint = canonicalMint(mint);
+    if (!mint || !(listed || (mint === open.mint && onHere))) {
       throw paymentRefused(422, 'That payment is not at the mint the request named.');
     }
+    // the keys it is read by: the connected wallet's at the mint the phone is on, those kept on file for another
+    var kw = (onHere || canonicalMint(mint) === canonicalMint(String(here || ''))) ? wallet : tillKeysAt(mint, recordUnit(open));
+    if (!kw && !onHere) throw paymentRefused(422, 'This phone has no keys on file for ' + hostOf(mint) + ', so it cannot read that payment.');
     /* In the request's unit, by its label and by its pieces' keysets: a
      * request names its unit, and the same number in the other unit is a
      * different amount of money. Pieces of the mint's dollar keyset sent as
@@ -2724,7 +2798,7 @@
     var notIn = 'That payment is not in ' + (unit === 'sat' ? 'sats' : balanceWord(unit)) + '.';
     if ((unitOf(j.unit) || String(j.unit || 'sat')) !== unit) throw paymentRefused(422, notIn);
     var proofs = Array.isArray(j.proofs) ? j.proofs : [];
-    if (wallet && wrongUnitPieces(proofs.filter(function (x) { return x && typeof x === 'object'; }), mint, unit, wallet).length) {
+    if (kw && wrongUnitPieces(proofs.filter(function (x) { return x && typeof x === 'object'; }), mint, unit, kw).length) {
       throw paymentRefused(422, notIn);
     }
     if (!proofs.length || proofs.length > 500) throw paymentRefused(422, 'That payment holds no usable proofs.');
@@ -2747,7 +2821,7 @@
      * the fee; this is for payments from other wallets. The fee is that of
      * the pieces' own keyset, so a dollar payment is net of the dollar fee. */
     var inFee = 0;
-    try { inFee = wallet ? swapFeeFor(wallet, proofs) : 0; } catch (e) { inFee = 0; }
+    try { inFee = kw ? swapFeeFor(kw, proofs) : 0; } catch (e) { inFee = 0; }
     var asked = amountOfRecord(open);
     if (asked > 0 && amount - inFee < asked) {
       var say = function (n) { return unit === 'sat' ? String(n) : moneyWords(n, unit); };

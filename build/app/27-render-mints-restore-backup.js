@@ -3,19 +3,28 @@
   /** @param {RenderContext} c */
   renderMints(c) {
     const { s, sc } = c;
+    const tillOn = s.tillPick === 'set' && !!this.tillSetNow && this.tillSetNow().length > 0;
+    const FUR = "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),"
+      + "linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),url('foxy-fur.webp')";
     return {
       isSwitchMint: sc === 'switchMint',
       // adding a mint belongs to switching, not to picking one to move between
-      mintPickers: !s.trStep && !s.fcPick,
+      mintPickers: !s.trStep && !s.fcPick && !s.tillPick,
       /* The same list does three jobs: switching, and the two steps of a
        * transfer between your own mints. */
       /* And a fourth, for a card: which mint it moves to (26f-flashcard.js).
        * `fcPick` says so, and like trStep it is named by whoever opens the
        * list and cleared by every other way in. */
-      mintTitle: s.fcPick ? 'TO WHICH MINT?'
+      /* And the till's two (26m-till.js): every mint it takes, ticked, then NEXT (`tillPick` 'set'); then which of those is
+       * the default (`tillPick` 'default'). */
+      mintTitle: s.tillPick === 'default' ? 'DEFAULT MINT'
+        : s.tillPick ? 'TILL AT WHICH MINTS?'
+        : s.fcPick ? 'TO WHICH MINT?'
         : s.trStep === 'from' ? 'FROM WHICH MINT?'
         : s.trStep === 'to' ? 'TO WHICH MINT?' : 'SWITCH MINT',
-      mintNowLine: s.fcPick ? 'This card is at ' + this.mintNameOf(s.fc && s.fc.mint) + '.'
+      mintNowLine: s.tillPick === 'default' ? 'Payments from mints you did not pick are moved here. Invoices are made here.'
+        : s.tillPick ? 'Pick every mint this till takes. Payments from other mints cross into the default, the payer paying the fee.'
+        : s.fcPick ? 'This card is at ' + this.mintNameOf(s.fc && s.fc.mint) + '.'
         : s.trStep === 'from' ? 'Move money between the mints you use.'
         : s.trStep === 'to' ? 'Moving from ' + this.mintNameOf(s.trFrom) + '.'
         : 'Connected to ' + (this.mintHost() || 'no mint')
@@ -50,10 +59,20 @@
             border: here ? 'rgba(var(--acc-rgb),.75)' : 'rgba(var(--ink-rgb),.12)',
             // tapping the one you are already on should do nothing at all
             tap: !reach ? (() => this.offlineNo('Switching to ' + m.name))
+              : s.tillPick === 'default' ? (() => this.tillMintPick(m.url))
+              : s.tillPick ? (() => this.tillSetToggle(m.url))
               : s.fcPick ? (() => this.fcSwitchPick(m.url))
               : s.trStep ? (() => this.trPick(m.url)) : here ? (() => {}) : (() => this.justSwitch(m.url)),
           };
         };
+        /* The till's questions: the mints this phone uses (26m-till.js `tillMints`), the one it is on first, each ticked or
+         * not in the look of the mint you are on; then only the ticked, to pick the default from. */
+        if (s.tillPick) {
+          const use = this.tillMints ? this.tillMints() : all;
+          const ordered = use.filter(m => this.onMint(m.url)).concat(use.filter(m => !this.onMint(m.url)));
+          if (s.tillPick === 'default') return ordered.filter(m => this.tillTicked(m.url)).map(m => row(m, false));
+          return ordered.map(m => row(m, this.tillTicked(m.url)));
+        }
         if (s.fcPick) {
           // every mint but the one the card is at
           const at = String((s.fc && s.fc.mint) || '').replace(/\/+$/, '');
@@ -70,6 +89,13 @@
         return all.filter(m => this.onMint(m.url)).map(m => row(m, true))
           .concat(all.filter(m => !this.onMint(m.url)).map(m => row(m, false)));
       })(),
+      // NEXT under the till's set list: the fur once a mint is ticked, grey and nothing before (26m-till.js, `tillSetNext`)
+      tillNextShown: s.tillPick === 'set',
+      tillNext: () => this.tillSetNext(),
+      tillNextBg: tillOn ? 'var(--acc)' : 'rgba(var(--ink-rgb),.14)',
+      tillNextFur: tillOn ? FUR : 'none,none,none',
+      tillNextInk: tillOn ? '#fff' : 'rgba(var(--ink-rgb),.4)',
+      tillNextSh: tillOn ? 'inset 0 2px 0 rgba(255,255,255,.4),inset 0 -4px 0 rgba(0,0,0,.16),0 12px 24px rgba(var(--acc-rgb),.34)' : 'none',
       scanOtherMint: () => this.scanOtherMint(),
       typeOtherMint: () => this.typeMint(),
     };

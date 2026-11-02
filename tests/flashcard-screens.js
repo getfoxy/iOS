@@ -2369,6 +2369,14 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       await setUpWith(owner, H2, fresh, '');
       await look(owner, H2, fresh);
       ok(vals(owner).fcDesign === 'FX1', 'a card that names none is given this phone’s own, FX1', vals(owner).fcDesign);
+      // the card maker's record (the mint "-", the design it was printed in): drawn in that design, as a new card with no mint and no menu
+      const made = newCard(H2, undefined, { format: 4, software: 24 });
+      await made.send('00a404000af0464f5859434152440100');
+      await made.send('b0320000' + '68' + '00' + '00'.repeat(33) + '00'.repeat(65) + '01' + '2d' + Buffer.from('EL1', 'latin1').toString('hex'));
+      await look(owner, H2, made);
+      const mv = vals(owner);
+      ok(mv.fcDesign === 'EL1' && owner.state.fc.hasRecord === false && owner.state.fc.setUp === false && mv.fcPill === false && mv.fcMintShown === false && mv.fcMenuItems.length === 0,
+         'a card the maker wrote EL1 on is drawn EL1, new: no mint, no pill, no menu', JSON.stringify([mv.fcDesign, mv.fcPill, mv.fcMintShown, mv.fcMenuItems.length]));
     }
     await look(owner, H2, n);
 

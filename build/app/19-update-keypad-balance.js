@@ -88,12 +88,15 @@
       // landing on a token's own screen: ask the mint about it at once
       if (this.state.screen === 'tokenOut') this.tokenWatchNow();
       if (this.state.screen === 'home') this.endReceiveAtHome();
-      /* The till's SET AMOUNT is its home (26m-till.js, `tillIdle`): a receive ends there as it ends at home, and a keeper's
-       * next customer is asked which balance again. A cashier's is the keeper's unit whatever this says (`walletNow`). */
+      /* The till's SET AMOUNT is its home (26m-till.js, `tillIdle`): a receive ends there as it ends at home, and in a till
+       * that takes both the next customer is asked which again. A till in one currency is in it whatever this says
+       * (`walletNow`). */
       const idle = this.state.screen === 'home' || !!(this.tillIdle && this.tillIdle());
       if (idle && this.state.screen !== 'home') this.endReceiveAtHome();
-      // home ends a flow: the next one asks again (or takes home's one balance), not this one's
-      if (idle && (this.state.wallet || this.state.walletAuto || this.state.walletTapped)) {
+      /* Home ends a flow: the next one asks again (or takes home's one balance), not this one's. Not the till's SET AMOUNT
+       * reached from CURRENCY: that is the question just answered, for the receive about to be typed there. */
+      const answered = prevState.screen === 'currency' && this.state.screen !== 'home';
+      if (idle && !answered && (this.state.wallet || this.state.walletAuto || this.state.walletTapped)) {
         this.setState({ wallet: '', walletAuto: false, walletTapped: false, feeQ: null });
       }
       // a code somebody was asked to scan goes with the token it belonged to

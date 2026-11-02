@@ -8,10 +8,21 @@
    * the money only as something it cannot spend, and only until it is sent.
    *
    * The code (a "pass") is a URL, https://getfoxy.io/till#<base64url(JSON)>,
-   * with { v, id, mint, unit, lock, to, exp }: `lock` is a key from the
+   * with { v, id, mint, mints, unit, lock, to, exp }: `lock` is a key from the
    * keeper's seed-derived pool (`takeLockKey`, under 'till-<id>'), `to` the
    * Nostr key the keeper's phone made for this code and keeps in its Keychain,
-   * `exp` when it ends, 72 hours after it was made.
+   * `exp` when it ends, 72 hours after it was made. `mints` are the mints the
+   * till takes payments at, the default first; `mint` is that default, where
+   * a cashier is connected and its invoices are made, and is all a code from
+   * before a till took several mints carries (read as `[mint]`). `unit` is
+   * what the till takes: 'sat', 'usd', or 'both', where each payment is in
+   * either and says which (its token, its request, its delivery). A code in
+   * dollars or both needs its default to issue dollars; the rest of its mints
+   * may issue sats alone, and a dollar request leaves those out.
+   *
+   * A payment at a mint of the till's other than the one the phone is on is
+   * taken there by a wallet made for that mint (`awayWallet`), without the
+   * phone moving: the money stays at the mint it was paid at.
    *
    * What a cashier takes is never in its pile, never in its balance, and is
    * not its money on any row: its history rows say `forKeeper`. The outbox
@@ -65,6 +76,9 @@
   var TILL_TRIES_FAST = 30;
   var TILL_RETRY_SLOW = 15;
 
+  // the most mints one till takes payments at: a code carries them all, and a QR code has only so much room
+  var TILL_MINTS_MAX = 8;
+
   var TILL_LOCK = /^0[23][0-9a-f]{64}$/;
   var TILL_TO = /^nprofile1[02-9ac-hj-np-z]{20,1200}$/;
   var TILL_ID = /^[0-9a-f]{16}$/;
@@ -111,18 +125,77 @@
     if (j.v !== 1) return { why: 'That cashier code is from a newer Foxy. Update Foxy and scan it again.' };
     if (typeof j.id !== 'string' || !TILL_ID.test(j.id)) return bad;
     if (typeof j.mint !== 'string' || j.mint.length > 512 || mintUrlProblem(j.mint)) return bad;
-    if (j.unit !== 'sat' && j.unit !== 'usd') return bad;
+    /* The mints it takes payments at: none named is the one mint a code from
+     * before carried. Named, the default is among them, each a mint address
+     * Foxy would use itself, and eight at most. */
+    if (j.mints !== undefined && (!Array.isArray(j.mints) || !j.mints.length || j.mints.length > TILL_MINTS_MAX)) return bad;
+    var mints = tillMintList(j.mints === undefined ? [j.mint] : j.mints, j.mint);
+    if (!mints.length || (j.mints !== undefined && mints.length !== j.mints.length)) return bad;
+    if (j.unit !== 'sat' && j.unit !== 'usd' && j.unit !== 'both') return bad;
+    /* A till in both says which is its main: the one its QR invoice is made in, and the one a payment from a mint it does not
+     * take lands in. A code from before it said nothing is in sats; a till in one currency has that one, whatever it says. */
+    if (j.main !== undefined && j.main !== 'sat' && j.main !== 'usd') return bad;
+    var main = j.unit === 'both' ? (j.main === 'usd' ? 'usd' : 'sat') : j.unit;
     if (typeof j.lock !== 'string' || !TILL_LOCK.test(j.lock)) return bad;
     if (typeof j.to !== 'string' || !TILL_TO.test(j.to)) return bad;
     if (typeof j.exp !== 'number' || !isFinite(j.exp) || Math.floor(j.exp) !== j.exp) return bad;
     var nowS = Math.floor(Date.now() / 1000);
     if (j.exp <= nowS) return { why: 'That cashier code has expired. Ask for a new one.' };
     if (j.exp > nowS + TILL_PASS_MS / 1000 + TILL_PASS_SLACK_S) return bad;
-    return { pass: { v: 1, id: j.id, mint: canonicalMint(j.mint), unit: j.unit, lock: j.lock, to: j.to, exp: j.exp } };
+    return { pass: { v: 1, id: j.id, mint: mints[0], mints: mints, unit: j.unit, main: main, lock: j.lock, to: j.to, exp: j.exp } };
   }
 
+  /* A till's mints as a list Foxy can hold it to: each a mint address Foxy
+   * would use (`mintUrlProblem`), canonical, once, eight at most, and the
+   * default first. [] where any of that fails, or the default is not among
+   * them. The default is the first when none is named. */
+  function tillMintList(list, def) {
+    var raw = Array.isArray(list) ? list : [];
+    if (!raw.length || raw.length > TILL_MINTS_MAX) return [];
+    var out = [];
+    for (var i = 0; i < raw.length; i++) {
+      if (typeof raw[i] !== 'string' || raw[i].length > 512 || mintUrlProblem(raw[i])) return [];
+      var m = canonicalMint(raw[i]);
+      if (out.indexOf(m) < 0) out.push(m);
+    }
+    var d = typeof def === 'string' && def ? canonicalMint(def) : out[0];
+    if (out.indexOf(d) < 0) return [];
+    return [d].concat(out.filter(function (m) { return m !== d; }));
+  }
+
+  // the mints a pass or a pass row takes payments at, the default first: `[mint]` for one from before there were several
+  function tillMintsOf(p) {
+    if (!p) return [];
+    var list = tillMintList(Array.isArray(p.mints) && p.mints.length ? p.mints : [p.mint], p.mint);
+    return list.length ? list : [canonicalMint(String(p.mint || ''))].filter(Boolean);
+  }
+
+  function tillHasMint(p, mint) {
+    return tillMintsOf(p).indexOf(canonicalMint(String(mint || ''))) >= 0;
+  }
+
+  // two lists of mints the same till would take: the same default, and the same mints whatever their order
+  function tillSameMints(a, b) {
+    if (!a.length || a.length !== b.length || a[0] !== b[0]) return false;
+    return a.every(function (m) { return b.indexOf(m) >= 0; });
+  }
+
+  /* `mint` is the default, so a Foxy from before, which reads no `mints`,
+   * still works the till at the mint it is connected to. */
+  /* `main` only on a code for both, so a code in one currency reads as it always did. */
   function tillPassText(p) {
-    return TILL_URL + tillB64(JSON.stringify({ v: 1, id: p.id, mint: p.mint, unit: p.unit, lock: p.lock, to: p.to, exp: p.exp }));
+    var mints = tillMintsOf(p);
+    var body = { v: 1, id: p.id, mint: mints[0] || p.mint, mints: mints, unit: p.unit };
+    if (p.unit === 'both') body.main = p.main === 'usd' ? 'usd' : 'sat';
+    body.lock = p.lock; body.to = p.to; body.exp = p.exp;
+    return TILL_URL + tillB64(JSON.stringify(body));
+  }
+
+  // a code's main currency: its own on a code for both (sats on one from before it said), else the one it takes
+  function tillMainOf(p) {
+    if (!p) return 'sat';
+    if (p.unit === 'both') return p.main === 'usd' ? 'usd' : 'sat';
+    return p.unit === 'usd' ? 'usd' : 'sat';
   }
 
   /* A question to the phone about one code, whose id is the message's own.
@@ -191,23 +264,164 @@
     return null;
   }
 
-  /* The unit a new code takes payments in: dollars where this phone holds
-   * dollars and its mint issues them, sats otherwise. */
+  /* What a new code takes payments in, where the screen names nothing: what
+   * this phone holds, as chosen at set-up, of what its mint issues. Dollars
+   * for 'dollars' and both for 'both' where the mint issues dollars; sats
+   * otherwise. The screen names the till's own (26m-till.js, `tillUnitAt`). */
   function tillUnitNow(at) {
     var hold = '';
     try { hold = String(load(K.hold, '') || ''); } catch (e) { hold = ''; }
     var units = [];
     try { units = unitsOf(at); } catch (e) { units = []; }
-    return (hold === 'dollars' || hold === 'both') && units.indexOf('usd') >= 0 ? 'usd' : 'sat';
+    if (units.indexOf('usd') < 0) return 'sat';
+    return hold === 'dollars' ? 'usd' : hold === 'both' ? 'both' : 'sat';
   }
 
-  // whether the connected mint honours a lock (NUT-11), read from what it said, sending nothing
-  function tillMintLocks() {
+  // whether a code (or the till it is for) takes payments in `unit`: its one, or either of sats and dollars for 'both'
+  function tillTakesUnit(pass, unit) {
+    var u = unitOf(unit) || 'sat';
+    var p = pass && pass.unit;
+    return p === 'both' ? (u === 'sat' || u === 'usd') : u === p;
+  }
+
+  // what a code takes, said: 'bitcoin', 'dollars', or 'dollars or bitcoin'
+  function tillTakesWords(pass) {
+    return pass && pass.unit === 'both' ? 'dollars or bitcoin' : balanceWord(pass && pass.unit);
+  }
+
+  /* Whether a mint honours a lock (NUT-11), read from what it said, sending
+   * nothing: the connected mint where none is named, and another by what is
+   * kept on file for it (`mintCacheFor`). A mint nothing is known of does not. */
+  function tillMintLocks(mint) {
+    var m = mint ? canonicalMint(String(mint)) : '';
     try {
-      var nuts = (needLocal().getMintInfo() || {}).nuts || {};
+      var info = (!m || (wallet && canonicalMint(mintUrl || '') === m)) ? needLocal().getMintInfo()
+        : ((mintCacheFor(m) || {}).info || null);
+      var nuts = (info || {}).nuts || {};
       var n11 = nuts['11'] || nuts[11];
       return !!n11 && (n11.supported === undefined || n11.supported === true);
     } catch (e) { return false; }
+  }
+
+  /* A mint of the till's keys on file, so its payments can be checked with
+   * no route and without the phone going there: kept already, or asked for
+   * once (its info and keys, which it tells anybody) and kept. A mint this
+   * phone has never seen cannot be asked with no route, and is refused in
+   * words that say so. Resolves the mint. */
+  /* `fresh`: asked again even though keys are on file, for a payment in a
+   * keyset those keys do not name (the mint has made a new one since). What is
+   * on file stays until the new answer is kept over it, so a mint that does
+   * not answer leaves the phone no worse off. */
+  function tillMintLoad(mint, fresh) {
+    var m = canonicalMint(String(mint || ''));
+    if (!m) return Promise.reject(new Error('No mint was named for the till.'));
+    if (wallet && canonicalMint(mintUrl || '') === m) return Promise.resolve(m);
+    if (!fresh && mintCacheFor(m)) return Promise.resolve(m);
+    if (!routeOpen()) {
+      return Promise.reject(new Error(hostOf(m) + ' has not been seen on this phone yet, so the till cannot take payments there'
+        + ' until there is a connection to ask it once.'));
+    }
+    var w;
+    try { w = newWallet(m, {}); } catch (e) { return Promise.reject(e); }
+    tillLoadPin(m, 1);
+    return withTimeout(w.loadMint(), 25000, hostOf(m)).then(function () {
+      tillLoadPin(m, -1);
+      mintCacheSave(m, w);
+      if (!mintCacheFor(m)) throw new Error('The keys of ' + hostOf(m) + ' could not be kept on this phone.');
+      console.log('[foxy] till: the keys of ' + hostOf(m) + ' are on file');
+      return m;
+    }, function (e) {
+      tillLoadPin(m, -1);
+      throw new Error(hostOf(m) + ' did not answer, so the till cannot take payments there. ('
+        + String((e && e.message) || e).slice(0, 80) + ')');
+    });
+  }
+
+  /* Each of a till's mints loaded in turn (`tillMintLoad`); the first that
+   * cannot be is the refusal. The whole list is pinned in the mint cache while
+   * it loads: the till's record is written only once it has, so without this
+   * the fifth mint asked for pushed out the first (review, cache-evict). */
+  function tillMintsLoad(list) {
+    list.forEach(function (m) { tillLoadPin(m, 1); });
+    var unpin = function () { list.forEach(function (m) { tillLoadPin(m, -1); }); };
+    return list.reduce(function (chain, m) {
+      return chain.then(function () { return tillMintLoad(m); });
+    }, Promise.resolve()).then(function () { unpin(); return list; }, function (e) { unpin(); throw e; });
+  }
+
+  // the mints being loaded right now, each with how many loads want it
+  var tillLoading = Object.create(null);
+
+  function tillLoadPin(mint, by) {
+    var m = canonicalMint(String(mint || ''));
+    if (!m) return;
+    var n = (tillLoading[m] || 0) + by;
+    if (n > 0) tillLoading[m] = n; else delete tillLoading[m];
+  }
+
+  /* The mints whose keys the mint cache keeps however full it is
+   * (`mintCacheSave`): a payment at any of them is checked by those keys, with
+   * no route and with the phone elsewhere. The open till's; every code the
+   * keeper still listens on; the code a cashier works by; and any being loaded
+   * now. Never throws: a cache write must not fail over this. */
+  function tillPinnedMints() {
+    var out = [];
+    var add = function (m) {
+      var c = canonicalMint(String(m || ''));
+      if (c && out.indexOf(c) < 0) out.push(c);
+    };
+    try { Object.keys(tillLoading).forEach(add); } catch (e) {}
+    try { var k = tillKeeperNow(); if (k) k.mints.forEach(add); } catch (e) {}
+    try {
+      var now = Date.now();
+      tillPassRows().forEach(function (r) {
+        if (Number(r.exp) * 1000 + TILL_LISTEN_AFTER_MS > now) tillMintsOf(r).forEach(add);
+      });
+    } catch (e) {}
+    try { var c = tillCashierRaw(); if (c && c.pass) tillMintsOf(c.pass).forEach(add); } catch (e) {}
+    return out;
+  }
+
+  /* None at launch (called as the page opens, 99-proof-lock-and-export.js).
+   * The app never brings a keeper's till back (it does not keep its screens'
+   * state), and the phone starts at the mint it calls home: a record left by
+   * an app killed in its till outlived it, and handed the next session's
+   * one-mint till a code that took the old till's mints too, and the next
+   * close a way home to where that session had started (review,
+   * stale-keeper). */
+  function tillKeeperForget() {
+    tillClear(K.tillKeeper);
+    tillClear(K.tillKeeperHome);
+  }
+
+  /* The keeper's till while it is open (`tillKeeperOpen`): { mints, def }, the
+   * default first, or null. */
+  function tillKeeperNow() {
+    var r = load(K.tillKeeper, null);
+    if (!r || typeof r !== 'object') return null;
+    var list = tillMintList(r.mints, r.def);
+    return list.length ? { mints: list, def: list[0] } : null;
+  }
+
+  /* The mints a new code or request of the keeper's names: the open till's,
+   * where it is open at the mint the phone is on, and that mint alone
+   * otherwise. */
+  function tillKeeperMints(at) {
+    var k = tillKeeperNow();
+    return k && k.def === canonicalMint(at || '') ? k.mints : [canonicalMint(at || '')];
+  }
+
+  /* '' where every mint of a till honours a lock, or the sentence that names
+   * the first that does not. Not what each issues: a mint of the set that
+   * issues no dollars is left off a dollar request (`paymentRequest`), and
+   * its payer crosses into the default. */
+  function tillMintsProblem(list) {
+    for (var i = 0; i < list.length; i++) {
+      if (!tillMintLocks(list[i])) {
+        return hostOf(list[i]) + ' cannot lock a payment to this phone, so it cannot run a till with a cashier.';
+      }
+    }
+    return '';
   }
 
   // the nprofile the phone answered `tillKeyMake` with, as a bare string or in JSON
@@ -219,11 +433,18 @@
     return TILL_TO.test(t) ? t : '';
   }
 
-  /* The newest code still live, or null. */
-  function tillLiveNewest() {
+  /* The newest code still live, or null: in `unit` alone where one is named
+   * (sats, dollars or both: a code says what its till takes), and at `mints`
+   * alone where they are named. A code for another set of mints is still
+   * live for the cashiers on it, but it is not this till's. */
+  /* (and with the main named, `main`, of that main alone: a code for both whose QR invoices are in sats is not the till's
+   * whose are in dollars) */
+  function tillLiveNewest(unit, mints, main) {
     var now = Date.now();
-    var live = tillPrune().filter(function (r) { return Number(r.exp) * 1000 > now; })
-      .sort(function (a, b) { return Number(a.made) - Number(b.made); });
+    var live = tillPrune().filter(function (r) {
+      return Number(r.exp) * 1000 > now && (!unit || r.unit === unit) && (!mints || tillSameMints(tillMintsOf(r), mints))
+        && (!main || r.unit !== 'both' || tillMainOf(r) === main);
+    }).sort(function (a, b) { return Number(a.made) - Number(b.made); });
     return live.length ? live[live.length - 1] : null;
   }
 
@@ -237,11 +458,28 @@
    * w2). Two asks at once share the one being made. */
   var tillMaking = null;
 
+  /* The mints a new code takes payments at: those the screen names
+   * (`opts.mints`, the till it opened), the mint the phone is on first, or the
+   * open till's (`tillKeeperMints`). [] where the named ones are not mints
+   * Foxy can hold a till to, or leave out the mint the phone is on. */
+  function tillPassMints(opts, at) {
+    var here = canonicalMint(at || '');
+    if (!here) return [];
+    if (opts && Array.isArray(opts.mints) && opts.mints.length) return tillMintList(opts.mints, here);
+    return tillKeeperMints(here);
+  }
+
   function tillPassMake(opts) {
-    var live = tillLiveNewest();
+    var want = opts && opts.unit ? unitOf(opts.unit) : '';
+    var named = mintUrl ? tillPassMints(opts, mintUrl) : null;
+    if (named && !named.length) {
+      return Promise.reject(new Error('A cashier code takes payments at the mint this phone is on, and at mints Foxy can use.'));
+    }
+    var mainWant = opts && (opts.main === 'usd' || opts.main === 'sat') ? opts.main : '';
+    var live = tillLiveNewest(want, named, mainWant);
     if (live) {
       Promise.resolve().then(function () { return FoxyWallet.tillListen(); }).then(null, function () {});
-      return Promise.resolve({ text: tillPassText(live), id: live.id, exp: live.exp });
+      return Promise.resolve({ text: tillPassText(live), id: live.id, exp: live.exp, mints: tillMintsOf(live), main: tillMainOf(live) });
     }
     if (tillMaking) return tillMaking;
     var run = tillPassMakeNew(opts);
@@ -255,12 +493,20 @@
     var o = opts || {};
     if (!wallet || !mintUrl) return Promise.reject(new Error('No mint connected yet. Call FoxyWallet.connect() first.'));
     var at = canonicalMint(mintUrl);
+    // the till's mints, this one first: every one of them honours a lock
+    var mints = tillPassMints(o, at);
+    if (!mints.length) {
+      return Promise.reject(new Error('A cashier code takes payments at the mint this phone is on, and at mints Foxy can use.'));
+    }
     if (!tillMintLocks()) {
       return Promise.reject(new Error(hostOf(at) + ' cannot lock a payment to this phone, so it cannot run a till with a cashier.'));
     }
     var unit = o.unit ? unitOf(o.unit) : tillUnitNow(at);
-    if (unit !== 'sat' && unit !== 'usd') return Promise.reject(new Error('A till takes sats or dollars.'));
-    if (unit === 'usd' && unitsOf(at).indexOf('usd') < 0) return Promise.reject(new Error(hostOf(at) + ' does not issue dollars.'));
+    if (unit !== 'sat' && unit !== 'usd' && unit !== 'both') return Promise.reject(new Error('A till takes sats, dollars or both.'));
+    // dollars at the default, where a cashier is connected and its dollar invoices are made; the others may issue sats alone
+    if (unit !== 'sat' && unitsOf(at).indexOf('usd') < 0) return Promise.reject(new Error(hostOf(at) + ' does not issue dollars.'));
+    var mintsNo = tillMintsProblem(mints);
+    if (mintsNo) return Promise.reject(new Error(mintsNo));
     var raw = new Uint8Array(8);
     (window.crypto || window.msCrypto).getRandomValues(raw);
     var id = hexOf(raw);
@@ -271,8 +517,15 @@
         var to = tillProfileOf(text);
         if (!to) throw new Error('The phone did not make an address for the cashier code. Try again.');
         var now = Date.now();
-        var row = { id: id, lock: lock, lockId: 'till-' + id, to: to, unit: unit, mint: at,
+        var row = { id: id, lock: lock, lockId: 'till-' + id, to: to, unit: unit, mint: at, mints: mints,
                     exp: Math.floor((now + TILL_PASS_MS) / 1000), made: now };
+        // a till in both: the main its screen chose (`opts.main`), sats where none was
+        if (unit === 'both') row.main = o.main === 'usd' ? 'usd' : 'sat';
+        // a code no phone could read back (its mints' addresses too long between them) is not handed out
+        if (tillPassText(row).length > TILL_TEXT_MAX) {
+          tillForget(row);
+          throw new Error('The till’s mints’ addresses are too long for one cashier code. Take fewer mints.');
+        }
         var rows = tillPrune().concat([row]);
         /* Four at most, and only ever an ended one goes, oldest first, with
          * its keys. None other is live (a live one is answered again,
@@ -290,10 +543,11 @@
         try { mustSave(K.tillPasses, rows); }
         catch (e) { tillForget(row); throw e; }
         gone.forEach(tillForget);
-        console.log('[foxy] till: a cashier code was made, ' + unit + ' at ' + hostOf(at) + ', for 72 hours');
+        console.log('[foxy] till: a cashier code was made, ' + unit + ' at ' + hostOf(at)
+          + (mints.length > 1 ? ' and ' + (mints.length - 1) + ' other mint(s)' : '') + ', for 72 hours');
         // and the phone listens for it from now on
         Promise.resolve().then(function () { return FoxyWallet.tillListen(); }).then(null, function () {});
-        return { text: tillPassText(row), id: id, exp: row.exp };
+        return { text: tillPassText(row), id: id, exp: row.exp, mints: mints, main: tillMainOf(row) };
       }, function (e) {
         dropLockKey('till-' + id);
         throw e;
@@ -389,6 +643,29 @@
     }
   }
 
+  /* The mint whose keys a payment to an open request needs, and does not
+   * have on file: { mint, fresh } or null. Only for a mint the request lists
+   * (a till's, `open.mints`) other than the one the phone is on, whose keys
+   * are not here at all, or name none of the keysets its pieces are in
+   * (`fresh`: asked again over what is on file). Read from the body as it
+   * came, before anything is checked; `readPayment` checks it all after. */
+  function tillKeysWanted(body, here) {
+    var j = null;
+    try { j = parseBody(String(body || '')); } catch (e) { j = null; }
+    if (!j || typeof j !== 'object' || typeof j.id !== 'string' || typeof j.mint !== 'string') return null;
+    var open = Object.prototype.hasOwnProperty.call(openRequests, j.id) ? openRequests[j.id] : null;
+    if (!open || !Array.isArray(open.mints)) return null;
+    var mint = canonicalMint(j.mint);
+    if (!mint || mint === canonicalMint(String(here || ''))) return null;
+    if (!open.mints.some(function (m) { return canonicalMint(String(m || '')) === mint; })) return null;
+    var kw = tillKeysAt(mint, recordUnit(open));
+    if (!kw) return { mint: mint, fresh: false };
+    var sets = keysetsOf(mint, kw);
+    var proofs = Array.isArray(j.proofs) ? j.proofs : [];
+    var unknown = !sets || proofs.some(function (pr) { return pr && typeof pr === 'object' && !keysetUnit(mint, pr.id, kw, sets); });
+    return unknown ? { mint: mint, fresh: true } : null;
+  }
+
   /* Whether the mint turned a kept delivery down for good: a refusal it
    * gave (a 4xx, a coded error, signatures that do not verify), and not a
    * mint too busy for its own lock, which Nutshell says as a 400 and means
@@ -418,16 +695,19 @@
    * A CASHIER CODE is a QR code at a counter, so anybody who has seen one
    * can write to this function: its key and its Nostr address are in it.
    * So nothing is kept, and nothing is sent to the mint, until it is shown
-   * to be the mint's own ecash: of the code's mint and unit by its keysets,
-   * every piece carrying a DLEQ that verifies against that mint's keys, no
+   * to be the mint's own ecash: of one of the code's mints, in its unit by
+   * its keysets, every piece carrying a DLEQ that verifies against that
+   * mint's keys, no
    * piece named twice, none seen before, and small. Only the lock was
    * checked, which anybody can write: unsigned bodies were kept, swapped
    * again on every listen, pushed real ones out of the inbox and filled the
    * store (review w3). */
-  function tillArriveOne(passId, body) {
+  /* `loaded`: the mint's keys were asked for once already on this reading. */
+  function tillArriveOne(passId, body, loaded) {
     /* A refusal drops a kept copy only once the mint itself has said no
-     * (`key`, below): a check that fails here for want of something on this
-     * phone (the mint's keys, say) leaves money kept before where it is. */
+     * (`key`, below), or the mint's own keys have: a check that fails here for
+     * want of something on this phone (the mint's keys, say) leaves money kept
+     * before where it is. */
     var key = '';
     var refuse = function (why) {
       console.warn('[foxy] till: a payment from a cashier was not taken: ' + why);
@@ -444,9 +724,10 @@
     try { j = JSON.parse(text); } catch (e) { j = null; }
     if (!j || typeof j !== 'object' || Array.isArray(j)) return refuse('it is not a payment');
     var mint = typeof j.mint === 'string' ? canonicalMint(j.mint) : '';
-    if (!mint || mint !== canonicalMint(pass.mint)) return refuse('it is not at the code’s mint');
-    var unit = unitOf(pass.unit) || 'sat';
-    if ((unitOf(j.unit) || 'sat') !== unit) return refuse('it is not in the code’s unit');
+    if (!mint || !tillHasMint(pass, mint)) return refuse('it is not at a mint the code takes');
+    // in what the code takes: its one unit, or for 'both' the sats or dollars the delivery says it is in
+    var unit = unitOf(j.unit) || 'sat';
+    if (!tillTakesUnit(pass, unit)) return refuse('it is not in the code’s unit');
     var proofs = Array.isArray(j.proofs) ? j.proofs.filter(function (p) { return p && typeof p === 'object'; }) : [];
     if (!proofs.length || proofs.length > TILL_PROOFS_MAX || proofs.length !== j.proofs.length) return refuse('it holds no usable proofs');
     if (repeatedProof(proofs)) return refuse('it names the same ecash more than once');
@@ -455,30 +736,66 @@
     })) return refuse('it holds a proof Foxy cannot read');
     if (!proofs.every(function (pr) { return onlyLockedTo(pr, pass.lock); })) return refuse('it is not locked to the code’s key');
     var kw = tillKeysAt(mint, unit);
-    if (!kw) return refuse('this phone has no keys on file for ' + hostOf(mint) + ' to check it by');
-    var sets = keysetsOf(mint, kw);
+    var sets = kw ? keysetsOf(mint, kw) : null;
+    var known = !!sets && proofs.every(function (pr) { return !!keysetUnit(mint, pr.id, kw, sets); });
+    /* No keys on file for its mint, or a keyset they do not name (the mint has
+     * made a new one since): with a route, asked for once and read again; with
+     * none, kept as it is, to be read when there is one (`tillDrain`). It was
+     * refused, and nothing asked for the keys again: a cashier's payment at a
+     * mint whose keys had gone was refused on every listen for good, with the
+     * cashier's outbox saying it was sent (review, cache-evict). Nothing here
+     * is checked yet, so it is kept only within the inbox's own cap. */
+    if (!kw || !known) {
+      var here = !!wallet && canonicalMint(mintUrl || '') === mint;
+      if (!loaded && !here && wallet && routeOpen() && !claimAway) {
+        return tillMintLoad(mint, !!kw).then(function () {
+          return tillArriveOne(passId, body, true);
+        }, function (e) {
+          try { tillInboxKeep(id, j, text); }
+          catch (eK) { return refuse('the keys of ' + hostOf(mint) + ' could not be had, and it could not be written down ('
+            + ((eK && eK.message) || eK) + ')'); }
+          console.warn('[foxy] till: a payment from a cashier is kept until the keys of ' + hostOf(mint) + ' can be had:',
+            (e && e.message) || e);
+          return 'kept';
+        });
+      }
+      if (!kw || !loaded) {
+        if (here) return refuse('its pieces are not of ' + hostOf(mint) + '’s keysets');
+        try { tillInboxKeep(id, j, text); }
+        catch (e) { return refuse('this phone has no keys for it on file, and it could not be written down (' + ((e && e.message) || e) + ')'); }
+        console.log('[foxy] till: a payment from a cashier is kept until the keys of ' + hostOf(mint) + ' can be had');
+        return 'kept';
+      }
+    }
+    /* From here every check is against the mint's own keys, as it gave them:
+     * one that fails is the mint's no, and a copy kept before goes with it. */
+    key = tillInboxKey(id, j);
     if (!sets || !proofs.every(function (pr) { return keysetUnit(mint, pr.id, kw, sets) === unit; })) {
       return refuse('its pieces are not of ' + hostOf(mint) + '’s ' + unit + ' keysets');
     }
     if (dleqAudit(kw, proofs).invalid || !mintSigned(kw, proofs)) return refuse('the mint’s signature on it does not check out');
+    key = '';
     var seen = tillSeenList();
     if (proofs.some(function (pr) { return seen.indexOf(pr.secret) >= 0; })) {
       console.log('[foxy] till: a payment from a cashier that was taken already, read again; nothing more taken');
       tillInboxDrop(tillInboxKey(id, j));
       return 'seen';
     }
-    // only at the code's own mint, with a route, and no late claim visiting elsewhere: otherwise kept for later
-    if (!wallet || canonicalMint(mintUrl || '') !== mint || !routeOpen() || claimAway) {
+    /* With a route, and no late claim visiting elsewhere: otherwise kept for
+     * later. At the mint the phone is on, or at another of the code's, taken
+     * there by a wallet made for it (`away`), the phone staying where it is. */
+    if (!wallet || !routeOpen() || claimAway) {
       try { tillInboxKeep(id, j, text); }
       catch (e) { return refuse('it could not be written down (' + ((e && e.message) || e) + ')'); }
-      console.log('[foxy] till: a payment from a cashier is kept until this phone is online at ' + hostOf(mint));
+      console.log('[foxy] till: a payment from a cashier is kept until this phone is online, to be taken at ' + hostOf(mint));
       return 'kept';
     }
     var token;
     try { token = encodeToken(mint, proofs, unit); }
     catch (e) { return refuse('it would not make a token'); }
     var at = tillInboxKey(id, j);
-    return FoxyWallet.receiveToken(token, { till: true, memo: 'till' }).then(function (r) {
+    var away = canonicalMint(mintUrl || '') !== mint;
+    return FoxyWallet.receiveToken(token, { till: true, memo: 'till', away: away }).then(function (r) {
       tillSeenAdd(proofs);
       tillInboxDrop(at);
       console.log('[foxy] till: a payment from a cashier was taken in');
@@ -495,22 +812,22 @@
         key = at;
         return refuse('the mint refused it (' + why.slice(0, 120) + ')');
       }
-      // anything else is worth another go, on the next listen at this mint
+      // anything else is worth another go, on the next listen
       try { tillInboxKeep(id, j, text); } catch (eK) {}
       console.warn('[foxy] till: a payment from a cashier could not be taken yet, kept to try again:', why);
       return 'kept';
     });
   }
 
-  // what was kept for later, taken now if this phone is where it can be
+  /* What was kept for later, taken now that there is a route: at whichever
+   * of its code's mints it was paid, the phone staying where it is. */
   function tillDrain() {
     var rows = tillInboxRows();
     if (!rows.length || !wallet || !routeOpen()) return Promise.resolve(0);
-    var here = canonicalMint(mintUrl || '');
     var took = 0;
     return rows.reduce(function (chain, r) {
       var pass = tillPassById(r.pass);
-      if (!pass || canonicalMint(pass.mint) !== here) return chain;
+      if (!pass) return chain;
       return chain.then(function () {
         return tillArrived(r.pass, r.body).then(function (got) { if (got === 'taken') took += 1; });
       });
@@ -549,13 +866,14 @@
   }
 
   /* The key a till request or invoice is locked to, for the code this phone
-   * works by, in its unit, at its mint: or a throw that says what is wrong. */
+   * works by, in a unit it takes, at its mint: or a throw that says what is
+   * wrong. A code for both takes a request or invoice in either. */
   function tillTermsFor(lockPub, unit, at) {
     var row = tillCashierNow();
     if (!row || !row.pass) throw new Error('This phone is not working a till.');
     var pass = row.pass;
     if (String(lockPub || '').toLowerCase() !== pass.lock) throw new Error('That key is not the till’s.');
-    if ((unitOf(unit) || 'sat') !== pass.unit) throw new Error('This till takes ' + balanceWord(pass.unit) + ' only.');
+    if (!tillTakesUnit(pass, unit)) throw new Error('This till takes ' + tillTakesWords(pass) + ' only.');
     if (canonicalMint(at || '') !== pass.mint) throw new Error('This till takes payments at ' + hostOf(pass.mint) + ' only.');
     if (!tillMintLocks()) throw new Error(hostOf(pass.mint) + ' cannot lock a payment to the keeper, so this till cannot take it.');
     return pass;
@@ -779,9 +1097,19 @@
    * as the main path's does (`refundRefused`, given `body` and `over`):
    * which takes plain ecash only, so what is locked to the keeper is never
    * swapped here. */
-  function tillRequestPaid(p, answer, body, over) {
+  /* `loaded`: the keys of the mint it was paid at were asked for once already. */
+  function tillRequestPaid(p, answer, body, over, loaded) {
     var pu = unitOf(p.unit) || 'sat';
-    var dw = pu === 'sat' ? wallet : (unitWalletNow(pu) || wallet);
+    // the keys of the mint it was paid at: another of the code's is checked by what is on file for it (`tillKeysAt`)
+    var dw = tillKeysAt(p.mint, pu);
+    /* None on file for it: with a route, asked for once and read again, as
+     * `_requestPaid` does before it reads the payment. The ecash is locked to
+     * the keeper, so a refusal for want of keys is money the payer cannot take
+     * back. */
+    if (!dw && !loaded && routeOpen() && canonicalMint(String(p.mint || '')) !== canonicalMint(mintUrl || '')) {
+      var again = function () { return tillRequestPaid(p, answer, body, over, true); };
+      return tillMintLoad(p.mint).then(again, again);
+    }
     var said = function (n) { return pu === 'sat' ? n + ' sats' : moneyWords(n, pu); };
     var kept = Math.max(0, Math.round(satsOf(p.amount) - (Number(p.inFee) || 0)));
     var tell = function (stage, more) {
@@ -811,8 +1139,19 @@
     if (!lock || !open.tillPass || !TILL_TO.test(String(open.tillTo || ''))) {
       return Promise.resolve(no(422, 'This till has nothing on file for that request. Ask for a new one.', true));
     }
+    if (!dw) return Promise.resolve(no(422, 'This till has no keys on file for ' + hostOf(p.mint) + ', so it cannot check that ecash.', true));
+    /* Over what was asked, and not marked: a till makes no change. Plain, it
+     * is refused, and the payer can still spend it. Locked to the keeper, a
+     * refusal strands it (the payer cannot spend it back, and nobody sends it
+     * on), so it is taken whole, as the keeper's own till takes one at another
+     * mint (`_requestPaid`), and its row says what came; `tillAccept` still
+     * checks it is signed and unspent. */
     if (Number(p.asked) > 0 && kept > Number(p.asked) && !p.overpaid) {
-      return Promise.resolve(no(422, 'This till cannot give change. Send exactly ' + said(Number(p.asked)) + '.', true));
+      if (!(Array.isArray(p.proofs) && p.proofs.length && p.proofs.every(function (pr) { return onlyLockedTo(pr, lock); }))) {
+        return Promise.resolve(no(422, 'This till cannot give change. Send exactly ' + said(Number(p.asked)) + '.', true));
+      }
+      console.log('[foxy] till: a payment over the amount asked by ' + said(kept - Number(p.asked))
+        + ', locked to the keeper; taken whole, no change made');
     }
     // the same ecash at another request, or scanned, at this moment: one of them takes it
     release = tillHold(p.proofs);
@@ -978,20 +1317,26 @@
     try { tok = FoxyWallet.tokenInfo(text); } catch (e) { tok = null; }
     if (!tok) return Promise.reject(new Error('That is not a Cashu token.'));
     var unit = unitOf(tok.unit);
-    if (canonicalMint(tok.mint || '') !== pass.mint) {
-      return Promise.reject(new Error('That ecash is from ' + hostOf(tok.mint || '') + '; this till takes ecash at ' + hostOf(pass.mint) + '.'));
+    // at any mint the code takes, checked by that mint's keys (`tillKeysAt`)
+    var at = canonicalMint(tok.mint || '');
+    if (!tillHasMint(pass, at)) {
+      var names = tillMintsOf(pass).map(hostOf);
+      return Promise.reject(new Error('That ecash is from ' + hostOf(tok.mint || '') + '; this till takes ecash at '
+        + (names.length > 1 ? names.slice(0, -1).join(', ') + ' or ' + names[names.length - 1] : names[0]) + '.'));
     }
-    if (unit !== pass.unit) return Promise.reject(new Error('This till takes ' + balanceWord(pass.unit) + ' only.'));
+    // in what the code takes: for 'both', the token's own unit, sats or dollars
+    if (!tillTakesUnit(pass, unit)) return Promise.reject(new Error('This till takes ' + tillTakesWords(pass) + ' only.'));
     if (!wallet || canonicalMint(mintUrl || '') !== pass.mint) {
       return Promise.reject(new Error('This phone is not at the till’s mint yet. Try again in a moment.'));
     }
+    var dw = tillKeysAt(at, unit);
+    if (!dw) return Promise.reject(new Error('This till has no keys on file for ' + hostOf(at) + ', so it cannot check that ecash.'));
     var proofs = tok.proofs || [];
-    if (wrongUnitPieces(proofs, pass.mint, unit, wallet).length) {
+    if (wrongUnitPieces(proofs, at, unit, dw).length) {
       return Promise.reject(new Error('That token says ' + balanceWord(unit) + ' but holds another unit’s ecash, so it was not taken.'));
     }
     var hash = 'till-' + piecesFingerprint(proofs);
     if (txSeen(hash)) return Promise.reject(new Error('This till has taken that ecash already.'));
-    var dw = unit === 'sat' ? wallet : (unitWalletNow(unit) || wallet);
     // the same ecash posted to a request at this moment: one of them takes it (`tillHold`)
     var held = tillHold(proofs);
     if (!held) return Promise.reject(new Error(TILL_IN_FLIGHT));
@@ -1004,13 +1349,13 @@
       try { fee = swapFeeFor(dw, proofs); } catch (e) { fee = 0; }
       var kept = Math.max(0, Math.round(sumProofs(proofs) - fee));
       try {
-        tillOutboxAdd({ proofs: proofs, mint: pass.mint, unit: unit, amount: kept, to: pass.to, passId: pass.id, exp: pass.exp, hash: hash });
+        tillOutboxAdd({ proofs: proofs, mint: at, unit: unit, amount: kept, to: pass.to, passId: pass.id, exp: pass.exp, hash: hash });
       } finally { free(); }
-      try { tillLogIn(hash, kept, unit, pass.mint, pass.id); }
+      try { tillLogIn(hash, kept, unit, at, pass.id); }
       catch (e) { console.warn('[foxy] till: the history row for a token could not be written:', (e && e.message) || e); }
       console.log('[foxy] till: a token was taken for the keeper; sending');
       tillDeliverSoon();
-      return { sats: unit === 'sat' ? kept : 0, unit: unit, amount: kept, mint: pass.mint, host: hostOf(pass.mint),
+      return { sats: unit === 'sat' ? kept : 0, unit: unit, amount: kept, mint: at, host: hostOf(at),
                hash: hash, switched: false, till: true };
     }).then(null, function (e) { free(); throw e; });
   }
@@ -1089,6 +1434,15 @@
     var c = typeof given === 'string' ? tillRead(given) : tillCheck(given);
     if (!c.pass) return Promise.reject(new Error(c.why || 'That is not a cashier code Foxy can read.'));
     var pass = c.pass;
+    /* The keys of every other mint the till takes, on file before anything is
+     * written: a payment at one of them is checked by them, and with none the
+     * till could only refuse it. A mint that cannot be asked refuses the join,
+     * by name. (The default's come with the connect below.) */
+    var others = tillMintsOf(pass).slice(1);
+    return tillMintsLoad(others).then(function () { return tillJoinAt(pass); });
+  }
+
+  function tillJoinAt(pass) {
     var before = tillCashierRaw();
     var homeBefore = load(K.tillHome, null);
     var home = homeBefore && typeof homeBefore === 'object' && typeof homeBefore.mint === 'string' ? homeBefore
@@ -1102,7 +1456,8 @@
     var there = !!wallet && canonicalMint(mintUrl || '') === pass.mint;
     var going = there ? Promise.resolve(null) : FoxyWallet.connect(pass.mint, null, null, { remember: false });
     return going.then(function () {
-      console.log('[foxy] till: working the till for a keeper at ' + hostOf(pass.mint) + ', in ' + pass.unit);
+      console.log('[foxy] till: working the till for a keeper at ' + hostOf(pass.mint) + ', in ' + pass.unit
+        + (tillMintsOf(pass).length > 1 ? ', taking ' + (tillMintsOf(pass).length - 1) + ' other mint(s) too' : ''));
       return { pass: pass, since: since };
     }, function (e) {
       if (before && before.pass) save(K.tillCashier, { pass: before.pass, since: before.since });
@@ -1129,6 +1484,85 @@
     var done = function () { if (tillLeaving === run) tillLeaving = null; };
     run.then(done, done);
     return run;
+  }
+
+  /* The keeper's till opens at a set of its mints (`mints`), one of them the
+   * default (`def`, the first where none is named): payments at any of them
+   * are taken where they are paid, and a payer at any other mint crosses into
+   * the default, paying the crossing itself. One mint, named alone, is the
+   * till as it was: `tillKeeperOpen(mint)`.
+   *
+   * Every mint's keys are on file first (`tillMintLoad`), so its payments can
+   * be checked with no route; a mint never seen is asked once, and with no
+   * route refused. Several mints must each honour a lock (NUT-11): a payment
+   * at a mint the phone is not on is only taken with no route when it is
+   * locked to this phone. The phone visits the default for the till (the mint
+   * on file is not changed, as a cashier's visit does not change it) and
+   * comes home when the till ends (`tillKeeperClose`). Opened at the mint it
+   * is on: no visit, and no way home kept. Resolves { mint, moved, mints, def }. */
+  function tillKeeperOpen(mints, def) {
+    var named = Array.isArray(mints) ? mints : (mints ? [mints] : []);
+    var list = named.length ? tillMintList(named, def || '') : [];
+    if (!named.length) return Promise.reject(new Error('No mint was named for the till.'));
+    if (!list.length) {
+      return Promise.reject(new Error(named.length > TILL_MINTS_MAX ? 'A till takes payments at ' + TILL_MINTS_MAX + ' mints at most.'
+        : def && tillMintList(named).indexOf(canonicalMint(String(def))) < 0 ? 'The default mint has to be one of the till’s mints.'
+        : 'One of the till’s mints is not a mint address Foxy can use.'));
+    }
+    var to = list[0];
+    var here = canonicalMint(mintUrl || '');
+    if (!wallet || !here) return Promise.reject(new Error('No mint connected yet. Call FoxyWallet.connect() first.'));
+    return tillMintsLoad(list).then(function () {
+      /* Every mint's keys on file at the end, not only as each was asked: a
+       * till checks its payments by them, and a refusal over a lock was what
+       * a till of eight said when a mint's keys had been pushed out a moment
+       * before, of a mint that honours one (review, cache-evict). */
+      var missing = list.filter(function (m) { return !(m === here && m === to) && !mintCacheFor(m); })[0];
+      if (missing) {
+        throw new Error('The keys of ' + hostOf(missing) + ' could not be kept on this phone, so the till cannot take payments there.');
+      }
+      if (list.length > 1) {
+        var noLock = list.filter(function (m) { return !tillMintLocks(m); })[0];
+        if (noLock) throw new Error(hostOf(noLock) + ' cannot lock a payment to this phone, so the till cannot take payments there.');
+      }
+      var rec = { mints: list, def: to };
+      var answer = { mints: list, def: to };
+      if (to === here) {
+        mustSave(K.tillKeeper, rec);
+        return Object.assign({ mint: here, moved: false }, answer);
+      }
+      /* The way home is kept as the till first opened it: a till open now,
+       * opened again at another default, still goes home and not to the mint
+       * it ran at. A row left from a till that is not open is written over. */
+      var wrote = !(tillKeeperNow() && load(K.tillKeeperHome, null));
+      if (wrote) mustSave(K.tillKeeperHome, { mint: here });
+      try { mustSave(K.tillKeeper, rec); } catch (e) { if (wrote) tillClear(K.tillKeeperHome); throw e; }
+      return FoxyWallet.connect(to, null, null, { remember: false }).then(function () {
+        console.log('[foxy] till: opened at ' + hostOf(to) + ', away from ' + hostOf(here)
+          + (list.length > 1 ? ', taking ' + (list.length - 1) + ' other mint(s) too' : ''));
+        return Object.assign({ mint: to, moved: true }, answer);
+      }, function (e) {
+        if (wrote) tillClear(K.tillKeeperHome);
+        tillClear(K.tillKeeper);
+        throw e;
+      });
+    });
+  }
+
+  // the keeper's till closed: home to its own mint where the till ran elsewhere; never refused
+  function tillKeeperClose() {
+    var home = load(K.tillKeeperHome, null);
+    tillClear(K.tillKeeperHome);
+    tillClear(K.tillKeeper);
+    var to = home && typeof home.mint === 'string' ? canonicalMint(home.mint) : '';
+    if (!to || to === canonicalMint(mintUrl || '')) return Promise.resolve({ mint: canonicalMint(mintUrl || ''), moved: false });
+    return FoxyWallet.connect(to, null, null).then(function () {
+      console.log('[foxy] till: closed; back at ' + hostOf(to));
+      return { mint: to, moved: true };
+    }, function (e) {
+      console.warn('[foxy] till: closed, and could not get back to ' + hostOf(to) + ':', (e && e.message) || e);
+      return { mint: canonicalMint(mintUrl || ''), moved: false, failed: true };
+    });
   }
 
   function tillLeaveOnce() {

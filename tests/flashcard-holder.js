@@ -21,7 +21,7 @@
  * And the set-up's two amounts in the card's own money, on SET AMOUNT: a dollar card's in dollars only, a bitcoin card's in dollars
  * first with the screen's swap to sats, the card sent cents or sats as before. No card of 1.21 or 1.22 in this suite makes change: every payment here is of
  * exact pieces (the change these cards make for themselves, mended or given up, is tests/flashcard-mend.js). */
-const { funded, newCard, why, OTHER_WORDS } = require('./flashcard-kit');
+const { funded, newCard, why, OTHER_WORDS, MINT } = require('./flashcard-kit');
 const { appOn, until, pad, card, vals, settle, keyIn, welcome, limits, speed, named, restore } = require('./flashcard-ui-kit');
 
 let failed = 0;
@@ -228,6 +228,35 @@ function amt(a) {
     const c21 = card4(H, 21);
     c21.tap();
     ok((await why(R.W.cardSetUpFor(c21, { pin: '1111' }))) === 'old-card', 'a card of 1.21 is not set up for somebody else: it takes no money with no owner');
+    {
+      // a card printed in EL1, its design written on the chip by the card maker (the mint "-", no refund key): set up for its holder, it keeps it
+      const maker = 'b0320000' + '68' + '00' + '00'.repeat(33) + '00'.repeat(65) + '01' + '2d' + hexOf('EL1');
+      const p1 = card4(H, 24);
+      await p1.send(SELECT);
+      await p1.send(maker);
+      p1.tap();
+      await R.W.cardSetUpFor(p1, { pin: '5555', design: 'FX1' });
+      ok(p1.state.record.mint === MINT && p1.state.record.design === 'EL1' && p1.state.pinState === 1 && !p1.state.owner,
+         'a card the maker wrote EL1 on, set up for its holder with the app’s FX1, is at this phone’s mint and still EL1', JSON.stringify([p1.state.record.mint, p1.state.record.design]));
+      // cut off after its PIN and before its record: any phone takes it up again with the PIN it has (the card keeps it, having a record)
+      const p2 = card4(H, 24);
+      await p2.send(SELECT);
+      await p2.send(maker);
+      p2.tap();
+      p2.leaveBefore('32', 1);
+      ok((await why(R.W.cardSetUpFor(p2, { pin: '5555', design: 'FX1' }))) === 'gone' && p2.state.pinState === 1 && p2.state.record.mint === '-',
+         'a set-up for the holder cut off before its record leaves the PIN on the maker’s record');
+      p2.tap();
+      const seen2 = await G.W.cardLook(p2, { short: true });
+      ok(!seen2.info.setUp && !seen2.info.hasRecord && seen2.info.recordSet && seen2.info.pinSet && seen2.design === 'EL1',
+         'another phone reads it as a set-up cut short, in EL1, with no mint', JSON.stringify({ setUp: seen2.info.setUp, hasRecord: seen2.info.hasRecord }));
+      p2.tap();
+      ok((await why(G.W.cardSetUpFor(p2, { pin: '7777' }))) === 'wrong-pin' && p2.state.pinState === 1 && p2.state.record.mint === '-',
+         'taken up there with another PIN, the card’s own refusal: the PIN it has is wanted (the card keeps it), and nothing is written');
+      p2.tap();
+      await G.W.cardSetUpFor(p2, { pin: '5555' });
+      ok(p2.state.record.mint === MINT && p2.state.record.design === 'EL1' && !p2.state.owner, 'and with the PIN it has, it is finished there, still EL1', p2.state.record.mint);
+    }
     c.tap();
     await R.W.cardPrepare(await R.W.cardLook(c, { short: true }), 1200);
     c.tap();

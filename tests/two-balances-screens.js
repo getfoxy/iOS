@@ -845,8 +845,9 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq(A.tapUnitRule({ unit: 'eur', amount: 500, sats: null }), 'That request asks for EUR, which Foxy cannot pay over tap.', 'any other unit is refused in words');
     const offer = A.tapOfferOf(JSON.stringify({ v: 2, req: 'creqA-usd' }));
     ok(!!(offer && !offer.notSats && offer.sameMint && !offer.asksUsd), 'a tap offering a dollar request at this mint is paid in dollars, with no price asked');
-    /* CARD on a dollar invoice: the card is tapped for the invoice's own sats (6,112 here), and never for a figure
-     * priced on this phone; the whole flow is tests/flashcard-usd-receive.js. */
+    /* CARD on a dollar receive: the card is tapped for the cents at once, with no invoice in it and none waited for, and a
+     * bitcoin card for the sats they come to at this phone's price where it has one (none in this suite: nothing asked of a
+     * bitcoin card); the whole flow is tests/flashcard-usd-receive.js. */
     const runs = [];
     const start0 = A.fcPayStart;
     A.fcPayStart = (...a) => { runs.push(a); };
@@ -855,15 +856,15 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     A.offlineNow = () => false;
     A.setState({ screen: 'confirm', flow: 'receive', recvUnit: 'usd', wallet: 'usd', invoice: 'lnbcusd9', invoiceHash: 'q-usd9', recvAmount: 500 });
     A.payByCard();
-    eq(runs.map((a) => [a[0], a[4] && a[4].bolt11, a[4] && a[4].cents]), [[6112, 'lnbcusd9', 500]],
-      'CARD on a dollar invoice taps the card for the invoice’s own 6,112 sats, for the 500 cents asked');
-    A.setState({ invoice: 'not an invoice' });
+    eq(runs.map((a) => [a[0], a[4] && a[4].bolt11, a[4] && a[4].cents]), [[0, '', 500]],
+      'CARD on a dollar receive taps the card for the 500 cents asked, with no invoice in it');
+    A.setState({ invoice: '' });
     A.payByCard();
-    eq([runs.length, toasts.pop()], [1, 'The invoice is still being made.'], 'and with no sats named on the code, the card is not tapped');
+    eq(runs.length, 2, 'and with no invoice made yet, the card is tapped all the same');
     A.offlineNow = () => true;
     A.setState({ invoice: 'lnbcusd9' });
     A.payByCard();
-    ok(runs.length === 1 && /^A card payment needs a connection/.test(toasts.pop() || ''), 'offline, a card payment needs a connection, as in bitcoin');
+    ok(runs.length === 2 && /^A card payment needs a connection/.test(toasts.pop() || ''), 'offline, a card payment needs a connection, as in bitcoin');
     A.fcPayStart = start0;
     A.offlineNow = off0;
     delete W.cardSession;
