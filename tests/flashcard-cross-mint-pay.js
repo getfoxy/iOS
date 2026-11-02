@@ -292,6 +292,28 @@ function booksGood(name, ...pages) {
     booksGood('a dollar card at another mint, a bitcoin ask', H, R);
   }
 
+  /* ---- 4b: a dollar card of 1.23 at A, holding bitcoin only, pays a bitcoin receive at B ---------------------------- */
+  /* Its record says dollars and its pieces are sats: it pays in what it holds. It was asked in its record's currency, with its
+   * record's balance of nothing, and the confirmation said "The card holds $0.00" of ₿95,000 (a card at Forge, a phone on Minibits,
+   * 2026-11-01). */
+  {
+    const { H, R, till } = await world({ units: ['sat', 'usd'] });
+    const k = newCard(H, undefined, { format: 4, software: 23 });
+    await H.W.cardSetUp(k, { unit: 'usd', pin: '1234', price: 76900 });
+    k.tap();
+    await H.W.cardAdd(k, { amount: 4000, unit: 'sat', pin: '1234', price: 76900 });
+    R.nfc = k;
+    await bitcoinReceive(till, R, 1000);
+    k.tap();
+    till.payByCard();
+    await until('the confirmation', () => till.state.screen === 'fcXmConfirm' && !!(till.state.fcXm && (till.state.fcXm.quote || till.state.fcXm.err)));
+    const x = till.state.fcXm;
+    ok(x.payUnit === 'sat' && x.balance === 4000 && !x.short && !x.err && x.pay > 0 && x.pay <= 4000,
+       'a dollar card holding bitcoin only pays the bitcoin ask in bitcoin, with the bitcoin it holds', JSON.stringify({ unit: x.payUnit, balance: x.balance, pay: x.pay, short: x.short, err: x.err }));
+    till.setState({ screen: 'home', stack: [], fcXm: null });
+    till.stopReceive && till.stopReceive();
+  }
+
   /* ---- 5: a bitcoin card at A pays a dollar receive at B ------------------------------------------------------------ */
   {
     const { H, R, till } = await world({ units2: ['sat', 'usd'] });

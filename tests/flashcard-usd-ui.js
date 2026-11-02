@@ -410,6 +410,16 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     ok(till.state.paidUnit === 'usd' && till.state.paidAmount === 475 && paidVals(till).paidHeadline === '$ 4.75',
        'a confirmation held for a card flow is raised in dollars, with its cents', JSON.stringify({ unit: till.state.paidUnit, amount: till.state.paidAmount }));
     till.dismissPaid();
+    /* Sats the screen was told of, with no amount typed: the figure is what it was told, not the keypad's nothing. Money put on
+     * a card at the tap after the one that was cut short (`fcWriteDone`, from Home) came up as ON THE CARD $0.00 for ₿3,254. */
+    till.setState({ screen: 'paid', stack: ['home'], amount: '', unit: 'USD', payOut: true, paidSays: 'ON THE CARD', paidTo: 'ECASHCARD', paidUnit: 'sat', paidAmount: 3254, recvResolved: true });
+    {
+      const pv = paidVals(till);
+      const shown = pv.paidHeadline + ' ' + pv.paidHeadlineSub;
+      ok(/3,254|3254/.test(shown) && !/^\$ ?0\.00/.test(pv.paidHeadline),
+         'sats the screen was told of are shown with no amount typed', shown);
+    }
+    till.setState({ screen: 'home', stack: [], payOut: false, paidSays: '', paidTo: '', paidUnit: '', paidAmount: null });
     const au = await audits(till);
     ok(au.sat === 0 && au.usd === 0, 'the app’s books add up in both units', JSON.stringify(au));
     booksGood('a dollar card at a dollar receive', H, R);

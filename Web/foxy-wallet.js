@@ -23531,10 +23531,18 @@
     /* The watch on this invoice asks its mint now, and quickly for `ms` more
      * (twenty seconds unless said, a minute at most). False when nothing is
      * watching it. Nothing is believed on the strength of this: it is only
-     * when the mint is asked. */
-    watchKick: function (quoteId, ms) {
+     * when the mint is asked.
+     *
+     * `opts.paid`: the kicker saw this very mint settle the invoice (a card's
+     * sats melted into the code on screen, 26f-flashcard.js `fcUsdLand`: the
+     * melt answered "paid" at the mint that made the code). The claim is then
+     * made at once, with no question first; refused as not paid, the questions
+     * begin as for any kick. The question and the second after its answer
+     * came to three seconds a round over Tor, and the sats were claimed seven
+     * seconds after the melt had answered (2026-11-01). */
+    watchKick: function (quoteId, ms, opts) {
       var w = FoxyWallet._watches && FoxyWallet._watches[String(quoteId || '')];
-      return !!(w && w.kick(ms));
+      return !!(w && w.kick(ms, opts));
     },
 
     /* Watch a quote until it is paid, then CLAIM it. The claim is the step a
@@ -23607,10 +23615,19 @@
        * that never slows down again. */
       var fastUntil = 0;
       var asking = false;
+      /* A kick on the word of the mint itself (`watchKick`'s `paid`): the next thing this watch does is the claim, not
+       * a question. Taken by `settle(true)` when nothing is in flight, else by the answer to what is. */
+      var sure = false;
       var mine = {
-        kick: function (ms) {
+        kick: function (ms, ko) {
           if (done || halted) return false;
           fastUntil = Date.now() + Math.max(1000, Math.min(Number(ms) || 20000, 60000));
+          // never away: a claim from another mint goes through the pass that makes its wallet (`awayW`)
+          if (ko && ko.paid && !awayFor() && !mintBusy(askedMint())) {
+            sure = true;
+            if (!asking) { if (timer) clearTimeout(timer); timer = null; settle(true); }
+            return true;
+          }
           /* Waiting on its clock: ask now. Mid-question: the next one comes
            * a second after the answer. Never a second question beside the
            * first — `timer` still held the clock that had just fired, so a
@@ -23684,9 +23701,12 @@
         catch (e) { console.error('[foxy] watch: the screen threw on an answer:', (e && e.message) || e); }
       }
 
-      function settle() {
+      /* `onWord`: claimed on the kicker's word that the mint has settled it (`sure`), with no question first. The mint saying
+       * "not paid" is then not the claim's failure: it is asked at once, as for any kick, and nothing is filed as trouble. */
+      function settle(onWord) {
         if (done) return;
         done = true;
+        sure = false;
         stop();
         // at the mint that made it, by the wallet the poll asked with when the phone is elsewhere
         var away = awayFor() && awayW ? awayW : null;
@@ -23694,6 +23714,13 @@
         FoxyWallet.claim(quoteId, away ? { w: away } : undefined).then(function (got) {
           tell(onPaid, paidSay(got, awaySay(!!away)));
         }, function (e) {
+          if (onWord && /not paid|unpaid|not been paid/i.test(String((e && e.message) || e))) {
+            console.log('[foxy] watch: claimed on the payer’s word, and the mint has not marked the invoice paid yet; asking it');
+            done = false;
+            relist();
+            poll();
+            return;
+          }
           noteClaimTrouble(quoteId, e);
           // invalid signatures: not asked again, so no more polling for it
           if (badSignatures(e)) { tell(o.onError, e); return; }
@@ -23708,8 +23735,18 @@
             return;
           }
           done = false;
+          relist();
           again(4000 * Math.pow(3, claimFails));
         });
+      }
+
+      /* A watch that goes on after a claim (refused as not paid on the kicker's word, or failed and to be tried again) is
+       * listed again under its invoice: `stop()` took it off the list for the claim, and a kick that came after found
+       * nothing to hurry. */
+      function relist() {
+        if (halted) return;
+        FoxyWallet._watches = FoxyWallet._watches || {};
+        if (!FoxyWallet._watches[quoteId]) FoxyWallet._watches[quoteId] = mine;
       }
 
       function poll() {
@@ -23772,9 +23809,12 @@
             tell(o.onExpired);
             return;
           }
+          // a kick on the mint's own word came while this question was out: the claim now, not a second's wait and another question
+          if (sure) { settle(true); return; }
           again();
         }).catch(function () {
           asking = false;
+          if (sure) { settle(true); return; }
           again();
         });
       }

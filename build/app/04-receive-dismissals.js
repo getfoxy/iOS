@@ -18,8 +18,9 @@
     this.setState({ sendExit: true });
     setTimeout(() => {
       this.setState({ screen: 'home', stack: [], recvPending: false, sendExit: false });
+      // (the one way onto the screen that says no figure of its own: the keypad's stands, not one an earlier screen left behind)
       this._sendA = setTimeout(() => this.setState(p => ({
-        screen: 'paid', recvResolved: true, recv: Object.assign({}, p.recv, { live: 'in' }),
+        screen: 'paid', recvResolved: true, recv: Object.assign({}, p.recv, { live: 'in' }), paidAmount: null,
       })), 1000);
     }, 380);
   }

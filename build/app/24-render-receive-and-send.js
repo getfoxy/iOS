@@ -210,6 +210,15 @@
   /* paid: the confirmation after money moves. A Lightning send ends here. */
   /** @param {RenderContext} c */
   renderPaid(c) {
+    const c0 = c;
+    const s0 = c0.s;
+    /* The sats figure: what the screen was told arrived or left (`paidAmount`, in sats where `paidUnit` is sats), and the
+     * keypad's figure (`c.sats`, from the typed amount at the price) only where nothing was said. The keypad's figure is
+     * nothing on a screen reached with no amount typed: money put on a card at the tap after the one that was cut short
+     * (26f-flashcard.js `fcWriteDone`) came up as ON THE CARD $0.00 for ₿3,254 (2026-11-01). */
+    const told = (s0.paidUnit === 'sat' && s0.paidAmount !== null && s0.paidAmount !== undefined && s0.paidAmount !== '' && Number.isFinite(Number(s0.paidAmount)))
+      ? Math.max(0, Math.round(Number(s0.paidAmount))) : null;
+    c = told !== null ? Object.assign({}, c0, { sats: told }) : c0;
     const { s, sc, sats } = c;
     /* Dollars arrived (or left): the figure in cents, as it is, with no sats
      * under it and no coins, and the words name the dollar balance. */

@@ -1782,8 +1782,9 @@ class Component extends DCLogic {
     this.setState({ sendExit: true });
     setTimeout(() => {
       this.setState({ screen: 'home', stack: [], recvPending: false, sendExit: false });
+      // (the one way onto the screen that says no figure of its own: the keypad's stands, not one an earlier screen left behind)
       this._sendA = setTimeout(() => this.setState(p => ({
-        screen: 'paid', recvResolved: true, recv: Object.assign({}, p.recv, { live: 'in' }),
+        screen: 'paid', recvResolved: true, recv: Object.assign({}, p.recv, { live: 'in' }), paidAmount: null,
       })), 1000);
     }, 380);
   }
@@ -16354,6 +16355,15 @@ class Component extends DCLogic {
   /* paid: the confirmation after money moves. A Lightning send ends here. */
   /** @param {RenderContext} c */
   renderPaid(c) {
+    const c0 = c;
+    const s0 = c0.s;
+    /* The sats figure: what the screen was told arrived or left (`paidAmount`, in sats where `paidUnit` is sats), and the
+     * keypad's figure (`c.sats`, from the typed amount at the price) only where nothing was said. The keypad's figure is
+     * nothing on a screen reached with no amount typed: money put on a card at the tap after the one that was cut short
+     * (26f-flashcard.js `fcWriteDone`) came up as ON THE CARD $0.00 for ₿3,254 (2026-11-01). */
+    const told = (s0.paidUnit === 'sat' && s0.paidAmount !== null && s0.paidAmount !== undefined && s0.paidAmount !== '' && Number.isFinite(Number(s0.paidAmount)))
+      ? Math.max(0, Math.round(Number(s0.paidAmount))) : null;
+    c = told !== null ? Object.assign({}, c0, { sats: told }) : c0;
     const { s, sc, sats } = c;
     /* Dollars arrived (or left): the figure in cents, as it is, with no sats
      * under it and no coins, and the words name the dollar balance. */
@@ -24713,7 +24723,8 @@ class Component extends DCLogic {
    * screen still shows that code; otherwise the wallet's own asking claims it, and HISTORY says so. */
   fcUsdLand(usd) {
     const W = this.fcW();
-    if (W && W.watchKick && W.watchKick(usd.hash, 20000)) return;
+    // the mint that made the code has just said the melt into it is paid: the watch claims it at once, with no question first
+    if (W && W.watchKick && W.watchKick(usd.hash, 20000, { paid: true })) return;
     const s = this.state;
     /* The code has run out by now, so its clock counts the watch's own twenty seconds rather than a minute it does not
      * have; then a new code is asked for. */
@@ -25522,6 +25533,19 @@ class Component extends DCLogic {
         this.fcXmBegin(picked, sats, offline, usd);
       });
       return;
+    }
+    /* A card of 1.23 holding one currency, and not its record's (a dollar card loaded with bitcoin, say): it pays in the one it
+     * holds, with that balance. It was asked in its record's, with its record's balance of nothing: a card with ₿95,000 on it at
+     * Forge, tapped at a phone on Minibits, was quoted in dollars and told "The card holds $0.00" (2026-11-01). */
+    if (held && !(Number(held.usd) > 0 && Number(held.sat) > 0) && (Number(held.usd) > 0 || Number(held.sat) > 0)) {
+      const one = Number(held.usd) > 0 ? 'usd' : 'sat';
+      const was = e.cardUnit === 'usd' ? 'usd' : 'sat';
+      if (one !== was || Math.round(Number(e.balance) || 0) !== Math.round(Number(held[one]) || 0)) {
+        const picked = Object.assign({}, e, { units: null, cardUnit: one, balance: Math.round(Number(held[one]) || 0) });
+        try { Object.defineProperty(picked, 'cardRead', { value: e.cardRead || null, enumerable: false }); } catch (eR) { /* the fee is then found at the tap */ }
+        console.log('[foxy] card: at another mint it holds ' + (one === 'usd' ? 'dollars' : 'bitcoin') + ' only, so it pays in that');
+        e = picked;
+      }
     }
     // the code on screen is paid by the card from its mint, not by sats from this phone (`fcUsdPay`)
     if (usd) this._fcUsd = null;

@@ -446,6 +446,51 @@ async function run() {
       left.length === 1 && left[0].quote === stray.quote && left[0].checked > 0, JSON.stringify(left));
   }
 
+  // ---- a kick on the mint's own word claims first --------------------------
+  /* A card's sats melted into the code on screen at the mint that made it: the melt answered "paid", so the kick says so
+   * (`watchKick(id, ms, { paid: true })`), and the watch claims at once with no question first. The mint not having marked
+   * the invoice paid yet is not the claim's failure: the questions begin as for any kick, nothing is filed as trouble, and
+   * the claim comes once the mint says PAID. The question and the second after its answer came to three seconds a round
+   * over Tor, and the sats were claimed seven seconds after the melt had answered (2026-11-01). */
+  {
+    let paid = false;
+    const asked = [], tries = [];
+    const ctx = stubPage(() => { asked.push(Date.now()); return Promise.resolve({ state: paid ? 'PAID' : 'UNPAID' }); }, {
+      mintProofs: () => {
+        tries.push({ at: Date.now(), asked: asked.length });
+        if (!paid) { const e = new Error('Quote not paid'); e.status = 400; return Promise.reject(e); }
+        const e = new Error('the mint said nothing'); e.status = 502; return Promise.reject(e);
+      },
+    });
+    const W = ctx.W;
+    await W.connect(MINT, { remember: true });
+    await wait(50);
+    ctx.storage.setItem('foxy.cashu.quotes', JSON.stringify([{ quote: 'q-word', amount: 21, mint: MINT, at: 1 }]));
+    const trouble = [], told = [];
+    W._onClaimTrouble = (h) => trouble.push(h);
+    const stop = W.watch('q-word', () => {}, { pollMs: 40, onError: (e) => told.push(String((e && e.message) || e)) });
+    await wait(10);
+    const before = asked.length;
+    const kicked = W.watchKick('q-word', 20000, { paid: true });
+    await wait(25);
+    check('a kick on the mint’s own word is taken', kicked === true, String(kicked));
+    check('and the claim is made at once, before any question', tries.length === 1 && tries[0].asked === before,
+      tries.length + ' claim(s), ' + (tries.length ? tries[0].asked - before : '-') + ' question(s) first');
+    check('a mint that has not marked it paid yet is asked, and the claim is not filed as trouble',
+      trouble.length === 0 && told.length === 0, trouble.length + ' trouble, ' + told.length + ' told');
+    await wait(60);
+    check('and the questions go on', asked.length > before, (asked.length - before) + ' more');
+    const kickedTwice = W.watchKick('q-word', 20000, { paid: true });
+    await wait(25);
+    check('a second such kick while a question is out claims as soon as that question answers, not a second later',
+      kickedTwice === true && tries.length === 2, tries.length + ' claim(s)');
+    paid = true;
+    await wait(120);
+    check('once the mint says PAID the claim is made for real, and only its own failure is trouble',
+      tries.length === 3 && trouble.length === 1 && told.length === 1, tries.length + ' claim(s), ' + trouble.length + ' trouble, ' + told.length + ' told');
+    stop();
+  }
+
   results.forEach((r) => console.log(r));
   const failed = results.filter((r) => r.startsWith('FAIL')).length;
   if (failed) {
