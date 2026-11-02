@@ -4,6 +4,8 @@
    * address's, for one) is not what was picked, so what is paid to it is swapped as the person's hold says. */
   recvPicked(unit) {
     const s = this.state;
+    // a cashier's till: the keeper's unit, picked by the code it scanned (26m-till.js, `tillUnit`)
+    if (this.tillUnit && this.tillUnit()) return this.tillUnit() === (unit === 'usd' ? 'usd' : 'sat');
     return !!(this.twoUnitsOn && this.twoUnitsOn() && s.flow === 'receive' && (s.wallet === 'usd' || s.wallet === 'sat')
       && s.wallet === (unit === 'usd' ? 'usd' : 'sat'));
   }
@@ -87,7 +89,10 @@
      * the screen asks again when the trip home lands and the balance is read. */
     if (this._homeGoing) return '';
     const unit = arguments[3];             // 'usd' for a request in dollars (above)
-    const why = purpose || 'receive';
+    /* A cashier's till: every request is locked to the keeper's key, from the code, and named for the till, so what pays
+     * it goes to the keeper and never into this phone's pile (26m-till.js, `tillLockFor`; the wallet's `paymentRequest`). */
+    const tillLock = this.tillLockFor ? this.tillLockFor() : '';
+    const why = tillLock ? 'till' : (purpose || 'receive');
     const inUsd = unit === 'usd';
     const cents = inUsd ? 0 : Math.round(Number(usdCents) || 0);
     /* The key a request is kept under: a request in dollars has its unit on
@@ -107,9 +112,9 @@
     // `ways` is { onion, nostr }, either of which may be missing
     const make = ways => {
       const text = inUsd
-        ? W.paymentRequest(Math.round(Number(sats) || 0), { deliverTo: ways, purpose: why, unit: 'usd', kept: kept })
+        ? W.paymentRequest(Math.round(Number(sats) || 0), Object.assign({ deliverTo: ways, purpose: why, unit: 'usd', kept: kept }, tillLock ? { lockPub: tillLock } : {}))
         : W.paymentRequest(cents > 0 ? 0 : sats,
-          { deliverTo: ways, purpose: why, usd: cents > 0 ? cents : 0, kept: kept });
+          Object.assign({ deliverTo: ways, purpose: why, usd: cents > 0 ? cents : 0, kept: kept }, tillLock ? { lockPub: tillLock } : {}));
       this._creqs[key] = { text: text, inbox: ways };
       this.setState({ creqMade: Date.now() });
       return text;
@@ -124,7 +129,8 @@
      * request was before requests were locked — so nothing here has to handle
      * a failure.
      * The address is what decides when the code appears, as it did before. */
-    const primed = W.primeLocks ? W.primeLocks() : Promise.resolve(0);
+    // (a till's request names the keeper's key, and takes none from this phone's pool)
+    const primed = (W.primeLocks && !tillLock) ? W.primeLocks() : Promise.resolve(0);
     /* No route, no address, and no waiting to find that out.
      *
      * `openInbox` is a bridge call with a twenty-five second timeout, and an
@@ -178,7 +184,9 @@
     const now = this.railRequest(sats, purpose, usdCents, unit);
     if (now) return Promise.resolve(now);
     if (!W || !W.paymentRequest) return Promise.resolve('');
-    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + (purpose || 'receive') + '|$' + Math.round(Number(unit === 'usd' ? 0 : usdCents) || 0) + (unit === 'usd' ? '|usd' : '');
+    // (a cashier's till names its requests 'till', as `railRequest` keeps them)
+    const why = (this.tillLockFor && this.tillLockFor()) ? 'till' : (purpose || 'receive');
+    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + why + '|$' + Math.round(Number(unit === 'usd' ? 0 : usdCents) || 0) + (unit === 'usd' ? '|usd' : '');
     const have = (this._creqs || {})[key];
     if (have && have.ready) return have.ready.then(t => t || '', () => '');
     /* No row and no promise: `railRequest` refused it outright. */
@@ -212,17 +220,22 @@
     const n = Math.max(0, Math.round(Number(sats) || 0));
     const inUsd = unit === 'usd';
     // a share of a split names itself, which is how `forgetRequests` tells them apart
-    const key = 'tap|' + W.mintUrl + '|' + n + (purpose ? '|' + purpose + '|' : '') + (inUsd ? '|usd' : '');
+    // (and a till's is kept apart, so a request locked to a keeper is never handed out once the till is closed)
+    const tillAt = (this.tillLockFor && this.tillLockFor()) ? '|till' : '';
+    const key = 'tap|' + W.mintUrl + '|' + n + (purpose ? '|' + purpose + '|' : '') + (inUsd ? '|usd' : '') + tillAt;
     this._creqs = this._creqs || {};
     const have = this._creqs[key];
     if (have && have.text) return have.text;
     /* The lock pool is filled in the background: a request that goes out
      * unlocked is what every request was before requests were locked, and
      * waiting for a key here would put back the delay this exists to remove. */
-    if (W.primeLocks) { try { W.primeLocks(); } catch (e) {} }
+    // a cashier's till: locked to the keeper's key and named for the till, as `railRequest` makes them (26m-till.js)
+    const tillLock = this.tillLockFor ? this.tillLockFor() : '';
+    if (W.primeLocks && !tillLock) { try { W.primeLocks(); } catch (e) {} }
     const kept = !purpose && this.recvPicked(inUsd ? 'usd' : 'sat');
-    const text = inUsd ? W.paymentRequest(n, { purpose: purpose || 'receive', unit: 'usd', kept: kept })
-      : W.paymentRequest(n, { purpose: purpose || 'receive', kept: kept });
+    const till = tillLock ? { purpose: 'till', lockPub: tillLock } : {};
+    const text = inUsd ? W.paymentRequest(n, Object.assign({ purpose: purpose || 'receive', unit: 'usd', kept: kept }, till))
+      : W.paymentRequest(n, Object.assign({ purpose: purpose || 'receive', kept: kept }, till));
     if (!text) return '';
     this._creqs[key] = { text: text };
     return text;
@@ -236,7 +249,8 @@
     const W = window.FoxyWallet;
     if (!W || !W.paymentRequest) return false;
     const unit = arguments[3];
-    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + (purpose || 'receive') + '|$' + Math.round(Number(unit === 'usd' ? 0 : usdCents) || 0) + (unit === 'usd' ? '|usd' : '');
+    const why = (this.tillLockFor && this.tillLockFor()) ? 'till' : (purpose || 'receive');
+    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + why + '|$' + Math.round(Number(unit === 'usd' ? 0 : usdCents) || 0) + (unit === 'usd' ? '|usd' : '');
     const have = (this._creqs || {})[key];
     return !!(have && have.making);
   }
@@ -300,6 +314,8 @@
     this._inboxLeftAt = 0;
     this._creqs = {};
     this.syncInbox();
+    // and the till's inbox and outbox, which the phone closed with the rest (26m-till.js, `tillWake`)
+    if (this.tillWake) this.tillWake();
   }
 
   /* A request is for one payment, so one that has been answered is let go.
@@ -608,7 +624,8 @@
       { rail: 'LIGHTNING', sub: 'Any Lightning wallet pays the invoice.' },
       { rail: 'CASHU', sub: 'A Cashu wallet answers with a token for this amount. Tap SCAN to take it.' },
     ];
-    if (this.ocCan('receive')) {
+    // (not at a cashier's till, where an address's deposit would be minted here: `openReceiveNow`)
+    if (this.ocCan('receive') && !(this.tillLockFor && this.tillLockFor())) {
       rails.push({ rail: 'ON-CHAIN', sub: 'An ordinary Bitcoin payment to an address this mint watches.' });
     }
     const W = window.FoxyWallet;
@@ -660,6 +677,8 @@
      * network this amount cannot use. */
     let rail = (W && W.defaultRail) ? W.defaultRail() : 'LIGHTNING';
     if (rail === 'ON-CHAIN' && (!this.ocCan('receive') || this.ocReceiveBlocked(sats))) rail = 'LIGHTNING';
+    // nor at a cashier's till: a deposit on chain is minted into the phone that asked, and none of it is this phone's
+    if (rail === 'ON-CHAIN' && this.tillLockFor && this.tillLockFor()) rail = 'LIGHTNING';
     /* Offline there is one network, and it is Cashu.
      *
      * A Lightning invoice is the mint's to make and an on-chain address is the
@@ -729,7 +748,10 @@
      * screen that waits for ever. */
     const G = window.FoxyGate;
     const WAITS = 3;
-    const attempt = (n, waits) => W.invoice(sats, memo).catch(e => {
+    /* A cashier's till: the ecash the mint signs for this invoice is locked to the keeper's key, and goes to the keeper
+     * (26m-till.js, `tillLockFor`; the wallet's `invoice`). Asked as it always was otherwise. */
+    const tillLock = this.tillLockFor ? this.tillLockFor() : '';
+    const attempt = (n, waits) => (tillLock ? W.invoice(sats, memo, { lockPub: tillLock }) : W.invoice(sats, memo)).catch(e => {
       const closed = !!(W.neverSent && W.neverSent(e));
       if (closed && waits < WAITS && G && G.quiet) {
         console.warn('[foxy] invoice: the request never left \u2014 waiting for Tor'
@@ -864,7 +886,9 @@
     // the code is being made: CARD waits for it rather than read a bitcoin card now and refuse it (26f-flashcard.js, `payUsdByCard`)
     this._usdCodeMaking = mine;
     const G = window.FoxyGate;
-    const attempt = (n, waits) => W.invoice(cents, memo, { unit: 'usd' }).catch(e => {
+    // (a cashier's till: locked to the keeper's key, as `openReceiveNow` asks)
+    const tillLock = this.tillLockFor ? this.tillLockFor() : '';
+    const attempt = (n, waits) => W.invoice(cents, memo, Object.assign({ unit: 'usd' }, tillLock ? { lockPub: tillLock } : {})).catch(e => {
       const closed = !!(W.neverSent && W.neverSent(e));
       if (closed && waits < 3 && G && G.quiet) return G.quiet().then(ok => { if (!ok) throw e; return attempt(n, waits + 1); });
       if (n >= 3) throw e;
@@ -960,7 +984,9 @@
     if (this.offlineNow()) { this.setState({ recvExpiresAt: null }); return; }
     this._requoting = true;
     console.log('[foxy] receive: the dollar code ran out; asking for a new one');
-    W.invoice(s.recvAmount, this._recvMemo || '', { unit: 'usd' }).then(inv => {
+    // (a cashier's till: the new code is locked to the keeper's key as the first was, `openUsdReceive`)
+    const tillLock = this.tillLockFor ? this.tillLockFor() : '';
+    W.invoice(s.recvAmount, this._recvMemo || '', Object.assign({ unit: 'usd' }, tillLock ? { lockPub: tillLock } : {})).then(inv => {
       this._requoting = false;
       if (mine !== this._invoiceRun || (this.state.screen !== 'confirm' && this.state.screen !== 'fcXmConfirm') || this.state.recvUnit !== 'usd') return;
       if (W.tag && this._recvMemo) W.tag(inv.hash, { note: this._recvMemo });
@@ -979,6 +1005,8 @@
   /* WALLET on the invoice: which balance this receive goes into. A new code
    * is made in it, for the same amount; nothing is kept for the next receive. */
   pickRecvWallet() {
+    // a cashier's till takes the keeper's unit, and this phone's own balances are not shown in it (26m-till.js)
+    if (this.tillUnit && this.tillUnit()) return;
     const now = this.walletNow('receive') || 'sat';
     this.chooseFrom('WALLET', () => ['usd', 'sat'].map(u => ({
       label: this.unitWord(u),
@@ -1035,6 +1063,10 @@
     const W = window.FoxyWallet;
     const t = String(text || '').trim().replace(/^lightning:/i, '');
     const kind = W.classify(t);
+    /* In the till nothing is paid and nothing is joined: a token is taken, the rest is said no to (26m-till.js, `tillAccept`).
+     * Outside it, a cashier code asks whether to work the keeper's till (`tillJoinAsk`). */
+    if (this.state.till && this.tillAccept) return this.tillAccept(t, kind);
+    if (kind === 'till') return this.tillJoinAsk ? this.tillJoinAsk(t) : false;
     /* Paying from a card (SEND on the card's screen, 26f-flashcard.js): a card pays Lightning, an invoice or an address,
      * and a bitcoin address on chain where the mint pays on chain (`fcOutAddress`, which asks it first). A Cashu payment
      * request is said no to here, before anything moves, and the person is left where they were. */

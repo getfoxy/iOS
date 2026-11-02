@@ -490,7 +490,7 @@ const nap = (ms) => new Promise((go) => setTimeout(go, ms));
   {
     const { app, win, overlay } = pageApp();
     const at = () => app.cardTapFacts();
-    ok(JSON.stringify(at()) === JSON.stringify({ locked: false, starting: false, screen: 'home', transfer: false, pick: false, over: '' }),
+    ok(JSON.stringify(at()) === JSON.stringify({ locked: false, starting: false, screen: 'home', transfer: false, pick: false, till: false, over: '' }),
       'a page with nothing up reads as home with nothing over it', JSON.stringify(at()));
     const stage = overlay('foxy-stage');
     ok(at().over === 'foxy-stage', 'the stage screens, the loaders and the like are named by what they are', at().over);

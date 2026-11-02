@@ -82,6 +82,8 @@ class Component extends DCLogic {
     xCtaBtc: (this.props.startCashOnly && !this.props.startFresh) || undefined,
     asset: '',
     amount: '',
+    // (a figure a screen put on the keypad itself, which the first key replaces: 19-update-keypad-balance.js `press`)
+    amountDefault: false,
     network: '',
     unit: 'USD',
     /* Two balances at one mint (dollars and bitcoin). `wallet` is the money
@@ -206,7 +208,8 @@ class Component extends DCLogic {
     this.setState(p => {
       const next = p.stack.length
         ? { screen: p.stack[p.stack.length - 1], stack: p.stack.slice(0, -1) }
-        : { screen: 'home', stack: [] };
+        // nothing left to go back to: home, or in the till its SET AMOUNT (26m-till.js, `homeState`)
+        : (this.homeState ? this.homeState() : { screen: 'home', stack: [] });
       return next;
     });
   }
@@ -557,6 +560,8 @@ class Component extends DCLogic {
    * more than one balance, each receive and send asks). Always 'sat' at a mint with one balance. `flow` is 'receive'
    * or 'send'. */
   walletNow(flow) {
+    // a cashier's till receives in the keeper's unit, the one its code names, whatever this phone holds (26m-till.js)
+    if (flow === 'receive' && this.tillUnit && this.tillUnit()) return this.tillUnit();
     if (!this.twoUnitsOn()) return 'sat';
     // a card pays in what it holds, whatever balance this phone's own sends use
     // (a card of software 1.23 that holds both: the currency chosen to pay from, `fcUnit`)
@@ -1771,7 +1776,8 @@ class Component extends DCLogic {
     if (this._unlisten) this._unlisten();
     if (window.FoxyWallet) { window.FoxyWallet.stopPreview(); window.FoxyWallet.stopPasteButton(); }
     clearTimeout(this._sendA); clearTimeout(this._sendB); clearInterval(this._eta);
-    this.setState({ screen: 'home', stack: [], noteOpen: false });
+    // home, or in the till its SET AMOUNT, for the next customer (26m-till.js, `homeState`)
+    this.setState(Object.assign({ noteOpen: false }, (this.homeState ? this.homeState() : { screen: 'home', stack: [] })));
   }
 
   // leaving the pending receive: the confirmation lands a beat after the home screen does
@@ -1780,8 +1786,10 @@ class Component extends DCLogic {
     clearInterval(this._eta);
     clearTimeout(this._sendA); clearTimeout(this._sendB);
     this.setState({ sendExit: true });
+    // when the PAID below lands: a till whose code has run out waits for it before it leaves (26m-till.js, `tillMidPayment`)
+    this._paidDueAt = Date.now() + 1600;
     setTimeout(() => {
-      this.setState({ screen: 'home', stack: [], recvPending: false, sendExit: false });
+      this.setState(Object.assign({ recvPending: false, sendExit: false }, (this.homeState ? this.homeState() : { screen: 'home', stack: [] })));
       // (the one way onto the screen that says no figure of its own: the keypad's stands, not one an earlier screen left behind)
       this._sendA = setTimeout(() => this.setState(p => ({
         screen: 'paid', recvResolved: true, recv: Object.assign({}, p.recv, { live: 'in' }), paidAmount: null,
@@ -1796,7 +1804,7 @@ class Component extends DCLogic {
     clearTimeout(this._sendA); clearTimeout(this._sendB);
     this.setState({ sendExit: true });
     setTimeout(() => {
-      this.setState({ screen: 'home', stack: [], sendExit: false });
+      this.setState(Object.assign({ sendExit: false }, (this.homeState ? this.homeState() : { screen: 'home', stack: [] })));
       this._sendA = setTimeout(() => this.setState({ screen: 'sendDone', sendPhase: 'done' }), 1000);
       this._sendB = setTimeout(() => this.setState({ sendPhase: 'settled' }), 2700);
     }, 380);
@@ -1981,6 +1989,13 @@ class Component extends DCLogic {
     if (!m) return false;
     const target = m[1].toLowerCase();
     const W = window.FoxyWallet;
+    /* Not into the till's way out: a link opens SEND, a token or a split, and the till does none of those (26m-till.js). It
+     * is dropped, and the till stays where it is. */
+    if (this.state && this.state.till) {
+      console.log('[foxy] link: the till is open, so it is not followed');
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+      return true;
+    }
     /* A link starts a flow afresh: at a mint with two balances, with no
      * balance picked, not the one a flow left on screen picked. */
     const go = (patch) => this.setState(Object.assign({ stack: [], wallet: '', walletAuto: false, walletTapped: false, feeQ: null }, patch));
@@ -3505,6 +3520,8 @@ class Component extends DCLogic {
   scanTokenToReceive() {
     const W = window.FoxyWallet;
     if (!W || !W.scan) return;
+    // a cashier's till takes a token for its keeper, never into this phone's pile (26m-till.js, `tillScanToken`)
+    if (this.tillRole && this.tillRole() === 'cashier') { this.tillScanToken(); return; }
     W.scan('Scan an ecash token').then(text => {
       const t = String(text || '').trim();
       if (W.classify(t) !== 'token') {
@@ -6535,13 +6552,16 @@ class Component extends DCLogic {
   }
 
   walletReady(w) {
-    this.setState({
+    /* Home, unless the till is open: a mint answering again is not a way out of it, and the screen it is on stays
+     * (26m-till.js). */
+    this.setState(Object.assign({
       walletLive: true,
       walletSearching: false,
       walletErr: '',
+    }, this.state.till ? {} : {
       screen: 'home',
       stack: [],
-    });
+    }));
     /* The heartbeat first, before anything that can throw.
      *
      * This pair is how an arrival nobody watched for reaches the screen at
@@ -6611,6 +6631,12 @@ class Component extends DCLogic {
     const balance = this.refreshBalance();
     this.loadHistory();
     this.listenWallet();
+    /* The till (26m-till.js): once a launch, past the lock, a cashier's till that was open when Foxy was closed comes back
+     * (`tillResume`). Its inbox and outbox the wallet asks itself at every connect. */
+    if (this.tillResume && !this._tillResumed) {
+      this._tillResumed = true;
+      this.pinUnlocked().then(() => this.tillResume()).catch(() => {});
+    }
     // NOT checking the clipboard on launch: reading it makes iOS put up its
     // "allow paste?" prompt every time the app opens. The paste button uses
     // UIPasteControl, which needs no prompt, so paste stays one tap away.
@@ -8871,6 +8897,8 @@ class Component extends DCLogic {
    * address's, for one) is not what was picked, so what is paid to it is swapped as the person's hold says. */
   recvPicked(unit) {
     const s = this.state;
+    // a cashier's till: the keeper's unit, picked by the code it scanned (26m-till.js, `tillUnit`)
+    if (this.tillUnit && this.tillUnit()) return this.tillUnit() === (unit === 'usd' ? 'usd' : 'sat');
     return !!(this.twoUnitsOn && this.twoUnitsOn() && s.flow === 'receive' && (s.wallet === 'usd' || s.wallet === 'sat')
       && s.wallet === (unit === 'usd' ? 'usd' : 'sat'));
   }
@@ -8954,7 +8982,10 @@ class Component extends DCLogic {
      * the screen asks again when the trip home lands and the balance is read. */
     if (this._homeGoing) return '';
     const unit = arguments[3];             // 'usd' for a request in dollars (above)
-    const why = purpose || 'receive';
+    /* A cashier's till: every request is locked to the keeper's key, from the code, and named for the till, so what pays
+     * it goes to the keeper and never into this phone's pile (26m-till.js, `tillLockFor`; the wallet's `paymentRequest`). */
+    const tillLock = this.tillLockFor ? this.tillLockFor() : '';
+    const why = tillLock ? 'till' : (purpose || 'receive');
     const inUsd = unit === 'usd';
     const cents = inUsd ? 0 : Math.round(Number(usdCents) || 0);
     /* The key a request is kept under: a request in dollars has its unit on
@@ -8974,9 +9005,9 @@ class Component extends DCLogic {
     // `ways` is { onion, nostr }, either of which may be missing
     const make = ways => {
       const text = inUsd
-        ? W.paymentRequest(Math.round(Number(sats) || 0), { deliverTo: ways, purpose: why, unit: 'usd', kept: kept })
+        ? W.paymentRequest(Math.round(Number(sats) || 0), Object.assign({ deliverTo: ways, purpose: why, unit: 'usd', kept: kept }, tillLock ? { lockPub: tillLock } : {}))
         : W.paymentRequest(cents > 0 ? 0 : sats,
-          { deliverTo: ways, purpose: why, usd: cents > 0 ? cents : 0, kept: kept });
+          Object.assign({ deliverTo: ways, purpose: why, usd: cents > 0 ? cents : 0, kept: kept }, tillLock ? { lockPub: tillLock } : {}));
       this._creqs[key] = { text: text, inbox: ways };
       this.setState({ creqMade: Date.now() });
       return text;
@@ -8991,7 +9022,8 @@ class Component extends DCLogic {
      * request was before requests were locked — so nothing here has to handle
      * a failure.
      * The address is what decides when the code appears, as it did before. */
-    const primed = W.primeLocks ? W.primeLocks() : Promise.resolve(0);
+    // (a till's request names the keeper's key, and takes none from this phone's pool)
+    const primed = (W.primeLocks && !tillLock) ? W.primeLocks() : Promise.resolve(0);
     /* No route, no address, and no waiting to find that out.
      *
      * `openInbox` is a bridge call with a twenty-five second timeout, and an
@@ -9045,7 +9077,9 @@ class Component extends DCLogic {
     const now = this.railRequest(sats, purpose, usdCents, unit);
     if (now) return Promise.resolve(now);
     if (!W || !W.paymentRequest) return Promise.resolve('');
-    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + (purpose || 'receive') + '|$' + Math.round(Number(unit === 'usd' ? 0 : usdCents) || 0) + (unit === 'usd' ? '|usd' : '');
+    // (a cashier's till names its requests 'till', as `railRequest` keeps them)
+    const why = (this.tillLockFor && this.tillLockFor()) ? 'till' : (purpose || 'receive');
+    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + why + '|$' + Math.round(Number(unit === 'usd' ? 0 : usdCents) || 0) + (unit === 'usd' ? '|usd' : '');
     const have = (this._creqs || {})[key];
     if (have && have.ready) return have.ready.then(t => t || '', () => '');
     /* No row and no promise: `railRequest` refused it outright. */
@@ -9079,17 +9113,22 @@ class Component extends DCLogic {
     const n = Math.max(0, Math.round(Number(sats) || 0));
     const inUsd = unit === 'usd';
     // a share of a split names itself, which is how `forgetRequests` tells them apart
-    const key = 'tap|' + W.mintUrl + '|' + n + (purpose ? '|' + purpose + '|' : '') + (inUsd ? '|usd' : '');
+    // (and a till's is kept apart, so a request locked to a keeper is never handed out once the till is closed)
+    const tillAt = (this.tillLockFor && this.tillLockFor()) ? '|till' : '';
+    const key = 'tap|' + W.mintUrl + '|' + n + (purpose ? '|' + purpose + '|' : '') + (inUsd ? '|usd' : '') + tillAt;
     this._creqs = this._creqs || {};
     const have = this._creqs[key];
     if (have && have.text) return have.text;
     /* The lock pool is filled in the background: a request that goes out
      * unlocked is what every request was before requests were locked, and
      * waiting for a key here would put back the delay this exists to remove. */
-    if (W.primeLocks) { try { W.primeLocks(); } catch (e) {} }
+    // a cashier's till: locked to the keeper's key and named for the till, as `railRequest` makes them (26m-till.js)
+    const tillLock = this.tillLockFor ? this.tillLockFor() : '';
+    if (W.primeLocks && !tillLock) { try { W.primeLocks(); } catch (e) {} }
     const kept = !purpose && this.recvPicked(inUsd ? 'usd' : 'sat');
-    const text = inUsd ? W.paymentRequest(n, { purpose: purpose || 'receive', unit: 'usd', kept: kept })
-      : W.paymentRequest(n, { purpose: purpose || 'receive', kept: kept });
+    const till = tillLock ? { purpose: 'till', lockPub: tillLock } : {};
+    const text = inUsd ? W.paymentRequest(n, Object.assign({ purpose: purpose || 'receive', unit: 'usd', kept: kept }, till))
+      : W.paymentRequest(n, Object.assign({ purpose: purpose || 'receive', kept: kept }, till));
     if (!text) return '';
     this._creqs[key] = { text: text };
     return text;
@@ -9103,7 +9142,8 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     if (!W || !W.paymentRequest) return false;
     const unit = arguments[3];
-    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + (purpose || 'receive') + '|$' + Math.round(Number(unit === 'usd' ? 0 : usdCents) || 0) + (unit === 'usd' ? '|usd' : '');
+    const why = (this.tillLockFor && this.tillLockFor()) ? 'till' : (purpose || 'receive');
+    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + why + '|$' + Math.round(Number(unit === 'usd' ? 0 : usdCents) || 0) + (unit === 'usd' ? '|usd' : '');
     const have = (this._creqs || {})[key];
     return !!(have && have.making);
   }
@@ -9167,6 +9207,8 @@ class Component extends DCLogic {
     this._inboxLeftAt = 0;
     this._creqs = {};
     this.syncInbox();
+    // and the till's inbox and outbox, which the phone closed with the rest (26m-till.js, `tillWake`)
+    if (this.tillWake) this.tillWake();
   }
 
   /* A request is for one payment, so one that has been answered is let go.
@@ -9475,7 +9517,8 @@ class Component extends DCLogic {
       { rail: 'LIGHTNING', sub: 'Any Lightning wallet pays the invoice.' },
       { rail: 'CASHU', sub: 'A Cashu wallet answers with a token for this amount. Tap SCAN to take it.' },
     ];
-    if (this.ocCan('receive')) {
+    // (not at a cashier's till, where an address's deposit would be minted here: `openReceiveNow`)
+    if (this.ocCan('receive') && !(this.tillLockFor && this.tillLockFor())) {
       rails.push({ rail: 'ON-CHAIN', sub: 'An ordinary Bitcoin payment to an address this mint watches.' });
     }
     const W = window.FoxyWallet;
@@ -9527,6 +9570,8 @@ class Component extends DCLogic {
      * network this amount cannot use. */
     let rail = (W && W.defaultRail) ? W.defaultRail() : 'LIGHTNING';
     if (rail === 'ON-CHAIN' && (!this.ocCan('receive') || this.ocReceiveBlocked(sats))) rail = 'LIGHTNING';
+    // nor at a cashier's till: a deposit on chain is minted into the phone that asked, and none of it is this phone's
+    if (rail === 'ON-CHAIN' && this.tillLockFor && this.tillLockFor()) rail = 'LIGHTNING';
     /* Offline there is one network, and it is Cashu.
      *
      * A Lightning invoice is the mint's to make and an on-chain address is the
@@ -9596,7 +9641,10 @@ class Component extends DCLogic {
      * screen that waits for ever. */
     const G = window.FoxyGate;
     const WAITS = 3;
-    const attempt = (n, waits) => W.invoice(sats, memo).catch(e => {
+    /* A cashier's till: the ecash the mint signs for this invoice is locked to the keeper's key, and goes to the keeper
+     * (26m-till.js, `tillLockFor`; the wallet's `invoice`). Asked as it always was otherwise. */
+    const tillLock = this.tillLockFor ? this.tillLockFor() : '';
+    const attempt = (n, waits) => (tillLock ? W.invoice(sats, memo, { lockPub: tillLock }) : W.invoice(sats, memo)).catch(e => {
       const closed = !!(W.neverSent && W.neverSent(e));
       if (closed && waits < WAITS && G && G.quiet) {
         console.warn('[foxy] invoice: the request never left \u2014 waiting for Tor'
@@ -9731,7 +9779,9 @@ class Component extends DCLogic {
     // the code is being made: CARD waits for it rather than read a bitcoin card now and refuse it (26f-flashcard.js, `payUsdByCard`)
     this._usdCodeMaking = mine;
     const G = window.FoxyGate;
-    const attempt = (n, waits) => W.invoice(cents, memo, { unit: 'usd' }).catch(e => {
+    // (a cashier's till: locked to the keeper's key, as `openReceiveNow` asks)
+    const tillLock = this.tillLockFor ? this.tillLockFor() : '';
+    const attempt = (n, waits) => W.invoice(cents, memo, Object.assign({ unit: 'usd' }, tillLock ? { lockPub: tillLock } : {})).catch(e => {
       const closed = !!(W.neverSent && W.neverSent(e));
       if (closed && waits < 3 && G && G.quiet) return G.quiet().then(ok => { if (!ok) throw e; return attempt(n, waits + 1); });
       if (n >= 3) throw e;
@@ -9827,7 +9877,9 @@ class Component extends DCLogic {
     if (this.offlineNow()) { this.setState({ recvExpiresAt: null }); return; }
     this._requoting = true;
     console.log('[foxy] receive: the dollar code ran out; asking for a new one');
-    W.invoice(s.recvAmount, this._recvMemo || '', { unit: 'usd' }).then(inv => {
+    // (a cashier's till: the new code is locked to the keeper's key as the first was, `openUsdReceive`)
+    const tillLock = this.tillLockFor ? this.tillLockFor() : '';
+    W.invoice(s.recvAmount, this._recvMemo || '', Object.assign({ unit: 'usd' }, tillLock ? { lockPub: tillLock } : {})).then(inv => {
       this._requoting = false;
       if (mine !== this._invoiceRun || (this.state.screen !== 'confirm' && this.state.screen !== 'fcXmConfirm') || this.state.recvUnit !== 'usd') return;
       if (W.tag && this._recvMemo) W.tag(inv.hash, { note: this._recvMemo });
@@ -9846,6 +9898,8 @@ class Component extends DCLogic {
   /* WALLET on the invoice: which balance this receive goes into. A new code
    * is made in it, for the same amount; nothing is kept for the next receive. */
   pickRecvWallet() {
+    // a cashier's till takes the keeper's unit, and this phone's own balances are not shown in it (26m-till.js)
+    if (this.tillUnit && this.tillUnit()) return;
     const now = this.walletNow('receive') || 'sat';
     this.chooseFrom('WALLET', () => ['usd', 'sat'].map(u => ({
       label: this.unitWord(u),
@@ -9902,6 +9956,10 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     const t = String(text || '').trim().replace(/^lightning:/i, '');
     const kind = W.classify(t);
+    /* In the till nothing is paid and nothing is joined: a token is taken, the rest is said no to (26m-till.js, `tillAccept`).
+     * Outside it, a cashier code asks whether to work the keeper's till (`tillJoinAsk`). */
+    if (this.state.till && this.tillAccept) return this.tillAccept(t, kind);
+    if (kind === 'till') return this.tillJoinAsk ? this.tillJoinAsk(t) : false;
     /* Paying from a card (SEND on the card's screen, 26f-flashcard.js): a card pays Lightning, an invoice or an address,
      * and a bitcoin address on chain where the mint pays on chain (`fcOutAddress`, which asks it first). A Cashu payment
      * request is said no to here, before anything moves, and the person is left where they were. */
@@ -10684,6 +10742,8 @@ class Component extends DCLogic {
       // and never leave a payment mid-flight
       if (this.state.sendPhase === 'in' || this.state.sendPhase === 'onchain') return;
       if (this.state.screen === 'home') return;
+      // nor off the till's SET AMOUNT, whose way out is its X and the lock behind it (26m-till.js)
+      if (this.tillIdle && this.tillIdle()) return;
 
       console.log('[foxy] edge swipe: back');
       this.back();
@@ -11609,6 +11669,9 @@ class Component extends DCLogic {
     const seen = { in: 0, out: 0, inSats: 0, outSats: 0, skipped: 0, skippedSats: 0, arriving: 0, arrivingSats: 0 };
     (s.fresh ? [] : (s.history || [])).forEach(g => g.items.forEach(t => {
       balOf.set(t, run);
+      /* A cashier's till row is the keeper's money, taken and sent on, never in this phone's balance (08d-till.js,
+       * `forKeeper`): counted, it read as money missing from these books. */
+      if (t.forKeeper) return;
       /* Its entry goes with the money, and by the money's figure: in the
        * arriving bucket, neither counted by its own figure nor "not counted". */
       const coming = t.dir === 'in' ? arriving.byHash.get(String(t.hash || '')) : undefined;
@@ -11710,6 +11773,8 @@ class Component extends DCLogic {
     let run = balNow, arrivingSeen = 0;
     (s.fresh ? [] : (s.history || [])).forEach(g => g.items.forEach(t => {
       balOf.set(t, run);
+      // (nor a cashier's till row, which is the keeper's: `histAudit`)
+      if (t.forKeeper) return;
       if (t.unit !== 'usd') return;
       const coming = t.dir === 'in' ? arriving.byHash.get(String(t.hash || '')) : undefined;
       if (coming !== undefined) { run -= coming; arrivingSeen += coming; return; }
@@ -11904,6 +11969,13 @@ class Component extends DCLogic {
           time: this.txLabel(d, now),
           // the same moment with its date, for the detail screen
           stamp: this.txStamp(d, now),
+          /* The till's: when, in milliseconds, for its session's list; whether a till took it, and a cashier's, whether it has
+           * reached the keeper (26m-till.js, `tillHistory`; the wallet tags the row). */
+          atMs: d.getTime(),
+          till: !!t.till,
+          tillSent: !!t.tillSent,
+          // and a cashier's: the keeper's money, which this phone's books leave out (`histAudit`)
+          forKeeper: !!t.forKeeper,
           /* A token this wallet sent is pending (amber) until it is known to be
            * redeemed: its text is kept until then (forgetClaimedToken). */
           pending: !t.settled || (t.dir === 'out' && meta.to === 'ecash' && !!meta.token),
@@ -13748,7 +13820,8 @@ class Component extends DCLogic {
       this.setState({ sendSlow: false, sendPct: 0 });
     }
     // a card's VERIFYING over a code (26f-flashcard.js, `fcCardVerifying`) comes down with the confirmation, or with home, whichever way in
-    if ((s.screen === 'paid' || s.screen === 'home') && this.stageUp && this.stageUp('paidCheck')) this.hideStage('paidCheck');
+    // (the till's SET AMOUNT is its home: 26m-till.js, `tillIdle`)
+    if ((s.screen === 'paid' || s.screen === 'home' || (this.tillIdle && this.tillIdle())) && this.stageUp && this.stageUp('paidCheck')) this.hideStage('paidCheck');
     console.log('[foxy] screen ' + (prevState.screen || '?') + ' \u2192 ' + s.screen
       + ' after ' + held + 'ms, back stack ' + ((s.stack && s.stack.length) || 0)
       + (flags.length ? ' | ' + flags.join(' ') : ''));
@@ -13789,8 +13862,12 @@ class Component extends DCLogic {
       // landing on a token's own screen: ask the mint about it at once
       if (this.state.screen === 'tokenOut') this.tokenWatchNow();
       if (this.state.screen === 'home') this.endReceiveAtHome();
+      /* The till's SET AMOUNT is its home (26m-till.js, `tillIdle`): a receive ends there as it ends at home, and a keeper's
+       * next customer is asked which balance again. A cashier's is the keeper's unit whatever this says (`walletNow`). */
+      const idle = this.state.screen === 'home' || !!(this.tillIdle && this.tillIdle());
+      if (idle && this.state.screen !== 'home') this.endReceiveAtHome();
       // home ends a flow: the next one asks again (or takes home's one balance), not this one's
-      if (this.state.screen === 'home' && (this.state.wallet || this.state.walletAuto || this.state.walletTapped)) {
+      if (idle && (this.state.wallet || this.state.walletAuto || this.state.walletTapped)) {
         this.setState({ wallet: '', walletAuto: false, walletTapped: false, feeQ: null });
       }
       // a code somebody was asked to scan goes with the token it belonged to
@@ -13843,6 +13920,8 @@ class Component extends DCLogic {
     this.syncSlide();
     this.syncPreview();
     this.syncInbox();
+    // the till: home turned into its SET AMOUNT, the cashier's clock, PAID's words (26m-till.js)
+    if (this.syncTill) this.syncTill(prevState);
     this.syncTap();
     this.syncClaim();
     this.syncAwake();
@@ -13880,22 +13959,25 @@ class Component extends DCLogic {
     // a swap's rate was asked for the figure as it stood, and this changes it (`swapForget`)
     if (this.state.flow === 'swap' && this.state.screen === 'amount' && this.swapForget) this.swapForget();
     this.setState(p => {
-      let a = p.amount;
+      /* A figure the screen put there itself (`amountDefault`: a card set-up's $20.00, 26j-card-wheel.js) is not typed after: the
+       * first key starts from nothing, and del clears it. */
+      let a = p.amountDefault ? '' : p.amount;
+      const typed = (amount) => ({ amount, amountDefault: false });
       if (p.unit !== 'SATS') {
         let d = a.replace('.', '').replace(/^0+/, '');
         if (ch === 'del') d = d.slice(0, -1);
-        else if (/^[0-9]+$/.test(ch)) { if (d.length + ch.length > 9) return { amount: a }; d += ch; }
-        else return { amount: a };
+        else if (/^[0-9]+$/.test(ch)) { if (d.length + ch.length > 9) return typed(a); d += ch; }
+        else return typed(a);
         d = d.replace(/^0+/, '');
-        if (d === '') return { amount: '' };
+        if (d === '') return typed('');
         d = d.padStart(3, '0');
-        return { amount: d.slice(0, -2) + '.' + d.slice(-2) };
+        return typed(d.slice(0, -2) + '.' + d.slice(-2));
       }
-      if (ch === 'del') return { amount: a.slice(0, -1) };
-      if (!/^[0-9]+$/.test(ch)) return { amount: a };
-      if (a === '0' || a === '') { if (ch === '00') return { amount: a }; return { amount: ch }; }
-      if (a.length + ch.length > 9) return { amount: a };
-      return { amount: a + ch };
+      if (ch === 'del') return typed(a.slice(0, -1));
+      if (!/^[0-9]+$/.test(ch)) return typed(a);
+      if (a === '0' || a === '') { if (ch === '00') return typed(a); return typed(ch); }
+      if (a.length + ch.length > 9) return typed(a);
+      return typed(a + ch);
     });
   }
 
@@ -15058,6 +15140,13 @@ class Component extends DCLogic {
       /* What this phone takes with no route before it settles: from one payer,
        * and in all (26j-till-caps.js). Dollars, with the sats under. */
     ]).concat(this.tillCapRows ? this.tillCapRows(MENU_ICON.receive, shut) : []).concat([
+      /* The till (26m-till.js): this phone as a point of sale, receive and this session's history only, and a code that
+       * puts another Foxy into it for this phone. Both behind the lock this phone already has (`tillGate`). */
+      { label: 'POINT OF SALE', path: MENU_ICON.receive,
+        tap: shut(() => this.tillGate(() => this.tillStart(), 'To open the till.')) },
+      { label: 'CASHIER CODE', path: MENU_ICON.scan,
+        tap: shut(() => this.tillGate(() => this.tillPassShow(), 'To show a cashier code.')) },
+    ]).concat([
       /* The phone's own screens, straight over home: no Foxy screen before
        * RESTORE A WALLET or after YOUR SEED PHRASE. */
       { label: 'RESTORE', path: MENU_ICON.restore, tap: shut(() => this.restoreFromMenu()) },
@@ -15262,7 +15351,8 @@ class Component extends DCLogic {
   /* What more than one screen's function reads, worked out once a render. */
   renderContext() {
     const s = this.state;
-    const sc = s.screen;
+    // home is never drawn in the till: its SET AMOUNT is, until `syncTill` has put the state right (26m-till.js)
+    const sc = (s.till && s.screen === 'home') ? 'amount' : s.screen;
     // the wallet you're paying from caps a send
     const balLive = this.balNow();
     // the fork could hide the bitcoin wallet; this one is the bitcoin wallet
@@ -15926,8 +16016,18 @@ class Component extends DCLogic {
     const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '00', '0'].map(k => ({
       label: k, size: '30px', tap: () => this.press(k),
     }));
+    // the till's SET AMOUNT: X for the way out, HISTORY at the top right (26m-till.js)
+    const tillHere = !!s.till && sc === 'amount' && !!(this.tillIdle && this.tillIdle());
     return {
       isAmount: sc === 'amount',
+      /* The round button at the top left: back, or in the till its close, which the keeper's lock or the cashier's question
+       * stands behind (`tillClose`). */
+      amtBack: () => ((this.tillIdle && this.tillIdle()) ? this.tillClose() : this.back()),
+      amtBackPath: tillHere ? 'M6 6l12 12M18 6L6 18' : 'M19.5 12H5m0 0 6-6m-6 6 6 6',
+      // and its HISTORY, this session's (`tillHistory`), where home's menu would have it
+      amtHistShown: tillHere,
+      amtHistPath: 'M12 7v5l3.5 2M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.5 8.5 0 0 0 12 3.5Z',
+      amtHistTap: () => this.go('history'),
       nextFur: (val > 0 && !sendOver)
         ? "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),"
           + "rgba(255,240,220,0) 62%),"
@@ -15984,7 +16084,8 @@ class Component extends DCLogic {
       // what a till cap is, in a plain line under the question (26j-till-caps.js, `tillCapNote`)
       amountNote: s.flow === 'tillCap' && this.tillCapNote ? this.tillCapNote() : '',
       amountNoteShown: !!(s.flow === 'tillCap' && this.tillCapNote),
-      hideSkip: true,
+      // the space that balances the back button, which the till's HISTORY takes
+      hideSkip: !tillHere,
       /* The set-up's max per tap: what the figure typed means in seconds, under it, as it is typed (26j-card-wheel.js, `fcSuAmountLine`). */
       amountLine: this.fcSuAmountLine ? this.fcSuAmountLine() : '',
       amountLineShown: !!(this.fcSuAmountLine && this.fcSuAmountLine()),
@@ -16197,8 +16298,10 @@ class Component extends DCLogic {
       // offline too: only the request changes, and that needs no mint
       pickRecvWallet: () => this.pickRecvWallet(),
       recvTapShown: true,
-      recvCardShown: !usdIn || (!!s.invoice && !s.invoiceIsAddress) || !this.offlineNow()
-        || !!(window.FoxyWallet && window.FoxyWallet.cardOffline && window.FoxyWallet.cardOffline()),
+      /* Not at a cashier's till: a card's pieces are swapped into the phone that reads them, and a cashier's phone holds
+       * nothing of the keeper's (26m-till.js). */
+      recvCardShown: !(this.tillRole && this.tillRole() === 'cashier') && (!usdIn || (!!s.invoice && !s.invoiceIsAddress) || !this.offlineNow()
+        || !!(window.FoxyWallet && window.FoxyWallet.cardOffline && window.FoxyWallet.cardOffline())),
       recvClockShown: usdIn && !cashu && !!s.invoice && !!s.recvExpiresAt,
       recvClock: 'NEW CODE IN ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0'),
       /* COPY and SHARE wait for the code. Until the rail on screen has
@@ -16480,7 +16583,9 @@ class Component extends DCLogic {
             balance: fc.unit === off.unit ? Math.max(0, (Number(fc.balance) || 0) - off.off) : fc.balance,
             bal: fc.bal ? Object.assign({}, fc.bal, { [off.unit]: Math.max(0, (Number(fc.bal[off.unit]) || 0) - off.off) }) : fc.bal,
           }) : fc;
-          this.setState({ screen: toCard ? 'flashcard' : 'home', fc: fcNext, stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidPlace: null, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidAskAgeMs: 0, paidConvert: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
+          this.setState(Object.assign({ screen: toCard ? 'flashcard' : 'home', fc: fcNext, stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidPlace: null, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidAskAgeMs: 0, paidConvert: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) },
+            // in the till, its SET AMOUNT for the next customer (26m-till.js, `homeState`)
+            toCard || !this.state.till ? {} : this.homeState()));
         }, 450);
       },
     };
@@ -17307,7 +17412,8 @@ class Component extends DCLogic {
       blockedInk: (BLOCKED[sc] || {}).tone === 'warn' ? 'var(--btc-ink)' : '#FF5C5C',
       blockedGlyphBg: (BLOCKED[sc] || {}).tone === 'warn' ? 'rgba(247,147,26,.16)' : 'rgba(255,92,92,.14)',
       blockedRetry: () => this.setState({ screen: (BLOCKED[sc] || {}).back || 'amount' }),
-      blockedClose: () => this.setState({ screen: 'home', stack: [], amount: '', asset: '', flow: 'receive', unit: 'USD' }),
+      // (in the till, its SET AMOUNT: 26m-till.js, `homeState`)
+      blockedClose: () => this.setState(Object.assign({ screen: 'home', stack: [], amount: '', asset: '', flow: 'receive', unit: 'USD' }, this.state.till ? this.homeState() : {})),
     };
   }
 
@@ -17486,6 +17592,8 @@ class Component extends DCLogic {
   /** @param {RenderContext} c */
   renderHistory(c) {
     const { s, sc } = c;
+    // the till's own list: this session's money in, and nothing to open (26m-till.js, `tillHistory`)
+    if (s.till && this.tillHistory) return this.tillHistory(c);
     const hf = s.histFilter || 'all';
     /* One card's entries, when this screen was opened from that card's own
      * (26f-flashcard.js): only then, read from where it was opened and not
@@ -17712,6 +17820,8 @@ class Component extends DCLogic {
         : s.fresh ? 'Your transactions will show up here.' : 'No transactions match this filter.',
       isHistory: sc === 'history',
       histTitle: ofCard ? 'CARD HISTORY' : 'HISTORY',
+      // ALL, RECEIVED and SENT; the till's list has none (26m-till.js)
+      histFilterShown: true,
       // clearing history is the whole wallet's, not one card's
       histClearVis: ofCard ? 'hidden' : 'visible',
       historyMint: (window.FoxyWallet && window.FoxyWallet.mintHost
@@ -19598,8 +19708,10 @@ class Component extends DCLogic {
     }
     /* Not while paying from a card (SEND on the card's screen, `fcOutMode`): a phone-to-phone offer is paid out of this
      * phone's own pile, and that is not what the person is doing. */
+    /* Nor in the till (26m-till.js): listening is this phone ready to PAY a merchant who presses TAP, and a till never pays.
+     * Its own receives arm on the receive screen, as anywhere (above). */
     const listening = (s.screen === 'home' || s.screen === 'sendHow')
-      && s.sendPhase !== 'in' && !s.reqBusy && !gateUp && !(this.fcOutMode && this.fcOutMode());
+      && s.sendPhase !== 'in' && !s.reqBusy && !gateUp && !(this.fcOutMode && this.fcOutMode()) && !s.till;
     /* And the marks are cleared only when there is no tap to protect.
      *
      * `_tapKeep` is what stops `syncTap` searching again under a live link —
@@ -19612,8 +19724,10 @@ class Component extends DCLogic {
      * the regression the comment above this describes, arriving by the other
      * door. `_tapKeep` is dropped when the payment is done with the link, so
      * waiting for it is exactly right. */
-    if (s.screen !== 'home') this._tapAway = true;
-    if (s.screen === 'home' && this._tapAway && s.sendPhase !== 'in' && !this.changeStillDue()) {
+    // (the till's SET AMOUNT is its home, so a tap taken there is let go there as at home: 26m-till.js, `tillIdle`)
+    const idle = s.screen === 'home' || !!(this.tillIdle && this.tillIdle());
+    if (!idle) this._tapAway = true;
+    if (idle && this._tapAway && s.sendPhase !== 'in' && !this.changeStillDue()) {
       /* Home again, with the payment over: the next tap may start.
        *
        * The marks cannot be cleared the moment the offer lands, because that
@@ -23465,6 +23579,9 @@ class Component extends DCLogic {
    * cannot be tapped: its money is taken back from home's MENU, RESTORE LOST
    * CARD (`fcRestoreLost`), not from this screen. */
   goFlashcard() {
+    /* Never in the till (26m-till.js): the card's screen has LOAD and SEND on it, which move this phone's money, the very
+     * thing the till keeps out of reach. A card tapped to the phone on the till's HISTORY opened it (review u1). */
+    if (this.state.till) { console.log('[foxy] card: not in the till'); return; }
     // a card read on an earlier visit is not shown again: it may be somebody else's, and what it held may have changed
     this._fcCard = null;
     clearInterval(this._fcRollT);
@@ -23543,6 +23660,8 @@ class Component extends DCLogic {
       // the mint list asked for a transfer's mint, or for the one a card moves to: money, not a list
       transfer: !!s.trStep,
       pick: !!s.fcPick,
+      // the till, which has no card screen whatever screen of its own is up (26m-till.js)
+      till: !!s.till,
       over: starting ? '' : this.cardTapOver(),
     };
   }
@@ -23571,6 +23690,8 @@ class Component extends DCLogic {
    * payment under the lock is ignored there and then, not kept to be acted on a minute later from wherever the person
    * has got to. */
   cardTapRule(f) {
+    // in the till a card's tap takes nobody anywhere: its HISTORY is a free screen everywhere else, and opened the card's (review u1)
+    if (f.till || (this.state && this.state.till)) return 'ignore';
     if (f.over) return 'ignore';
     const free = this.CARD_TAP_FREE.indexOf(f.screen) >= 0 && !(f.screen === 'switchMint' && (f.transfer || f.pick));
     if (!free) return 'ignore';
@@ -23601,7 +23722,7 @@ class Component extends DCLogic {
     }
     this._cardTapAt = 0;
     if (say === 'ignore') {
-      console.log('[foxy] card tap: ignored, ' + (f.over ? 'something is up over the screen (' + f.over + ')'
+      console.log('[foxy] card tap: ignored, ' + (f.till ? 'the till is open' : f.over ? 'something is up over the screen (' + f.over + ')'
         : 'the screen is ' + f.screen + (f.screen === 'switchMint' && (f.transfer || f.pick) ? ', asking where money moves' : '')));
       return;
     }
@@ -23833,7 +23954,7 @@ class Component extends DCLogic {
       // one keypad at a time: asked from another card question's keypad, this takes its place
       screen: 'amount', stack: p.screen === 'amount' ? p.stack : p.stack.concat([p.screen]), flow,
       // dollars, as the receive flow starts; sats where there is no price to say dollars at
-      amount: '', unit: (usd || this.px()) ? 'USD' : 'SATS',
+      amount: '', amountDefault: false, unit: (usd || this.px()) ? 'USD' : 'SATS',
       asset: '', network: '', note: '', noteDraft: '', recipient: '', recipientKind: '',
     }));
   }
@@ -23966,8 +24087,11 @@ class Component extends DCLogic {
    *
    * Every refusal the wallet or the card can give, by its kind, in the words
    * of the screen list. `o.again` is what TRY AGAIN does, where trying again
-   * can work; `o.taken` says whether "nothing was taken" is a true thing to
-   * add (it is for a payment and a withdrawal, and means nothing for a read).
+   * can work; `o.pinAgain` what it does after a wrong PIN, where the tap was
+   * run with a PIN typed earlier: the pad again, never the same PIN at the
+   * card a second time (which would only cost another try). `o.taken` says
+   * whether "nothing was taken" is a true thing to add (it is for a payment
+   * and a withdrawal, and means nothing for a read).
    */
   fcFailed(e, o) {
     const opt = o || {};
@@ -23976,7 +24100,8 @@ class Component extends DCLogic {
     // whatever is said next is said on its own: the screen of a tap that ended asking for the PIN, and no pad followed, goes
     this.hideStage('card');
     const safe = opt.taken ? ' Nothing was taken.' : '';
-    const again = opt.again ? { retry: 'TRY AGAIN', go: opt.again, shut: { label: 'CANCEL' } } : {};
+    const retry = (kind === 'wrong-pin' && typeof opt.pinAgain === 'function') ? opt.pinAgain : opt.again;
+    const again = retry ? { retry: 'TRY AGAIN', go: retry, shut: { label: 'CANCEL' } } : {};
     console.log('[foxy] card: ' + (kind || 'failed') + ' — ' + said);
     // their own cancel, or no card held up: the screen they were on is the answer
     if (kind === 'cancelled') return;
@@ -24384,6 +24509,10 @@ class Component extends DCLogic {
 
   payByCard() {
     const s = this.state;
+    /* Not at a cashier's till, which draws no CARD (24-render-receive-and-send.js, `recvCardShown`): a card's pieces are
+     * swapped into the phone that reads them, and a cashier's phone holds nothing of the keeper's. Said here as well, so no
+     * other way to this button reaches it. */
+    if (this.tillRole && this.tillRole() === 'cashier') { console.log('[foxy] card: a cashier’s till takes no card'); return; }
     // a receive into the dollar balance: a dollar card pays its cents, a bitcoin card the dollar invoice's sats (`payUsdByCard`)
     if (s.recvUnit === 'usd' && this.walletNow && this.walletNow('receive') === 'usd') { this.payUsdByCard(); return; }
     const W = this.fcW();
@@ -24429,6 +24558,8 @@ class Component extends DCLogic {
   payUsdByCard() {
     const s = this.state;
     const W = window.FoxyWallet;
+    // (nor here, which the code's own wait presses again: `payByCard`)
+    if (this.tillRole && this.tillRole() === 'cashier') return;
     /* A card flow already going (a sheet up, its PIN asked, a card asking to be tapped again): CARD starts no second one. The
      * wait's own timer pressed CARD again after the person had, and two sheets were begun for one code, the second taking over
      * `_fcUsd` from the payment the first was making. */
@@ -26433,7 +26564,8 @@ class Component extends DCLogic {
   fcShow(card, open) {
     if (!card || !card.key) return;
     if (this.state.screen !== 'flashcard') {
-      if (!open) return;
+      // (and never onto it in the till, which has no card screen: 26m-till.js)
+      if (!open || this.state.till) return;
       this.setState(p => ({ screen: 'flashcard', stack: p.stack.concat([p.screen]) }));
     }
     const W = this.fcW();
@@ -26593,7 +26725,7 @@ class Component extends DCLogic {
         }
         // the card's own refusal: the mint's answer does not fit the opening, which can now only be given up
         if (r.refused > 0) this.fcFailed({ card: 'mend-refused', message: 'The card would not take this change.' });
-      }, (e) => this.fcFailed(e, { again: () => this.fcMendRun(pin) }));
+      }, (e) => this.fcFailed(e, { again: () => this.fcMendRun(pin), pinAgain: () => this.fcMend() }));
   }
 
   /* GIVE UP THIS CHANGE, for one opening (`x`: { number, amount }): one sentence that its money is gone, then the tap. The owner's
@@ -26627,7 +26759,7 @@ class Component extends DCLogic {
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.toast('The change is given up.');
-      }, (e) => this.fcFailed(e, { again: () => this.fcGiveUpRun(x, pin) }));
+      }, (e) => this.fcFailed(e, { again: () => this.fcGiveUpRun(x, pin), pinAgain: () => this.fcGiveUp(x) }));
   }
 
   // the change the card is owed, as the screen has it, less the opening `n`
@@ -26813,7 +26945,7 @@ class Component extends DCLogic {
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.toast(unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
-      }, (e) => this.fcFailed(e, { again: () => this.fcSetUpRun(pin, recoverable, unit) }));
+      }, (e) => this.fcFailed(e, { again: () => this.fcSetUpRun(pin, recoverable, unit), pinAgain: () => this.fcSetUpIn(unit) }));
   }
 
   // (`unit`: the one chosen for the card, carried to the tap as `fcSetUpRun` takes it, so a choice of dollars is never lost here)
@@ -27591,7 +27723,9 @@ class Component extends DCLogic {
       }, (e) => {
         // the rate guard: asked once, and the limit written with the answer
         if (e && e.card === 'rate-far' && !answer) { this.fcRateFar(e, (a) => this.fcLimitRun(sats, tap, usd, pin, a)); return; }
-        this.fcFailed(e, { again: () => this.fcLimitRun(sats, tap, usd, pin, answer) });
+        this.fcFailed(e, { again: () => this.fcLimitRun(sats, tap, usd, pin, answer),
+                           // (a wrong PIN for the recut: the pad again, not the same PIN)
+                           pinAgain: pin ? () => this.fcPinOr({ title: 'CARD PIN', subtitle: 'To recut its money under the new limit' }, (p2) => this.fcLimitRun(sats, tap, usd, p2, answer)) : undefined });
       });
   }
 
@@ -28088,10 +28222,11 @@ class Component extends DCLogic {
         this.loadHistory();
         this.haptic && this.haptic('success');
         this.fcMovedScreen(to, r.amount, r.unit);
-      }, (e) => { v.end(); this.fcFailed(e, { again: () => this.fcMoveWrite(to, pin) }); }),
-    (e) => this.fcFailed(e, { again: () => this.fcMoveWrite(to, pin) }));
+      }, (e) => { v.end(); this.fcFailed(e, { again: () => this.fcMoveWrite(to, pin), pinAgain: ask }); }),
+    (e) => this.fcFailed(e, { again: () => this.fcMoveWrite(to, pin), pinAgain: ask }));
+    const ask = () => this.fcAskPin({ title: 'CARD PIN', subtitle: 'To put its money on the card at ' + this.mintNameOf(to) + '.', cta: 'TAP CARD' }, go);
     if (pin0 || !this.fcKnownPinFirst()) { go(pin0 || ''); return; }
-    this.fcAskPin({ title: 'CARD PIN', subtitle: 'To put its money on the card at ' + this.mintNameOf(to) + '.', cta: 'TAP CARD' }, go);
+    ask();
   }
 
   /* A TRANSFER the card's screen says is not finished (the wallet's `cardTransfers`): its money is in this phone. Where it is at the
@@ -28998,13 +29133,14 @@ class Component extends DCLogic {
           this.fcStillWaiting({});
           return;
         }
-        this.fcFailed(e, { again: () => this.fcWriteRun(c.pin, {}) });
+        this.fcFailed(e, { again: () => this.fcWriteRun(c.pin, {}), pinAgain: () => this.fcWriteAsk({ pin: true }) });
         return;
       }
       /* Set up, the next try is the send with the holder's PIN. Cut short before that, it is the set-up again with the same PIN and
        * the same two numbers (`cardSetUpFor` takes up a set-up cut after the PIN or after the record): the holder's numbers are not
-       * dropped by a send that never writes them. */
-      this.fcFailed(e, { again: () => (setUp ? this.fcSendRun(sats, c.pin, unit, alt) : this.fcSendSetUpRun(sats, unit, alt, c)) });
+       * dropped by a send that never writes them. A wrong PIN (a card that keeps one): the pad once more, the numbers kept. */
+      this.fcFailed(e, { again: () => (setUp ? this.fcSendRun(sats, c.pin, unit, alt) : this.fcSendSetUpRun(sats, unit, alt, c)),
+                         pinAgain: () => (setUp ? this.fcSendAsk(sats, unit, alt) : this.fcSuPinAgain(c, (c2) => this.fcSendSetUpRun(sats, unit, alt, c2))) });
     });
   }
 
@@ -29039,7 +29175,7 @@ class Component extends DCLogic {
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.fcLogCard();
-      }, (e) => this.fcFailed(e, { again: () => this.fcGuestRun(pin) }));
+      }, (e) => this.fcFailed(e, { again: () => this.fcGuestRun(pin), pinAgain: () => this.fcGuestView() }));
   }
 
   /* CONNECT TO PHONE: straight to the card's PIN ("To connect the card to this phone…", CONNECT), then the claim's held tap (about
@@ -29080,7 +29216,7 @@ class Component extends DCLogic {
       if (full) { this.refreshBalance(); this.loadHistory(); }
       this.haptic && this.haptic('success');
       this.toast(card && card.rekeyed ? 'Connected. Backup on this phone.' : 'Connected to this phone.');
-    }, (e) => this.fcFailed(e, { again: () => this.fcTieRun(pin) }));
+    }, (e) => this.fcFailed(e, { again: () => this.fcTieRun(pin), pinAgain: () => this.fcGuestTie() }));
   }
 
   /* A card connected with money on it whose backup is still to move here (software 1.24, `rekeyDue`): read by this phone with a route
@@ -29138,7 +29274,8 @@ class Component extends DCLogic {
    * being read is not lost. Opened, it asks the mint what is still there (`fcAskAtMint`). */
   fcRestoreLost() {
     const W = this.fcW();
-    if (!W) return;
+    // the till has no menu and no card screens; this is here so that no way round to it is found later (26m-till.js)
+    if (!W || this.state.till) return;
     const rows = (W.cardsList() || []);
     if (!rows.length) {
       this.blockedCard('fc-restore', { tone: 'ask', title: 'RESTORE LOST CARD',
@@ -29292,6 +29429,8 @@ class Component extends DCLogic {
   fcSwipe(dir) {
     const s = this.state;
     if (this._pinLocked || s.open0 || this.cardTapOver() || this.cardFlowBusy()) return false;
+    // nor in the till, which has no card screen (26m-till.js)
+    if (s.till) return false;
     if (s.screen === 'home' && dir === 'left') {
       console.log('[foxy] swipe: to the card');
       this.goFlashcard();
@@ -31552,8 +31691,12 @@ class Component extends DCLogic {
    * PIN on this phone, and the words say it is theirs; what the card holds is what is being sent, so CURRENCY is not asked; and
    * the tap writes no owner and no key of this phone's, then the money under the holder's PIN.
    *
-   * The way back is the round back button of the pad and of SET AMOUNT: one step back (from SET AMOUNT, to its question), and
-   * from the first, to where the set-up began. A question's card goes when it is tapped beside, and the set-up with it. */
+   * The way back is the round back button of the pad and of SET AMOUNT: one step back (from SET AMOUNT, to its question; from
+   * NO PIN AMOUNT?, to CURRENCY where it was asked), and from the first, to where the set-up began. A question's card goes when
+   * it is tapped beside, and the set-up with it.
+   *
+   * NO PIN AMOUNT? comes up filled in: $20.00 (the design's default, FC_SU_NOPIN_DEFAULT_CENTS) where it is typed in dollars,
+   * or the figure chosen before where the step is come back to; the first key typed replaces it (`amountDefault`). */
 
   /* What a card can hold, as the set-up's CURRENCY step offers it, in order. */
   FC_SETUP_UNITS = ['usd', 'sat'];
@@ -31643,6 +31786,26 @@ class Component extends DCLogic {
     su.fromSpeed = which === 'tap' && !!other;
     if (which === 'tap' && !other && this.fcSpeedChoosable(this.fcSuUnitNow())) { this.fcSpeedOpen('su', this.fcSuUnitNow(), this.FC_SPEED_FIRST); return; }
     this.fcAmount(this.FC_SU_FLOWS[which]);
+    if (which === 'noPin') this.fcSuPrefill(su);
+  }
+
+  /* What NO PIN AMOUNT? shows before anything is typed: the figure chosen before, where the step is come back to (from MAX SPEND PER
+   * SECOND's back button), in the unit it was typed in; else $20.00 where dollars are typed. A bitcoin card with no price types sats,
+   * and is given no figure (there are no dollars to say it in). Marked the default: the first key typed starts from nothing
+   * (19-update-keypad-balance.js, `press`), so $20.00 is not what a 5 is typed after. */
+  FC_SU_NOPIN_DEFAULT_CENTS = 2000;
+  fcSuPrefill(su) {
+    const s = this.state;
+    let amount = '';
+    let unit = s.unit;
+    if (su.noPin > 0) {
+      if (this.fcSuUnitNow() === 'usd') amount = (su.noPin / 100).toFixed(2);
+      else if (s.unit === 'USD' && su.noPinUsd > 0) amount = Number(su.noPinUsd).toFixed(2);
+      else { amount = String(Math.round(su.noPin)); unit = 'SATS'; }
+    } else if (s.unit === 'USD') {
+      amount = (this.FC_SU_NOPIN_DEFAULT_CENTS / 100).toFixed(2);
+    }
+    if (amount) this.setState({ amount, unit, amountDefault: true });
   }
 
   // which of the two SET AMOUNT is asking for, while it is up: 'noPin', 'tap', or ''
@@ -31657,7 +31820,7 @@ class Component extends DCLogic {
     const su = this._fcSu;
     const was = su && su.was;
     if (su) su.was = null;
-    if (was) this.setState({ screen: was.screen, stack: was.stack, flow: was.flow, amount: was.amount, unit: was.unit });
+    if (was) this.setState({ screen: was.screen, stack: was.stack, flow: was.flow, amount: was.amount, unit: was.unit, amountDefault: false });
   }
 
   /* NEXT: the figure in the card's unit (`fcTyped`: cents for a dollar card, sats for a bitcoin card) and, for a bitcoin card typed in
@@ -31685,16 +31848,22 @@ class Component extends DCLogic {
     if (w === 'tap') { su.tapLimit = 0; su.tapUsd = 0; this.fcSuGo(); } else { su.noPin = 0; su.noPinUsd = 0; this.fcSuTap(); }
   }
 
-  /* The round back button on SET AMOUNT (01-ui-basics.js, `back`), a step back: off NO PIN AMOUNT?, out of the set-up to the screen it
-   * was asked over, with nothing written; off the rate typed, MAX SPEND PER SECOND where it came from there, NO PIN AMOUNT? otherwise.
-   * True where it was the set-up's. */
+  /* The round back button on SET AMOUNT (01-ui-basics.js, `back`), a step back: off NO PIN AMOUNT?, CURRENCY again where it was asked
+   * (the choice open once more), and otherwise out of the set-up to the screen it was asked over, with nothing written; off the rate
+   * typed, MAX SPEND PER SECOND where it came from there, NO PIN AMOUNT? otherwise. True where it was the set-up's. */
   /* (and on MAX SPEND PER SECOND, while the set-up asks it: NO PIN AMOUNT?, `fcSpeedBack`) */
   fcSuAmountBack() {
     if (this._fcSu && this.state.screen === 'fcSpeed' && this.state.fcSpeed && this.state.fcSpeed.mode === 'su') { this.fcSpeedBack(); return true; }
     const which = this.fcSuAsking();
     if (!which) return false;
     const su = this._fcSu;
-    if (which === 'noPin') { this.fcSuLeave(); this._fcSu = null; return true; }
+    if (which === 'noPin') {
+      this.fcSuLeave();
+      // the step before was CURRENCY (asked only of the owner's own card, at a mint with two balances): that question again, not the start
+      if (su.unit && !su.other && this.twoUnitsOn && this.twoUnitsOn()) { su.unit = ''; this.fcSuUnit(); return true; }
+      this._fcSu = null;
+      return true;
+    }
     if (su.fromSpeed && this.state.fcSpeed && this.state.fcSpeed.mode === 'su') {
       // (SET AMOUNT was opened over MAX SPEND PER SECOND, `fcAmount`: off it, back to that screen, at the rate it showed)
       su.fromSpeed = false;
@@ -31755,7 +31924,13 @@ class Component extends DCLogic {
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.toast(c.unit === 'both' ? 'The card is set up. It holds dollars and bitcoin.' : c.unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
-      }, (e) => this.fcFailed(e, { again: () => this.fcSetUpStepsRun(c) }));
+      }, (e) => this.fcFailed(e, { again: () => this.fcSetUpStepsRun(c), pinAgain: () => this.fcSuPinAgain(c, (c2) => this.fcSetUpStepsRun(c2)) }));
+  }
+
+  /* TRY AGAIN after the card refused the PIN the set-up's tap was run with (a card that keeps one): the pad once more, and the tap
+   * again with the new PIN and everything else as chosen (`c`, the choice `fcSuGo` made), never the same PIN at the card twice. */
+  fcSuPinAgain(c, then) {
+    this.fcAskPin({ title: 'CARD PIN', subtitle: 'The card refused that PIN. Type it again.' }, (a) => then(Object.assign({}, c, { pin: a })));
   }
 
   /* ---- MAX SPEND PER SECOND -------------------------------------------------------------------------------------------
@@ -33000,6 +33175,544 @@ class Component extends DCLogic {
     if (!this._ocVisit) return;
     this._ocVisit = null;
     this.crossComeHome();
+  }
+  /* ---- the till: point of sale -----------------------------------------------
+   *
+   * A phone put into the till can only RECEIVE and look at the HISTORY of this session. Everything else (send, cards, the
+   * menu, the balance, scan and paste on the amount screen, the home screen) is out of reach until the till is closed.
+   *
+   * Two roles, in `state.till` ({ role, since, pass }), which the app does not save:
+   *
+   *   keeper   the phone whose money it is. It opens the till from SETTINGS > POINT OF SALE behind the lock it already has
+   *            (Face ID or the PIN), and closes it behind the same lock, so a phone handed across a counter cannot be
+   *            walked out of the till. It receives into its own wallet as ever. A relaunch ends it: the lock, then home.
+   *   cashier  another Foxy, which scanned the keeper's CASHIER CODE. Every payment it takes is locked to the keeper's key
+   *            and sent to the keeper over Nostr (the wallet's `tillJoin`, `tillOutboxAdd`, `tillDeliver`); this phone
+   *            never holds it. Its own money is hidden and untouched. It leaves with no PIN, and by itself when the code
+   *            runs out. Its till survives a relaunch, after the ordinary lock (`tillResume`).
+   *
+   * Every screen is one the app already has: SET AMOUNT, the receive screen, PAID, HISTORY, the cards, the PIN pad and the
+   * stage screen that shows a code. The one rule that holds it together is that every road home ends at the till's SET
+   * AMOUNT instead (`homeState`), and a home reached some other way is turned into it (`syncTill`). */
+
+  // the screens a till has: its SET AMOUNT, the receive screen, PAID and HISTORY (`syncTill`)
+  TILL_SCREENS = ['amount', 'confirm', 'paid', 'history'];
+
+  /** 'keeper', 'cashier', or '' outside the till. */
+  tillRole() {
+    const t = this.state && this.state.till;
+    return t && (t.role === 'keeper' || t.role === 'cashier') ? t.role : '';
+  }
+
+  /** The cashier's pass ({ id, mint, unit, lock, to, exp }), or null for a keeper and outside the till. */
+  tillPassNow() {
+    const t = this.state && this.state.till;
+    return (t && t.role === 'cashier' && t.pass) ? t.pass : null;
+  }
+
+  /* The cashier's unit, which every receive is asked in: the keeper's, written into the code. '' otherwise, so a keeper's
+   * till asks which balance as home's RECEIVE does (`walletNow`). */
+  tillUnit() {
+    const p = this.tillPassNow();
+    return p ? (p.unit === 'usd' ? 'usd' : 'sat') : '';
+  }
+
+  /* The lock every cashier payment goes to: the keeper's key, from the code. '' for a keeper and outside the till, where
+   * a request takes its lock from this phone's own pool as ever. */
+  tillLockFor() {
+    const p = this.tillPassNow();
+    return (p && /^0[23][0-9a-f]{64}$/.test(String(p.lock || ''))) ? String(p.lock) : '';
+  }
+
+  /* The till's SET AMOUNT with nothing above it: the till's home. What reads `screen === 'home'` as "idle" reads this too
+   * (the tap's release, the edge swipe, the end of a receive, 19-update-keypad-balance.js). */
+  tillIdle() {
+    const s = this.state || {};
+    return !!s.till && s.screen === 'amount' && s.flow === 'receive' && !((s.stack || []).length);
+  }
+
+  /* Where a road home ends: home, or in the till its SET AMOUNT, set up as home's RECEIVE sets it up (23-render-home-and-amount.js,
+   * `goReceive`). `till` is the till about to be, for the step that opens one; the one in state otherwise. A cashier's
+   * receive is in the keeper's unit, picked for it (`tillUnit`), so no question about this phone's own balances is put. */
+  homeState(till) {
+    const t = till === undefined ? (this.state && this.state.till) : till;
+    if (!t) return { screen: 'home', stack: [] };
+    const unit = (t.role === 'cashier' && t.pass) ? (t.pass.unit === 'usd' ? 'usd' : 'sat') : '';
+    return {
+      screen: 'amount', stack: [], flow: 'receive', amount: '', unit: 'USD',
+      asset: '', network: '', note: '', noteDraft: '', recipient: '', recipientKind: '',
+      wallet: unit, walletAuto: false, walletTapped: false,
+    };
+  }
+
+  /* The lock in front of opening the till, closing it and showing a cashier code: Face ID where FACE / FINGER LOCK is on,
+   * else the PIN pad, as the launch's lock asks (10-pin.js, `pinLock`). A phone with no lock is told to set one first: a till
+   * anybody can close is a phone anybody can walk off into SEND with. `why` is the pad's line under its title. */
+  tillGate(then, why) {
+    const W = window.FoxyWallet;
+    const go = typeof then === 'function' ? then : () => {};
+    const pinSet = !!(W && W.pinIsSet && W.pinIsSet());
+    const face = !!(W && W.faceLock && W.faceLock() && W.biometric);
+    if (!W || !W.screenLocked || !W.screenLocked() || (!pinSet && !face)) {
+      this.blockedCard('tillNoLock', {
+        tone: 'warn', title: 'SET A LOCK FIRST',
+        reason: 'The till opens and closes behind Face ID or a PIN, so a phone handed to someone else cannot leave it.',
+        chip: 'SETTINGS > SET PIN or FACE / FINGER LOCK.',
+      });
+      return;
+    }
+    const pad = () => {
+      if (!pinSet) return;
+      this.pinOverlay({
+        title: 'ENTER YOUR PIN',
+        subtitle: why || 'To go on.',
+        cta: 'CONTINUE',
+        onCancel: () => {},
+        onSubmit: (pin, warn) => {
+          // the lock's own count of tries and its wait, as every PIN this app asks
+          const r = this.pinTry(pin);
+          if (!r.ok) { warn(r.message); return; }
+          this.pinDismiss();
+          go();
+        },
+      });
+    };
+    if (!face) { pad(); return; }
+    /* With no PIN the phone's own passcode may stand in for the face, as at launch; and a phone that cannot check either is
+     * let through, which is no worse than the phone itself (`pinLock`). With a PIN, a face that will not scan falls to it. */
+    Promise.resolve(W.biometric(String(why || 'Foxy').replace(/\.$/, ''), !pinSet)).then((answer) => {
+      if (answer === 'yes' || (answer === 'unavailable' && !pinSet)) {
+        if (answer === 'yes' && W.pinTriesClear) W.pinTriesClear();
+        go();
+        return;
+      }
+      pad();
+    }, () => pad());
+  }
+
+  // POINT OF SALE, past the lock: this phone's own till, on SET AMOUNT as home's RECEIVE opens it
+  tillStart() {
+    const till = { role: 'keeper', since: Date.now() };
+    console.log('[foxy] till: opened on this phone');
+    // the requests made before it are let go, so none from before is shown in the till (`forgetRequests`)
+    if (this.forgetRequests) this.forgetRequests();
+    this.setState(Object.assign({ till: till, open0: false, menuSettingsOpen: false }, this.homeState(till)));
+  }
+
+  /* The X on the till's SET AMOUNT. The keeper's is behind the lock; the cashier's asks only whether, since the money it
+   * took is the keeper's and goes to them whether this phone stays or not. */
+  tillClose() {
+    const W = window.FoxyWallet;
+    if (this.tillRole() === 'keeper') { this.tillGate(() => this.tillEnd(), 'To close the till.'); return; }
+    if (this.tillRole() !== 'cashier') { this.tillEnd(); return; }
+    this.blockedCard('tillLeave', {
+      tone: 'ask', title: 'LEAVE THE TILL?',
+      reason: 'Money already taken is still sent to the keeper.',
+      retry: 'LEAVE',
+      go: () => this.tillLeaveNow(''),
+      shut: { label: 'BACK' },
+    });
+  }
+
+  /* A cashier out of the till: the wallet lets the code go and goes back to this phone's own mint (`tillLeave`), keeping
+   * what is still to be sent to the keeper, which goes out by itself. `said` is a word for the toast, or ''. */
+  tillLeaveNow(said) {
+    const W = window.FoxyWallet;
+    // one leave at a time: the minute's clock and the end of a payment can both come to it (`tillRunOutGo`)
+    if (this._tillLeaving) return this._tillLeaving;
+    /* The mint the till was worked at, from the code, and not the one the wallet is on now: a code run out is noticed by the
+     * wallet on its own clock too (`tillCashier`), which goes home before this runs, and a comparison with where it is now
+     * said nothing had changed, so the cashier's home came back with no balance asked of its own mint (review, expiry). */
+    const pass = this.tillPassNow();
+    const was = String((pass && pass.mint) || (W && W.mintUrl) || '');
+    const run = Promise.resolve(W && W.tillLeave ? W.tillLeave() : null).then(() => {
+      this.tillEnd();
+      if (said) this.toast(said);
+      // back at this phone's own mint: what a switch says, as SWITCH says it (09-melt-paste-switch.js, `justSwitch`)
+      if (W && was && !this.onMint(was)) this.walletReady({ name: this.mintHost() });
+    }, (e) => {
+      // out of the till all the same: the outbox stays with the wallet and goes out by itself
+      console.warn('[foxy] till: leaving, the way back to this phone\u2019s mint failed:', (e && e.message) || e);
+      this.tillEnd();
+      // why it left comes first; the banner says the mint could not be reached
+      this.toast(said || ((W && W.reason) ? W.reason(e) : 'Could not reach your mint.'), !said);
+    });
+    this._tillLeaving = run;
+    const done = () => { if (this._tillLeaving === run) this._tillLeaving = null; };
+    run.then(done, done);
+    return run;
+  }
+
+  // out of the till, either role: home, with this phone's own balance and history again
+  tillEnd() {
+    clearInterval(this._tillTickT);
+    this._tillTickT = null;
+    clearTimeout(this._tillRunOutT);
+    this._tillRunOutT = null;
+    this._tillRunOut = false;
+    this._tillRunOutSaid = false;
+    if (this.state.till) console.log('[foxy] till: closed');
+    // and a request locked to a keeper is never shown again once the till is closed (12-receive.js, `forgetRequests`)
+    if (this.forgetRequests) this.forgetRequests();
+    this.setState({ till: null, screen: 'home', stack: [], amount: '', flow: '', wallet: '', walletAuto: false, walletTapped: false });
+    this.loadHistory();
+    this.refreshBalance();
+  }
+
+  // when a cashier code runs out, in the words the clock on the phone would use: "Mon, 2:45 PM"
+  tillExpiresText(exp) {
+    const n = Number(exp) || 0;
+    if (!n) return '';
+    const d = new Date(n * (n > 1e11 ? 1 : 1000));
+    let day = '';
+    try { day = d.toLocaleDateString('en-US', { weekday: 'short' }); } catch (e) { day = ''; }
+    return (day ? day + ', ' : '') + this.txClock(d);
+  }
+
+  /* CASHIER CODE, past the lock: a code for another Foxy to scan, made by the wallet (`tillPassMake`: a lock key from the seed,
+   * a Nostr key the phone keeps in the Keychain, 72 hours). Shown on the stage screen that shows a code to be scanned, with
+   * DONE, as the change card's code is (26e-loaders.js, `stageScreen`). */
+  tillPassShow() {
+    const W = window.FoxyWallet;
+    if (!W || !W.tillPassMake) { this.toast('This Foxy cannot make a cashier code.', true); return; }
+    const run = (this._tillPassRun = (this._tillPassRun || 0) + 1);
+    this.stageScreen('tillPass', {
+      art: '', title: 'CASHIER CODE', body: 'Making the code', dots: true, button: 'CANCEL',
+      go: () => { if (this._tillPassRun === run) this._tillPassRun = 0; },
+    });
+    Promise.resolve(W.tillPassMake()).then((p) => {
+      if (this._tillPassRun !== run) return;
+      if (!p || !p.text) throw new Error('No code was made.');
+      this.stageScreen('tillPass', {
+        art: '', title: 'CASHIER CODE', qr: String(p.text),
+        body: 'Scan with Foxy. Money they take is locked to this phone and sent here.'
+          + (p.exp ? '<br>Expires ' + this.tillExpiresText(p.exp) : ''),
+        button: 'DONE',
+      });
+    }).catch((e) => {
+      if (this._tillPassRun !== run) return;
+      this._tillPassRun = 0;
+      this.hideStage('tillPass');
+      this.blockedCard('tillPassFailed', {
+        title: 'NO CASHIER CODE',
+        reason: (W.reason ? W.reason(e) : String((e && e.message) || e)),
+        chip: 'Nothing was made.',
+      });
+    });
+  }
+
+  /* A cashier code, scanned or pasted (`acceptTarget`): what it is, before anything changes. A code that has run out, or that
+   * is not one, is said no to; so is this phone's own, which it cannot work for itself. */
+  tillJoinAsk(text) {
+    const W = window.FoxyWallet;
+    const pass = (W && W.tillDecode) ? W.tillDecode(String(text || '')) : null;
+    if (!pass) {
+      this.blockedCard('tillBadCode', {
+        tone: 'warn', title: 'THAT CODE WON’T WORK',
+        // the wallet's own sentence for what is wrong with it (run out, or not one), where it has one (`tillProblem`)
+        reason: (W && W.tillProblem && W.tillProblem(String(text || ''))) || 'This cashier code has run out, or it is not one Foxy can read.',
+        chip: 'Ask for a new CASHIER CODE.',
+      });
+      return false;
+    }
+    let own = false;
+    try { own = !!(W.tillPasses && (W.tillPasses() || []).some((p) => p && p.id === pass.id)); } catch (e) { own = false; }
+    if (own) {
+      this.blockedCard('tillOwnCode', {
+        tone: 'warn', title: 'THIS PHONE’S OWN CODE',
+        reason: 'A cashier code is for another phone to scan. To take payments on this one, open SETTINGS > POINT OF SALE.',
+      });
+      return false;
+    }
+    const host = String(pass.mint || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    this.blockedCard('tillJoin', {
+      tone: 'ask', title: 'WORK THE TILL?',
+      reason: host + '\nMoney you take is locked to the keeper and sent to them. This phone never holds it.'
+        + '\nYour own money is hidden until you leave.',
+      chip: 'Expires ' + this.tillExpiresText(pass.exp),
+      retry: 'START',
+      go: () => this.tillJoinGo(pass),
+      shut: { label: 'BACK' },
+    });
+    return true;
+  }
+
+  /* START: onto the keeper's mint (the wallet remembers this phone's own to come back to), then the till. The connecting
+   * screen is the one a payment's connection shows; a cancel there leaves the till again once the mint has answered. */
+  tillJoinGo(pass) {
+    const W = window.FoxyWallet;
+    if (!W || !W.tillJoin) { this.toast('This Foxy cannot work a till.', true); return; }
+    // a payment or a claim under way finishes at the mint it started on (`refuseSwitchWhileBusy`)
+    if (!this.onMint(pass.mint) && this.refuseSwitchWhileBusy && this.refuseSwitchWhileBusy()) return;
+    let cancelled = false;
+    this.stageScreen('tillJoin', {
+      art: '', title: 'CONNECTING', body: String(pass.mint || '').replace(/^https?:\/\//, '').replace(/\/+$/, ''),
+      dots: true, button: 'CANCEL', go: () => { cancelled = true; },
+    });
+    Promise.resolve(W.tillJoin(pass)).then((joined) => {
+      this.hideStage('tillJoin');
+      if (cancelled) {
+        console.log('[foxy] till: cancelled while connecting; leaving again');
+        return Promise.resolve(W.tillLeave ? W.tillLeave() : null).then(() => this.refreshBalance(), () => {});
+      }
+      // the wallet's answer, { pass, since }: the session is from when it was joined
+      const till = { role: 'cashier', since: Number(joined && joined.since) || Date.now(), pass: (joined && joined.pass) || pass };
+      console.log('[foxy] till: working the till for a keeper at ' + String(pass.mint).replace(/^https?:\/\//, ''));
+      // a request this phone made for itself is never shown in the till (12-receive.js, `forgetRequests`)
+      if (this.forgetRequests) this.forgetRequests();
+      // (its outbox and inbox are the wallet's to ask at the connect: 08d-till.js)
+      this.setState(Object.assign({ till: till, open0: false, menuSettingsOpen: false }, this.homeState(till)));
+      this.loadHistory();
+      return null;
+    }).catch((e) => {
+      this.hideStage('tillJoin');
+      console.warn('[foxy] till: could not join:', (e && e.message) || e);
+      // nothing half done: the wallet's row goes, and this phone is where it was
+      if (W.tillLeave) Promise.resolve(W.tillLeave()).catch(() => {});
+      if (!cancelled) this.toast(W.reason ? W.reason(e) : 'Could not reach that mint.', true);
+    });
+  }
+
+  /* Once a minute while this phone is a cashier: a code that has run out takes it out of the till, with a word. The wallet
+   * answers null once `exp` has passed, and leaves for this phone's own mint itself (`tillCashier`). One timer, which
+   * `syncTill` starts and stops with the role, so none outlives the till.
+   *
+   * Not in the middle of a payment (`tillMidPayment`): the receive screen up, PAID, a token being taken. Then the code's own
+   * date decides, and the wallet is not asked, since its asking is itself what takes the phone home, and a payer half way
+   * through paying would find the till gone under them. The leave waits for the screen to be left (`syncTill`). */
+  tillTick() {
+    const W = window.FoxyWallet;
+    if (this.tillRole() !== 'cashier') { clearInterval(this._tillTickT); this._tillTickT = null; return Promise.resolve(false); }
+    const pass = this.tillPassNow();
+    const ran = !!pass && Number(pass.exp) > 0 && Date.now() / 1000 >= Number(pass.exp);
+    if (this._tillRunOut || (ran && this.tillMidPayment())) {
+      this._tillRunOut = true;
+      return this.tillRunOutGo();
+    }
+    let asked = null;
+    try { asked = (W && W.tillCashier) ? W.tillCashier() : null; } catch (e) { asked = null; }
+    return Promise.resolve(asked).then((row) => {
+      if (row && !ran) return false;
+      if (this.tillRole() !== 'cashier') return false;
+      this._tillRunOut = true;
+      return this.tillRunOutGo();
+    }, () => false);
+  }
+
+  /* A payment under way on a cashier's phone: anything but the till's SET AMOUNT or its HISTORY with nothing up over it (a
+   * stage screen such as PAYMENT RECEIVED, the wait over a token being taken), or the second between a pending receive's
+   * DISMISS and its PAID (04-receive-dismissals.js, `dismissPending`, which says when that PAID is due). */
+  tillMidPayment() {
+    const s = this.state || {};
+    const still = (this.tillIdle() || (s.screen === 'history' && !!s.till)) && !s.sendExit;
+    if (!still) return true;
+    if (Date.now() < (Number(this._paidDueAt) || 0)) return true;
+    if (this.stageUp && this.stageUp()) return true;
+    return !!document.getElementById('foxy-melt');
+  }
+
+  /* The code has run out: out of the till now, or, in the middle of a payment, as soon as it is over. Answers whether it left. */
+  tillRunOutGo() {
+    clearTimeout(this._tillRunOutT);
+    this._tillRunOutT = null;
+    if (this.tillRole() !== 'cashier') { this._tillRunOut = false; return Promise.resolve(false); }
+    if (this.tillMidPayment()) {
+      if (!this._tillRunOutSaid) {
+        this._tillRunOutSaid = true;
+        console.log('[foxy] till: the cashier code has run out; leaving once the payment on screen is over');
+      }
+      /* Looked at again a moment from now as well as at every render (`syncTill`): a PAID that is still to land, and a stage
+       * screen going down, render nothing of their own to say they are over. */
+      this._tillRunOutT = setTimeout(() => this.tillRunOutGo(), Math.max(1000, (Number(this._paidDueAt) || 0) - Date.now() + 50));
+      return Promise.resolve(false);
+    }
+    this._tillRunOutSaid = false;
+    console.log('[foxy] till: the cashier code has run out');
+    return this.tillLeaveNow('The cashier code has expired').then(() => true);
+  }
+
+  /* At launch, past the lock: a cashier's till comes back, on the keeper's mint, until it runs out or is left. A keeper's
+   * never does (it is not saved). */
+  tillResume() {
+    const W = window.FoxyWallet;
+    if (!W || !W.tillCashier || this.state.till) return Promise.resolve(false);
+    let asked = null;
+    try { asked = W.tillCashier(); } catch (e) { asked = null; }
+    return Promise.resolve(asked).then((row) => {
+      const pass = row && row.pass;
+      if (!pass || !pass.mint || this.state.till) return false;
+      const enter = () => {
+        const till = { role: 'cashier', since: Number(row.since) || Date.now(), pass: pass };
+        console.log('[foxy] till: back in the till after a relaunch');
+        if (this.forgetRequests) this.forgetRequests();
+        this.setState(Object.assign({ till: till, open0: false }, this.homeState(till)));
+        this.loadHistory();
+        return true;
+      };
+      if (this.onMint(pass.mint)) return enter();
+      return Promise.resolve(W.tillJoin ? W.tillJoin(pass) : null).then(enter, (e) => {
+        console.warn('[foxy] till: could not get back to the keeper\u2019s mint:', (e && e.message) || e);
+        return false;
+      });
+    }, () => false);
+  }
+
+  /* The till's two jobs with the network on every return to the foreground (12-receive.js, `inboxWake`): the keeper's inbox
+   * for the codes it has out (`tillListen`), which the phone closed as Foxy went away, and whatever a cashier took that has
+   * not reached its keeper yet (`tillDeliver`). The wallet asks both itself at every connect, and making a code opens its
+   * inbox, so the return is the one moment left to this. */
+  tillWake() {
+    const W = window.FoxyWallet;
+    if (!W) return;
+    try { if (W.tillListen) Promise.resolve(W.tillListen()).catch(() => {}); } catch (e) {}
+    try { if (W.tillDeliver) Promise.resolve(W.tillDeliver()).catch(() => {}); } catch (e) {}
+  }
+
+  /* What a scan or a paste is, in the till (`acceptTarget`): a token is taken (a cashier's to its keeper, `tillTokenIn`); a
+   * cashier code is for outside the till; everything else is a way to pay, and the till does not pay. */
+  tillAccept(text, kind) {
+    if (kind === 'token') {
+      if (this.tillRole() === 'cashier') this.tillTokenIn(text);
+      else this.takeTokenFromPaste(text);
+      return true;
+    }
+    if (kind === 'till') { this.toast('Leave the till first.', true); return false; }
+    this.toast('The till only receives. Ask them to pay this till’s code.', true);
+    return false;
+  }
+
+  /* A token taken at a cashier's till: never into this phone's pile. The wallet takes it only locked to the keeper's key,
+   * signed by the mint and unspent, and sends it on (`tillTakeToken`); the confirmation is the history's, as a scanned
+   * token's is (`announceTaken`). */
+  tillTokenIn(text) {
+    const W = window.FoxyWallet;
+    if (!W || !W.tillTakeToken) { this.toast('This till cannot take a token.', true); return; }
+    if (this.state.screen === 'confirm') this.closeReceive();
+    this.showMelt('Receiving ecash…');
+    Promise.resolve(W.tillTakeToken(String(text || '').trim())).then((r) => {
+      this.hideMelt();
+      this.announceTaken(r);
+      this.loadHistory();
+    }).catch((e) => {
+      this.hideMelt();
+      this.blockedCard('tillTokenRefused', {
+        title: 'NOT TAKEN',
+        reason: W.reason ? W.reason(e) : String((e && e.message) || e),
+        chip: 'Nothing was taken.',
+      });
+    });
+  }
+
+  // SCAN on a cashier's receive screen: the camera, then the till's own way in for a token (`tillTokenIn`)
+  tillScanToken() {
+    const W = window.FoxyWallet;
+    if (!W || !W.scan) return;
+    Promise.resolve(W.scan('Scan an ecash token')).then((text) => {
+      const t = String(text || '').trim();
+      if (W.classify(t) !== 'token') { this.toast('That QR is not a Cashu token.', true); return; }
+      this.tillTokenIn(t);
+    }).catch(() => {});
+  }
+
+  /* After every render, while the till is open (19-update-keypad-balance.js, `componentDidUpdate`):
+   *
+   *   - home is never shown: a road home this file did not reach still says `screen: 'home'` (a card's CLOSE, a flow's own
+   *     ending), and it is turned into the till's SET AMOUNT here, before the next frame;
+   *   - the cashier's expiry clock runs, and only while it is a cashier (`tillTick`);
+   *   - PAID on a cashier's phone says where the money went, which is to the keeper, not into a balance here. */
+  syncTill(prevState) {
+    const s = this.state || {};
+    const cashier = !!s.till && s.till.role === 'cashier';
+    if (cashier && !this._tillTickT) this._tillTickT = setInterval(() => this.tillTick(), 60000);
+    if (!cashier && this._tillTickT) { clearInterval(this._tillTickT); this._tillTickT = null; }
+    if (!s.till) return;
+    if (s.screen === 'home') {
+      console.log('[foxy] till: a way home ended at the till instead');
+      this.setState(Object.assign({ open0: false, menuSettingsOpen: false }, this.homeState()));
+      return;
+    }
+    // nor the menu, which is home's and has SEND, the cards and SETTINGS in it, whatever opened it
+    if (s.open0) { this.setState({ open0: false, menuSettingsOpen: false }); return; }
+    /* Nor any screen the till has none of: a card's (LOAD and SEND are on it), SEND's, the menu's. Whatever reached one, a road
+     * this file has not heard of, it is the till's SET AMOUNT before the next frame (and SET AMOUNT only for a receive: a
+     * card's amounts are typed on it too, 26f-flashcard.js `fcAmount`). A keeper's receive paid by a card at
+     * another mint shows the charge first (26f-flashcard.js, `fcXmBegin`), and that is the one more a keeper's till has. */
+    const kept = this.TILL_SCREENS.indexOf(s.screen) >= 0 && (s.screen !== 'amount' || s.flow === 'receive');
+    if (!kept && !(s.till.role === 'keeper' && s.screen === 'fcXmConfirm')) {
+      console.log('[foxy] till: ' + s.screen + ' is not a screen the till has; back to its SET AMOUNT');
+      this.setState(this.homeState());
+      return;
+    }
+    // a code that ran out in the middle of a payment: out of the till once it is over (`tillTick`)
+    if (cashier && this._tillRunOut && !this._tillLeaving && !this.tillMidPayment()) this.tillRunOutGo();
+    if (cashier && s.screen === 'paid' && !s.paidPlace && !s.payOut) {
+      this.setState({ paidPlace: { label: 'SENT TO', to: 'THE KEEPER' } });
+    }
+  }
+
+  /* HISTORY in the till: this session's money in, and nothing else. Rows from `since` on, received only; a cashier's only
+   * the till's own (`till`), each saying whether it has reached the keeper yet. No running balance, no books, no tabs and
+   * no filters, and a row opens nothing: its detail screen has COPY TOKEN, SHOW QR and REDEEM on it. Returns every key
+   * `renderHistory` does, so the screen is the same screen. */
+  /** @param {RenderContext} c */
+  tillHistory(c) {
+    const { s, sc } = c;
+    const t0 = Number(s.till && s.till.since) || 0;
+    const cashier = this.tillRole() === 'cashier';
+    const ok = 'var(--ok)', amber = 'var(--btc-ink)';
+    const groups = (s.fresh ? [] : (s.history || [])).map((g) => ({
+      label: g.label,
+      items: (g.items || []).filter((t) => t && t.dir === 'in' && !t.split && !t.changeRow
+        && (Number(t.atMs) || 0) >= t0 && (!cashier || t.till)).map((t) => {
+        const waiting = cashier ? !t.tillSent : !!t.pending;
+        const rail = cashier ? (t.tillSent ? 'SENT TO KEEPER' : 'SENDING…') : (t.pending ? 'Pending' : '');
+        return {
+          name: (t.note && String(t.note).trim()) || t.name || 'Received',
+          initial: String(t.name || 'R').slice(0, 1).toUpperCase(),
+          cardBg: 'var(--surface)', cardEdge: '1.5px', cardSpin: 'none',
+          tileBg: waiting ? amber : ok,
+          stroke: waiting ? amber : 'rgba(var(--ok-rgb),.7)',
+          amtColor: 'var(--ok-ink)',
+          amtText: '+' + (t.unit ? this.unitMoney(t.amount, t.unit)
+            : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).main),
+          amtSub: t.unit ? this.unitLabel(t.unit) + ' ecash' : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).sub,
+          balText: '',
+          line2: rail || t.time,
+          line3: rail ? t.time : '',
+          line2Color: rail ? (waiting ? amber : 'rgba(var(--ink-rgb),.5)') : 'rgba(var(--ink-rgb),.45)',
+          line2Weight: rail ? '600' : '500',
+          open: () => {},
+        };
+      }),
+    })).filter((g) => g.items.length);
+    const none = () => {};
+    return {
+      historyEmptySub: 'Payments taken in this session show up here.',
+      isHistory: sc === 'history',
+      histTitle: 'THIS SESSION',
+      histClearVis: 'hidden',
+      historyMint: (window.FoxyWallet && window.FoxyWallet.mintHost && window.FoxyWallet.mintHost()) || 'MINT',
+      goSwitchFromHistory: none,
+      histScrollRef: this._refHist || (this._refHist = (el) => this.histRef(el)),
+      goHistory: () => this.go('history'),
+      histFilterShown: false,
+      fAllBg: 'transparent', fAllFg: 'rgba(var(--ink-rgb),.5)',
+      fInBg: 'transparent', fInFg: 'rgba(var(--ink-rgb),.5)',
+      fOutBg: 'transparent', fOutFg: 'rgba(var(--ink-rgb),.5)',
+      filterAll: none, filterIn: none, filterOut: none,
+      historyGroups: groups,
+      histTabsShown: false,
+      histTabs: [],
+      historyEmpty: groups.length === 0,
+      histAuditShown: false,
+      histAuditTitle: '',
+      histAuditBody: '',
+      histAuditAction: false,
+      histAuditCta: '',
+      histAuditGo: none,
+      histAuditInk: 'var(--btc-ink)',
+      histAuditEdge: 'rgba(var(--ink-rgb),.12)',
+    };
   }
 
   /* switchMint: the mint list. */

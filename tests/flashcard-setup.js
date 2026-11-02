@@ -191,7 +191,8 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
   card.tap();
   const b2 = card.sent.length;
   const lim = await W.cardSetLimit(card, { sats: 5000 });
-  ok(lim.info.limit === 5000 && lim.record.limit === 5000 && lim.info.windowStart === lim.info.now && lim.info.spentToday === 0 && lim.info.now > 0,
+  // within a second: the two are read a moment apart, and the clock ticked between them once in a check-all (2026-11-01)
+  ok(lim.info.limit === 5000 && lim.record.limit === 5000 && Math.abs(lim.info.windowStart - lim.info.now) <= 1 && lim.info.spentToday === 0 && lim.info.now > 0,
      'the owner sets the limit, and a day begins at the card’s clock with nothing spent', JSON.stringify({ limit: lim.info.limit, start: lim.info.windowStart, now: lim.info.now }));
   ok(!card.sent.slice(b2).some((a) => a.slice(2, 4) === '40'), 'with no PIN sent');
   ok(lim.day.limited && lim.day.limit === 5000 && lim.day.left === 5000 && lim.day.spent === 0, 'and the card’s day is read as the whole limit left', JSON.stringify(lim.day));

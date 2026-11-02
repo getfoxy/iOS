@@ -52,8 +52,10 @@
       // offline too: only the request changes, and that needs no mint
       pickRecvWallet: () => this.pickRecvWallet(),
       recvTapShown: true,
-      recvCardShown: !usdIn || (!!s.invoice && !s.invoiceIsAddress) || !this.offlineNow()
-        || !!(window.FoxyWallet && window.FoxyWallet.cardOffline && window.FoxyWallet.cardOffline()),
+      /* Not at a cashier's till: a card's pieces are swapped into the phone that reads them, and a cashier's phone holds
+       * nothing of the keeper's (26m-till.js). */
+      recvCardShown: !(this.tillRole && this.tillRole() === 'cashier') && (!usdIn || (!!s.invoice && !s.invoiceIsAddress) || !this.offlineNow()
+        || !!(window.FoxyWallet && window.FoxyWallet.cardOffline && window.FoxyWallet.cardOffline())),
       recvClockShown: usdIn && !cashu && !!s.invoice && !!s.recvExpiresAt,
       recvClock: 'NEW CODE IN ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0'),
       /* COPY and SHARE wait for the code. Until the rail on screen has
@@ -335,7 +337,9 @@
             balance: fc.unit === off.unit ? Math.max(0, (Number(fc.balance) || 0) - off.off) : fc.balance,
             bal: fc.bal ? Object.assign({}, fc.bal, { [off.unit]: Math.max(0, (Number(fc.bal[off.unit]) || 0) - off.off) }) : fc.bal,
           }) : fc;
-          this.setState({ screen: toCard ? 'flashcard' : 'home', fc: fcNext, stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidPlace: null, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidAskAgeMs: 0, paidConvert: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) });
+          this.setState(Object.assign({ screen: toCard ? 'flashcard' : 'home', fc: fcNext, stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidPlace: null, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidAskAgeMs: 0, paidConvert: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) },
+            // in the till, its SET AMOUNT for the next customer (26m-till.js, `homeState`)
+            toCard || !this.state.till ? {} : this.homeState()));
         }, 450);
       },
     };

@@ -21,6 +21,15 @@
       // on the circuit kept ready, when there is one (`needNow`)
       try { w = needNow(); } catch (e) { return Promise.reject(e); }
       var at = mintOf(w);
+      /* A till's invoice (`opts.lockPub`, 08d-till.js): its claim mints ecash
+       * locked to the keeper and sends it there, and its record says where. */
+      var tillExtra;
+      if (opts && opts.lockPub) {
+        try {
+          var tp = tillTermsFor(opts.lockPub, unit || 'sat', at);
+          tillExtra = { lockPub: tp.lock, till: true, tillPass: tp.id, tillTo: tp.to, tillExp: tp.exp };
+        } catch (eTill) { return Promise.reject(eTill); }
+      }
 
       // no default description: 'Foxy' on every invoice told the payer and the mint which wallet this is
       /* Asked again on another circuit after five seconds of nothing,
@@ -31,7 +40,7 @@
        * it comes, is a quote nobody was shown. The record is written in the
        * same step (`keepQuote`). */
       return unitWalletOn(w, unit).then(function (via) {
-        return makeQuote(via, amount, memo || '', unit);
+        return makeQuote(via, amount, memo || '', unit, tillExtra);
       }).then(function (made) {
         var q = made.q;
         var expiry = Number(q.expiry) || 0;
@@ -449,6 +458,8 @@
        * would never be sats anyway. */
       var unit = recordUnit(entry);
       return unitWalletOn(w, unit).then(function (w) {
+      // a till's invoice: minted locked to the keeper, into the outbox and not the pile (08d-till.js)
+      if (entry.lockPub) return tillClaimQuote(w, entry, quoteId, archived, unit);
       /* The counter ranges this claim reserves go on the invoice's record as
        * they are reserved, before the request leaves. If the mint issues and
        * the answer is lost, the quote reads ISSUED and recoverIssued restores
@@ -811,6 +822,8 @@
         // restored by the wallet of the invoice's unit, into that unit's pile (hard rule 3)
         var unit = recordUnit(entry);
         return unitWalletOn(w, unit).then(function (w) {
+        // a till's invoice: rebuilt from its locked outputs, for the keeper (08d-till.js)
+        if (entry.lockPub) return tillRecoverQuote(w, rec0, quoteId, unit);
         var memo = foundKey === K.move ? 'mint switch' : (entry.memo || '');
         if (!Array.isArray(entry.outputs) || !entry.outputs.length) {
           console.log('[foxy] invoice', short, 'is ISSUED with no claim outputs on record; dropped. ' +

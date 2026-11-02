@@ -325,6 +325,13 @@
       /* What this phone takes with no route before it settles: from one payer,
        * and in all (26j-till-caps.js). Dollars, with the sats under. */
     ]).concat(this.tillCapRows ? this.tillCapRows(MENU_ICON.receive, shut) : []).concat([
+      /* The till (26m-till.js): this phone as a point of sale, receive and this session's history only, and a code that
+       * puts another Foxy into it for this phone. Both behind the lock this phone already has (`tillGate`). */
+      { label: 'POINT OF SALE', path: MENU_ICON.receive,
+        tap: shut(() => this.tillGate(() => this.tillStart(), 'To open the till.')) },
+      { label: 'CASHIER CODE', path: MENU_ICON.scan,
+        tap: shut(() => this.tillGate(() => this.tillPassShow(), 'To show a cashier code.')) },
+    ]).concat([
       /* The phone's own screens, straight over home: no Foxy screen before
        * RESTORE A WALLET or after YOUR SEED PHRASE. */
       { label: 'RESTORE', path: MENU_ICON.restore, tap: shut(() => this.restoreFromMenu()) },
@@ -529,7 +536,8 @@
   /* What more than one screen's function reads, worked out once a render. */
   renderContext() {
     const s = this.state;
-    const sc = s.screen;
+    // home is never drawn in the till: its SET AMOUNT is, until `syncTill` has put the state right (26m-till.js)
+    const sc = (s.till && s.screen === 'home') ? 'amount' : s.screen;
     // the wallet you're paying from caps a send
     const balLive = this.balNow();
     // the fork could hide the bitcoin wallet; this one is the bitcoin wallet

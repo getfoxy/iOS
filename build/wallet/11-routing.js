@@ -89,6 +89,8 @@
       }
       // and the newest Bitcoin block header is fetched for the cards, if the one kept is old (08b-block-headers.js)
       if (!wasUp && privacy.tor === 'up') headerLater();
+      // and what a cashier took and could not send with no route goes now (08d-till.js), not at its next minute
+      if (!wasUp && privacy.tor === 'up' && routeOpen()) tillOnRoute();
       return FoxyWallet.privacy();
     },
 
@@ -394,6 +396,8 @@
           // a store short of room: sent tokens the mint says are claimed let go from their notes (`tidySentTokens`)
           .then(function () { return tidySentTokens().then(null, function () { return 0; }); })
           .then(sweepPause).then(function () { return FoxyWallet.claimUnclaimed(); })
+          // and a till's: what a cashier still has to send, and what a keeper kept for this mint (08d-till.js)
+          .then(function () { tillCatchUp(); })
           // and a card's pieces it signed for while the mint was not answering (08a-flashcard.js)
           .then(function () { return FoxyWallet.cardTaken().length ? FoxyWallet.cardSettle() : null; })
           // and change due to a card that could not be made when it paid

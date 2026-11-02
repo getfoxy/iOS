@@ -29,8 +29,12 @@
    * PIN on this phone, and the words say it is theirs; what the card holds is what is being sent, so CURRENCY is not asked; and
    * the tap writes no owner and no key of this phone's, then the money under the holder's PIN.
    *
-   * The way back is the round back button of the pad and of SET AMOUNT: one step back (from SET AMOUNT, to its question), and
-   * from the first, to where the set-up began. A question's card goes when it is tapped beside, and the set-up with it. */
+   * The way back is the round back button of the pad and of SET AMOUNT: one step back (from SET AMOUNT, to its question; from
+   * NO PIN AMOUNT?, to CURRENCY where it was asked), and from the first, to where the set-up began. A question's card goes when
+   * it is tapped beside, and the set-up with it.
+   *
+   * NO PIN AMOUNT? comes up filled in: $20.00 (the design's default, FC_SU_NOPIN_DEFAULT_CENTS) where it is typed in dollars,
+   * or the figure chosen before where the step is come back to; the first key typed replaces it (`amountDefault`). */
 
   /* What a card can hold, as the set-up's CURRENCY step offers it, in order. */
   FC_SETUP_UNITS = ['usd', 'sat'];
@@ -120,6 +124,26 @@
     su.fromSpeed = which === 'tap' && !!other;
     if (which === 'tap' && !other && this.fcSpeedChoosable(this.fcSuUnitNow())) { this.fcSpeedOpen('su', this.fcSuUnitNow(), this.FC_SPEED_FIRST); return; }
     this.fcAmount(this.FC_SU_FLOWS[which]);
+    if (which === 'noPin') this.fcSuPrefill(su);
+  }
+
+  /* What NO PIN AMOUNT? shows before anything is typed: the figure chosen before, where the step is come back to (from MAX SPEND PER
+   * SECOND's back button), in the unit it was typed in; else $20.00 where dollars are typed. A bitcoin card with no price types sats,
+   * and is given no figure (there are no dollars to say it in). Marked the default: the first key typed starts from nothing
+   * (19-update-keypad-balance.js, `press`), so $20.00 is not what a 5 is typed after. */
+  FC_SU_NOPIN_DEFAULT_CENTS = 2000;
+  fcSuPrefill(su) {
+    const s = this.state;
+    let amount = '';
+    let unit = s.unit;
+    if (su.noPin > 0) {
+      if (this.fcSuUnitNow() === 'usd') amount = (su.noPin / 100).toFixed(2);
+      else if (s.unit === 'USD' && su.noPinUsd > 0) amount = Number(su.noPinUsd).toFixed(2);
+      else { amount = String(Math.round(su.noPin)); unit = 'SATS'; }
+    } else if (s.unit === 'USD') {
+      amount = (this.FC_SU_NOPIN_DEFAULT_CENTS / 100).toFixed(2);
+    }
+    if (amount) this.setState({ amount, unit, amountDefault: true });
   }
 
   // which of the two SET AMOUNT is asking for, while it is up: 'noPin', 'tap', or ''
@@ -134,7 +158,7 @@
     const su = this._fcSu;
     const was = su && su.was;
     if (su) su.was = null;
-    if (was) this.setState({ screen: was.screen, stack: was.stack, flow: was.flow, amount: was.amount, unit: was.unit });
+    if (was) this.setState({ screen: was.screen, stack: was.stack, flow: was.flow, amount: was.amount, unit: was.unit, amountDefault: false });
   }
 
   /* NEXT: the figure in the card's unit (`fcTyped`: cents for a dollar card, sats for a bitcoin card) and, for a bitcoin card typed in
@@ -162,16 +186,22 @@
     if (w === 'tap') { su.tapLimit = 0; su.tapUsd = 0; this.fcSuGo(); } else { su.noPin = 0; su.noPinUsd = 0; this.fcSuTap(); }
   }
 
-  /* The round back button on SET AMOUNT (01-ui-basics.js, `back`), a step back: off NO PIN AMOUNT?, out of the set-up to the screen it
-   * was asked over, with nothing written; off the rate typed, MAX SPEND PER SECOND where it came from there, NO PIN AMOUNT? otherwise.
-   * True where it was the set-up's. */
+  /* The round back button on SET AMOUNT (01-ui-basics.js, `back`), a step back: off NO PIN AMOUNT?, CURRENCY again where it was asked
+   * (the choice open once more), and otherwise out of the set-up to the screen it was asked over, with nothing written; off the rate
+   * typed, MAX SPEND PER SECOND where it came from there, NO PIN AMOUNT? otherwise. True where it was the set-up's. */
   /* (and on MAX SPEND PER SECOND, while the set-up asks it: NO PIN AMOUNT?, `fcSpeedBack`) */
   fcSuAmountBack() {
     if (this._fcSu && this.state.screen === 'fcSpeed' && this.state.fcSpeed && this.state.fcSpeed.mode === 'su') { this.fcSpeedBack(); return true; }
     const which = this.fcSuAsking();
     if (!which) return false;
     const su = this._fcSu;
-    if (which === 'noPin') { this.fcSuLeave(); this._fcSu = null; return true; }
+    if (which === 'noPin') {
+      this.fcSuLeave();
+      // the step before was CURRENCY (asked only of the owner's own card, at a mint with two balances): that question again, not the start
+      if (su.unit && !su.other && this.twoUnitsOn && this.twoUnitsOn()) { su.unit = ''; this.fcSuUnit(); return true; }
+      this._fcSu = null;
+      return true;
+    }
     if (su.fromSpeed && this.state.fcSpeed && this.state.fcSpeed.mode === 'su') {
       // (SET AMOUNT was opened over MAX SPEND PER SECOND, `fcAmount`: off it, back to that screen, at the rate it showed)
       su.fromSpeed = false;
@@ -232,7 +262,13 @@
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.toast(c.unit === 'both' ? 'The card is set up. It holds dollars and bitcoin.' : c.unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
-      }, (e) => this.fcFailed(e, { again: () => this.fcSetUpStepsRun(c) }));
+      }, (e) => this.fcFailed(e, { again: () => this.fcSetUpStepsRun(c), pinAgain: () => this.fcSuPinAgain(c, (c2) => this.fcSetUpStepsRun(c2)) }));
+  }
+
+  /* TRY AGAIN after the card refused the PIN the set-up's tap was run with (a card that keeps one): the pad once more, and the tap
+   * again with the new PIN and everything else as chosen (`c`, the choice `fcSuGo` made), never the same PIN at the card twice. */
+  fcSuPinAgain(c, then) {
+    this.fcAskPin({ title: 'CARD PIN', subtitle: 'The card refused that PIN. Type it again.' }, (a) => then(Object.assign({}, c, { pin: a })));
   }
 
   /* ---- MAX SPEND PER SECOND -------------------------------------------------------------------------------------------

@@ -46,7 +46,8 @@
       this.setState({ sendSlow: false, sendPct: 0 });
     }
     // a card's VERIFYING over a code (26f-flashcard.js, `fcCardVerifying`) comes down with the confirmation, or with home, whichever way in
-    if ((s.screen === 'paid' || s.screen === 'home') && this.stageUp && this.stageUp('paidCheck')) this.hideStage('paidCheck');
+    // (the till's SET AMOUNT is its home: 26m-till.js, `tillIdle`)
+    if ((s.screen === 'paid' || s.screen === 'home' || (this.tillIdle && this.tillIdle())) && this.stageUp && this.stageUp('paidCheck')) this.hideStage('paidCheck');
     console.log('[foxy] screen ' + (prevState.screen || '?') + ' \u2192 ' + s.screen
       + ' after ' + held + 'ms, back stack ' + ((s.stack && s.stack.length) || 0)
       + (flags.length ? ' | ' + flags.join(' ') : ''));
@@ -87,8 +88,12 @@
       // landing on a token's own screen: ask the mint about it at once
       if (this.state.screen === 'tokenOut') this.tokenWatchNow();
       if (this.state.screen === 'home') this.endReceiveAtHome();
+      /* The till's SET AMOUNT is its home (26m-till.js, `tillIdle`): a receive ends there as it ends at home, and a keeper's
+       * next customer is asked which balance again. A cashier's is the keeper's unit whatever this says (`walletNow`). */
+      const idle = this.state.screen === 'home' || !!(this.tillIdle && this.tillIdle());
+      if (idle && this.state.screen !== 'home') this.endReceiveAtHome();
       // home ends a flow: the next one asks again (or takes home's one balance), not this one's
-      if (this.state.screen === 'home' && (this.state.wallet || this.state.walletAuto || this.state.walletTapped)) {
+      if (idle && (this.state.wallet || this.state.walletAuto || this.state.walletTapped)) {
         this.setState({ wallet: '', walletAuto: false, walletTapped: false, feeQ: null });
       }
       // a code somebody was asked to scan goes with the token it belonged to
@@ -141,6 +146,8 @@
     this.syncSlide();
     this.syncPreview();
     this.syncInbox();
+    // the till: home turned into its SET AMOUNT, the cashier's clock, PAID's words (26m-till.js)
+    if (this.syncTill) this.syncTill(prevState);
     this.syncTap();
     this.syncClaim();
     this.syncAwake();
@@ -178,22 +185,25 @@
     // a swap's rate was asked for the figure as it stood, and this changes it (`swapForget`)
     if (this.state.flow === 'swap' && this.state.screen === 'amount' && this.swapForget) this.swapForget();
     this.setState(p => {
-      let a = p.amount;
+      /* A figure the screen put there itself (`amountDefault`: a card set-up's $20.00, 26j-card-wheel.js) is not typed after: the
+       * first key starts from nothing, and del clears it. */
+      let a = p.amountDefault ? '' : p.amount;
+      const typed = (amount) => ({ amount, amountDefault: false });
       if (p.unit !== 'SATS') {
         let d = a.replace('.', '').replace(/^0+/, '');
         if (ch === 'del') d = d.slice(0, -1);
-        else if (/^[0-9]+$/.test(ch)) { if (d.length + ch.length > 9) return { amount: a }; d += ch; }
-        else return { amount: a };
+        else if (/^[0-9]+$/.test(ch)) { if (d.length + ch.length > 9) return typed(a); d += ch; }
+        else return typed(a);
         d = d.replace(/^0+/, '');
-        if (d === '') return { amount: '' };
+        if (d === '') return typed('');
         d = d.padStart(3, '0');
-        return { amount: d.slice(0, -2) + '.' + d.slice(-2) };
+        return typed(d.slice(0, -2) + '.' + d.slice(-2));
       }
-      if (ch === 'del') return { amount: a.slice(0, -1) };
-      if (!/^[0-9]+$/.test(ch)) return { amount: a };
-      if (a === '0' || a === '') { if (ch === '00') return { amount: a }; return { amount: ch }; }
-      if (a.length + ch.length > 9) return { amount: a };
-      return { amount: a + ch };
+      if (ch === 'del') return typed(a.slice(0, -1));
+      if (!/^[0-9]+$/.test(ch)) return typed(a);
+      if (a === '0' || a === '') { if (ch === '00') return typed(a); return typed(ch); }
+      if (a.length + ch.length > 9) return typed(a);
+      return typed(a + ch);
     });
   }
 

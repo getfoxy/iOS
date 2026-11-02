@@ -160,6 +160,8 @@ extension FoxyBridge {
         spareInbox = nil
         nostrInbox?.close()
         nostrInbox = nil
+        // the till's too; the page opens them again on its wake (`tillListen`)
+        closeTillInboxes()
         // and any that were still answering for a payment on the wire: nothing
         // of this phone's survives backgrounding, and Tor is about to be told
         // to stop anyway (TorService.backgrounded)

@@ -50,6 +50,9 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
     /// The Nostr key the same request is also paid to, for the wallets that
     /// cannot reach an onion (NostrInbox). Made and thrown away with it.
     var nostrInbox: NostrInbox?
+    /// The till's inboxes, by cashier code id: one Nostr key per code, kept in
+    /// the Keychain for the code's three days (FoxyBridge+Till.swift).
+    var tillInboxes = TillInboxes()
     /// Tap to pay over Bluetooth (FoxyBridge+Tap.swift): the invoice on screen,
     /// advertised; or the search for one, and the page's request waiting on it.
     /// `TapRx`/`TapTx`: the Bluetooth link on a phone, its stand-in in the
@@ -417,6 +420,11 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         "onionPost": FoxyBridge.handleOnionPost,
         "httpsPost": FoxyBridge.handleHttpsPost,
         "nostrSend": FoxyBridge.handleNostrSend,
+        // The till: the keys a cashier's phone delivers to, and listening on them (FoxyBridge+Till.swift)
+        "tillKeyMake": FoxyBridge.handleTillKeyMake,
+        "tillKeyDrop": FoxyBridge.handleTillKeyDrop,
+        "tillInboxOpen": FoxyBridge.handleTillInboxOpen,
+        "tillInboxClose": FoxyBridge.handleTillInboxClose,
         // Tap to pay: an invoice handed between two phones over Bluetooth (FoxyBridge+Tap.swift)
         "tapReceiveStart": FoxyBridge.handleTapReceiveStart,
         "tapReceiveStop": FoxyBridge.handleTapReceiveStop,

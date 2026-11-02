@@ -178,6 +178,13 @@
     if (!m) return false;
     const target = m[1].toLowerCase();
     const W = window.FoxyWallet;
+    /* Not into the till's way out: a link opens SEND, a token or a split, and the till does none of those (26m-till.js). It
+     * is dropped, and the till stays where it is. */
+    if (this.state && this.state.till) {
+      console.log('[foxy] link: the till is open, so it is not followed');
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+      return true;
+    }
     /* A link starts a flow afresh: at a mint with two balances, with no
      * balance picked, not the one a flow left on screen picked. */
     const go = (patch) => this.setState(Object.assign({ stack: [], wallet: '', walletAuto: false, walletTapped: false, feeQ: null }, patch));

@@ -950,8 +950,15 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       await toCurrency(a, c);
       cur(a).curCards[i].tap();
       const unitNow = a.fcTypedUnit();
-      ok(!cardUp(a) && a.state.screen === 'amount' && a.state.flow === 'cardSuNoPin' && a.state.unit === 'USD' && a.state.amount === '' && unitNow === (i === 0 ? 'usd' : 'sat'),
-         name + ': the currency opens SET AMOUNT for the no-PIN amount, no question first, empty and in dollars, for ' + (i === 0 ? 'cents' : 'sats'), JSON.stringify([a.state.flow, a.state.unit, unitNow]));
+      ok(!cardUp(a) && a.state.screen === 'amount' && a.state.flow === 'cardSuNoPin' && a.state.unit === 'USD' && a.state.amount === '20.00' && a.state.amountDefault === true && unitNow === (i === 0 ? 'usd' : 'sat'),
+         name + ': the currency opens SET AMOUNT for the no-PIN amount, no question first, $20.00 filled in as the default, in dollars, for ' + (i === 0 ? 'cents' : 'sats'), JSON.stringify([a.state.flow, a.state.unit, unitNow]));
+      // the round back button off NO PIN AMOUNT? is CURRENCY again (the step before), not the start of the set-up
+      a.back();
+      ok(a.state.screen === 'currency' && a.state.currencyFlow === 'card' && !!a._fcSu && a._fcSu.unit === '' && !cardUp(a) && a.state.stack.slice(-1)[0] === 'flashcard',
+         name + ': back off NO PIN AMOUNT? is the CURRENCY question again, the set-up still open, over the card’s screen', JSON.stringify([a.state.screen, a.state.currencyFlow, a.state.stack]));
+      cur(a).curCards[i].tap();
+      ok(a.state.screen === 'amount' && a.state.flow === 'cardSuNoPin' && a.state.amount === '20.00' && a.fcTypedUnit() === (i === 0 ? 'usd' : 'sat'),
+         name + ': chosen again, NO PIN AMOUNT? again with its default', JSON.stringify([a.state.screen, a.state.flow, a.state.amount]));
       a.setState({ amount: '2.00' });
       a.fcAmountNext();
       ok(!cardUp(a) && speed(a) && speed(a).chosen === '$5' && speed(a).alt === 'SKIP', name + ': NEXT opens MAX SPEND PER SECOND, in dollars, SKIP under NEXT', JSON.stringify(speed(a)));

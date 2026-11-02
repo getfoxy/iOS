@@ -1113,6 +1113,24 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(/made ready to go back on it once this phone reaches the mint, and the card\u2019s next tap here puts it back\.$/.test(card(till).reason) && !card(till).has('TAP CARD') && card(till).has('OK'),
      'and, where the mint has not answered, that it goes back once it has, with no TAP CARD to find nothing waiting', card(till).all);
   card(till).press('OK');
+  // a wrong PIN, where the tap was run with a PIN typed earlier: TRY AGAIN is the pad again (`pinAgain`), never the same PIN at the card twice
+  {
+    const ran = [];
+    till.fcFailed({ card: 'wrong-pin', tries: 2, message: 'Wrong PIN. 2 tries left.' }, { taken: true, again: () => ran.push('again'), pinAgain: () => ran.push('pin') });
+    ok(card(till).title === 'WRONG PIN' && card(till).reason === '2 tries left. Nothing was taken.' && card(till).has('TRY AGAIN') && card(till).has('CANCEL'),
+       'a wrong PIN says the tries left, with TRY AGAIN and CANCEL', card(till).all);
+    card(till).press('TRY AGAIN');
+    ok(ran.join() === 'pin', 'TRY AGAIN after a wrong PIN asks for the PIN again rather than running the same one', ran.join());
+    // the same refusal with no pad to go back to (the PIN was not typed on this phone): TRY AGAIN is the tap again
+    till.fcFailed({ card: 'wrong-pin', tries: 2, message: 'Wrong PIN. 2 tries left.' }, { taken: true, again: () => ran.push('again') });
+    card(till).press('TRY AGAIN');
+    ok(ran.join() === 'pin,again', 'with no pad to go back to, TRY AGAIN is the tap again', ran.join());
+    // any other refusal: the tap again, whether or not a pad was offered for a wrong PIN
+    till.fcFailed({ card: 'keep-holding', message: 'Hold the card longer.' }, { taken: true, again: () => ran.push('again'), pinAgain: () => ran.push('pin') });
+    ok(card(till).title === 'HOLD IT LONGER' && card(till).has('TRY AGAIN'), 'a card lifted too soon offers TRY AGAIN', card(till).all);
+    card(till).press('TRY AGAIN');
+    ok(ran.join() === 'pin,again,again', 'another refusal’s TRY AGAIN is the tap again, not the pad', ran.join());
+  }
   // change the mint did not make: the payment stands, and the phone says it makes the change when it next connects
   till.fcChangeLater(824, 200);
   ok(card(till).title === 'CHANGE NOT MADE YET' && card(till).reason === 'Paid \u20bf200. The mint did not make its \u20bf824 of change. This phone tries again whenever it connects, and then a tap of the card here receives it.'

@@ -159,6 +159,8 @@
         .then(sweepPause).then(function () { return FoxyWallet.recoverSwaps(); })
         // a store short of room: sent tokens the mint says are claimed let go from their notes (`tidySentTokens`)
         .then(function () { return tidySentTokens().then(null, function () { return 0; }); })
+        // and a till's, waited for by nobody: a cashier's outbox sent, a keeper listening again (08d-till.js)
+        .then(function () { tillCatchUp(); })
         .catch(function (e) { console.warn('[foxy] resume sweep:', e && e.message); })
         /* After the melts are settled, so a crossing whose melt was cut has
          * been paid or given back by the time its note is looked at. */

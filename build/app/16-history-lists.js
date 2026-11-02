@@ -176,6 +176,9 @@
     const seen = { in: 0, out: 0, inSats: 0, outSats: 0, skipped: 0, skippedSats: 0, arriving: 0, arrivingSats: 0 };
     (s.fresh ? [] : (s.history || [])).forEach(g => g.items.forEach(t => {
       balOf.set(t, run);
+      /* A cashier's till row is the keeper's money, taken and sent on, never in this phone's balance (08d-till.js,
+       * `forKeeper`): counted, it read as money missing from these books. */
+      if (t.forKeeper) return;
       /* Its entry goes with the money, and by the money's figure: in the
        * arriving bucket, neither counted by its own figure nor "not counted". */
       const coming = t.dir === 'in' ? arriving.byHash.get(String(t.hash || '')) : undefined;
@@ -277,6 +280,8 @@
     let run = balNow, arrivingSeen = 0;
     (s.fresh ? [] : (s.history || [])).forEach(g => g.items.forEach(t => {
       balOf.set(t, run);
+      // (nor a cashier's till row, which is the keeper's: `histAudit`)
+      if (t.forKeeper) return;
       if (t.unit !== 'usd') return;
       const coming = t.dir === 'in' ? arriving.byHash.get(String(t.hash || '')) : undefined;
       if (coming !== undefined) { run -= coming; arrivingSeen += coming; return; }
@@ -471,6 +476,13 @@
           time: this.txLabel(d, now),
           // the same moment with its date, for the detail screen
           stamp: this.txStamp(d, now),
+          /* The till's: when, in milliseconds, for its session's list; whether a till took it, and a cashier's, whether it has
+           * reached the keeper (26m-till.js, `tillHistory`; the wallet tags the row). */
+          atMs: d.getTime(),
+          till: !!t.till,
+          tillSent: !!t.tillSent,
+          // and a cashier's: the keeper's money, which this phone's books leave out (`histAudit`)
+          forKeeper: !!t.forKeeper,
           /* A token this wallet sent is pending (amber) until it is known to be
            * redeemed: its text is kept until then (forgetClaimedToken). */
           pending: !t.settled || (t.dir === 'out' && meta.to === 'ecash' && !!meta.token),

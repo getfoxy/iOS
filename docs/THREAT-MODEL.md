@@ -60,6 +60,7 @@ The bridge exposes exactly these actions:
 - `hostsKnown` (once, the first time a version with host approvals runs)
 - `previewStart`, `previewStop`, `pasteStart`, `pasteStop`, `notify`, `share`, `exportText`, `openSettings`, `openCompany`
 - payment requests paid straight to whoever asked: `inboxOpen`, `inboxClose`, `inboxAnswer`, `onionPost`, `httpsPost`, `nostrSend`
+- the till (point of sale): a Nostr key made per cashier code and kept in the Keychain, and the inboxes that listen on those keys for the cashier's deliveries: `tillKeyMake`, `tillKeyDrop`, `tillInboxOpen`, `tillInboxClose`
 - tap to pay, an invoice or a payment request handed over Bluetooth: `tapReceiveStart`, `tapReceiveStop`, `tapPayStart`, `tapPayStop`, `tapSend`, `tapChange`, and `bluetoothAsk`, the first install's Bluetooth question, `tapChangeKept`, `tapAsking`, `tapChangeDue`, `tapQuote`, `tapTerms`
 - `awake`, which holds the screen lit while a screen is being looked at rather than touched
 - `shakeStart`, `shakeStop`: whether a shake of the phone presses TAP, armed only on the receive screen (TAP-TO-PAY.md)
@@ -137,6 +138,10 @@ answer for a third of them.
 | `inboxClose` | — | ends the address (`DEL_ONION`) and the listener |
 | `inboxAnswer` | answer limits | answers a payment that arrived: status 200, 409 or 422 only, and 300 characters of text, to a payment still waiting |
 | `nostrSend` | nostr only | a payment wrapped for the receiver's key (NIP-17/59, signed by keys made for that payment and forgotten) and published to at most five `wss` relays their request names, each over Tor on its own circuit; never the open connection. Foxy also *listens* on relays while a payment request is on screen — see `inboxOpen` |
+| `tillKeyMake` | till id | makes a Nostr key for one cashier code (`NostrCrypto.newKey`), keeps its 32 bytes in the Keychain under `till.nostr.<id>` (readable when unlocked, this device only), and answers the nprofile; the id must be 16 hex characters before the Keychain is touched; an id that already has a key gets the same one back |
+| `tillKeyDrop` | till id | deletes that code's key and closes its inbox |
+| `tillInboxOpen` | till id + till window | listens on at most four codes' keys for NIP-17 gift wraps (kinds 1059) over Tor, from the `since` the page names (the oldest listened code's start less NIP-59's two days) when it is a number inside the last twelve days, else five days back, closing the previous set first; a code with no key in the Keychain is skipped; each wrap is opened once and handed to the page as `_tillArrived(id, body)` |
+| `tillInboxClose` | — | closes the till inboxes; the keys are kept |
 | `onionPost` | onion only | only `http://` to a version 3 `.onion` host, with no user, query or fragment, through Tor's SOCKS port and never the open connection; a body of at most 256 kB, an answer cut off at 64 kB |
 | `httpsPost` | mint url | a payment posted once to the web address a request names (NUT-18 `post`, https): the same address checks a mint meets, so never localhost, an IP literal, a single-label name or the `.local` family, and never an `.onion`, which is `onionPost`'s; no sign-in or fragment in the address; a body of at most 256 kB; through Tor on a circuit of its own, or the open connection when the person chose it, as for a mint; never redirected, so a 3xx comes back as itself and is not read as paid; 60 s at most |
 | `tapReceiveStart` | offer only | a BOLT11 invoice, a Cashu payment request, or both, at most 4096 characters in all, advertised over Bluetooth by service UUID alone, with no name, code or amount; sent to any phone that connects, which learns no more than the QR code shows (TAP-TO-PAY.md) |

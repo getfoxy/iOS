@@ -28,7 +28,8 @@ import Foundation
 /// nothing at all, which is why it stays the transport Foxy itself prefers
 /// (`deliveryFor`, build/wallet/07-request-delivery.js).
 ///
-/// One at a time, made and ended on the main queue.
+/// One at a time, made and ended on the main queue. The till's inboxes are
+/// the exception, up to four beside it (FoxyBridge+Till.swift).
 final class NostrInbox {
 
     /// The relays this inbox listens on, and which its `nprofile` names. The
@@ -53,6 +54,16 @@ final class NostrInbox {
     private var closed = false
     /// Internal, not private, so that a test can hand `took` a relay's message.
     let subscription: String
+    /// What the log calls this inbox. The request's keeps the words it always
+    /// had; a till's says which, so four of them closing are not one line four times.
+    let label: String
+    /// The oldest wrap asked for, fixed when the inbox was made; nil for the
+    /// request's own, which works its window out as it opens (`open`).
+    private let since: Int?
+    /// How many stored wraps a relay is asked for, and how many ids are held
+    /// as opened before the set is emptied.
+    private let limit: Int
+    private let seenCap: Int
 
     /// nil when a key could not be made, which means secp256k1 is unavailable
     /// and nothing here could work anyway.
@@ -63,6 +74,38 @@ final class NostrInbox {
         self.onPayment = onPayment
         // a name for this subscription, unrelated to the key
         self.subscription = NostrEvent.hex((try? NostrCrypto.newKey())?.prefix(8).map { $0 } ?? [0, 1, 2, 3])
+        self.label = "nostr inbox"
+        self.since = nil
+        self.limit = 64
+        self.seenCap = 128
+    }
+
+    /// An inbox on a key that was made earlier and kept: a cashier code's,
+    /// which lives as long as the code (three days, and a week after) so that a cashier's phone
+    /// can deliver to it while this phone is off. Still never from the words,
+    /// still one key per code, and thrown away with the code (`tillKeyDrop`);
+    /// what it costs is that the relays can tell every payment taken on one
+    /// code went to the same key.
+    ///
+    /// `since` is the caller's, because the window has to reach back to when
+    /// the code was made and not to when this phone last woke: a payment
+    /// published while it was off is waiting at the relays, backdated by
+    /// NIP-59 up to two days before that. A whole shift can be waiting, so
+    /// the relays are asked for more stored wraps than a request's inbox
+    /// asks for, and more ids are held as opened, or one relay's copies would
+    /// arrive again after the set was emptied.
+    ///
+    /// nil for a secret that is not a secp256k1 key.
+    init?(secret: [UInt8], since: Int, label: String, onPayment: @escaping (_ body: String) -> Void) {
+        guard secret.count == 32, let p = try? NostrCrypto.publicKey(of: secret) else { return nil }
+        self.secret = secret
+        self.pubkey = p
+        self.onPayment = onPayment
+        self.subscription = NostrEvent.hex((try? NostrCrypto.newKey())?.prefix(8).map { $0 } ?? [0, 1, 2, 3])
+        self.label = label
+        self.since = since
+        self.limit = 500
+        self.seenCap = 2048
     }
 
     /// What the payment request names: this inbox's key and its relays.
@@ -93,10 +136,13 @@ final class NostrInbox {
          * It stays bounded rather than being dropped altogether, because the
          * key in this filter is minutes old and has never been published
          * anywhere else: within this window there is nothing for a relay to
-         * replay at us but the payment we are waiting for. */
+         * replay at us but the payment we are waiting for. A till's key was
+         * shown as a QR code and is days old, so its window does hold
+         * payments already taken, every time it opens: the page keeps the
+         * proofs it has seen and takes each once (`_tillArrived`). */
         let backdating = 172_800                            // NIP-59's two days
-        let since = Int(Date().timeIntervalSince1970) - backdating - 3600
-        let filter = "{\"kinds\":[1059],\"#p\":[\"\(NostrEvent.hex(pubkey))\"],\"since\":\(since),\"limit\":64}"
+        let since = self.since ?? (Int(Date().timeIntervalSince1970) - backdating - 3600)
+        let filter = "{\"kinds\":[1059],\"#p\":[\"\(NostrEvent.hex(pubkey))\"],\"since\":\(since),\"limit\":\(limit)}"
         let ask = "[\"REQ\",\"\(subscription)\",\(filter)]"
 
         var answered = false
@@ -119,7 +165,7 @@ final class NostrInbox {
                     guard let self, !self.closed else { return }
                     if let error {
                         #if DEBUG
-                        print("[foxy] nostr inbox: \(relay.host ?? "?") would not take the ask: \(error.localizedDescription)")
+                        print("[foxy] \(self.label): \(relay.host ?? "?") would not take the ask: \(error.localizedDescription)")
                         #endif
                         report(false)
                         return
@@ -169,13 +215,13 @@ final class NostrInbox {
 
         guard let rumor = NostrEvent.unwrap(wrap, to: secret) else {
             #if DEBUG
-            print("[foxy] nostr inbox: a wrap did not open, or did not check out")
+            print("[foxy] \(label): a wrap did not open, or did not check out")
             #endif
             return
         }
-        if seen.count >= 128 { seen.removeAll() }
+        if seen.count >= seenCap { seen.removeAll() }
         seen.insert(wrap.id)
-        print("[foxy] nostr inbox: a payment arrived")
+        print("[foxy] \(label): a payment arrived")
         onPayment(rumor.content)
     }
 
@@ -191,7 +237,7 @@ final class NostrInbox {
         }
         sockets.removeAll()
         seen.removeAll()
-        print("[foxy] nostr inbox closed")
+        print("[foxy] \(label) closed")
     }
 
     deinit { if !closed { sockets.forEach { $0.session.invalidateAndCancel() } } }

@@ -409,6 +409,18 @@ const amountVals = (o) => app.renderAmount(Object.assign(
   amountVals().amtAltTap();
   ok(skipped.join() === 'cardSuNoPin,cardSuTap', 'SKIP is the set-up\u2019s skip on each', skipped.join());
   delete app.fcSuSkip;
+  // a figure the screen put there itself (the set-up's $20.00, `amountDefault`): the first key starts from nothing, del clears it
+  reset({ screen: 'amount', flow: 'cardSuNoPin', amount: '20.00', unit: 'USD', amountDefault: true });
+  app.press('5');
+  ok(app.state.amount === '0.05' && app.state.amountDefault === false, 'the first key replaces the default: 5 is $0.05, not $200.05', JSON.stringify([app.state.amount, app.state.amountDefault]));
+  app.press('0');
+  ok(app.state.amount === '0.50', 'and the keys after it type on as ever', app.state.amount);
+  reset({ screen: 'amount', flow: 'cardSuNoPin', amount: '20.00', unit: 'USD', amountDefault: true });
+  app.press('del');
+  ok(app.state.amount === '' && app.state.amountDefault === false, 'del on the default clears it', JSON.stringify([app.state.amount, app.state.amountDefault]));
+  reset({ screen: 'amount', flow: 'cardSuNoPin', amount: '20.00', unit: 'USD', amountDefault: false });
+  app.press('5');
+  ok(app.state.amount === '200.05', 'a figure that was typed, not put there, is typed after', app.state.amount);
   reset({ screen: 'amount', flow: 'receive' });
   ok(amountVals().amountTitle === 'SET AMOUNT', 'every other amount is still SET AMOUNT', amountVals().amountTitle);
 }

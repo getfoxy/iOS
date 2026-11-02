@@ -3,6 +3,8 @@
   /** @param {RenderContext} c */
   renderHistory(c) {
     const { s, sc } = c;
+    // the till's own list: this session's money in, and nothing to open (26m-till.js, `tillHistory`)
+    if (s.till && this.tillHistory) return this.tillHistory(c);
     const hf = s.histFilter || 'all';
     /* One card's entries, when this screen was opened from that card's own
      * (26f-flashcard.js): only then, read from where it was opened and not
@@ -229,6 +231,8 @@
         : s.fresh ? 'Your transactions will show up here.' : 'No transactions match this filter.',
       isHistory: sc === 'history',
       histTitle: ofCard ? 'CARD HISTORY' : 'HISTORY',
+      // ALL, RECEIVED and SENT; the till's list has none (26m-till.js)
+      histFilterShown: true,
       // clearing history is the whole wallet's, not one card's
       histClearVis: ofCard ? 'hidden' : 'visible',
       historyMint: (window.FoxyWallet && window.FoxyWallet.mintHost

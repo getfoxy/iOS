@@ -217,6 +217,9 @@ function books(ctx) {
   (Array.isArray(rows) ? rows : []).forEach((e) => {
     if (!e) return;
     if (e.state === 'failed' || e.failed || e.atRisk) return;
+    /* A cashier's till row (build/wallet/08d-till.js, `forKeeper`): the keeper's money, locked to the keeper and sent on,
+     * never in this page's pile, so not in its books either. The app's books leave it out the same way (`histAudit`). */
+    if (e.forKeeper) return;
     /* Change that came back is the tail of the payment it belongs to, whose
      * entry already says what came back, in any unit: never counted twice. */
     if (e.dir === 'in' && (e.changeRow || /^(tap|req)-change-/.test(String(e.hash || '')))) return;

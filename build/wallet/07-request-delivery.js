@@ -355,7 +355,8 @@
   }
 
   function lockPubFor(id) {
-    return lockPubOf(lockKeys()[id]);
+    // and a till's request, whose key is the keeper's and is held on the request (08d-till.js)
+    return lockPubOf(lockKeys()[id]) || tillRequestLock(id);
   }
 
   /* The private key for a request's lock, from the phone, or '' when this phone
@@ -1605,6 +1606,8 @@
       if (openUnit === 'sat') return no('That payment would be ' + amount + ' sats; the request is for ' + wanted + '.');
       return no('That payment would be ' + moneyWords(amount, openUnit) + '; the request is for ' + moneyWords(wanted, openUnit) + '.');
     }
+    // a till asks the mint about every payment before it takes it (08d-till.js, `tillAccept`)
+    if (open.purpose === 'till' && !routeOpen()) return no('This till needs a connection to take that.');
     if (!routeOpen()) {
       // with no route: only ecash locked to this request's own key, still unpaid, in a keyset this phone can check
       if (x.locked !== true) {
@@ -2496,6 +2499,8 @@
     if (!Object.keys(want).length) return 0;
     var all = lockKeys(), ids = Object.keys(all), gone = 0;
     ids.forEach(function (id) {
+      // not a cashier code's: its row serves every payment by that code, and goes with the code (08d-till.js, `tillForget`)
+      if (/^till-/.test(id)) return;
       if (want[lockPubOf(all[id])]) { delete all[id]; gone += 1; }
     });
     if (gone) save(LOCK_KEYS, all);

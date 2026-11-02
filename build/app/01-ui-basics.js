@@ -80,6 +80,8 @@ class Component extends DCLogic {
     xCtaBtc: (this.props.startCashOnly && !this.props.startFresh) || undefined,
     asset: '',
     amount: '',
+    // (a figure a screen put on the keypad itself, which the first key replaces: 19-update-keypad-balance.js `press`)
+    amountDefault: false,
     network: '',
     unit: 'USD',
     /* Two balances at one mint (dollars and bitcoin). `wallet` is the money
@@ -204,7 +206,8 @@ class Component extends DCLogic {
     this.setState(p => {
       const next = p.stack.length
         ? { screen: p.stack[p.stack.length - 1], stack: p.stack.slice(0, -1) }
-        : { screen: 'home', stack: [] };
+        // nothing left to go back to: home, or in the till its SET AMOUNT (26m-till.js, `homeState`)
+        : (this.homeState ? this.homeState() : { screen: 'home', stack: [] });
       return next;
     });
   }
@@ -555,6 +558,8 @@ class Component extends DCLogic {
    * more than one balance, each receive and send asks). Always 'sat' at a mint with one balance. `flow` is 'receive'
    * or 'send'. */
   walletNow(flow) {
+    // a cashier's till receives in the keeper's unit, the one its code names, whatever this phone holds (26m-till.js)
+    if (flow === 'receive' && this.tillUnit && this.tillUnit()) return this.tillUnit();
     if (!this.twoUnitsOn()) return 'sat';
     // a card pays in what it holds, whatever balance this phone's own sends use
     // (a card of software 1.23 that holds both: the currency chosen to pay from, `fcUnit`)

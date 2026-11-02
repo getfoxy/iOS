@@ -93,7 +93,8 @@
       blockedInk: (BLOCKED[sc] || {}).tone === 'warn' ? 'var(--btc-ink)' : '#FF5C5C',
       blockedGlyphBg: (BLOCKED[sc] || {}).tone === 'warn' ? 'rgba(247,147,26,.16)' : 'rgba(255,92,92,.14)',
       blockedRetry: () => this.setState({ screen: (BLOCKED[sc] || {}).back || 'amount' }),
-      blockedClose: () => this.setState({ screen: 'home', stack: [], amount: '', asset: '', flow: 'receive', unit: 'USD' }),
+      // (in the till, its SET AMOUNT: 26m-till.js, `homeState`)
+      blockedClose: () => this.setState(Object.assign({ screen: 'home', stack: [], amount: '', asset: '', flow: 'receive', unit: 'USD' }, this.state.till ? this.homeState() : {})),
     };
   }
 

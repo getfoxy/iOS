@@ -527,8 +527,18 @@
     const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '00', '0'].map(k => ({
       label: k, size: '30px', tap: () => this.press(k),
     }));
+    // the till's SET AMOUNT: X for the way out, HISTORY at the top right (26m-till.js)
+    const tillHere = !!s.till && sc === 'amount' && !!(this.tillIdle && this.tillIdle());
     return {
       isAmount: sc === 'amount',
+      /* The round button at the top left: back, or in the till its close, which the keeper's lock or the cashier's question
+       * stands behind (`tillClose`). */
+      amtBack: () => ((this.tillIdle && this.tillIdle()) ? this.tillClose() : this.back()),
+      amtBackPath: tillHere ? 'M6 6l12 12M18 6L6 18' : 'M19.5 12H5m0 0 6-6m-6 6 6 6',
+      // and its HISTORY, this session's (`tillHistory`), where home's menu would have it
+      amtHistShown: tillHere,
+      amtHistPath: 'M12 7v5l3.5 2M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.5 8.5 0 0 0 12 3.5Z',
+      amtHistTap: () => this.go('history'),
       nextFur: (val > 0 && !sendOver)
         ? "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),"
           + "rgba(255,240,220,0) 62%),"
@@ -585,7 +595,8 @@
       // what a till cap is, in a plain line under the question (26j-till-caps.js, `tillCapNote`)
       amountNote: s.flow === 'tillCap' && this.tillCapNote ? this.tillCapNote() : '',
       amountNoteShown: !!(s.flow === 'tillCap' && this.tillCapNote),
-      hideSkip: true,
+      // the space that balances the back button, which the till's HISTORY takes
+      hideSkip: !tillHere,
       /* The set-up's max per tap: what the figure typed means in seconds, under it, as it is typed (26j-card-wheel.js, `fcSuAmountLine`). */
       amountLine: this.fcSuAmountLine ? this.fcSuAmountLine() : '',
       amountLineShown: !!(this.fcSuAmountLine && this.fcSuAmountLine()),

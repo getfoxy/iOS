@@ -36,6 +36,7 @@ const SEED = read('Foxy/Bridge/NativeSeedBridge.swift');
 const DELIVERY = read('Foxy/Bridge/FoxyBridge+Delivery.swift');
 const TAP = read('Foxy/Bridge/FoxyBridge+Tap.swift');
 const CARD = read('Foxy/Bridge/FoxyBridge+Flashcard.swift');
+const TILL = read('Foxy/Bridge/FoxyBridge+Till.swift');
 const DOC = read('docs/THREAT-MODEL.md');
 
 /* The tokens the table may use, and the Swift each one means. A token with no
@@ -61,6 +62,10 @@ const TOKENS = {
   'onion only': /OnionPost\.send/,
   'answer limits': /\[200, 409, 422\]\.contains/,
   'nostr only': /NostrDelivery\.send/,
+  // the till (FoxyBridge+Till.swift): a cashier code's id is checked for shape before the Keychain is touched
+  'till id': /Self\.tillID\(/,
+  // and how far back the relays are asked: the page's start, held to the last twelve days (`tillSince`)
+  'till window': /Self\.tillSince\(/,
   // the screen kept lit: the flag is the only thing this action touches
   'screen only': /isIdleTimerDisabled = on/,
   // tap to pay over Bluetooth (FoxyBridge+Tap.swift)
@@ -107,7 +112,7 @@ for (const m of BRIDGE.matchAll(/"([A-Za-z][A-Za-z0-9]*)": FoxyBridge\.([A-Za-z]
 
 /* A Swift function body, by brace matching from its declaration. */
 function body(name) {
-  for (const source of [BRIDGE, SEED, DELIVERY, TAP, CARD]) {
+  for (const source of [BRIDGE, SEED, DELIVERY, TAP, CARD, TILL]) {
     const at = source.search(new RegExp('\\n {4}(?:private )?(?:static )?func ' + name + '\\('));
     if (at < 0) continue;
     let depth = 0;

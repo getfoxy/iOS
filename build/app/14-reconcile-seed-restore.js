@@ -304,6 +304,8 @@
       // and never leave a payment mid-flight
       if (this.state.sendPhase === 'in' || this.state.sendPhase === 'onchain') return;
       if (this.state.screen === 'home') return;
+      // nor off the till's SET AMOUNT, whose way out is its X and the lock behind it (26m-till.js)
+      if (this.tillIdle && this.tillIdle()) return;
 
       console.log('[foxy] edge swipe: back');
       this.back();

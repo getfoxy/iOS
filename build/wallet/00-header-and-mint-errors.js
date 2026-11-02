@@ -155,6 +155,17 @@
     payerTag: 'foxy.payer.tag',
     // this phone's own, as a receiver, on its offer while it has no route (`tillTag`)
     tillTag: 'foxy.till.tag',
+    /* Point of sale (08d-till.js). A keeper's cashier codes, each with the public key payments to it are locked to and the
+     * Nostr key they are sent to (whose private half the phone keeps in the Keychain, never here); the secrets of what
+     * came in by them, so a delivery read twice is taken once; and what came while the phone was at another mint. */
+    tillPasses: 'foxy.till.passes',
+    tillSeen: 'foxy.till.seen',
+    tillInbox: 'foxy.till.inbox',
+    /* A cashier's: the code it works the till by, the mint it banks at, to go back to, and what it took for the keeper,
+     * locked to the keeper's key, until it is sent. The outbox is the keeper's money: written with mustSave. */
+    tillCashier: 'foxy.till.cashier',
+    tillHome: 'foxy.till.home',
+    tillOutbox: 'foxy.till.outbox',
   };
 
   /* A day. Bitcoin seldom moves more than a few percent in one; past that the

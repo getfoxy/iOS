@@ -1008,7 +1008,8 @@
            * stays, never more than arrived less that change; and an entry
            * being finished (`into`, a payment kept offline and swapped in
            * now) keeps what was already charged to it. */
-          try { dropLockKeysByPub(lockPubsOf(tok.proofs)); } catch (eLu) {}
+          /* Not a till's: its code's lock row serves every payment by that code (08d-till.js). */
+          if (!(opts && opts.till)) { try { dropLockKeysByPub(lockPubsOf(tok.proofs)); } catch (eLu) {} }
           var keptU = opts && opts.keptAmount != null ? Number(opts.keptAmount) : NaN;
           var recU = (keptU >= 0 && keptU <= got) ? keptU : got;
           var changeU = Math.max(0, Number(opts && opts.changeAmount) || 0);
@@ -1046,6 +1047,8 @@
           }
           // a new entry is filed where the pieces went; one being finished stays where it was written
           if (!into || !txSeen(into)) entryU.mint = intoMint;
+          // taken from a cashier at this phone's till (`opts.till`, 08d-till.js)
+          if (opts && opts.till) { entryU.till = true; entryU.who = 'cashier'; }
           logTx(entryU, into);
           console.log('[foxy] took', formatAmount(got, unit), 'of', unitName(unit), 'ecash at', hostOf(tok.mint),
                       tok.amount !== got + toCardU ? '(' + formatAmount(tok.amount - got - toCardU, unit) + ' to the mint fee)' : '',
@@ -1061,7 +1064,8 @@
          * the person reads afterwards. It passes what stays; nobody
          * else passes anything and nothing else changes. */
         // swapped in, so the request it answered is paid: its row goes with it (`lockRowFor`)
-        try { dropLockKeysByPub(lockPubsOf(tok.proofs)); } catch (eL) {}
+        // not a till's: its code's lock row serves every payment by that code (08d-till.js)
+        if (!(opts && opts.till)) { try { dropLockKeysByPub(lockPubsOf(tok.proofs)); } catch (eL) {} }
         var recorded = (opts && Number(opts.keptSats) >= 0
                         && Number(opts.keptSats) <= got) ? Number(opts.keptSats) : got;
         /* A token that paid over and named a key for its change: what stays
@@ -1117,6 +1121,8 @@
         }
         // a new entry is filed where the pieces went; one being finished stays where it was written
         if (!into || !txSeen(into)) entry.mint = intoMint;
+        // taken from a cashier at this phone's till (`opts.till`, 08d-till.js)
+        if (opts && opts.till) { /** @type {any} */ (entry).till = true; /** @type {any} */ (entry).who = 'cashier'; }
         logTx(entry, into);
         console.log('[foxy] took', got, 'sats of ecash at', hostOf(tok.mint),
                     tok.amount !== got + toCard ? '(' + (tok.amount - got - toCard) + ' to the mint fee)' : '',

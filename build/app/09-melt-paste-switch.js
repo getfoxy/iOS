@@ -536,13 +536,16 @@
   }
 
   walletReady(w) {
-    this.setState({
+    /* Home, unless the till is open: a mint answering again is not a way out of it, and the screen it is on stays
+     * (26m-till.js). */
+    this.setState(Object.assign({
       walletLive: true,
       walletSearching: false,
       walletErr: '',
+    }, this.state.till ? {} : {
       screen: 'home',
       stack: [],
-    });
+    }));
     /* The heartbeat first, before anything that can throw.
      *
      * This pair is how an arrival nobody watched for reaches the screen at
@@ -612,6 +615,12 @@
     const balance = this.refreshBalance();
     this.loadHistory();
     this.listenWallet();
+    /* The till (26m-till.js): once a launch, past the lock, a cashier's till that was open when Foxy was closed comes back
+     * (`tillResume`). Its inbox and outbox the wallet asks itself at every connect. */
+    if (this.tillResume && !this._tillResumed) {
+      this._tillResumed = true;
+      this.pinUnlocked().then(() => this.tillResume()).catch(() => {});
+    }
     // NOT checking the clipboard on launch: reading it makes iOS put up its
     // "allow paste?" prompt every time the app opens. The paste button uses
     // UIPasteControl, which needs no prompt, so paste stays one tap away.

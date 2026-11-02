@@ -597,6 +597,8 @@
   scanTokenToReceive() {
     const W = window.FoxyWallet;
     if (!W || !W.scan) return;
+    // a cashier's till takes a token for its keeper, never into this phone's pile (26m-till.js, `tillScanToken`)
+    if (this.tillRole && this.tillRole() === 'cashier') { this.tillScanToken(); return; }
     W.scan('Scan an ecash token').then(text => {
       const t = String(text || '').trim();
       if (W.classify(t) !== 'token') {

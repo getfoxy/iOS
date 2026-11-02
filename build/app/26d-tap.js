@@ -451,8 +451,10 @@
     }
     /* Not while paying from a card (SEND on the card's screen, `fcOutMode`): a phone-to-phone offer is paid out of this
      * phone's own pile, and that is not what the person is doing. */
+    /* Nor in the till (26m-till.js): listening is this phone ready to PAY a merchant who presses TAP, and a till never pays.
+     * Its own receives arm on the receive screen, as anywhere (above). */
     const listening = (s.screen === 'home' || s.screen === 'sendHow')
-      && s.sendPhase !== 'in' && !s.reqBusy && !gateUp && !(this.fcOutMode && this.fcOutMode());
+      && s.sendPhase !== 'in' && !s.reqBusy && !gateUp && !(this.fcOutMode && this.fcOutMode()) && !s.till;
     /* And the marks are cleared only when there is no tap to protect.
      *
      * `_tapKeep` is what stops `syncTap` searching again under a live link —
@@ -465,8 +467,10 @@
      * the regression the comment above this describes, arriving by the other
      * door. `_tapKeep` is dropped when the payment is done with the link, so
      * waiting for it is exactly right. */
-    if (s.screen !== 'home') this._tapAway = true;
-    if (s.screen === 'home' && this._tapAway && s.sendPhase !== 'in' && !this.changeStillDue()) {
+    // (the till's SET AMOUNT is its home, so a tap taken there is let go there as at home: 26m-till.js, `tillIdle`)
+    const idle = s.screen === 'home' || !!(this.tillIdle && this.tillIdle());
+    if (!idle) this._tapAway = true;
+    if (idle && this._tapAway && s.sendPhase !== 'in' && !this.changeStillDue()) {
       /* Home again, with the payment over: the next tap may start.
        *
        * The marks cannot be cleared the moment the offer lands, because that

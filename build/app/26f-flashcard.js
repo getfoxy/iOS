@@ -284,6 +284,9 @@
    * cannot be tapped: its money is taken back from home's MENU, RESTORE LOST
    * CARD (`fcRestoreLost`), not from this screen. */
   goFlashcard() {
+    /* Never in the till (26m-till.js): the card's screen has LOAD and SEND on it, which move this phone's money, the very
+     * thing the till keeps out of reach. A card tapped to the phone on the till's HISTORY opened it (review u1). */
+    if (this.state.till) { console.log('[foxy] card: not in the till'); return; }
     // a card read on an earlier visit is not shown again: it may be somebody else's, and what it held may have changed
     this._fcCard = null;
     clearInterval(this._fcRollT);
@@ -362,6 +365,8 @@
       // the mint list asked for a transfer's mint, or for the one a card moves to: money, not a list
       transfer: !!s.trStep,
       pick: !!s.fcPick,
+      // the till, which has no card screen whatever screen of its own is up (26m-till.js)
+      till: !!s.till,
       over: starting ? '' : this.cardTapOver(),
     };
   }
@@ -390,6 +395,8 @@
    * payment under the lock is ignored there and then, not kept to be acted on a minute later from wherever the person
    * has got to. */
   cardTapRule(f) {
+    // in the till a card's tap takes nobody anywhere: its HISTORY is a free screen everywhere else, and opened the card's (review u1)
+    if (f.till || (this.state && this.state.till)) return 'ignore';
     if (f.over) return 'ignore';
     const free = this.CARD_TAP_FREE.indexOf(f.screen) >= 0 && !(f.screen === 'switchMint' && (f.transfer || f.pick));
     if (!free) return 'ignore';
@@ -420,7 +427,7 @@
     }
     this._cardTapAt = 0;
     if (say === 'ignore') {
-      console.log('[foxy] card tap: ignored, ' + (f.over ? 'something is up over the screen (' + f.over + ')'
+      console.log('[foxy] card tap: ignored, ' + (f.till ? 'the till is open' : f.over ? 'something is up over the screen (' + f.over + ')'
         : 'the screen is ' + f.screen + (f.screen === 'switchMint' && (f.transfer || f.pick) ? ', asking where money moves' : '')));
       return;
     }
@@ -652,7 +659,7 @@
       // one keypad at a time: asked from another card question's keypad, this takes its place
       screen: 'amount', stack: p.screen === 'amount' ? p.stack : p.stack.concat([p.screen]), flow,
       // dollars, as the receive flow starts; sats where there is no price to say dollars at
-      amount: '', unit: (usd || this.px()) ? 'USD' : 'SATS',
+      amount: '', amountDefault: false, unit: (usd || this.px()) ? 'USD' : 'SATS',
       asset: '', network: '', note: '', noteDraft: '', recipient: '', recipientKind: '',
     }));
   }
@@ -785,8 +792,11 @@
    *
    * Every refusal the wallet or the card can give, by its kind, in the words
    * of the screen list. `o.again` is what TRY AGAIN does, where trying again
-   * can work; `o.taken` says whether "nothing was taken" is a true thing to
-   * add (it is for a payment and a withdrawal, and means nothing for a read).
+   * can work; `o.pinAgain` what it does after a wrong PIN, where the tap was
+   * run with a PIN typed earlier: the pad again, never the same PIN at the
+   * card a second time (which would only cost another try). `o.taken` says
+   * whether "nothing was taken" is a true thing to add (it is for a payment
+   * and a withdrawal, and means nothing for a read).
    */
   fcFailed(e, o) {
     const opt = o || {};
@@ -795,7 +805,8 @@
     // whatever is said next is said on its own: the screen of a tap that ended asking for the PIN, and no pad followed, goes
     this.hideStage('card');
     const safe = opt.taken ? ' Nothing was taken.' : '';
-    const again = opt.again ? { retry: 'TRY AGAIN', go: opt.again, shut: { label: 'CANCEL' } } : {};
+    const retry = (kind === 'wrong-pin' && typeof opt.pinAgain === 'function') ? opt.pinAgain : opt.again;
+    const again = retry ? { retry: 'TRY AGAIN', go: retry, shut: { label: 'CANCEL' } } : {};
     console.log('[foxy] card: ' + (kind || 'failed') + ' — ' + said);
     // their own cancel, or no card held up: the screen they were on is the answer
     if (kind === 'cancelled') return;
@@ -1203,6 +1214,10 @@
 
   payByCard() {
     const s = this.state;
+    /* Not at a cashier's till, which draws no CARD (24-render-receive-and-send.js, `recvCardShown`): a card's pieces are
+     * swapped into the phone that reads them, and a cashier's phone holds nothing of the keeper's. Said here as well, so no
+     * other way to this button reaches it. */
+    if (this.tillRole && this.tillRole() === 'cashier') { console.log('[foxy] card: a cashier’s till takes no card'); return; }
     // a receive into the dollar balance: a dollar card pays its cents, a bitcoin card the dollar invoice's sats (`payUsdByCard`)
     if (s.recvUnit === 'usd' && this.walletNow && this.walletNow('receive') === 'usd') { this.payUsdByCard(); return; }
     const W = this.fcW();
@@ -1248,6 +1263,8 @@
   payUsdByCard() {
     const s = this.state;
     const W = window.FoxyWallet;
+    // (nor here, which the code's own wait presses again: `payByCard`)
+    if (this.tillRole && this.tillRole() === 'cashier') return;
     /* A card flow already going (a sheet up, its PIN asked, a card asking to be tapped again): CARD starts no second one. The
      * wait's own timer pressed CARD again after the person had, and two sheets were begun for one code, the second taking over
      * `_fcUsd` from the payment the first was making. */
@@ -3252,7 +3269,8 @@
   fcShow(card, open) {
     if (!card || !card.key) return;
     if (this.state.screen !== 'flashcard') {
-      if (!open) return;
+      // (and never onto it in the till, which has no card screen: 26m-till.js)
+      if (!open || this.state.till) return;
       this.setState(p => ({ screen: 'flashcard', stack: p.stack.concat([p.screen]) }));
     }
     const W = this.fcW();
@@ -3412,7 +3430,7 @@
         }
         // the card's own refusal: the mint's answer does not fit the opening, which can now only be given up
         if (r.refused > 0) this.fcFailed({ card: 'mend-refused', message: 'The card would not take this change.' });
-      }, (e) => this.fcFailed(e, { again: () => this.fcMendRun(pin) }));
+      }, (e) => this.fcFailed(e, { again: () => this.fcMendRun(pin), pinAgain: () => this.fcMend() }));
   }
 
   /* GIVE UP THIS CHANGE, for one opening (`x`: { number, amount }): one sentence that its money is gone, then the tap. The owner's
@@ -3446,7 +3464,7 @@
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.toast('The change is given up.');
-      }, (e) => this.fcFailed(e, { again: () => this.fcGiveUpRun(x, pin) }));
+      }, (e) => this.fcFailed(e, { again: () => this.fcGiveUpRun(x, pin), pinAgain: () => this.fcGiveUp(x) }));
   }
 
   // the change the card is owed, as the screen has it, less the opening `n`
@@ -3632,7 +3650,7 @@
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.toast(unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
-      }, (e) => this.fcFailed(e, { again: () => this.fcSetUpRun(pin, recoverable, unit) }));
+      }, (e) => this.fcFailed(e, { again: () => this.fcSetUpRun(pin, recoverable, unit), pinAgain: () => this.fcSetUpIn(unit) }));
   }
 
   // (`unit`: the one chosen for the card, carried to the tap as `fcSetUpRun` takes it, so a choice of dollars is never lost here)
@@ -4410,7 +4428,9 @@
       }, (e) => {
         // the rate guard: asked once, and the limit written with the answer
         if (e && e.card === 'rate-far' && !answer) { this.fcRateFar(e, (a) => this.fcLimitRun(sats, tap, usd, pin, a)); return; }
-        this.fcFailed(e, { again: () => this.fcLimitRun(sats, tap, usd, pin, answer) });
+        this.fcFailed(e, { again: () => this.fcLimitRun(sats, tap, usd, pin, answer),
+                           // (a wrong PIN for the recut: the pad again, not the same PIN)
+                           pinAgain: pin ? () => this.fcPinOr({ title: 'CARD PIN', subtitle: 'To recut its money under the new limit' }, (p2) => this.fcLimitRun(sats, tap, usd, p2, answer)) : undefined });
       });
   }
 
@@ -4907,10 +4927,11 @@
         this.loadHistory();
         this.haptic && this.haptic('success');
         this.fcMovedScreen(to, r.amount, r.unit);
-      }, (e) => { v.end(); this.fcFailed(e, { again: () => this.fcMoveWrite(to, pin) }); }),
-    (e) => this.fcFailed(e, { again: () => this.fcMoveWrite(to, pin) }));
+      }, (e) => { v.end(); this.fcFailed(e, { again: () => this.fcMoveWrite(to, pin), pinAgain: ask }); }),
+    (e) => this.fcFailed(e, { again: () => this.fcMoveWrite(to, pin), pinAgain: ask }));
+    const ask = () => this.fcAskPin({ title: 'CARD PIN', subtitle: 'To put its money on the card at ' + this.mintNameOf(to) + '.', cta: 'TAP CARD' }, go);
     if (pin0 || !this.fcKnownPinFirst()) { go(pin0 || ''); return; }
-    this.fcAskPin({ title: 'CARD PIN', subtitle: 'To put its money on the card at ' + this.mintNameOf(to) + '.', cta: 'TAP CARD' }, go);
+    ask();
   }
 
   /* A TRANSFER the card's screen says is not finished (the wallet's `cardTransfers`): its money is in this phone. Where it is at the
@@ -5817,13 +5838,14 @@
           this.fcStillWaiting({});
           return;
         }
-        this.fcFailed(e, { again: () => this.fcWriteRun(c.pin, {}) });
+        this.fcFailed(e, { again: () => this.fcWriteRun(c.pin, {}), pinAgain: () => this.fcWriteAsk({ pin: true }) });
         return;
       }
       /* Set up, the next try is the send with the holder's PIN. Cut short before that, it is the set-up again with the same PIN and
        * the same two numbers (`cardSetUpFor` takes up a set-up cut after the PIN or after the record): the holder's numbers are not
-       * dropped by a send that never writes them. */
-      this.fcFailed(e, { again: () => (setUp ? this.fcSendRun(sats, c.pin, unit, alt) : this.fcSendSetUpRun(sats, unit, alt, c)) });
+       * dropped by a send that never writes them. A wrong PIN (a card that keeps one): the pad once more, the numbers kept. */
+      this.fcFailed(e, { again: () => (setUp ? this.fcSendRun(sats, c.pin, unit, alt) : this.fcSendSetUpRun(sats, unit, alt, c)),
+                         pinAgain: () => (setUp ? this.fcSendAsk(sats, unit, alt) : this.fcSuPinAgain(c, (c2) => this.fcSendSetUpRun(sats, unit, alt, c2))) });
     });
   }
 
@@ -5858,7 +5880,7 @@
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.fcLogCard();
-      }, (e) => this.fcFailed(e, { again: () => this.fcGuestRun(pin) }));
+      }, (e) => this.fcFailed(e, { again: () => this.fcGuestRun(pin), pinAgain: () => this.fcGuestView() }));
   }
 
   /* CONNECT TO PHONE: straight to the card's PIN ("To connect the card to this phone…", CONNECT), then the claim's held tap (about
@@ -5899,7 +5921,7 @@
       if (full) { this.refreshBalance(); this.loadHistory(); }
       this.haptic && this.haptic('success');
       this.toast(card && card.rekeyed ? 'Connected. Backup on this phone.' : 'Connected to this phone.');
-    }, (e) => this.fcFailed(e, { again: () => this.fcTieRun(pin) }));
+    }, (e) => this.fcFailed(e, { again: () => this.fcTieRun(pin), pinAgain: () => this.fcGuestTie() }));
   }
 
   /* A card connected with money on it whose backup is still to move here (software 1.24, `rekeyDue`): read by this phone with a route
@@ -5957,7 +5979,8 @@
    * being read is not lost. Opened, it asks the mint what is still there (`fcAskAtMint`). */
   fcRestoreLost() {
     const W = this.fcW();
-    if (!W) return;
+    // the till has no menu and no card screens; this is here so that no way round to it is found later (26m-till.js)
+    if (!W || this.state.till) return;
     const rows = (W.cardsList() || []);
     if (!rows.length) {
       this.blockedCard('fc-restore', { tone: 'ask', title: 'RESTORE LOST CARD',
@@ -6111,6 +6134,8 @@
   fcSwipe(dir) {
     const s = this.state;
     if (this._pinLocked || s.open0 || this.cardTapOver() || this.cardFlowBusy()) return false;
+    // nor in the till, which has no card screen (26m-till.js)
+    if (s.till) return false;
     if (s.screen === 'home' && dir === 'left') {
       console.log('[foxy] swipe: to the card');
       this.goFlashcard();

@@ -29,6 +29,8 @@
     },
 
     classify: function (text) {
+      // a cashier code (08d-till.js), by its address alone: one that has ended is still named, and refused as one
+      if (tillUrlShape(text)) return 'till';
       var t = FoxyWallet.unwrap(text).replace(/^lightning:/i, '');
       if (/^ln(bc|tb|bcrt)\w{20,}$/i.test(t)) return 'invoice';
       if (/^lnurl1[02-9ac-hj-np-z]{10,}$/i.test(t)) return 'lnurl';
@@ -786,7 +788,17 @@
          * which returns '' — and '' is a receive screen whose QR never
          * appears. */
         var lock;
-        if (o.lock !== false && canLock) {
+        /* A till's request (`o.lockPub`, 08d-till.js): locked to the keeper's
+         * key on the code this phone works by, never to one of this phone's,
+         * and nothing taken from the pool. Made only where the lock holds:
+         * without one, what was paid would be the cashier's to spend. */
+        var tillPass = null;
+        if (o.lockPub) {
+          try { tillPass = tillTermsFor(o.lockPub, unit, mint); }
+          catch (eTill) { console.warn('[foxy] a till request was not made: ' + eTill.message); return ''; }
+          if (!canLock) { console.warn('[foxy] a till request was not made: the mint does not honour a lock'); return ''; }
+          lock = { kind: 'P2PK', data: tillPass.lock, tags: [] };
+        } else if (o.lock !== false && canLock) {
           try {
             var pub = takeLockKey(hexOf(id), { unit: unit, amount: n > 0 ? n : 0 });
             if (/^0[23][0-9a-f]{64}$/i.test(pub)) lock = { kind: 'P2PK', data: pub, tags: [] };
@@ -827,7 +839,16 @@
         }
         var text = new CT.PaymentRequest(transport, hexOf(id), n > 0 ? n : undefined, unit,
           [mint], says || undefined, true, lock).toEncodedRequest();
-        noteOpenRequest(hexOf(id), n > 0 ? n : 0, mint, o.purpose, unit, o.kept === true);
+        noteOpenRequest(hexOf(id), n > 0 ? n : 0, mint, tillPass ? 'till' : o.purpose, unit, o.kept === true);
+        // the keeper's key and where to send what is paid, on the open request (`tillRequestLock`, `tillRequestPaid`)
+        if (tillPass) {
+          var openTill = openRequests[hexOf(id)];
+          openTill.tillLock = tillPass.lock;
+          openTill.tillPass = tillPass.id;
+          openTill.tillTo = tillPass.to;
+          openTill.tillExp = tillPass.exp;
+          saveOpenRequests();
+        }
         return text;
       } catch (e) {
         return '';
@@ -1462,6 +1483,10 @@
         if (over === 'tap') refundRefused(body, e);
         return;
       }
+      /* A till's request (08d-till.js): locked to the keeper, checked at the
+       * mint, and sent to the keeper; never into this phone's pile, and no
+       * change made. Nothing below is for it. */
+      if (p.purpose === 'till') return tillRequestPaid(p, answer, body, over);
       /* The payment's unit, which `readPayment` has held to the request's:
        * every figure below is in it (sats, or cents), and `sats` is said only
        * of a sat payment. A dollar payment is 0 sats. */
