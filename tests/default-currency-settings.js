@@ -177,7 +177,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
   let toasts = [];
   A.toast = (m) => { toasts.push(String(m)); };
   const V = () => A.renderVals();
-  // a clean slate, the wallet given, and home with the drawer and SETTINGS open
+  // a clean slate, the wallet given, and home with the drawer, SETTINGS and its SECURITY drop-down open (SET PIN lives there)
   const fresh = async (W, state) => {
     w.FoxyWallet = W;
     const patch = {};
@@ -186,7 +186,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     clearTimeout(A._holdT); A.stopReceive();
     toasts = [];
     A.setState(Object.assign(patch, initial, { walletLive: true, balSats: 50000, balUsdCents: null, livePrice: PRICE,
-      satUsd: PRICE / 1e8, screen: 'home', stack: [], open0: true, menuSettingsOpen: true }, state || {}));
+      satUsd: PRICE / 1e8, screen: 'home', stack: [], open0: true, menuSettingsOpen: true, menuSecurityOpen: true }, state || {}));
     A.refreshUsd();
     await settle();
   };

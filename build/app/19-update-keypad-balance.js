@@ -81,6 +81,18 @@
     this.stopReceive();
   }
 
+  /* The road to the connected mint, opened by a screen a few seconds ahead of what it will ask there (the wallet's `warm`:
+   * once a minute at most, and nothing offline, before Tor is up, or under a switch still to answer). Nothing when offline
+   * here either; never waited on. */
+  warmRoad() {
+    const W = window.FoxyWallet;
+    if (!W || (this.offlineNow && this.offlineNow())) return;
+    try {
+      const went = W.warm ? W.warm() : W.warmMint ? W.warmMint() : null;
+      if (went && went.catch) went.catch(() => {});
+    } catch (e) { /* a road not opened: the job opens its own, as it always did */ }
+  }
+
   componentDidUpdate(prevProps, prevState) {
     // every screen the person is actually shown, in order
     if (prevState && prevState.screen !== this.state.screen) {
@@ -101,14 +113,16 @@
       }
       // a code somebody was asked to scan goes with the token it belonged to
       if (prevState.screen === 'tokenOut' && this.hideStage) this.hideStage('needScan');
-      // a receive's amount screen: the road to the mint is opened while the amount is typed
-      if (this.state.screen === 'amount' && this.state.flow === 'receive') {
-        const Ww = window.FoxyWallet;
-        if (Ww && Ww.warmMint && !(this.offlineNow && this.offlineNow())) Ww.warmMint();
-      }
+      /* A receive's amount screen, and so the till's SET AMOUNT as it opens and as each PAID comes back to it: the road to
+       * the mint is opened while the amount is typed, for the invoice after it. A card's screen: for the load or the claim
+       * after it (`warmRoad`). */
+      if ((this.state.screen === 'amount' && this.state.flow === 'receive') || this.state.screen === 'flashcard') this.warmRoad();
       // the camera opened for a reason says it only while it is open
       if (prevState.screen === 'sendScan' && this.state.scanWhy) this.setState({ scanWhy: '' });
     }
+    // SEND's keypad reaching an amount: the fee quote, or the token's swap, follows NEXT
+    const sendTyped = (st) => !!st && st.screen === 'amount' && st.flow === 'send' && Number(st.amount) > 0;
+    if (sendTyped(this.state) && !sendTyped(prevState)) this.warmRoad();
     // the token screen's QR code animates while it is open (syncTokenQr)
     this.syncTokenQr();
     // and the receive screen's, where a request with two transports on it is
@@ -151,6 +165,7 @@
     this.syncInbox();
     // the till: home turned into its SET AMOUNT, the cashier's clock, PAID's words (26m-till.js)
     if (this.syncTill) this.syncTill(prevState);
+    this.syncMenuScroll(prevState);
     this.syncTap();
     this.syncClaim();
     this.syncAwake();
@@ -176,6 +191,17 @@
       this._rolled = this.riderShow();
     }
     this._wasHome = home;
+  }
+
+  /* SETTINGS opened in the drawer: its rows unfold at the bottom, below the fold on most phones, so the drawer scrolls to its
+   * end as they open, and the person sees what they asked for. Nothing on close, nor for TOOLS, whose rows are in view. (Both
+   * drawers carry the mark, home's and the card screen's: whichever is up scrolls; the other is not drawn.) */
+  syncMenuScroll(prevState) {
+    if (!this.state.menuSettingsOpen || (prevState && prevState.menuSettingsOpen)) return;
+    const els = (typeof document !== 'undefined') ? document.querySelectorAll('[data-menu-drawer]') : [];
+    if (!els.length) return;
+    const go = () => { els.forEach((el) => { try { el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); } catch (e) { el.scrollTop = el.scrollHeight; } }); };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(go); else go();
   }
 
   press(ch) {

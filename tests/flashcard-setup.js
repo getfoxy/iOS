@@ -339,6 +339,108 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
        'and the same set-up tried again finishes it, the PIN shown first, at this phone’s mint, still EL1', JSON.stringify([cut.state.record.mint, cut.state.record.design]));
   }
 
+  /* ---- the keeper's yes, asked before the card is held up ------------------- */
+  /* Every owner's command but a top-up is signed only against a yes the phone asks itself, before the tap (cardOwnerApprove,
+   * NativeSeedBridge.swift). What the page sends for each, and a No said as `declined`, not as a missing seed. */
+  {
+    P.phone.cardApprovals = [];
+    await W.cardApprove({ label: 'change-pin', pin: '2468' });
+    await W.cardApprove({ label: 'reset', number: 3 });
+    await W.cardApprove({ label: 'reset' });
+    await W.cardApprove({ label: 'set-card', mint: MINT + '/', units: ['usd'], keep: true, card: '02' + '11'.repeat(32) });
+    await W.cardApprove({ label: 'set-limit', figures: ['tap'] });
+    const asked = P.phone.cardApprovals.map((m) => [m.label, m.value, m.mint, (m.units || []).join(), m.keep, m.card, (m.figures || []).join()]);
+    ok(JSON.stringify(asked) === JSON.stringify([
+      ['change-pin', '32343638', undefined, '', undefined, undefined, ''],
+      ['reset', '03', undefined, '', undefined, undefined, ''],
+      ['reset', '', undefined, '', undefined, undefined, ''],
+      ['set-card', undefined, MINT, 'usd', true, '02' + '11'.repeat(32), ''],
+      ['set-limit', undefined, undefined, '', undefined, undefined, 'tap']]),
+      'the page asks the phone for the keeper’s yes with the exact PIN or opening, the mint as the card will hold it, and which limit', JSON.stringify(asked));
+    P.phone.hooks.cardApprove = () => false;
+    ok((await why(W.cardApprove({ label: 'reset' }))) === 'declined', 'a No is the keeper’s answer (`declined`), not a missing seed phrase');
+    P.phone.hooks.cardApprove = null;
+    ok((await why(W.cardApprove({ label: 'change-pin', pin: '12' }))) === 'bad-pin', 'and a PIN that is no PIN is refused before the phone is asked');
+  }
+
+  /* ---- 2026-11-03: the per second limit made true (software 1.25) ------------------------------------------------------
+   * The card of 1.25 waits one second for each limit's worth after the first, and signs nothing earlier than two seconds into
+   * the tap. So a rate of R a second is a limit of R (FC_SPEED_SECS 1: "$5 a second" sends $5), and what the screens say a
+   * payment of N limits' worth takes is 2 s + 1 s × (N − 1) on a 1.25 card, 3 s × (N − 1) on one before it (`fcHoldSecs`). */
+  {
+    const { appOn } = require('./flashcard-ui-kit');
+    const H = await funded({}, 0);
+    const a = appOn(H, { screen: 'flashcard', stack: ['home'] });
+    a.price = 50000;
+    ok(a.FC_SPEED_SECS === 1 && a.fcSpeedLimit(5, 'usd') === 500 && a.fcSpeedLimit(5, 'sat') === 10000,
+       '1.25: "$5 a second" is a limit of $5.00 (500 cents, or 10,000 sats at $50,000)', [a.fcSpeedLimit(5, 'usd'), a.fcSpeedLimit(5, 'sat')].join());
+    const on = (version) => { a._fcCard = version ? { info: { version } } : null; };
+    on('1.25');
+    ok(a.fcCard125() && [1, 2, 3, 4, 10].map((n) => a.fcHoldSecs(n)).join() === '2,4,5,6,13',
+       'a card of 1.25 holds about 2.4 s + 1.2 s \u00d7 (N \u2212 1) for N limits\u2019 worth, the floor even within the limit', [1, 2, 3, 4, 10].map((n) => a.fcHoldSecs(n)).join());
+    ok(a.fcWaitLine(1000, 'usd', 'usd') === 'It will take 6 seconds to pay $40.00.', 'its SET AMOUNT line: $10 a second, four limits\u2019 worth, six seconds', a.fcWaitLine(1000, 'usd', 'usd'));
+    on('1.26');
+    ok(a.fcCard125() && a.fcHoldSecs(4) === 6, 'and so does a card after it');
+    on('1.24');
+    ok(!a.fcCard125() && [1, 2, 3, 4].map((n) => a.fcHoldSecs(n)).join() === '0,3,6,9', 'a card before 1.25 still waits about three seconds a limit: 3 s \u00d7 (N \u2212 1), nothing within it',
+       [1, 2, 3, 4].map((n) => a.fcHoldSecs(n)).join());
+    ok(a.fcWaitLine(1000, 'usd', 'usd') === 'It will take 9 seconds to pay $40.00.', 'and its SET AMOUNT line says nine seconds for the same', a.fcWaitLine(1000, 'usd', 'usd'));
+    on('');
+    ok(a.fcCard125() && a.fcHoldSecs(4) === 6, 'a card not read yet is taken as the newest');
+    // the sheet's words while a 1.25 card waits: its floor is not "over the limit"
+    ok(a.fcProgressText({ step: 'waiting', floor: 3, more: 2, polls: 2 }) === 'Keep holding.' && a.fcProgressText({ step: 'waiting', floor: 3, more: 2, polls: 3 }) === 'Keep holding.'
+       && a.fcProgressText({ step: 'waiting', floor: 3, more: 2, polls: 4 }) === 'Over per tap limit x2' && a.fcProgressText({ step: 'waiting', floor: 3, more: 2, polls: 6 }) === 'Over per tap limit x3',
+       'on 1.25 the floor\u2019s waits are "Keep holding", and only a wait past it is over the limit, x2 and x3 by two waits a limit',
+       [2, 3, 4, 6].map((n) => a.fcProgressText({ step: 'waiting', floor: 3, more: 2, polls: n })).join(' | '));
+    ok(a.fcProgressText({ step: 'waiting', over: 10, more: 4, polls: 3 }) === 'Over per tap limit', 'and a card before it is over its limit from its first wait, as ever');
+    a._fcCard = null;
+
+    // the wallet against the card itself: 1.25 waits its floor and two a limit past it; 1.24 signs within its limit at once
+    for (const software of [25, 24]) {
+      const R = await funded({}, 20000);
+      const card = newCard(R, undefined, { format: 4, software });
+      const PRICE = 100000;
+      await R.W.cardSetUp(card, { pin: '1234', unit: 'sat', price: PRICE });
+      card.tap();
+      await R.W.cardAdd(card, { amount: 9000, unit: 'sat', pin: '1234', price: PRICE });
+      card.tap();
+      const read = await R.W.cardLook(card, { mine: true, price: PRICE });
+      const i = read.info || {};
+      if (software === 25) {
+        ok(i.waitFloor === 3 && i.waitMore === 2 && i.waitOver === 5, '1.25 says its wait: a floor of 3, two more a limit (and 5 for the first past it)', JSON.stringify([i.waitFloor, i.waitMore, i.waitOver]));
+      } else {
+        ok(i.waitFloor === 0 && i.waitMore === 4 && i.waitOver === 10, 'a card of 1.24 has no floor: four a limit, ten for the first past it', JSON.stringify([i.waitFloor, i.waitMore, i.waitOver]));
+      }
+      // (a card of 1.23 and on keeps its limits in cents: $2.00, 2,000 sats at the price)
+      card.state.tapLimit = 200;
+      const w0 = card.state.waited || 0;
+      card.tap();
+      const small = await R.W.cardPay(card, { sats: 512, pin: '1234', price: PRICE }).then((r) => r, (e) => ({ no: e }));
+      const w1 = card.state.waited || 0;
+      ok(!small.no && w1 - w0 === (software === 25 ? 3 : 0), software === 25
+        ? '1.25: a payment within its limit waits the floor, three, and is signed (the floor is not read as over the limit)'
+        : '1.24: a payment within its limit is signed at once', (small.no ? String(small.no.message) : '') + ' waited ' + (w1 - w0));
+      card.tap();
+      const big = await R.W.cardPay(card, { sats: 6000, pin: '1234', price: PRICE }).then((r) => r, (e) => ({ no: e }));
+      const w2 = card.state.waited || 0;
+      ok(!big.no && w2 - w1 === (software === 25 ? 7 : 14), software === 25
+        ? '1.25: three limits\u2019 worth waits the floor and two a limit past the first: 3 + 2 \u00d7 2'
+        : '1.24: three limits\u2019 worth waits ten and four: 14', (big.no ? String(big.no.message) : '') + ' waited ' + (w2 - w1));
+    }
+    {
+      // the signing loop's "a cheaper set" turn is made at the first wait past the floor, never at the floor's own first "not yet"
+      const wsrc = fs.readFileSync(path.join(__dirname, '..', 'Web', 'foxy-wallet.js'), 'utf8');
+      ok(/var floorWaits = \(card && card\.info && Number\(card\.info\.waitFloor\) > 0\)[\s\S]{0,200}if \(polls === floorWaits && other && other\.group && other\.group\.length\)/.test(wsrc)
+         && !/if \(polls === 0 && other && other\.group/.test(wsrc),
+         'on 1.25 a payment with another set of pieces is not dropped at the floor\u2019s first "not yet": the turn to a cheaper set is past the floor', 'signing loop');
+    }
+    const src = fs.readFileSync(path.join(__dirname, '..', 'build', 'app', '26g-tap-limit-explainer.js'), 'utf8');
+    ok(/\[2, 3, 4\]\.map\(\(n\) => String\(this\.fcHoldSecs\(n\)\)\)/.test(src), 'HOW TAP LIMIT WORKS takes its tiers from the same (`fcHoldSecs`)', 'explainer');
+    const wheel = fs.readFileSync(path.join(__dirname, '..', 'build', 'app', '26j-card-wheel.js'), 'utf8');
+    ok(!/three seconds of|L = 3 \u00d7 R|L \/ 3/.test(wheel), 'and no word of the card wheel still says a limit is three seconds of the rate', 'wording');
+    a._fcCard = null;
+  }
+
   console.log('\n' + (failed ? failed + ' flashcard-setup check(s) failed' : 'all flashcard-setup checks pass'));
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.log('THREW ' + ((e && e.stack) || e)); process.exit(1); });

@@ -101,7 +101,7 @@ function appMethod(sig) {
   }
   return appSrc.slice(at + 3, i + 1);
 }
-const auditMethods = new Function('return {' + ['histAudit() {', 'histAuditUsd() {', 'txTotalOut(t) {', 'arrivingBucket(unit) {',
+const auditMethods = new Function('return {' + ['histAudit() {', 'histAuditUsd() {', 'txTotalOut(t) {', 'txTotalUnit(t) {', 'arrivingBucket(unit) {',
   'arrivingNow() {', 'heldPill() {'].map(appMethod).join(',') + '}')();
 async function appAudit(c, mint) {
   const W = c.W;

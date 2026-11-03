@@ -306,10 +306,14 @@ extension FoxyBridge {
         evaluate("window.FoxyWallet && window.FoxyWallet._turned && window.FoxyWallet._turned(" + (upsideDown ? "true" : "false") + ")")
     }
 
-    /// The phone was shaken. Told to the page only while armed.
+    /// The phone was shaken. While the receive screen has armed it, the shake
+    /// presses TAP; anywhere else the page is told, and asks whether to copy
+    /// the logs (26c-field-log.js `shakenForLogs`). Asked, never done on the
+    /// shake alone.
     func shaken() {
         guard shakeArmed else {
-            print("[foxy] tap: shaken, but shake to tap is off")
+            print("[foxy] shaken off the receive screen; asking about the logs")
+            evaluate("window.FoxyWallet && window.FoxyWallet._shaken && window.FoxyWallet._shaken()")
             return
         }
         print("[foxy] tap: shaken; pressing TAP")

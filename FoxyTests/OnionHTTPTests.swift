@@ -329,6 +329,67 @@ final class OnionInboxParsingTests: XCTestCase {
     }
 }
 
+/// Who holds the inbox's places, and who gives one up when they are all taken.
+///
+/// Another app on the phone can reach the inbox's port. Four places, each held
+/// for thirty seconds by a connection that dripped a byte at a time, left the
+/// payer's own connection the one turned away.
+final class OnionInboxPlacesTests: XCTestCase {
+    func testThirtyTwoPlacesAndTheOldestWithNoHeadGivesItsPlaceUp() {
+        var places = InboxPlaces<Int>()
+        XCTAssertEqual(InboxPlaces<Int>.most, 32)
+        for k in 0..<32 {
+            let a = places.arrive(k)
+            XCTAssertTrue(a.admit, "place \(k)")
+            XCTAssertNil(a.evict, "nobody gives a place up before all are taken")
+        }
+        // 0 and 1 have sent a payer's head; 2 is the oldest that has not
+        places.headIn(0)
+        places.headIn(1)
+        let full = places.arrive(100)
+        XCTAssertTrue(full.admit, "a newcomer to a full inbox of silent connections is let in")
+        XCTAssertEqual(full.evict, 2, "the oldest connection with no head gave its place up")
+        XCTAssertEqual(places.order.count, 32)
+        XCTAssertTrue(places.hasHead(0) && places.hasHead(1), "a payer's connection is never the one let go")
+        XCTAssertEqual(places.arrive(101).evict, 3)
+    }
+
+    func testEveryPlaceHeldByAPayerTurnsTheNewcomerAway() {
+        var places = InboxPlaces<Int>()
+        for k in 0..<32 { _ = places.arrive(k); places.headIn(k) }
+        let late = places.arrive(99)
+        XCTAssertFalse(late.admit)
+        XCTAssertNil(late.evict)
+        places.leave(5)
+        XCTAssertTrue(places.arrive(99).admit, "a place given back is a place again")
+        XCTAssertFalse(places.hasHead(99))
+    }
+
+    func testAHeadCountsOnlyWhenWholeAndToThePath() {
+        let whole = Fixture.request()
+        XCTAssertTrue(HTTPRequestHead.headIsWhole(whole, path: Fixture.path))
+        XCTAssertTrue(HTTPRequestHead.headIsWhole(Fixture.slice(whole), path: Fixture.path), "read the same in a slice")
+        XCTAssertTrue(HTTPRequestHead.headIsWhole(Fixture.head(["Content-Length: 900"]), path: Fixture.path),
+                      "a head whose body is still on its way is a payer's")
+        XCTAssertFalse(HTTPRequestHead.headIsWhole(whole.prefix(40), path: Fixture.path), "half a head")
+        XCTAssertFalse(HTTPRequestHead.headIsWhole(Data("P".utf8), path: Fixture.path), "one byte")
+        XCTAssertFalse(HTTPRequestHead.headIsWhole(Fixture.request(path: "/other"), path: Fixture.path),
+                       "another path holds no place as a payer")
+    }
+
+    /// The deadline that gives up on an address that never opened reads and
+    /// writes what Tor's answer and the listener's state do, so it runs where
+    /// they run: the main queue. On the listener's own queue it could answer
+    /// twice and close a listener that had just been published.
+    func testTheOpeningDeadlineRunsOnTheMainQueue() throws {
+        let source = try String(contentsOf: repoRoot().appendingPathComponent("Foxy/Network/OnionInbox.swift"), encoding: .utf8)
+        let deadline = "asyncAfter(deadline: .now() + 20)"
+        XCTAssertEqual(source.components(separatedBy: deadline).count - 1, 1, "one opening deadline")
+        XCTAssertTrue(source.contains("DispatchQueue.main." + deadline), "the opening deadline left the main queue")
+        XCTAssertFalse(source.contains("connections.count < 4"), "the four-place cap is back")
+    }
+}
+
 /// What comes back from the other phone (HTTPAnswer), read off a connection
 /// that is closing.
 final class OnionAnswerParsingTests: XCTestCase {

@@ -930,7 +930,8 @@
    * payment, held to the total and not to a payer's cap. Asked only with no
    * route: a phone that can settle at once is carrying nothing. */
   function tillRefusal(amount, unit, who, card) {
-    if (routeOpen()) return '';
+    // (and while the mint switched to has not answered, which settles nothing either: `mintPending`, review p4)
+    if (routeOpen() && !mintPendingNow()) return '';
     // the price once, for every figure in this question
     var r = lastRate();
     var caps = tillCaps(r);
@@ -1319,8 +1320,9 @@
     if (!(asked > 0) || !(paid > asked)) return 0;
     /* Only what will really go back. With no route there is nothing to swap
      * with, and with no key from the payer there is nothing to lock it to — in
-     * both cases this phone keeps the lot and the entry should say so. */
-    if (!routeOpen() || !p.changeTo) return 0;
+     * both cases this phone keeps the lot and the entry should say so. Nor while the mint this phone has just
+     * switched to has not answered (`mintPending`): that is no route to swap with either. */
+    if (!routeOpen() || mintPendingNow() || !p.changeTo) return 0;
     /* Less this mint's input fee on the pieces that came. A payer with no
      * route pays the amount plus that fee on purpose, so the receiver nets
      * what it asked (readPayment); treating the fee as an overpayment made
@@ -1656,13 +1658,23 @@
     }
     // a till asks the mint about every payment before it takes it (08d-till.js, `tillAccept`)
     if (open.purpose === 'till' && !routeOpen()) return no('This till needs a connection to take that.');
-    if (!routeOpen()) {
+    /* At a mint switched to that has not answered yet (`mintPending`), as with no route: a till asks its mint about
+     * every payment, so it takes none; anything else takes only ecash locked to this request, which needs no mint. */
+    var pendingHere = canonicalMint(at) === canonicalMint(here) && mintPendingNow();
+    if (pendingHere && open.purpose === 'till') return no('This till is still connecting to its mint. Try again in a moment.');
+    if (pendingHere && x.locked !== true) {
+      return no('This phone is still connecting to its mint, so it can only take ecash locked to it. Try again in a moment.');
+    }
+    /* With no route, or at a mint switched to that has not answered (`pendingHere`), which can settle nothing either:
+     * the same questions, and the same limits on what is held unsettled (review p4). */
+    if (!routeOpen() || pendingHere) {
+      var offWords = pendingHere ? 'This phone is still connecting to its mint' : 'This phone is offline';
       // with no route: only ecash locked to this request's own key, still unpaid, in a keyset this phone can check
       if (x.locked !== true) {
-        return no('This phone is offline, so it can only take ecash locked to it. Try again when either phone is online.');
+        return no(offWords + ', so it can only take ecash locked to it. Try again when either phone is online.');
       }
       var pub = lockPubFor(id);
-      if (!pub) return no('This phone is offline and has no key on file for that request. Show them a new request.');
+      if (!pub) return no(offWords + ' and has no key on file for that request. Show them a new request.');
       if (lockTaken(id)) return no('That request has already been paid on this phone. Show them a new request.');
       /* A keyset this phone holds the keys of, and of the request's unit:
        * the DLEQ is checked against it, and a dollar payment made on a sat
@@ -1673,7 +1685,7 @@
       if (typeof x.keyset === 'string' && x.keyset && (kwAt
           ? (!keysetFor(kwAt, x.keyset) || (keysetUnit(onHereAt ? here : canonicalMint(at), x.keyset, kwAt) || 'sat') !== openUnit)
           : !onHereAt)) {
-        return no('This phone is offline and cannot check ecash from that keyset. Try again when either phone is online.');
+        return no(offWords + ' and cannot check ecash from that keyset. Try again when either phone is online.');
       }
       /* And within what this phone takes before it settles (`tillRefusal`): from
        * this payer, by the identity they name, and in all. Said here, before the
@@ -2111,8 +2123,9 @@
       keptTheLot();
       return;
     }
-    if (!routeOpen()) {
-      console.warn('[foxy] they overpaid by ' + said(owed) + ' and this phone has no route to make change');
+    if (!routeOpen() || mintPendingNow()) {
+      console.warn('[foxy] they overpaid by ' + said(owed) + ' and this phone has no route to make change'
+        + (routeOpen() ? ' (its mint has not answered yet)' : ''));
       keptTheLot();
       return;
     }

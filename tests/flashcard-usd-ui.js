@@ -73,7 +73,7 @@ const LIFTS = [
   ['23-render-home-and-amount.js', ['usdKeypad() {']],
   ['24-render-receive-and-send.js', ['renderPaid(c) {', 'renderPaidBase(c) {']],
   ['16-history-lists.js', ['loadHistory() {', 'histAudit() {', 'histAuditUsd() {', 'histAuditIn(unit) {', 'arrivingNow() {', 'arrivingBucket(unit) {',
-                           'topUpFeeSats() {', 'recoveringSats() {', 'txTotalOut(t) {', 'txWhen(t) {', 'txLabel(d, now) {', 'txStamp(d, now) {',
+                           'topUpFeeSats() {', 'recoveringSats() {', 'txTotalOut(t) {', 'txTotalUnit(t) {', 'txWhen(t) {', 'txLabel(d, now) {', 'txStamp(d, now) {',
                            'txDay(d, now) {', 'txClock(d) {', 'txWho(t) {', 'txCardName(t) {']],
   ['26-render-history-and-contacts.js', ['renderHistory(c) {', 'renderTxDetail(c) {', 'histRowTwo(']],
   ['12-receive.js', ['announcePayment(ev) {']],
@@ -307,8 +307,8 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     await until('the card read again', () => !!holder.state.fc && holder.state.fc.tap && holder.state.fc.tap.limited && holder.state.fc.limit === 5000);
     const line = () => vals(holder).fcLimitLine;
     // (its daily limit is not said: the card screens have none)
-    const want = 'PER SECOND LIMIT $6.67 | NO PIN';
-    ok(line() === want, 'its limit as the rate it makes, in dollars: $20.00 a payment is $6.67 a second, and nothing of its daily limit', line());
+    const want = 'PER SECOND LIMIT $20.00 | NO PIN';
+    ok(line() === want, 'its limit as the rate it makes, in dollars: $20.00 a payment is $20.00 a second (one second of it, 1.25), and nothing of its daily limit', line());
     holder.price = 80000;
     const at80 = line();
     holder.price = 160000;
@@ -758,7 +758,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     holder.price = 80000;
     holder.fcSetLimit();
     // (the limit on a payment, which this card waits for: its rate; the card screens set no daily limit)
-    ok(limits(holder) && limits(holder).rows[0] === 'PER SECOND LIMIT | How fast the card can pay | $6.67 | per sec', 'CARD LIMITS: PER SECOND LIMIT first, $20.00 a payment said as $6.67 a second', limits(holder) && limits(holder).rows.join(' / '));
+    ok(limits(holder) && limits(holder).rows[0] === 'PER SECOND LIMIT | How fast the card can pay | $20.00 | per sec', 'CARD LIMITS: PER SECOND LIMIT first, $20.00 a payment said as $20.00 a second', limits(holder) && limits(holder).rows.join(' / '));
     limits(holder).press('PER SECOND LIMIT');
     if (explainer(holder)) { explainer(holder).finish(); explainer(holder).press('CONTINUE'); } else card(holder).press('CONTINUE');
     ok(speed(holder) && speed(holder).mode === 'limit' && speed(holder).chosen === '$5', 'CONTINUE opens MAX SPEND PER SECOND, at $5 a second', JSON.stringify(speed(holder)));
@@ -768,9 +768,9 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     holder.state.amount = '20.00';
     holder.fcAmountNext();
     let sp = holder.fcLimitSpec();
-    ok(holder.state.fcLimit.sats === 6000 && holder.state.fcLimit.usd === 0 && sp.amount === '$20.00 / sec' && sp.amountSub === '' && !/kept at/.test(sp.warn)
-       && /^This card pays up to \$ 60\.00 straight away/.test(sp.warn),
-       'typed: $20.00 a second is a limit of $60.00, said as the rate, with no "kept at this many dollars"', JSON.stringify([sp.amount, sp.amountSub, sp.warn]));
+    ok(holder.state.fcLimit.sats === 2000 && holder.state.fcLimit.usd === 0 && sp.amount === '$20.00 / sec' && sp.amountSub === '' && !/kept at/.test(sp.warn)
+       && /^This card pays up to \$ 20\.00 straight away/.test(sp.warn),
+       'typed: $20.00 a second is a limit of $20.00, said as the rate, with no "kept at this many dollars"', JSON.stringify([sp.amount, sp.amountSub, sp.warn]));
     sp.secondary.go();
     ok(holder.state.screen === 'flashcard' && !holder.state.fcSpeed && !holder.state.fcLimit, 'CANCEL there is the card’s screen, past the keypad and the rate', holder.state.screen);
     // NO LIMIT under NEXT on the rate: the limit removed, as NO LIMIT on the keypad removes it (`fcLimitConfirm(0)`)
@@ -789,14 +789,14 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     if (explainer(holder)) { explainer(holder).finish(); explainer(holder).press('CONTINUE'); } else card(holder).press('CONTINUE');
     speed(holder).pick(10).next();
     sp = holder.fcLimitSpec();
-    ok(holder.state.fcLimit.sats === 3000 && holder.state.fcLimit.usd === 0 && sp.amount === '$10 / sec' && sp.amountLabel === 'YOU ARE APPLYING A PER SECOND LIMIT OF:',
-       'a chip: $10 a second is a limit of $30.00 in cents, confirmed as $10 / sec', JSON.stringify([holder.state.fcLimit, sp.amount]));
+    ok(holder.state.fcLimit.sats === 1000 && holder.state.fcLimit.usd === 0 && sp.amount === '$10 / sec' && sp.amountLabel === 'YOU ARE APPLYING A PER SECOND LIMIT OF:',
+       'a chip: $10 a second is a limit of $10.00 in cents, confirmed as $10 / sec', JSON.stringify([holder.state.fcLimit, sp.amount]));
     k.tap();
     sp.go();
     await until('the limit to be set', () => asked.length === 1 && !(holder._fcTaps > 0));
     await settle();
-    ok(asked[0].sats === 3000 && asked[0].usd === 0 && asked[0].tap === true && k.state.tapLimit === 3000 && holder.toasts.indexOf('Per second limit set.') >= 0,
-       'the card’s limit on a payment is set to 3,000 cents, and no dollars are sent to keep it at', JSON.stringify(asked[0]));
+    ok(asked[0].sats === 1000 && asked[0].usd === 0 && asked[0].tap === true && k.state.tapLimit === 1000 && holder.toasts.indexOf('Per second limit set.') >= 0,
+       'the card’s limit on a payment is set to 1,000 cents, and no dollars are sent to keep it at', JSON.stringify(asked[0]));
     ok(vals(holder).fcLimitLine === 'PER SECOND LIMIT $10 | NO PIN' && limits((holder.fcSetLimit(), holder)).rows[0] === 'PER SECOND LIMIT | How fast the card can pay | $10 | per sec',
        'and read back as $10 a second, on its face and in CARD LIMITS', vals(holder).fcLimitLine);
     limits(holder).press('CLOSE');

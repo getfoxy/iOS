@@ -157,7 +157,8 @@ plain message.
 | `p2pkPubkeys` | `{start, count}`, count 1 to 300, no index past 20,000 | the same shape, nothing moved: the walk that finds which index a token in hand is locked to |
 | `p2pkKey` | `{index}` | `{index, privkey, pubkey}`, inside 1,000 of the last index reserved or inside a range this session's walk served; "outside the lock-key window" |
 | `cardOwnerKey` | `{key}`, a card's compressed public key: 66 hex characters, either case, starting 02 or 03 | `{"pub": "<130 lowercase hex>"}`, the owner PUBLIC key, `04` and X and Y; "bad request" before the seed is read, "no seed" |
-| `cardOwnerSign` | `{key, label, nonce, value}`: the key as above; `label` exactly one of `change-pin`, `set-limit`, `set-owner`, `set-card`, `load`, `reset`; `nonce` 32 hex characters; `value` hex of the shape that label takes (empty for `load` and `reset`) | `{"sig": "<DER, lowercase hex>"}`, an ECDSA signature by the owner key over `"FoxyCard/" + label`, the nonce and the value; "bad request" before the seed is read, "no seed" |
+| `cardOwnerSign` | `{key, label, nonce, value, refundIndex?}`: the key as above; `refundIndex`, for `set-card` only, the lock-key index the record's refund key was taken at; `label` exactly one of `change-pin`, `set-limit`, `set-owner`, `set-card`, `load`, `reset`; `nonce` 32 hex characters; `value` hex of the shape that label takes (empty for `load` and `reset`) | `{"sig": "<DER, lowercase hex>"}`, an ECDSA signature by the owner key over `"FoxyCard/" + label`, the nonce and the value; "bad request" before the seed is read, "no seed"; "Nothing was changed on the card." without the keeper's yes it needs, or for a record whose refund key is not this phone's |
+| `cardOwnerApprove` | `{label, value}` for `change-pin`, `reset` and `set-owner`; `{label, mint, units?, card?, keep?}` for `set-card`; `{label, figures}` for `set-limit`; `card`, where given, a card's key as above | `{"approved": true}` after the alert and, for all but `set-limit`, Face ID or the passcode; "Nothing was changed on the card." otherwise; "bad request" for `load` or any other shape |
 | `seedShow` | `{verify}` | `{"verified": true}` or `{"verified": false}` once the screen closes |
 | `seedEnter` | `{}` | `{"candidate": id}`; "cancelled" |
 | `seedAdopt` | `{candidate}` | `{"adopted": true}` or `{"adopted": false, "same": true}`; "Nothing was changed.", "unknown candidate" |
@@ -188,7 +189,10 @@ or the seed.
   never saved. The page sends them once. Words that are not a BIP-39 phrase (12
   to 24 English words with a right checksum, as one string or an array) are
   "bad request". With no seed saved, and only inside the one-time window below,
-  they are written with `SeedVault`'s rules, never replacing one: `migrated`. The
+  they are written with `SeedVault`'s rules, never replacing one, and only after
+  the iOS alert "Save this wallet's seed?" and then Face ID or the passcode,
+  as a replace asks: `migrated`. A no is "Nothing was changed." and leaves the
+  window open, so the words can move at the next launch. The
   same BIP-39 seed already saved is `same`. A different seed saved is
   `different`, with nothing changed and no alert; the log says so. Those two
   answers come whether the window is open or closed: an
@@ -313,9 +317,8 @@ or the seed.
   before the seed is read. It moves no counter and has no window. A page that had
   been got at can ask for a signature for any card whose key it knows, but a
   nonce comes only from a card held to the phone, and a signature is good for that
-  nonce, in that tap, and no other, so it needs that card held to the phone. With
-  it, it can do what the card's owner can with no PIN, which includes setting the
-  PIN, lifting the limit and so spending what is on the card.
+  nonce, in that tap, and no other, so it needs that card held to the phone.
+  Every label but `load` signs only against the keeper's yes, given before the card session (`cardOwnerApprove`, below), and uses it up: the same bytes for `change-pin`, `reset` and `set-owner`; the mint, and the unit where it was named, for `set-card`; the figures chosen for `set-limit`, every other figure in the value the card's own as its GET_INFO answer in this tap said it. Three things sign with no yes because they change nothing the keeper chose: a 16-byte limit whose day's, one payment's and no-PIN figures are the card's own (the rate written before a top-up in sats); a limit in the tap whose GET_INFO said the card had no owner (its set-up); and a record at the mint and unit the card's own record, read in this tap, names. A move to another mint the keeper said yes to (`keep`) is kept in the Keychain (`foxy.card.moves`) for its card until the write that uses it, which may be a later tap. A record (`set-card`) is signed only when the key its money goes back to is this phone's own: the request names the lock-key index (`refundIndex`) and native derives the key again from the seed; any other key, none, or no index is "Nothing was changed on the card.", whatever the mint and unit. Nothing is asked during a tap: the phone's alert would sit under the card sheet. A new owner key for `set-owner` must be a point on P-256, not only 65 bytes beginning 04, or it is "bad request" before anything else.
 - **The words are shown and typed on native screens**
   (`Foxy/Bridge/SeedScreens.swift`), in the page's wording. `seedShow` reads the
   words under the usual unlock and shows them behind TAP TO REVEAL, with VERIFY
@@ -372,7 +375,12 @@ or the seed.
   that let a script delete the seed and write words of its own. A replace left
   without an answer for two minutes is a no, and its alert comes down. Each is
   one seed change at a time (a create, migrate, adopt or wipe), and the counters
-  are set aside only after the keychain has changed.
+  are set aside only after the keychain has changed. Counters that cannot be set
+  aside after a replace are deleted, the counter file and the lock-key index
+  both, and the new seed's are then raised to where its words were found: the
+  old seed's must not count on under the new one, where a restore from the new
+  words, scanning from zero, would never reach the ecash made at them. Only
+  counters that can be neither set aside nor deleted are a refusal.
 - **A write whose read-back failed** (the phone locked just after Replace, say)
   is read again: if the keychain holds the new words it is a success, and the
   change finishes (the counters set aside, `adopted` or `created`). The kept

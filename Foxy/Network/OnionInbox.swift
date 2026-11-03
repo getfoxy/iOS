@@ -24,6 +24,12 @@ final class OnionInbox {
     private static let largestHead = 8 * 1024
     /// How long a payer may take to send its request, once connected.
     private static let readPatience: TimeInterval = 30
+    /// How long a connection may take to send a whole head, with the right path,
+    /// before it gives up its place. A payer's Foxy sends its head the moment
+    /// the stream is open; something that connects and drips bytes, or sends
+    /// nothing, is not a payer, and every place it held for the thirty seconds
+    /// above was a place a payer could not have.
+    private static let headPatience: TimeInterval = 5
     /// How long the page may take to redeem and answer: a swap at the mint over
     /// Tor, which a bridge can make slow.
     private static let answerPatience: TimeInterval = 100
@@ -37,6 +43,8 @@ final class OnionInbox {
     private(set) var serviceID: String?
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
+    /// Who holds the places, in the order they came, and which have sent a head.
+    private var places = InboxPlaces<ObjectIdentifier>()
     private let queue = DispatchQueue(label: "foxy.onion.inbox")
     private var closed = false
 
@@ -78,6 +86,11 @@ final class OnionInbox {
         params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         guard let listener = try? NWListener(using: params) else { done(nil); return }
         self.listener = listener
+        /* `reported` and `closed` are the main queue's. The listener's state,
+         * Tor's answer and the deadline below all come back there, so the
+         * answer is given once and a listener just published is never closed
+         * by a deadline reading a flag another queue was writing. The deadline
+         * used to run on the listener's queue. */
         var reported = false
         let report: (URL?) -> Void = { url in
             guard !reported else { return }
@@ -127,7 +140,7 @@ final class OnionInbox {
         /* And a deadline, because `.setup` is not in the switch above either:
          * everything else in this file has one (readPatience,
          * answerPatience), and this was the one path that could hang. */
-        queue.asyncAfter(deadline: .now() + 20) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
             guard !reported else { return }
             print("[foxy] onion inbox did not open in 20s —", self?.note ?? "")
             report(nil)
@@ -148,6 +161,7 @@ final class OnionInbox {
         queue.async {
             self.connections.values.forEach { $0.cancel() }
             self.connections.removeAll()
+            self.places = InboxPlaces()
         }
         print("[foxy] onion inbox closed —", note)
     }
@@ -160,18 +174,34 @@ final class OnionInbox {
         #if DEBUG
         print("[foxy] onion inbox: a connection arrived (\(connections.count) open)")
         #endif
-        guard connections.count < 4 else { conn.cancel(); return }
+        /* Every place taken: the oldest that has not sent a head gives its place
+         * up, and only with none of those is the newcomer turned away. Another
+         * app on the phone can reach this port; four connections that dripped
+         * a byte at a time used to hold every place for thirty seconds each,
+         * and the payer's own connection, forwarded by Tor, was the one cancelled. */
+        let arrival = places.arrive(key)
+        if let evicted = arrival.evict {
+            print("[foxy] onion inbox: every place was taken; the oldest connection with no request gives its place up")
+            connections[evicted]?.cancel()
+            connections[evicted] = nil
+        }
+        guard arrival.admit else { conn.cancel(); return }
         connections[key] = conn
         conn.stateUpdateHandler = { [weak self] state in
             #if DEBUG
             print("[foxy] onion inbox: connection \(state)")
             #endif
             switch state {
-            case .failed, .cancelled: self?.queue.async { self?.connections[key] = nil }
+            case .failed, .cancelled: self?.queue.async { self?.connections[key] = nil; self?.places.leave(key) }
             default: break
             }
         }
         conn.start(queue: queue)
+        queue.asyncAfter(deadline: .now() + Self.headPatience) { [weak self] in
+            // connected and still no whole head: not a payer, and its place is given back
+            guard let self, self.connections[key] != nil, !self.places.hasHead(key) else { return }
+            conn.cancel()
+        }
         queue.asyncAfter(deadline: .now() + Self.readPatience) { [weak self] in
             // still reading: a payer that stalls does not hold a slot
             if self?.connections[key] != nil, conn.state != .cancelled, !(self?.answering.contains(key) ?? false) {
@@ -188,6 +218,8 @@ final class OnionInbox {
             guard let self else { return }
             var buffer = buffer
             if let data { buffer.append(data) }
+            // a whole head has come, so this is a request to the right path and not a place held for nothing
+            if !self.places.hasHead(key), HTTPRequestHead.headIsWhole(buffer, path: self.path) { self.places.headIn(key) }
             switch HTTPRequestHead.parse(buffer, path: self.path, largestHead: Self.largestHead,
                                          largestBody: Self.largestPayment) {
             case .needMore:
@@ -243,6 +275,41 @@ final class OnionInbox {
     }
 }
 
+/// The inbox's places: who holds one, in the order they came, and which have
+/// sent a whole head to the right path. Thirty-two of them, which costs little:
+/// a connection that has not sent a head holds at most the 8 KB a head may be.
+/// When all are taken, the oldest connection that has sent no head gives its
+/// place to the newcomer; a connection with a head is a payer's, and is never
+/// the one let go. With every place held by a payer, the newcomer is turned away.
+struct InboxPlaces<Key: Hashable> {
+    static var most: Int { 32 }
+    private(set) var order: [Key] = []
+    private var headed: Set<Key> = []
+
+    /// Whether `key` may have a place, and whose place it takes, if anyone's.
+    mutating func arrive(_ key: Key) -> (admit: Bool, evict: Key?) {
+        var evict: Key?
+        if order.count >= Self.most {
+            guard let oldest = order.first(where: { !headed.contains($0) }) else { return (false, nil) }
+            leave(oldest)
+            evict = oldest
+        }
+        order.append(key)
+        return (true, evict)
+    }
+
+    mutating func headIn(_ key: Key) {
+        if order.contains(key) { headed.insert(key) }
+    }
+
+    func hasHead(_ key: Key) -> Bool { headed.contains(key) }
+
+    mutating func leave(_ key: Key) {
+        order.removeAll { $0 == key }
+        headed.remove(key)
+    }
+}
+
 /// Reading one HTTP/1.1 request, as far as the inbox needs: POST, to the one
 /// path, with a Content-Length within the limit. Nothing else is accepted —
 /// no chunked bodies, no other methods — and a request that says it is too
@@ -252,6 +319,17 @@ enum HTTPRequestHead {
         case needMore
         case refuse(Int)
         case payment(String)
+    }
+
+    /// Whether a whole head has arrived and asks for this path: the blank line is
+    /// in, and what came before it is a request line to `path`. What the place
+    /// rules count as a payer (InboxPlaces); `parse` still decides what it gets.
+    static func headIsWhole(_ data: Data, path: String) -> Bool {
+        guard let end = data.range(of: Data("\r\n\r\n".utf8)),
+              let head = String(data: data[data.startIndex..<end.lowerBound], encoding: .utf8),
+              let first = head.components(separatedBy: "\r\n").first else { return false }
+        let parts = first.split(separator: " ", omittingEmptySubsequences: false)
+        return parts.count == 3 && parts[1] == path
     }
 
     static func parse(_ data: Data, path: String, largestHead: Int, largestBody: Int) -> Outcome {

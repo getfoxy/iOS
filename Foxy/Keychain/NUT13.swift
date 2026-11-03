@@ -444,11 +444,297 @@ enum CardOwner {
         let label: Label
         let nonce: [UInt8]
         let value: [UInt8]
+        /// For set-card: the lock-key index this phone derived the record's refund
+        /// key at, so the key can be checked to be this phone's own (P2PK).
+        var refundIndex: UInt64? = nil
 
         /// The shape checks again, on a request built some other way than by `CardOwner.signRequest`.
         var isWellFormed: Bool {
             CardOwner.isCardKey(key) && nonce.count == CardOwner.nonceLength && label.accepts(value)
         }
+    }
+
+    // MARK: What the phone asks before the card is held to it
+
+    /// A new owner key for SET_OWNER is a point on P-256, the curve the card
+    /// checks the owner's proofs on, and not only 65 bytes that begin 04. A card
+    /// given 65 bytes that are no key could never be given an order again, by
+    /// anyone; checked here, before the seed is read or anybody is asked.
+    static func isOwnerKey(_ value: [UInt8]) -> Bool {
+        value.count == 65 && value[0] == 0x04 && (try? P256.Signing.PublicKey(x963Representation: value)) != nil
+    }
+
+    /* The keeper's yes, given before the card session.
+     *
+     * The page drives the card and reads its nonces, so a script in it could
+     * have the owner key sign a reset, a new owner, a new mint or a new PIN in
+     * any tap. The keeper is asked instead, in the phone's own alert, at the
+     * screen where the change begins and before any card is held up: the alert
+     * iOS draws during a tap sits under the card sheet, and Face ID there can
+     * end the session. A yes is kept as an approval, and the owner key signs
+     * only a request that matches one: */
+
+    /// The figures a limit carries: the day's, the one payment's, the no-PIN allowance.
+    enum Figure: String, CaseIterable, Codable { case day, tap, noPin }
+
+    /// A yes to one command, before the tap.
+    ///  - change-pin, reset and set-owner: the exact bytes the card will be given.
+    ///  - set-card: the mint, and the units it may hold there (0 bitcoin, 1 dollars;
+    ///    none named is either). The rest of a record is the card's or this phone's,
+    ///    and the key its money goes back to is checked against this phone's seed
+    ///    when it is signed (SeedActions.cardOwnerSign).
+    ///  - set-limit: which figures the keeper set; every other figure in the value
+    ///    must be what the card itself said in this tap (`Seen`).
+    ///  - `card`: the card it is for, where the page knows it; then no other.
+    ///  - `keep`: a move to another mint whose record is written at a later tap:
+    ///    kept on the phone, beside nothing else, until that write uses it.
+    struct Approval: Codable, Equatable {
+        let label: String
+        let value: [UInt8]?
+        let mint: [UInt8]?
+        let units: [UInt8]?
+        let figures: [Figure]?
+        let card: [UInt8]?
+        let keep: Bool
+        let at: TimeInterval
+    }
+
+    /// What the page is told when the owner key will not sign: no yes for it,
+    /// or a record whose money would go back to a key that is not this phone's.
+    static let declined = "Nothing was changed on the card."
+
+    /// How long a yes given before the tap lasts, unless its card session ends first.
+    static let approvalLife: TimeInterval = 90
+
+    /// cardOwnerApprove {label, value | mint, units, card?, keep? | figures}: the
+    /// shape each label's approval takes, and nothing else. Load is asked nothing.
+    static func approval(_ body: [String: Any], at: TimeInterval) -> Approval? {
+        guard let name = body["label"] as? String, let label = Label(rawValue: name), label != .load else { return nil }
+        var card: [UInt8]?
+        if let given = body["card"] {
+            guard let key = key(from: given) else { return nil }
+            card = key
+        }
+        switch label {
+        case .changePin, .reset, .setOwner:
+            guard let text = body["value"] as? String, text.utf8.count <= 2 * mostValueBytes,
+                  let value = try? NUT13.bytes(hex: text), label.accepts(value) else { return nil }
+            if label == .setOwner, !isOwnerKey(value) { return nil }
+            return Approval(label: name, value: value, mint: nil, units: nil, figures: nil, card: card, keep: false, at: at)
+        case .setCard:
+            guard let text = body["mint"] as? String, (1...80).contains(text.utf8.count),
+                  text.utf8.allSatisfy({ (0x21...0x7E).contains($0) }) else { return nil }
+            var units: [UInt8]?
+            if let given = body["units"] {
+                guard let list = given as? [String], !list.isEmpty, list.count <= 2 else { return nil }
+                var out: [UInt8] = []
+                for u in list {
+                    switch u {
+                    case "sat": out.append(0x00)
+                    case "usd": out.append(0x01)
+                    default: return nil
+                    }
+                }
+                units = out
+            }
+            let keep = body["keep"] as? Bool ?? false
+            // a move kept for a later tap is for one card, named
+            if keep, card == nil { return nil }
+            return Approval(label: name, value: nil, mint: Array(text.utf8), units: units, figures: nil, card: card, keep: keep, at: at)
+        case .setLimit:
+            guard let list = body["figures"] as? [String], !list.isEmpty, list.count <= 3 else { return nil }
+            var figures: [Figure] = []
+            for f in list {
+                guard let figure = Figure(rawValue: f), !figures.contains(figure) else { return nil }
+                figures.append(figure)
+            }
+            return Approval(label: name, value: nil, mint: nil, units: nil, figures: figures, card: card, keep: false, at: at)
+        case .load:
+            return nil
+        }
+    }
+
+    /// What the card itself said in this tap, as the phone carried its answers:
+    /// its limits (GET_INFO) and its record's unit and mint (its record).
+    struct Seen: Equatable {
+        var limits: [Figure: UInt32]?
+        var unit: UInt8?
+        var mint: [UInt8]?
+        /// The card said it had no owner in this tap: this tap is its set-up, and the owner it has now is this phone.
+        var unowned = false
+    }
+
+    /// Whether a GET_INFO answer (29, 30, 42 or 51 bytes) says the card has no owner: byte 16.
+    static func unownedSeen(_ answer: [UInt8]) -> Bool {
+        [29, 30, 42, 51].contains(answer.count) && answer[16] == 0
+    }
+
+    /// A card's limits from its GET_INFO answer of 42 bytes (P1 = 1) or 51 (P1 =
+    /// 3), the status bytes off: the day's at 12, the one payment's at 30 and the
+    /// no-PIN allowance at 34, four bytes each, as the page reads them
+    /// (build/wallet/08a-flashcard.js, cardInfoOf). Nil for any other answer.
+    static func limitsSeen(_ answer: [UInt8]) -> [Figure: UInt32]? {
+        guard answer.count == 42 || answer.count == 51 else { return nil }
+        func u32(_ i: Int) -> UInt32 { answer[i..<(i + 4)].reduce(0) { $0 << 8 | UInt32($1) } }
+        return [.day: u32(12), .tap: u32(30), .noPin: u32(34)]
+    }
+
+    /// A card's unit and mint from its record answer (the status bytes off):
+    /// the unit at 2, the mint's length at 105 and the mint after it, as the page
+    /// reads them (cardRecordOf). Nil for anything that is not a record.
+    static func recordSeen(_ answer: [UInt8]) -> (unit: UInt8, mint: [UInt8])? {
+        guard answer.count >= 107 else { return nil }
+        let length = Int(answer[105])
+        guard (1...80).contains(length), answer.count == 106 + length || answer.count == 109 + length else { return nil }
+        return (answer[2], Array(answer[106..<(106 + length)]))
+    }
+
+    /// The figures in a limit's value, by its length: 4 bytes the day's, 8 and the
+    /// one payment's, 12 and the no-PIN allowance, 16 and then the rate, which is
+    /// the phone's price and not a figure the keeper sets.
+    static func figures(_ value: [UInt8]) -> [Figure: UInt32] {
+        func u32(_ i: Int) -> UInt32 { value[i..<(i + 4)].reduce(0) { $0 << 8 | UInt32($1) } }
+        var out: [Figure: UInt32] = [:]
+        if value.count >= 4 { out[.day] = u32(0) }
+        if value.count >= 8 { out[.tap] = u32(4) }
+        if value.count >= 12 { out[.noPin] = u32(8) }
+        return out
+    }
+
+    /// The mint a record names, and its unit.
+    static func recordMint(_ value: [UInt8]) -> (unit: UInt8, mint: [UInt8])? {
+        guard value.count > 100 else { return nil }
+        let length = Int(value[99])
+        guard value.count >= 100 + length else { return nil }
+        return (value[0], Array(value[100..<(100 + length)]))
+    }
+
+    /// Whether `request` is what `approval` said yes to.
+    static func matches(_ request: SignRequest, _ approval: Approval, seen: Seen) -> Bool {
+        guard approval.label == request.label.rawValue else { return false }
+        if let card = approval.card, card != request.key { return false }
+        switch request.label {
+        case .changePin, .reset, .setOwner:
+            return approval.value == request.value
+        case .setCard:
+            guard let record = recordMint(request.value), record.mint == approval.mint else { return false }
+            return approval.units.map { $0.contains(record.unit) } ?? true
+        case .setLimit:
+            let set = Set(approval.figures ?? [])
+            for (figure, number) in figures(request.value) where !set.contains(figure) {
+                guard seen.limits?[figure] == number else { return false }
+            }
+            return true
+        case .load:
+            return false
+        }
+    }
+
+    /// The moves kept for a later tap, with the one `request` writes taken out:
+    /// a yes kept for this card, to this mint and unit. Nil when none matches.
+    /// A newer move for a card replaces the one before it (`keepMove`).
+    static func useMove(_ kept: [Approval], for request: SignRequest, seen: Seen) -> [Approval]? {
+        guard request.label == .setCard,
+              let i = kept.firstIndex(where: { $0.keep && $0.card == request.key && matches(request, $0, seen: seen) }) else { return nil }
+        var left = kept
+        left.remove(at: i)
+        return left
+    }
+
+    static func keepMove(_ kept: [Approval], _ move: Approval) -> [Approval] {
+        Array((kept.filter { $0.card != move.card } + [move]).suffix(16))
+    }
+
+    /// What signs with nobody asked, because it changes nothing the keeper chose:
+    ///  - a limit of card software 1.23 whose day's, one payment's and no-PIN
+    ///    figures are the card's own, said in this tap: the rate written first,
+    ///    before a top-up in sats (the rate follows the phone's price);
+    ///  - a limit written in the tap that sets a card up, the card having said in it
+    ///    that it had no owner: the keeper is setting it up, with its first limits;
+    ///  - a record at the card's own mint and unit, said in this tap: only the key
+    ///    its money goes back to changes, and that is checked to be this phone's
+    ///    (a card claimed, or its backup moved to this phone's key).
+    static func signsUnasked(_ request: SignRequest, seen: Seen) -> Bool {
+        switch request.label {
+        case .setLimit:
+            if seen.unowned { return true }
+            guard request.value.count == 16, let limits = seen.limits else { return false }
+            return figures(request.value).allSatisfy { limits[$0.key] == $0.value }
+        case .setCard:
+            guard let record = recordMint(request.value), let unit = seen.unit, let mint = seen.mint else { return false }
+            return record.unit == unit && record.mint == mint
+        default:
+            return false
+        }
+    }
+
+    /// What the phone asks in its own alert, outside the page, before a yes is
+    /// kept: the command, the card where it is named, and the keeper's choices.
+    /// Every word is here; what is named is read from what the approval holds.
+    struct Question: Equatable {
+        let title: String
+        let message: String
+        let yes: String
+        /// Face ID or the passcode after the yes, asked fresh: never the seed
+        /// already unlocked, nor the moments after an unlock.
+        let askOwner: Bool
+        /// What iOS shows when it asks.
+        let reason: String
+    }
+
+    static func question(for approval: Approval) -> Question? {
+        guard let label = Label(rawValue: approval.label) else { return nil }
+        let card = approval.card.map { "The card whose key begins \(shortHex(Array($0.dropFirst()), 8))." }
+            ?? "The next card held to this phone."
+        switch label {
+        case .load:
+            return nil
+        case .setLimit:
+            let names: [Figure: String] = [.day: "its daily limit", .tap: "its limit on one payment", .noPin: "its allowance without a PIN"]
+            let chosen = (approval.figures ?? []).compactMap { names[$0] }
+            let named = list(chosen)
+            let sentence = String(named.prefix(1)).uppercased() + String(named.dropFirst())
+            return Question(title: "Change this card's limits?",
+                            message: card + " " + sentence
+                                + " change\(chosen.count == 1 ? "s" : "") to what was just set. The card pays that much without this phone.",
+                            yes: "Change", askOwner: false, reason: "")
+        case .changePin:
+            return Question(title: "Change this card's PIN?",
+                            message: card + " Its PIN becomes the one just typed, and the old one stops working.",
+                            yes: "Change PIN", askOwner: true, reason: "Change a card's PIN")
+        case .setOwner:
+            return Question(title: "Give this card to another wallet?",
+                            message: card + " From then on it takes orders only from the wallet whose key begins "
+                                + "\(shortHex(Array((approval.value ?? []).dropFirst()), 8)), and no longer from this phone.",
+                            yes: "Give It Away", askOwner: true, reason: "Give a card to another wallet")
+        case .setCard:
+            let mint = approval.mint.flatMap { String(bytes: $0, encoding: .ascii) } ?? "a mint this phone cannot read"
+            let units = approval.units ?? []
+            let holds = units == [0x00] ? "bitcoin" : units == [0x01] ? "dollars" : "the currency it holds"
+            return Question(title: "Move this card to another mint?",
+                            message: card + " It will hold \(holds) at \(mint), and money it cannot spend goes back to this phone's own key.",
+                            yes: "Move", askOwner: true, reason: "Move a card to another mint")
+        case .reset:
+            guard let opening = approval.value?.first else {
+                return Question(title: "Reset this card?",
+                                message: card + " It goes back to how it came, with a new key, and this phone no longer owns it.",
+                                yes: "Reset", askOwner: true, reason: "Reset a card")
+            }
+            return Question(title: "Give up this card's change?",
+                            message: card + " The change it is owed under opening \(opening) is given up for good.",
+                            yes: "Give Up", askOwner: true, reason: "Give up a card's change")
+        }
+    }
+
+    /// "a", "a and b", "a, b and c".
+    private static func list(_ items: [String]) -> String {
+        guard items.count > 1 else { return items.first ?? "its limits" }
+        return items.dropLast().joined(separator: ", ") + " and " + (items.last ?? "")
+    }
+
+    /// The first `count` hex characters of `bytes`, lowercase.
+    private static func shortHex(_ bytes: [UInt8], _ count: Int) -> String {
+        String(bytes.map { String(format: "%02x", $0) }.joined().prefix(count))
     }
 
     // MARK: What the page sends
@@ -477,7 +763,14 @@ enum CardOwner {
               let nonce = try? NUT13.bytes(hex: nonceText),
               let valueText = body["value"] as? String, valueText.utf8.count <= 2 * mostValueBytes,
               let value = try? NUT13.bytes(hex: valueText), label.accepts(value) else { return nil }
-        return SignRequest(key: key, label: label, nonce: nonce, value: value)
+        // set-card's refund index, where given: a whole number a lock key can be derived at
+        var refundIndex: UInt64?
+        if let given = body["refundIndex"] {
+            guard label == .setCard, let n = given as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(),
+                  n.doubleValue >= 0, n.doubleValue < Double(1 << 31), n.doubleValue == n.doubleValue.rounded() else { return nil }
+            refundIndex = n.uint64Value
+        }
+        return SignRequest(key: key, label: label, nonce: nonce, value: value, refundIndex: refundIndex)
     }
 
     // MARK: The key

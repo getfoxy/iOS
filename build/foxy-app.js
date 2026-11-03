@@ -179,6 +179,8 @@ class Component extends DCLogic {
       trStep: '', trFrom: '', trTo: '',
       // nor a card's question of which mint to move to (26f-flashcard.js), nor the till's of which mint to run at (26m-till.js)
       fcPick: false, tillPick: false, tillSet: [],
+      // nor a card's WITHDRAW TO (26n-card-withdraw-to.js)
+      wdPick: false,
     }, extra || {}));
   }
   back() {
@@ -2189,6 +2191,8 @@ class Component extends DCLogic {
           // a PAID, NOT COLLECTED YET card says "retrying" only with a route
           this.stuckInvoiceRoute();
         });
+        // a mint switched to at once has answered, or has not (09-melt-paste-switch.js)
+        if (W.onMintConnected) W.onMintConnected((ev) => this.mintConnected(ev));
         // A mint whose signatures do not match the keys it publishes is broken
         // or singling this wallet out. Said plainly, with nothing to retry.
         if (W.onMintTrouble) {
@@ -2308,6 +2312,8 @@ class Component extends DCLogic {
         });
         // the phone turned over: the invoice screen follows (syncFlip)
         if (W.onTurned) W.onTurned((on) => this.setState({ upsideDown: !!on }));
+        // the phone shaken off the receive screen: COPY YOUR LOGS? (26c-field-log.js)
+        if (W.onShaken) W.onShaken(() => this.shakenForLogs());
         /* The paying phone's price, for a request this phone made in dollars.
          * Nothing has moved: the card is a person agreeing to a number, and
          * only their ACCEPT sends the request back in sats. */
@@ -2376,8 +2382,29 @@ class Component extends DCLogic {
   /* Everything past the gate: runs once Tor is up or the person chose to
    * continue. Resolves once the balance has loaded, the mint has failed three
    * times, or 45 seconds have passed; the launch screen stays up until then. */
+  /* Are the page and the wallet from one build? tools/pack-index.py writes the same stamp into both (the page's meta
+   * foxy-wallet-stamp, the wallet's `buildStamp`). A phone ran a page from one build beside a wallet from another on
+   * 2026-11-03, and nothing said so. A line in the log, nothing on the screen; a page with no stamp (a test's, an
+   * unpacked one) says nothing. */
+  buildStampCheck() {
+    const W = window.FoxyWallet;
+    let page = '';
+    try {
+      const meta = typeof document !== 'undefined' && document.querySelector
+        ? document.querySelector('meta[name="foxy-wallet-stamp"]') : null;
+      page = meta ? String(meta.getAttribute('content') || '') : '';
+    } catch (e) { page = ''; }
+    if (!/^[0-9a-f]{64}$/.test(page)) return true;
+    const wallet = String((W && W.buildStamp) || '');
+    if (wallet === page) return true;
+    console.log('[foxy] page and wallet from different builds (page ' + page.slice(0, 8) + ', wallet '
+      + (wallet ? wallet.slice(0, 8) : 'none') + ')');
+    return false;
+  }
+
   bootWalletNow() {
     const W = window.FoxyWallet;
+    this.buildStampCheck();
     const saved = W.saved();
     const G = window.FoxyGate;
     if (G && G.launchStage) {
@@ -2623,6 +2650,12 @@ class Component extends DCLogic {
      * refreshes what is shown. A failure changes nothing (`connect` keeps the
      * wallet it had) and is tried again: 3s, 6s, 12s, then every 30s. */
     const again = (attempt) => {
+      // a switch made since is that mint's to connect (`switchTo`), and this one is not tried again over it
+      if (String(W.mintUrl || '').replace(/\/+$/, '') !== String(url || '').replace(/\/+$/, '')) {
+        console.log('[foxy] the connect behind the home screen: the phone is on another mint now; leaving it');
+        this._catchUpConnect = false;
+        return;
+      }
       W.connect(url).then(() => {
         this.refreshBalance();
         this.loadHistory();
@@ -6404,6 +6437,44 @@ class Component extends DCLogic {
     return why.join('; ') || 'nothing';
   }
 
+  /* Is the only thing in the way a background sweep holding the proof lock? A claim walked in from another mint, a
+   * held melt settled, change tidied: each lets go within seconds, and a switch refused for one said "a payment is in
+   * progress" to somebody who had made none (2026-11-03, `_onchainClaimAwayWith` for 3 s). A person's own payment
+   * (`own` below), or anything else moving money, is not a sweep. */
+  sweepHoldsLock() {
+    const W = window.FoxyWallet;
+    const held = W && W.proofLockHolder && W.proofLockHolder();
+    if (!held || !held.what) return false;
+    // what a person starts holds it under these names (99-proof-lock-and-export.js): not a sweep
+    const own = ['pay', 'sendToken', 'receiveToken', 'reclaimToken', 'onchainPay', 'importProofs', 'adoptScan'];
+    if (own.indexOf(String(held.what)) >= 0) return false;
+    return !(this._sendRun || this._chasingChange || this.state.nmBusy || this.state.reqBusy || this._swapRun || this._homeGoing);
+  }
+
+  /* Waits up to five seconds for such a sweep, the row showing it was tapped, then goes on (`go`), which refuses as
+   * before if the lock is still held. True when it is waiting. */
+  switchAfterSweep(url, go) {
+    if (!this.sweepHoldsLock()) return false;
+    const W = window.FoxyWallet;
+    const held = W.proofLockHolder() || {};
+    console.log('[foxy] mint switch: waiting up to 5s for ' + held.what + ' (a background sweep) to let go of the proof lock');
+    this.setState({ switchBusy: true, mintBusy: String(url).replace(/\/+$/, '') });
+    const t0 = Date.now();
+    clearTimeout(this._switchSweepT);
+    const poll = () => {
+      if (this.sweepHoldsLock() && Date.now() - t0 < 5000) {
+        this._switchSweepT = setTimeout(poll, 150);
+        return;
+      }
+      this._switchSweepT = null;
+      if (!this.sweepHoldsLock()) console.log('[foxy] mint switch: the sweep let go after ' + Math.round((Date.now() - t0) / 100) / 10 + 's');
+      this.setState({ switchBusy: false, mintBusy: '' });
+      go();
+    };
+    this._switchSweepT = setTimeout(poll, 150);
+    return true;
+  }
+
   refuseSwitchWhileBusy() {
     /* An invoice nobody has paid is let go, not waited for.
      *
@@ -6439,19 +6510,33 @@ class Component extends DCLogic {
 
   /* Point the wallet at another mint. Nothing moves — each mint's proofs stay
    * filed under it, so switching back brings that balance into view again. */
-  justSwitch(url) {
+  /* At once (`switchTo`): the wallet is built from the mint's keys on file, so home is drawn straight away from what
+   * is on the phone (the pile, the history), the drawer closes, and the shield says CONNECTING TO the mint until it
+   * answers (`shieldVals`). "Now on" is said when it has answered (`mintConnected`), not at the tap: the switch has
+   * shown itself already, and the toast is the word that the mint is there. A wallet with no `switchTo` connects and
+   * waits, as it always did. */
+  justSwitch(url, waited) {
     const W = window.FoxyWallet;
     const host = String(url).replace(/^https?:\/\//, '');
     if (this.state.switchBusy) return;
+    // a background sweep holding the proof lock is waited for, a few seconds, rather than refused (`switchAfterSweep`)
+    if (!waited && this.switchAfterSweep(url, () => this.justSwitch(url, true))) return;
     // a payment or claim in progress finishes at the mint it started on
     if (this.refuseSwitchWhileBusy()) return;
     // Connecting takes a second or two over Tor, and until now the row gave no
     // sign it had been tapped at all.
     this.setState({ switchBusy: true, mintBusy: String(url).replace(/\/+$/, '') });
+    // an earlier switch's "Now on" is not this one's to say (`mintConnected` matches by the switch, review 7)
+    this._switchSay = null;
     const back = this.state.mintReturn;
     // asked before connecting, which adds it to the list
     const usedBefore = !!(W.mintUsedBefore && W.mintUsedBefore(url));
-    W.connect(url).then(w => {
+    const lazy = typeof W.switchTo === 'function';
+    /* Which path this switch took, in one line: the phone that "still showed connecting" on 2026-11-03 left nothing to
+     * say whether it had landed at once or was waiting on the mint, nor why. */
+    const waits = !lazy ? 'no switchTo in the wallet' : (typeof W.switchWaits === 'function' ? String(W.switchWaits(url) || '') : '');
+    console.log('[foxy] switch: ' + host + (waits ? ' \u2014 waiting for the mint: ' + waits : ' \u2014 at once (switchTo)'));
+    (lazy ? W.switchTo(url) : W.connect(url)).then(w => {
       this.setState({ switchBusy: false, mintBusy: '', mintReturn: '' });
       this.walletReady({ name: (w && w.name) || host });
       // came from history, so go back to it — now showing this mint
@@ -6459,12 +6544,64 @@ class Component extends DCLogic {
         this.setState({ screen: 'history', stack: ['home'] });
         this.loadHistory();
       }
+      /* Still being asked: what waits for its answer is said when it comes (`mintConnected`), this switch's own
+       * toast and a first visit's seed check among them. */
+      if (w && w.pending) {
+        this._switchSay = { url: String(url).replace(/\/+$/, ''), host, firstTime: !usedBefore, gen: w.gen };
+        return;
+      }
       this.toast('Now on ' + host);
       if (!usedBefore) this.sweepNewMint(url, host);
     }).catch(e => {
       this.setState({ switchBusy: false, mintBusy: '' });
       this.toast(W.reason(e), true);
     });
+  }
+
+  /* A mint switched to at once has answered, or has not (the wallet's `onMintConnected`): { url, ok, why, back }.
+   *
+   * Answered: the balance and history are read again from the wallet that answered, the shield's ring stops, the
+   * switch's "Now on" is said, and a mint new to this phone has its seed check. Not: the phone stays on it, from the
+   * keys on file, and the shield says it is not answering; it is asked again behind the screen, as a launch's wallet
+   * from storage is (`connectForRealOnceOnline`). A switch with no keys on file goes back where it was (`back`). */
+  mintConnected(ev) {
+    const W = window.FoxyWallet;
+    const e = ev || {};
+    const strip = u => String(u || '').replace(/\/+$/, '');
+    /* This switch's own answer, by the switch (`gen`), not by its mint: going back to a mint and away again is two
+     * switches. Kept through NOT ANSWERING, so "Now on" is said once when it does answer. */
+    const own = this._switchSay;
+    const say = own && (own.gen != null || e.gen != null ? own.gen === e.gen : strip(own.url) === strip(e.url)) ? own : null;
+    if (say && (e.ok || e.back)) this._switchSay = null;
+    const host = String(e.url || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    this.setState({ routeAt: Date.now() });
+    if (e.ok) {
+      this.refreshBalance();
+      this.loadHistory();
+      this.offerQuarantine();
+      // the mint's own keys now: sats a dollars wallet was paid can be swapped into dollars
+      if (this.convertOnReturn) this.convertOnReturn();
+      if (say) {
+        this.toast('Now on ' + host);
+        if (say.firstTime) this.sweepNewMint(say.url, host);
+      }
+      return;
+    }
+    if (e.back) {
+      // with no keys on file there was nothing to stay on: home, on the mint it was on
+      this.walletReady({ name: this.mintHost() });
+      this.toast('Could not reach ' + host + ' (' + (e.why || 'no answer') + '). Still on ' + this.mintHost() + '.', true);
+      // the wallet put back may be one from the keys on file, itself still to be connected to for real
+      if (W && W.fromCache && W.fromCache()) { clearTimeout(this._catchUpT); this._catchUpConnect = false; this.connectForRealOnceOnline(); }
+      return;
+    }
+    this.refreshBalance();
+    if ((say && !say.toldDown) || (!say && this.onMint(e.url))) this.toast(host + ' is not answering yet. Foxy keeps trying.', true);
+    if (say) say.toldDown = true;
+    // and is asked again for real, behind whatever the person is doing
+    clearTimeout(this._catchUpT);
+    this._catchUpConnect = false;
+    if (W && W.fromCache && W.fromCache()) this.connectForRealOnceOnline();
   }
 
   /* Nothing filed under this mint — so ask it what it has signed for our seed
@@ -9641,6 +9778,9 @@ class Component extends DCLogic {
     }));
   }
 
+  // how long a receive waits for a mint switched to that has not answered (a connect's own deadline)
+  MINT_ANSWER_WAIT_MS = 30000;
+
   openReceiveNow() {
     const W = window.FoxyWallet;
     /* A dollar balance asks in cents, exactly, by a mint quote in dollars: one
@@ -9736,6 +9876,15 @@ class Component extends DCLogic {
      * (26m-till.js, `tillLockFor`; the wallet's `invoice`). Asked as it always was otherwise. */
     const tillLock = this.tillLockFor ? this.tillLockFor() : '';
     const attempt = (n, waits) => (tillLock ? W.invoice(sats, memo, { lockPub: tillLock }) : W.invoice(sats, memo)).catch(e => {
+      /* A mint switched to a moment ago that has not answered yet (`switchTo`): the invoice is its to make, so the
+       * screen waits for it, as long as a connect waits, without spending a try; one that will not answer ends it. */
+      if (e && e.foxyConnecting && waits < WAITS && W.routeSoon) {
+        console.log('[foxy] invoice: the mint switched to has not answered yet — waiting for it');
+        return W.routeSoon(this.MINT_ANSWER_WAIT_MS).then(ok => {
+          if (!ok) throw e;
+          return attempt(n, waits + 1);
+        });
+      }
       const closed = !!(W.neverSent && W.neverSent(e));
       if (closed && waits < WAITS && G && G.quiet) {
         console.warn('[foxy] invoice: the request never left \u2014 waiting for Tor'
@@ -9873,6 +10022,10 @@ class Component extends DCLogic {
     // (a cashier's till: locked to the keeper's key, as `openReceiveNow` asks)
     const tillLock = this.tillLockFor ? this.tillLockFor() : '';
     const attempt = (n, waits) => W.invoice(cents, memo, Object.assign({ unit: 'usd' }, tillLock ? { lockPub: tillLock } : {})).catch(e => {
+      // a mint switched to that has not answered yet: waited for, as `openReceiveNow` waits
+      if (e && e.foxyConnecting && waits < 3 && W.routeSoon) {
+        return W.routeSoon(this.MINT_ANSWER_WAIT_MS).then(ok => { if (!ok) throw e; return attempt(n, waits + 1); });
+      }
       const closed = !!(W.neverSent && W.neverSent(e));
       if (closed && waits < 3 && G && G.quiet) return G.quiet().then(ok => { if (!ok) throw e; return attempt(n, waits + 1); });
       if (n >= 3) throw e;
@@ -10852,46 +11005,34 @@ class Component extends DCLogic {
   // Clear a list, on two taps. A single tap arms it and says so; a second
   // within four seconds does it. Neither touches money — history is a local
   // record the mint does not keep, and contacts are just saved names.
+  /* History asks twice, with cards and not a toast (2026-11-03): ARE YOU SURE?, then ARE YOU TRIPLE SURE?, each with YES, DELETE
+   * and KEEP IT, and only the second YES deletes (`clearHistoryNow`). It is the only record of these payments there is: the mint
+   * keeps none. Contacts keep the two taps. */
   askClear(which) {
     const W = window.FoxyWallet;
     if (!W) return;
+    if (which === 'history') {
+      this._armed = null;
+      this.blockedCard('clearHistoryAsk', {
+        tone: 'ask', title: 'ARE YOU SURE?',
+        reason: 'This deletes the history on this phone. Your money stays where it is.',
+        retry: 'YES, DELETE',
+        go: () => this.blockedCard('clearHistoryAgain', {
+          tone: 'ask', title: 'ARE YOU TRIPLE SURE?',
+          reason: 'The mint keeps no record of your payments, so once this history is gone nothing can bring it back.',
+          retry: 'YES, DELETE',
+          go: () => this.clearHistoryNow(),
+          shut: { label: 'KEEP IT' },
+        }),
+        shut: { label: 'KEEP IT' },
+      });
+      return;
+    }
     const now = Date.now();
     if (this._armed === which && now - (this._armedAt || 0) < 4000) {
       this._armed = null;
-      if (which === 'history') {
-        const clear = (forgetToken) => {
-          W.clearHistory({ forgetToken });
-          this.loadHistory();
-          this.toast('History cleared');
-        };
-        /* A sent token nobody has claimed is money in a string. Clearing
-         * history keeps its text (`clearHistory`), and says so first. */
-        if (!W.tokensNotClaimed) { clear(false); return; }
-        W.tokensNotClaimed().then(list => {
-          if (!list.length) { clear(true); return; }
-          /* Each unit summed on its own, never added together: '1,200 sats
-           * and $ 3.00'. A dollar token's `sats` is null; its cents are in
-           * `amount` under unit 'usd'. */
-          const by = {};
-          list.forEach(t => {
-            const u = String((t && t.unit) || 'sat');
-            const n = u === 'sat' ? (Number(t.sats != null ? t.sats : t.amount) || 0) : (Number(t.amount) || 0);
-            by[u] = (by[u] || 0) + n;
-          });
-          const figures = Object.keys(by).sort((a, b) => (a === 'usd' ? -1 : b === 'usd' ? 1 : 0))
-            .map(u => (u === 'sat' ? this.group(by[u]) + ' sats' : this.unitMoney(by[u], u))).join(' and ');
-          this.blockedCard('unclaimedTokens', {
-            tone: 'warn',
-            title: 'UNCLAIMED ECASH',
-            reason: (list.length === 1 ? 'A token you sent' : list.length + ' tokens you sent') + ', '
-              + figures + ', ' + (list.length === 1 ? 'has' : 'have') + ' not been claimed. '
-              + 'Clearing history keeps ' + (list.length === 1 ? 'it' : 'them') + ' on this phone, to hand over or take back.',
-            chip: 'The rest of history is cleared.',
-            retry: 'CLEAR HISTORY',
-            go: () => clear(true),
-          });
-        }).catch(() => clear(false));
-      } else {
+      if (which === 'history') this.clearHistoryNow();
+      else {
         W.clearContacts();
         // history would otherwise write every past payee straight back
         this._contactsCleared = true;
@@ -10903,6 +11044,44 @@ class Component extends DCLogic {
     this._armed = which;
     this._armedAt = now;
     this.toast('Tap again to clear ' + which);
+  }
+
+  /* History cleared, once both cards have said yes (`askClear`). */
+  clearHistoryNow() {
+    const W = window.FoxyWallet;
+    if (!W) return;
+    const clear = (forgetToken) => {
+      W.clearHistory({ forgetToken });
+      this.loadHistory();
+      this.toast('History cleared');
+    };
+    /* A sent token nobody has claimed is money in a string. Clearing
+     * history keeps its text (`clearHistory`), and says so first. */
+    if (!W.tokensNotClaimed) { clear(false); return; }
+    W.tokensNotClaimed().then(list => {
+      if (!list.length) { clear(true); return; }
+      /* Each unit summed on its own, never added together: '1,200 sats
+       * and $ 3.00'. A dollar token's `sats` is null; its cents are in
+       * `amount` under unit 'usd'. */
+      const by = {};
+      list.forEach(t => {
+        const u = String((t && t.unit) || 'sat');
+        const n = u === 'sat' ? (Number(t.sats != null ? t.sats : t.amount) || 0) : (Number(t.amount) || 0);
+        by[u] = (by[u] || 0) + n;
+      });
+      const figures = Object.keys(by).sort((a, b) => (a === 'usd' ? -1 : b === 'usd' ? 1 : 0))
+        .map(u => (u === 'sat' ? this.group(by[u]) + ' sats' : this.unitMoney(by[u], u))).join(' and ');
+      this.blockedCard('unclaimedTokens', {
+        tone: 'warn',
+        title: 'UNCLAIMED ECASH',
+        reason: (list.length === 1 ? 'A token you sent' : list.length + ' tokens you sent') + ', '
+          + figures + ', ' + (list.length === 1 ? 'has' : 'have') + ' not been claimed. '
+          + 'Clearing history keeps ' + (list.length === 1 ? 'it' : 'them') + ' on this phone, to hand over or take back.',
+        chip: 'The rest of history is cleared.',
+        retry: 'CLEAR HISTORY',
+        go: () => clear(true),
+      });
+    }).catch(() => clear(false));
   }
 
   // Who a sent payment went to: the address if there was one, otherwise the
@@ -11902,6 +12081,16 @@ class Component extends DCLogic {
     const sats = Number((t && t.sats) || 0);
     if (!t || t.dir === 'in') return sats;
     return sats + Math.max(0, Number(t.fee || t.feeSats || 0));
+  }
+
+  /* The same for a row in a unit (dollars): what left the wallet is the
+   * amount and the fee, in the unit's own minor units (`feeAmount`, cents).
+   * A card paying a $1.01 invoice with a 5-cent fee showed SENT $1.01, FEE
+   * $0.05 and TOTAL $1.01, and the person read the fee as a cent. */
+  txTotalUnit(t) {
+    const amount = Number((t && t.amount) || 0);
+    if (!t || t.dir === 'in') return amount;
+    return amount + Math.max(0, Number(t.feeAmount || 0));
   }
 
   txWhen(t) {
@@ -13956,6 +14145,18 @@ class Component extends DCLogic {
     this.stopReceive();
   }
 
+  /* The road to the connected mint, opened by a screen a few seconds ahead of what it will ask there (the wallet's `warm`:
+   * once a minute at most, and nothing offline, before Tor is up, or under a switch still to answer). Nothing when offline
+   * here either; never waited on. */
+  warmRoad() {
+    const W = window.FoxyWallet;
+    if (!W || (this.offlineNow && this.offlineNow())) return;
+    try {
+      const went = W.warm ? W.warm() : W.warmMint ? W.warmMint() : null;
+      if (went && went.catch) went.catch(() => {});
+    } catch (e) { /* a road not opened: the job opens its own, as it always did */ }
+  }
+
   componentDidUpdate(prevProps, prevState) {
     // every screen the person is actually shown, in order
     if (prevState && prevState.screen !== this.state.screen) {
@@ -13976,14 +14177,16 @@ class Component extends DCLogic {
       }
       // a code somebody was asked to scan goes with the token it belonged to
       if (prevState.screen === 'tokenOut' && this.hideStage) this.hideStage('needScan');
-      // a receive's amount screen: the road to the mint is opened while the amount is typed
-      if (this.state.screen === 'amount' && this.state.flow === 'receive') {
-        const Ww = window.FoxyWallet;
-        if (Ww && Ww.warmMint && !(this.offlineNow && this.offlineNow())) Ww.warmMint();
-      }
+      /* A receive's amount screen, and so the till's SET AMOUNT as it opens and as each PAID comes back to it: the road to
+       * the mint is opened while the amount is typed, for the invoice after it. A card's screen: for the load or the claim
+       * after it (`warmRoad`). */
+      if ((this.state.screen === 'amount' && this.state.flow === 'receive') || this.state.screen === 'flashcard') this.warmRoad();
       // the camera opened for a reason says it only while it is open
       if (prevState.screen === 'sendScan' && this.state.scanWhy) this.setState({ scanWhy: '' });
     }
+    // SEND's keypad reaching an amount: the fee quote, or the token's swap, follows NEXT
+    const sendTyped = (st) => !!st && st.screen === 'amount' && st.flow === 'send' && Number(st.amount) > 0;
+    if (sendTyped(this.state) && !sendTyped(prevState)) this.warmRoad();
     // the token screen's QR code animates while it is open (syncTokenQr)
     this.syncTokenQr();
     // and the receive screen's, where a request with two transports on it is
@@ -14026,6 +14229,7 @@ class Component extends DCLogic {
     this.syncInbox();
     // the till: home turned into its SET AMOUNT, the cashier's clock, PAID's words (26m-till.js)
     if (this.syncTill) this.syncTill(prevState);
+    this.syncMenuScroll(prevState);
     this.syncTap();
     this.syncClaim();
     this.syncAwake();
@@ -14051,6 +14255,17 @@ class Component extends DCLogic {
       this._rolled = this.riderShow();
     }
     this._wasHome = home;
+  }
+
+  /* SETTINGS opened in the drawer: its rows unfold at the bottom, below the fold on most phones, so the drawer scrolls to its
+   * end as they open, and the person sees what they asked for. Nothing on close, nor for TOOLS, whose rows are in view. (Both
+   * drawers carry the mark, home's and the card screen's: whichever is up scrolls; the other is not drawn.) */
+  syncMenuScroll(prevState) {
+    if (!this.state.menuSettingsOpen || (prevState && prevState.menuSettingsOpen)) return;
+    const els = (typeof document !== 'undefined') ? document.querySelectorAll('[data-menu-drawer]') : [];
+    if (!els.length) return;
+    const go = () => { els.forEach((el) => { try { el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); } catch (e) { el.scrollTop = el.scrollHeight; } }); };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(go); else go();
   }
 
   press(ch) {
@@ -15152,14 +15367,20 @@ class Component extends DCLogic {
     /* RESTORE LOST CARD: the money of a card this phone loaded, taken back if the card is lost (26f-flashcard.js `fcRestoreLost`: the
      * RESTORE CARD screen, or a card saying this phone has loaded none). Under SETTINGS, not on a card's screens: a lost card cannot be tapped. */
     const restoreCardRow = { label: 'RESTORE LOST CARD', path: MENU_ICON.cardBack, tap: shut(() => this.fcRestoreLost()) };
-    /* The till (26m-till.js): this phone as a point of sale, receive and this session's history only. In the menu itself,
-     * right after HISTORY, behind the lock this phone already has (`tillGate`). The cashier code is on the till's own screen
-     * (23-render-home-and-amount.js `amtCodeTap`), so it follows the mints and currency the till was opened with. */
-    const tillRows = [
+    /* TOOLS, a drop-down like SETTINGS: the till (26m-till.js: this phone as a point of sale, receive and this session's history
+     * only, behind the lock this phone already has, `tillGate`; the cashier code is on the till's own screen, 23-render-home-and-amount.js
+     * `amtCodeTap`), SPLIT A BILL and CONTACTS. Opens and closes in place; the drawer stays. */
+    const toolsOpen = !!this.state.menuToolsOpen;
+    const toolsRows = [
+      { label: 'TOOLS', path: MENU_ICON.split, hasChev: true, chevRot: toolsOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+        tap: () => this.setState({ menuToolsOpen: !toolsOpen }) },
+    ].concat(!toolsOpen ? [] : [
       { label: 'POINT OF SALE', path: MENU_ICON.receive,
         tap: shut(() => this.tillGate(() => this.tillOpen(), 'To open the till.')) },
-    ];
-    v.menuItems = /** @type {any[]} */ ([historyRow]).concat(tillRows).concat(verified ? [] : [backupRow]).concat([
+      { label: 'SPLIT A BILL', path: MENU_ICON.split, tap: shut(v.goSplit) },
+      { label: 'CONTACTS', path: MENU_ICON.contacts, tap: shut(v.goContacts) },
+    ].map(inSettings));
+    v.menuItems = /** @type {any[]} */ ([historyRow]).concat(verified ? [] : [backupRow]).concat([
       /* Hiding the balance moved here from the pill, where its button sat on
        * top of the figures. The label says what the tap
        * will do, so it reads the same whichever way round it is. */
@@ -15169,10 +15390,7 @@ class Component extends DCLogic {
        * button does it when both pills are up. */
     ]).concat(twoHere && !twoPills ? [
       { label: 'SWAP', path: MENU_ICON.swap, tap: shut(() => this.swapStart()) },
-    ] : []).concat([
-      { label: 'SPLIT A BILL', path: MENU_ICON.split, tap: shut(v.goSplit) },
-      { label: 'CONTACTS', path: MENU_ICON.contacts, tap: shut(v.goContacts) },
-    ]).concat(mintsWithMoney > 1 ? [
+    ] : []).concat(toolsRows).concat(mintsWithMoney > 1 ? [
       { label: 'TRANSFER', path: MENU_ICON.transfer, tap: shut(() => this.goTransfer()) },
     ] : []).concat([
       { label: 'SWITCH', path: MENU_ICON.switch,
@@ -15199,6 +15417,11 @@ class Component extends DCLogic {
        * drawer stays open so it can be seen to move. */
       Object.assign({ label: 'AUTO TAP TO PAY', path: MENU_ICON.change,
         tap: () => { this.tapAutoSet(!tapAuto); this.setState({ menuTick: (this.state.menuTick || 0) + 1 }); } }, sw(tapAuto)),
+    ]).concat((() => {
+      /* SECURITY, a drop-down inside SETTINGS: what stands in front of the wallet, the PIN, and what this phone takes with no
+       * route (26j-till-caps.js). Opens and closes in place; its rows sit a step further in. */
+      const securityOpen = !!this.state.menuSecurityOpen;
+      const inSecurity = (m) => Object.assign({}, m, { indent: '20px' });
       /* What stands in front of the wallet, changed after the SECURE FOXY card
        * has been and gone (10-pin.js). Pressing it answers `device`, which
        * locks the screen and keeps the seed where it already was; turning it
@@ -15206,7 +15429,7 @@ class Component extends DCLogic {
        * that is deliberate: this answer guards the seed AND locks the screen.
        * Nobody having answered reads as off, which is what `faceLock()` does
        * with it. */
-      Object.assign({
+      const faceRow = Object.assign({
         label: 'FACE / FINGER LOCK',
         path: MENU_ICON.faceid,
         tap: shut(() => {
@@ -15216,11 +15439,8 @@ class Component extends DCLogic {
           // taking a guard off is never one tap
           this.confirmNoProtection();
         }),
-      }, sw(faceOn)),
-    ]).concat([
-      /* The label is the tap, not the state: SET, REMOVE — a verb cannot be
-       * read as a state. */
-      {
+      }, sw(faceOn));
+      const pinRow = {
         label: (window.FoxyWallet && window.FoxyWallet.pinIsSet
           && window.FoxyWallet.pinIsSet()) ? 'REMOVE PIN' : 'SET PIN',
         path: MENU_ICON.lock,
@@ -15247,10 +15467,11 @@ class Component extends DCLogic {
           }
           this.pinSetup(() => {});
         }),
-      },
-      /* What this phone takes with no route before it settles: from one payer,
-       * and in all (26j-till-caps.js). Dollars, with the sats under. */
-    ]).concat(this.tillCapRows ? this.tillCapRows(MENU_ICON.receive, shut) : []).concat([
+      };
+      return [{ label: 'SECURITY', path: MENU_ICON.lock, hasChev: true, chevRot: securityOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                tap: () => this.setState({ menuSecurityOpen: !securityOpen }) }]
+        .concat(!securityOpen ? [] : [faceRow, pinRow].concat(this.tillCapRows ? this.tillCapRows(MENU_ICON.receive, shut) : []).map(inSecurity));
+    })()).concat([
       restoreCardRow,
       /* The phone's own screens, straight over home: no Foxy screen before
        * RESTORE A WALLET or after YOUR SEED PHRASE. */
@@ -15765,6 +15986,24 @@ class Component extends DCLogic {
           if (!now.torBannerMaking) this.toast('Looking for Tor again\u2026');
           return;
         }
+        /* A mint switched to that has not answered: what is on screen is this phone's, and what waits is said. */
+        const sv = this.shieldVals();
+        if (sv.shieldState === 'mint' || sv.shieldState === 'mintDown') {
+          const W = window.FoxyWallet;
+          const pend = (W && W.connectPending && W.connectPending()) || {};
+          const host = pend.host || this.mintHost() || 'the mint';
+          this.blockedCard('torConnection', {
+            tone: sv.shieldState === 'mint' ? 'ask' : 'warn',
+            title: sv.shieldLabel,
+            reason: 'The balance and history shown are the ones on this phone. Receiving by Lightning, paying, '
+              + 'swapping and anything else that needs ' + host + ' waits until it answers.'
+              // checked by the mint's keys on file, so only where there are some
+              + (pend.noKeys ? '' : ' Ecash locked to this phone can still be taken by tap.')
+              + (pend.failed ? ' Foxy keeps asking it: ' + pend.failed : ''),
+            chip: sv.shieldLabel,
+          });
+          return;
+        }
         this.blockedCard('torConnection', {
           tone: 'ask',
           title: 'TOR CONNECTION',
@@ -16049,15 +16288,23 @@ class Component extends DCLogic {
       : (p && p.network === 'none') ? 'offline'
       : (p && (p.tor === 'failed' || p.tor === 'stopped')) ? 'cannot'
       : 'securing';
-    const state = blank || (st === 'making' ? 'securing'
+    const route = blank || (st === 'making' ? 'securing'
       : st === 'noNet' ? 'offline'
       : (st === 'orbot' || st === 'vpn') ? 'tunnel'
       : st);
+    /* A mint switched to at once that has not answered yet (`switchTo`, the wallet's `connectPending`): over a route
+     * that is up, CONNECTING TO it, the securing look with its turning ring, until it answers; and if it would not,
+     * NOT ANSWERING, amber with the exclamation, while Foxy asks again. Tor's own states come first (the route is what
+     * is missing then, not the mint), and so does IP EXPOSED, which is never quietened. */
+    const pend = (W && W.connectPending && (route === 'secure' || route === 'tunnel')) ? W.connectPending() : null;
+    const state = pend ? (pend.failed ? 'mintDown' : 'mint') : route;
+    const pendHost = pend ? String(pend.host || pend.url || '').toUpperCase() : '';
     const AMBER = ['#E6D8A8', '#3A2F0B'];
     const look = {
       secure: ['#BFE3EC', '#123642'],
       securing: ['var(--frost-chip)', '#BFE3EC'],
-      offline: AMBER, cannot: AMBER, tunnel: AMBER,
+      mint: ['var(--frost-chip)', '#BFE3EC'],
+      offline: AMBER, cannot: AMBER, tunnel: AMBER, mintDown: AMBER,
       exposed: ['#FF5C5C', '#3A0B0B'],
     }[state];
     // what goes inside the shield: a tick, a slash, a lock or an exclamation (its dot is a stroke with no length)
@@ -16065,17 +16312,21 @@ class Component extends DCLogic {
     const mark = {
       secure: 'M8.6 12.3l2.3 2.3 4.5-4.9',
       securing: '',
+      mint: '',
+      mintDown: BANG,
       offline: 'M6 18.5 18 5.5',
       cannot: BANG,
       tunnel: 'M10.2 11.2h3.6a1 1 0 0 1 1 1v2.4a1 1 0 0 1-1 1h-3.6a1 1 0 0 1-1-1v-2.4a1 1 0 0 1 1-1zM10.3 11.2V9.9a1.7 1.7 0 0 1 3.4 0v1.3',
       exposed: BANG,
     }[state];
-    const turning = state === 'securing';
+    const turning = state === 'securing' || state === 'mint';
     return {
       shieldState: state,
       /* Its words, for whoever cannot see the colour: the banner's own, and for the two states it said in one
        * word or none, the sentence the word stood for. */
-      shieldLabel: state === 'securing' ? 'SECURING YOUR CONNECTION'
+      shieldLabel: state === 'mint' ? 'CONNECTING TO ' + pendHost
+        : state === 'mintDown' ? pendHost + ' IS NOT ANSWERING'
+        : state === 'securing' ? 'SECURING YOUR CONNECTION'
         : state === 'secure' ? 'Connected Over Tor'
         /* a blank banner has no words of its own; the banner's for these, short of TAP TO RETRY, which is the
          * offline tap's promise and not this one's (`torBanner` opens the connection card here) */
@@ -16175,15 +16426,15 @@ class Component extends DCLogic {
         ? 'How much to send on chain?'
         : s.flow === 'transfer'
         // what is at the mint it leaves, so the amount is typed against it
-        ? 'From ' + (this.mintNameOf(s.trFrom) || 'that mint') + ' \u00b7 \u20bf '
-          + this.group(this.trFromSats()) + ' there'
+        ? this.trFromText()
         : s.flow === 'deposit' ? 'How much do you want to deposit?'
         : s.flow === 'cardAdd' ? 'How much to deposit?'
         : s.flow === 'cardSend' ? 'How much to put on the card?'
         : s.flow === 'cardWd' ? 'How much to withdraw?'
         : s.flow === 'cardLimit' ? (this.fcLimitQuestion ? this.fcLimitQuestion() : 'What would you like the daily limit to be?')
         // a card's set-up (26j-card-wheel.js): LIMITS' own questions for the two
-        : s.flow === 'cardSuNoPin' ? 'What is the most this card should pay without asking you to enter your PIN?'
+        // (the set-up's no-PIN figure is the card's 24-hour total without the PIN, software 1.25, written to the allowance)
+        : s.flow === 'cardSuNoPin' ? 'What\u2019s the most this card should pay in 24 hours without asking you for a PIN?'
         : s.flow === 'cardSuTap' ? 'What is the most this card should pay each second?'
         : s.flow === 'receive' ? 'How much to receive?'
         : s.flow === 'swap' ? 'How much to swap?'
@@ -17906,7 +18157,7 @@ class Component extends DCLogic {
          * does not change price with bitcoin. */
         amtText: ofCard
           ? (unfinished(t) ? '' : dirOf(t) === 'in' ? '+' : '−') + (usdCard ? this.unitFigure(t.amount, 'usd') : this.money(t.sats, this.txFiat(t, t.sats)).main)
-          : (t.dir === 'in' ? '+' : '−') + (t.unit ? this.unitMoney(t.amount, t.unit) : t.usd != null ? '$ ' + t.usd.toFixed(2) : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).main),
+          : (t.dir === 'in' ? '+' : '−') + (t.unit ? this.unitMoney(this.txTotalUnit(t), t.unit) : t.usd != null ? '$ ' + t.usd.toFixed(2) : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).main),
         amtSub: ofCard ? (usdCard ? '' : this.money(t.sats, this.txFiat(t, t.sats)).sub)
           : t.unit ? this.unitLabel(t.unit) + ' ecash' : t.usd != null ? 'Cash' : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).sub,
         // dollars at today's price, and the sats that actually add up
@@ -18005,7 +18256,7 @@ class Component extends DCLogic {
        * two numbers that do not visibly relate. */
       txSentLabel: tx.dir === 'in' ? 'RECEIVED' : 'SENT',
       txSent: (tx.dir === 'in' ? '+' : '\u2212') + (tx.unit ? this.unitMoney(tx.amount, tx.unit) : this.money(tx.sats, this.txFiat(tx, tx.sats)).main),
-      txTotal: (tx.dir === 'in' ? '+' : '\u2212') + (tx.unit ? this.unitMoney(tx.amount, tx.unit) : this.money(this.txTotalOut(tx), this.txFiat(tx, this.txTotalOut(tx))).main),
+      txTotal: (tx.dir === 'in' ? '+' : '\u2212') + (tx.unit ? this.unitMoney(this.txTotalUnit(tx), tx.unit) : this.money(this.txTotalOut(tx), this.txFiat(tx, this.txTotalOut(tx))).main),
       txTotalAlt: (tx.unit === 'usd' && two) ? 'DOLLARS'
         : tx.unit ? this.unitLabel(tx.unit) + ' ecash' : this.money(this.txTotalOut(tx), this.txFiat(tx, this.txTotalOut(tx))).sub,
       /* Which mint carried this. The screen said LIGHTNING and never said
@@ -18486,8 +18737,15 @@ class Component extends DCLogic {
     this._trWas = window.FoxyWallet.mintUrl || '';
     this.setState(p => ({
       screen: 'switchMint', stack: p.stack.concat([p.screen]),
-      trStep: 'from', trFrom: '', trTo: '', trSats: 0, trPlan: null, trFee: null, trErr: '', fcPick: false,
+      trStep: 'from', trFrom: '', trTo: '', trUnit: 'sat', trSats: 0, trPlan: null, trFee: null, trErr: '', fcPick: false, wdPick: false, tillPick: false,
     }));
+  }
+
+  /* What this phone holds at a mint, in each unit: { sat, usd } (cents for dollars). */
+  trHeldAt(url) {
+    const pile = this.mintPile(url);
+    const usd = (pile.units || []).find((b) => b && b.unit === 'usd');
+    return { sat: Math.max(0, Math.round(Number(pile.sats) || 0)), usd: Math.max(0, Math.round(Number(usd && usd.amount) || 0)) };
   }
 
   /* A mint tapped on the list while a transfer is being set up. */
@@ -18501,27 +18759,54 @@ class Component extends DCLogic {
      * the bug above. */
     if (!this.state.trStep) return;
     if (this.state.trStep === 'from') {
-      this.setState({ trFrom: mint, trStep: 'to' });
+      /* Which balance it leaves, asked when the mint holds both on this phone (2026-11-03: forge to minibits took sats
+       * with no question). The CURRENCY screen, in this flow's words, as a card asks which of its two (`fcPickUnit`);
+       * a mint holding only one is that one, asked nothing. */
+      const held = this.trHeldAt(mint);
+      if (held.sat > 0 && held.usd > 0 && this.fcPickUnit) {
+        this.fcPickUnit({
+          question: 'TRANSFER WHICH?',
+          foot: this.mintNameOf(mint) + ' holds dollars and bitcoin for you. The one you pick is what leaves; bitcoin lands at the other mint.',
+          bal: { usd: held.usd, sat: held.sat }, short: {}, why: '',
+        }, (u) => this.setState({ trFrom: mint, trUnit: u === 'usd' ? 'usd' : 'sat', trStep: 'to' }));
+        return;
+      }
+      this.setState({ trFrom: mint, trUnit: held.usd > 0 && !(held.sat > 0) ? 'usd' : 'sat', trStep: 'to' });
       return;
     }
+    const dollars = this.state.trUnit === 'usd';
     this.setState(p => ({
       trTo: mint, trStep: '',
       screen: 'amount', stack: p.stack.concat([p.screen]),
-      flow: 'transfer', asset: 'BITCOIN', unit: 'SATS', amount: '',
+      // a dollar transfer is typed in dollars; what lands is sats at the price, and the confirmation says both
+      flow: 'transfer', asset: dollars ? '' : 'BITCOIN', unit: dollars ? 'USD' : 'SATS', amount: '',
       note: '', noteDraft: '', recipient: '', recipientKind: '',
     }));
   }
 
-  /* What is at the mint the money leaves, for the keypad's line and its cap. */
+  /* What is at the mint the money leaves, for the keypad's line and its cap: sats, or cents on a dollar transfer. */
   trFromSats() {
-    return this.mintPile(this.state.trFrom).sats || 0;
+    const held = this.trHeldAt(this.state.trFrom);
+    return this.state.trUnit === 'usd' ? held.usd : held.sat;
+  }
+
+  /* The keypad's line: what is at the mint it leaves, in the balance it leaves. */
+  trFromText() {
+    const at = this.mintNameOf(this.state.trFrom) || 'that mint';
+    if (this.state.trUnit === 'usd') return 'From ' + at + ' \u00b7 ' + this.unitFigure(this.trFromSats(), 'usd') + ' there';
+    return 'From ' + at + ' \u00b7 \u20bf ' + this.group(this.trFromSats()) + ' there';
   }
 
   trNext() {
     const sats = this.amountInSats();
     const have = this.trFromSats();
     if (!(sats > 0)) { this.toast('Enter an amount first', true); return; }
-    if (sats > have) {
+    // in dollars the cap is the dollar pile, against the figure typed (or the sats typed, at the price)
+    const px = this.px ? this.px() : 0;
+    const typed = this.state.trUnit !== 'usd' ? sats
+      : this.state.unit === 'USD' ? Math.round((parseFloat(this.state.amount) || 0) * 100)
+      : (px ? Math.round(sats / 1e8 * px * 100) : 0);
+    if (typed > have) {
       this.toast('That is more than the ' + this.mintNameOf(this.state.trFrom) + ' balance.', true);
       return;
     }
@@ -18554,7 +18839,7 @@ class Component extends DCLogic {
     this.setState({ trQuoting: true, trErr: '', trFits: 0 });
     Promise.resolve()
       .then(() => (W.mintUrl === trTo ? null : W.connect(trTo)))
-      .then(() => W.transferQuote(trFrom, trSats))
+      .then(() => W.transferQuote(trFrom, trSats, this.state.trUnit === 'usd' ? { unit: 'usd' } : undefined))
       .then(plan => {
         this.setState({ trQuoting: false, trPlan: plan, trFee: plan.feeSats });
       })
@@ -18587,7 +18872,7 @@ class Component extends DCLogic {
     if (this.refuseSwitchWhileBusy()) return;
     const to = this.mintNameOf(this.state.trTo);
     this.setState({ trBusy: true });
-    this.showMelt('Moving your sats to ' + to + '…', 0, { sats: this.state.trSats, mint: to });
+    this.showMelt((plan.unit === 'usd' ? 'Moving your dollars to ' : 'Moving your sats to ') + to + '…', 0, { sats: this.state.trSats, mint: to });
     /* Back on the mint the money leaves: the quote was made while connected to
      * the destination, and moveRun pays from whichever wallet is connected —
      * run from the destination it found nothing to spend (seen in the
@@ -18620,6 +18905,7 @@ class Component extends DCLogic {
   /* The confirmation screen's contents (confirmSpec). */
   transferSpec() {
     const s = this.state;
+    if (s.trUnit === 'usd') return this.transferSpecUsd();
     const sats = s.trSats || 0;
     const fee = s.trFee;
     const rows = [
@@ -18659,6 +18945,47 @@ class Component extends DCLogic {
       ctaTone: 'go',
       ctaBusy: !!s.trBusy || fee == null,
       go: () => { if (fee != null && !s.trBusy) this.runTransfer(); },
+    };
+  }
+
+  /* A transfer from dollars: the sats that land, and the dollars that leave at the source's quote, both on the one
+   * screen; the fee is the mint's, in cents, inside what leaves. */
+  transferSpecUsd() {
+    const s = this.state;
+    const sats = s.trSats || 0;
+    const plan = s.trPlan;
+    const out = plan && plan.unit === 'usd' ? Math.round(Number(plan.gross) || 0) : null;
+    const fee = plan && plan.unit === 'usd' ? Math.max(0, Math.round(Number(plan.feeUnit) || 0)) : null;
+    const from = (this.mintNameOf(s.trFrom) || '').toUpperCase();
+    const rows = [
+      this.cfRow('LANDING AT', (this.mintNameOf(s.trTo) || '').toUpperCase()),
+      this.cfRow('LANDING', this.unitFigure(sats, 'sat'), { half: true }),
+      this.cfRow('LEAVING', s.trErr ? 'UNKNOWN' : out == null ? 'CHECKING\u2026' : 'UP TO ' + this.unitFigure(out, 'usd'), { half: true }),
+      this.cfRow('PAYING FROM', from + ' \u00b7 DOLLARS', { half: true }),
+      this.cfRow('FEE', s.trErr ? 'UNKNOWN' : fee == null ? 'CHECKING\u2026' : 'UP TO ' + this.unitFigure(fee, 'usd'),
+                 { half: true, sub2: 'You pay the mint\u2019s fees' }),
+    ];
+    if (s.trErr) {
+      return {
+        title: 'CONFIRMATION', amountLabel: 'MOVING',
+        amount: this.unitFigure(sats, 'sat'), amountSub: '', amountInk: '#FF5C5C', rows: rows,
+        warn: s.trErr, cta: 'TRY AGAIN', ctaTone: 'warn',
+        go: () => this.quoteTransfer(),
+        secondary: { label: 'CANCEL', go: () => this.trCancel() },
+      };
+    }
+    return {
+      title: 'CONFIRMATION',
+      amountLabel: 'MOVING',
+      amount: this.unitFigure(sats, 'sat'),
+      subtitle: out == null ? '' : 'Up to ' + this.unitFigure(out, 'usd') + ' leaves ' + (this.mintNameOf(s.trFrom) || 'the other mint'),
+      amountSub: out == null ? '' : this.unitFigure(out, 'usd'),
+      rows: rows,
+      secondary: { label: 'CANCEL', go: () => this.trCancel() },
+      cta: s.trBusy ? 'MOVING\u2026' : out == null ? 'CHECKING THE FEE\u2026' : 'MOVE ' + this.unitFigure(sats, 'sat'),
+      ctaTone: 'go',
+      ctaBusy: !!s.trBusy || out == null,
+      go: () => { if (out != null && !s.trBusy) this.runTransfer(); },
     };
   }
   /* ---- on chain (NUT-30) ---------------------------------------------------
@@ -19311,9 +19638,10 @@ class Component extends DCLogic {
     return two(d.getHours()) + ':' + two(d.getMinutes()) + ':' + two(d.getSeconds());
   }
 
-  flText() {
-    const lines = this.state.flLines || [];
-    const view = this.state.flView;
+  flText() { return this.flTextOf(this.state.flLines || [], this.state.flView); }
+
+  /* `lines` newest first, as the screen holds them; `view` names the heading. */
+  flTextOf(lines, view) {
     const head = 'Foxy ' + (view === 'bad' ? 'errors' : view === 'net' ? 'connection diary' : 'log') + ', '
       + lines.length + ' line' + (lines.length === 1 ? '' : 's')
       + ', newest first. Tokens, invoices, payment requests, onion addresses and '
@@ -19371,6 +19699,37 @@ class Component extends DCLogic {
         });
       },
       shut: { label: 'KEEP IT' },
+    });
+  }
+
+  /* A shake, anywhere the receive screen has not claimed it (the native side
+   * decides: FoxyBridge+Tap.swift `shaken`), asks whether to copy the whole
+   * log — the LOGS screen's COPY ALL without the walk to it, for someone
+   * holding a phone that has just done something odd. Asked, never done on the
+   * shake alone: a phone jostled in a pocket must not fill the clipboard. Not
+   * under the lock: the log names mint hosts and amounts, and a locked phone
+   * shows nothing of its holder's. Device-only and short-lived like every
+   * copy Foxy makes (copySecret). */
+  shakenForLogs() {
+    const W = window.FoxyWallet;
+    if (this._pinLocked) { console.log('[foxy] shaken under the lock; the logs stay'); return; }
+    if (!W || !W.fieldLog) return;
+    this.blockedCard('shakeLogs', {
+      tone: 'ask',
+      title: 'COPY YOUR LOGS?',
+      reason: 'Everything Foxy has been doing goes to the clipboard, on this phone only, '
+        + 'for two minutes. Tokens, invoices and keys are already left out; mint hosts '
+        + 'and amounts are not.',
+      retry: 'COPY',
+      go: () => {
+        W.fieldLog(false).then(lines => {
+          const newest = (lines || []).slice().reverse();
+          if (!newest.length) { this.toast('There is nothing to copy yet.', true); return; }
+          if (this.copySecret(this.flTextOf(newest, 'all'))) this.toast('Your logs are on the clipboard for two minutes');
+          else this.toast('Could not copy', true);
+        }, () => this.toast('Could not read the log', true));
+      },
+      shut: { label: 'NOT NOW' },
     });
   }
   /* ---- tap to pay, over Bluetooth (TAP-TO-PAY.md) ------------------------ */
@@ -24035,6 +24394,16 @@ class Component extends DCLogic {
       if (p.second) return 'Keep holding.';
       /* Over the limit: the first limit's worth over takes ten askings of the card (seven before software 1.17, `info.waitOver`),
        * and each further limit's worth three or four (`info.waitMore`); said as the level it has come to, "x2" when the second begins, and so on. */
+      /* (software 1.25, `p.floor`: every payment waits its floor of three askings first, within the limit or not; only an asking
+       * past the floor is over the limit, and each further limit's worth two more) */
+      const floor = Math.round(Number(p.floor) || 0);
+      if (floor > 0) {
+        const polls25 = Math.round(Number(p.polls) || 0);
+        if (p.ahead ? !(Number(p.left) > floor) : polls25 <= floor) return 'Keep holding.';
+        const more25 = Number(p.more) || 2;
+        const level25 = 1 + Math.ceil((polls25 - floor) / more25);
+        return 'Over per tap limit' + (level25 > 1 ? ' x' + level25 : '');
+      }
       const over = Number(p.over) || this.fcWaitOver();
       const more = Number(p.more) || this.fcWaitMore();
       const polls = Math.round(Number(p.polls) || 0);
@@ -24251,7 +24620,7 @@ class Component extends DCLogic {
     else if (flow === 'cardWd') this.fcWithdrawPin(sats);
     /* A limit typed in dollars is kept in dollars (`fcLimitRun`): the card holds sats, and the price moves. A dollar card's
      * limit is dollars, and is never kept at anything: no dollars are sent to keep it at. */
-    // (the limit on a payment of a card that waits for it is typed as a rate: the card is sent three seconds of it, 26j-card-wheel.js)
+    // (the limit on a payment of a card that waits for it is typed as a rate: the card is sent one second of it, 26j-card-wheel.js)
     else if (flow === 'cardLimit') {
       const k = (this._fcLimitTap && this.fcPacedNow && this.fcPacedNow()) ? this.FC_SPEED_SECS : 1;
       this.fcLimitConfirm(sats * k, (unit === 'usd' ? 0 : this.state.unit === 'USD' ? Number(this.state.amount) || 0 : 0) * k);
@@ -24404,7 +24773,8 @@ class Component extends DCLogic {
       'no-pin': () => ({ tone: 'warn', title: 'THIS CARD HAS NO PIN', reason: said }),
       'has-pin': () => ({ tone: 'warn', title: 'THIS CARD HAS A PIN', reason: said }),
       // a PIN is wanted where none was given (the card's word at a tap that was not a payment's)
-      'pin-needed': () => ({ tone: 'warn', title: 'THE CARD WANTS ITS PIN', reason: said + safe }),
+      'pin-needed': () => (e && e.limitReached ? { tone: 'warn', title: 'LIMIT REACHED. ENTER PIN.', reason: this.FC_LIMIT_REACHED + safe }
+        : { tone: 'warn', title: 'THE CARD WANTS ITS PIN', reason: said + safe }),
       'not-owner': () => ({ tone: 'warn', title: 'NOT THIS PHONE’S CARD',
         reason: 'This phone does not hold the seed phrase this card was set up with, so it cannot change the card’s PIN or limit.',
         chip: 'Restore that seed phrase in Foxy, on this phone or another, to do it.' }),
@@ -25132,6 +25502,18 @@ class Component extends DCLogic {
   /* The card's PIN, for the second tap: asked for after the card has said it wants one, or after a wrong
    * one. TAP AGAIN pays with it. `cardUnit`: the unit of the card that asked for it, where it said (its `pin-needed`):
    * a dollar card is told the cents it pays, whatever else the till asked. */
+  /* A card of 1.25 whose no-PIN total for these 24 hours is used up (6A9E): LIMIT REACHED. ENTER PIN., in the card's style, and ENTER
+   * PIN goes on to the PIN (`then`), with which the same payment is signed. Nothing was signed or taken. */
+  FC_LIMIT_REACHED = 'This card has paid all it pays without its PIN in these 24 hours. With its PIN this payment goes through.';
+  fcLimitReached(then) {
+    this.blockedCard('fc-limit-reached', {
+      tone: 'warn', title: 'LIMIT REACHED. ENTER PIN.',
+      reason: this.FC_LIMIT_REACHED,
+      retry: 'ENTER PIN', go: () => then(),
+      shut: { label: 'CANCEL' },
+    });
+  }
+
   fcPayAsk(sats, offline, resuming, share, send, usd, terms, cardUnit) {
     let figure;
     // a card at another mint: the total it pays from there, its fee in it (`fcXmPay`)
@@ -25380,7 +25762,14 @@ class Component extends DCLogic {
         if (e && e.card === 'choose-unit') { this.fcPayChoose(e, () => opt.again()); return; }
         /* The card wants its PIN for this payment (it has one and no no PIN limit covers it, or its software
          * always asks): the sheet ended saying so, nothing was signed or taken, and the pad comes up. */
-        if (e && e.card === 'pin-needed' && !pin) { this.fcPayAsk(sats, offline, resuming, share, send, usd, terms, e.cardUnit); return; }
+        /* (1.25: the no-PIN total for these 24 hours is used up, 6A9E, `limitReached`: said first, LIMIT REACHED. ENTER PIN., and the same
+         * payment is then signed with the PIN, `fcLimitReached`) */
+        if (e && e.card === 'pin-needed' && !pin) {
+          const ask = () => this.fcPayAsk(sats, offline, resuming, share, send, usd, terms, e.cardUnit);
+          if (e.limitReached) { this.fcLimitReached(ask); return; }
+          ask();
+          return;
+        }
         /* The card left part way through signing, and the sheet that looked for
          * it again was dismissed: what it signed is held, said with TAP CARD.
          * Where the phone could not keep the sheet up (an older one), a new
@@ -26731,8 +27120,40 @@ class Component extends DCLogic {
 
   /* Does this card hold two balances? Only a card whose software reports more than one unit, and none does yet:
    * a card of software 1.20 and before holds sats alone and reports no units at all. */
+  /* When a card of 1.25's 24 hours without the PIN start over (`noPin.turns`: its window's start and 24 hours, by the card's header
+   * clock), said after what is left: " · resets 3:04 PM", or nothing where no window is running (nothing spent without the PIN yet). */
+  fcNoPinResets(noPin) {
+    const at = Math.round(Number(noPin && noPin.turns) || 0);
+    if (!(at > 0) || !(Number(noPin.spent) > 0)) return '';
+    const d = new Date(at * 1000);
+    const clock = this.txClock ? this.txClock(d) : d.toISOString().slice(11, 16);
+    const sameDay = new Date().toDateString() === d.toDateString();
+    return ' \u00b7 resets ' + (sameDay ? clock : (this.txDay ? this.txDay(d, new Date()) + ' ' : '') + clock);
+  }
+
   fcTwoUnits(fc) {
     return !!(fc && Array.isArray(fc.units) && fc.units.length > 1);
+  }
+
+  /* The currencies a card's screen has a row for (`units`): those its table lists (the wallet's `cardUnits`), less any its own mint
+   * does not issue, from what this phone knows of that mint (`mintUnits`, the keys on file: the card's mint, not the one this phone is
+   * connected to). A card of 1.23 moved to a mint of bitcoin alone still lists dollars in its table, and its screen showed a dollar row
+   * of $0.00 at a mint that has no dollars (2026-11-03). A currency the card holds money in keeps its row; a mint this phone knows
+   * nothing of takes nothing away. */
+  fcUnitsAt(card) {
+    const W = this.fcW();
+    const list = (W && W.cardUnits && W.cardUnits(card)) ? W.cardUnits(card).map((x) => x.unit) : null;
+    if (!list) return null;
+    const mint = card && card.record && card.record.mint;
+    const issued = (mint && W && typeof W.mintUnits === 'function') ? (W.mintUnits(mint) || []) : [];
+    if (!issued.length) return list;
+    const holds = (u) => !!(card.units && card.units[u] && Number(card.units[u].balance) > 0);
+    const kept = list.filter((u) => issued.indexOf(u) >= 0 || holds(u));
+    if (kept.length < list.length) {
+      console.log('[foxy] card: no ' + list.filter((u) => kept.indexOf(u) < 0).join(', ') + ' row: ' + String(mint).replace(/^https?:\/\//, '')
+        + ' issues ' + issued.join(', ') + ' only');
+    }
+    return kept.length ? kept : list;
   }
 
   /* The sats the balance on the card's screen says now: what it holds, or where its count has got to. */
@@ -26805,6 +27226,8 @@ class Component extends DCLogic {
       /* software 1.16 and on: the PIN is optional. `setUp`: the card has its record (and, before 1.16, a PIN); `pinSet`: it has a PIN (a blocked one does);
        * `noPinKnown`: its software can be without one and has the no PIN limit; `noPin`: that limit and what is left of it today (`known`, `set`, `limit`, `left`) */
       setUp: !!card.info.setUp, pinSet: !!card.info.pinSet, noPinKnown: !!card.info.noPinKnown, noPin: card.noPin || null,
+      // software 1.25: the no-PIN allowance is a 24-hour total of its own, from its first payment without the PIN (`noPinOwn`)
+      noPinDay: !!card.info.noPinOwn,
       // software 1.21 and on: a PIN before any money, every load under it, and the owner taken in a held claim
       pinFirst: (() => { const v = String(card.info.version || '').split('.'); return Number(v[0]) > 1 || (Number(v[0]) === 1 && Number(v[1]) >= 21); })(),
       /* software 1.22 and on: a card with a PIN and no owner is a holder's with no phone, shown with VIEW AS GUEST and TIE OWNERSHIP
@@ -26841,7 +27264,7 @@ class Component extends DCLogic {
        * (`cents`); `units`: the two it holds (or may: format 5), for `fcTwoUnits`, or the one; `bal`: what it holds in each; `rate`: the
        * sats a dollar its sats payments are weighed at, where it said (to its owner). */
       v123: !!(card.info && card.info.units), cents: !!(card.info && card.info.cents),
-      units: (W && W.cardUnits && W.cardUnits(card)) ? W.cardUnits(card).map((x) => x.unit) : null,
+      units: this.fcUnitsAt(card),
       bal: card.units ? { usd: card.units.usd.balance, sat: card.units.sat.balance } : null,
       /* `only`: the one currency its owner chose for it when this phone set it up ('usd' or 'sat'), which this phone's ADD FUNDS and
        * SEND put on it and nothing else; '' for a card of both, one this phone made no such promise for, or one that holds the other
@@ -26974,7 +27397,8 @@ class Component extends DCLogic {
   fcGiveUpRun(x, pin) {
     const W = this.fcW();
     if (!W) return;
-    this.fcTap({}, (link, on) => { on('writing'); return W.cardGiveUp(link, { number: x.number, B_: x.B_, amount: x.amount, pin, onHold: () => on('writing') }); })
+    this.fcApprove({ label: 'reset', number: x.number })
+      .then(() => this.fcTap({}, (link, on) => { on('writing'); return W.cardGiveUp(link, { number: x.number, B_: x.B_, amount: x.amount, pin, onHold: () => on('writing') }); }))
       .then((r) => {
         // what the screen said of the card's change, without the one given up
         const card = Object.assign({}, r.card, { owes: this.fcOwesWithout(this.state.fc && this.state.fc.owes, x.number) });
@@ -27361,9 +27785,13 @@ class Component extends DCLogic {
     this.fcAmount('cardWd');
   }
 
-  fcWithdrawPin(sats) {
+  fcWithdrawPin(sats, asked) {
     const fc = this.state.fc;
     if (!fc) return;
+    /* ALL OF IT, on a phone that uses other mints too: where it lands is asked first, WITHDRAW TO, the card's own mint at no fee and
+     * each other with what crossing there costs (26n-card-withdraw-to.js, `fcWdToAsk`). A typed amount lands at the card's mint. */
+    if (!sats && !asked && this.fcWdToAsk && this.fcWdToAsk(() => this.fcWithdrawPin(0, true))) return;
+    if (sats || !asked) this._fcWdTo = '';
     const u = this.fcUnit();
     this.fcPinOr({
       title: 'ENTER PIN TO WITHDRAW',
@@ -27435,6 +27863,8 @@ class Component extends DCLogic {
         if (r && r.hash) this.txIsNew(r.hash);
         this.fcMoved({});
         said(r);
+        // and on to the mint WITHDRAW TO chose, where it was another (26n-card-withdraw-to.js, `fcWdCross`)
+        if (this.fcWdCross) this.fcWdCross(took + this.fcAmt(r), u);
         const ch = r && r.change;
         if (ch && !ch.written && !ch.unmade && this.fcAmt(ch) > 0) this.fcChangeWaiting(this.fcAmt(ch), 0, u);
       }, (e) => {
@@ -27502,6 +27932,19 @@ class Component extends DCLogic {
   /* CHANGE PIN, and UNBLOCK, which is the same: the owner's phone sets a new PIN
    * with its proof. The old PIN is not asked for, because this phone does not
    * know it and a blocked or forgotten PIN is the case that needs this. */
+  /* The keeper's yes to an owner's command, asked by the phone itself, in its own alert and (for all but a limit) with Face ID or
+   * the passcode, at the screen where the command begins and before the card is held up (the wallet's `cardApprove`). The owner
+   * key signs that command in the next tap and nothing like it that was not said yes to, so this is asked before the tap and
+   * never during it, where the phone's alert would sit under the card sheet. Named for the card on screen. A no rejects
+   * `declined`, said as any refusal is. */
+  fcApprove(op) {
+    const W = this.fcW();
+    const fc = this.state.fc;
+    const card = fc && /^0[23][0-9a-f]{64}$/.test(String(fc.key || '')) ? fc.key : undefined;
+    if (!W || !W.cardApprove) return Promise.resolve(true);
+    return W.cardApprove(Object.assign(card ? { card } : {}, op));
+  }
+
   fcChangePin() {
     const fc = this.state.fc;
     if (!fc) return;
@@ -27514,7 +27957,8 @@ class Component extends DCLogic {
       title: 'NEW PIN', subtitle: 'Four to eight digits.', warn: warn || '',
     }, (a) => this.fcAskPin({ title: 'NEW PIN AGAIN', subtitle: 'So a mistyped digit does not become the card’s PIN.' }, (b) => {
       if (a !== b) { fresh('Those did not match. Start again.'); return; }
-      this.fcTap({}, (link, on) => { on('writing'); return W.cardChangePin(link, { newPin: a }); })
+      this.fcApprove({ label: 'change-pin', pin: a })
+        .then(() => this.fcTap({}, (link, on) => { on('writing'); return W.cardChangePin(link, { newPin: a }); }))
         .then(() => {
           this.haptic && this.haptic('success');
           this.blockedCard('fc-pin', { tone: 'ask', title: was ? 'CARD UNBLOCKED' : 'PIN CHANGED', reason: 'The card asks for the new one from now on.', shut: { label: 'DONE' } });
@@ -27614,7 +28058,12 @@ class Component extends DCLogic {
     this.blockedCard('fc-limit-warn', np ? {
       tone: 'warn', title: 'SET NO PIN LIMIT',
       // (from 1.21 the allowance is refilled each time the PIN is entered on the card, not by the day)
-      reason: (this.state.fc && this.state.fc.pinFirst
+      /* (1.25: a total of its own over 24 hours from the first payment without the PIN; contact with this phone, the owner's, ends the
+       * 24 hours, and the PIN alone does not: `noPinDay`) */
+      reason: (this.state.fc && this.state.fc.noPinDay
+        ? 'A \u201cNo PIN\u201d limit is the most this card pays by tap alone in 24 hours before it asks for your PIN. The 24 hours begin at its first payment without the PIN.\n\n'
+          + 'Once it is used up, the card says LIMIT REACHED and asks for the PIN, and a payment with the PIN goes through. Entering the PIN does not start the 24 hours over: they end after 24 hours, or when the card is next held to this phone.\n\n'
+        : this.state.fc && this.state.fc.pinFirst
         ? 'A \u201cNo PIN\u201d limit is how much this card can pay by tap alone before it asks for your PIN.\n\n'
           + 'Once it is used up, the PIN is asked for, and entering it fills the limit again.\n\n'
         : 'A \u201cNo PIN\u201d limit is the most this card will pay in one day without requiring your PIN.\n\n'
@@ -27637,6 +28086,8 @@ class Component extends DCLogic {
   fcLimitQuestion() {
     // (from 1.21 the allowance is filled again by the PIN, not by the day)
     if (this._fcLimitNoPin) {
+      // (1.25: a 24-hour total of its own, `noPinDay`)
+      if (this.state.fc && this.state.fc.noPinDay) return 'What\u2019s the most this card should pay in 24 hours without asking you for a PIN?';
       return (this.state.fc && this.state.fc.pinFirst) ? 'What is the most this card should pay by tap alone before it asks for its PIN?'
         : 'What is the most this card should pay in a day without its PIN?';
     }
@@ -27671,7 +28122,8 @@ class Component extends DCLogic {
         title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A NO PIN LIMIT OF:',
         amount: fig(sats).main, amountSub: fig(sats).sub, rows: [],
         // (from 1.21 the PIN fills the allowance again, and no day does)
-        warn: ((this.state.fc && this.state.fc.pinFirst) ? 'This card will pay up to this much without its PIN, and entering the PIN fills it again. '
+        warn: ((this.state.fc && this.state.fc.noPinDay) ? 'This card will pay up to this much in 24 hours without its PIN; the 24 hours end early when the card is held to this phone, not when the PIN is entered. '
+          : (this.state.fc && this.state.fc.pinFirst) ? 'This card will pay up to this much without its PIN, and entering the PIN fills it again. '
           : 'This card will pay up to this much a day without its PIN. ') + 'Over it, the PIN is asked for the whole payment. '
           + (((this.state.fcLimit || {}).usd > 0) ? 'It is kept at this many dollars: this phone sets the card again when the price has moved. ' : '')
           + 'Only this phone, or a phone restored from its seed phrase, can change or remove it.',
@@ -27694,7 +28146,7 @@ class Component extends DCLogic {
       } : {
         title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A PER SECOND LIMIT OF:',
         amount: this.fcSpeedText(sats, U, usd) + ' / sec', amountSub: '', rows: [],
-        warn: 'This card pays up to ' + L + ' straight away, change or no change. Over it, the card has to be held about ' + this.fcWaitSecs(this.fcWaitOver()) + ' seconds, and ' + Math.max(1, Math.round(this.FC_TAP_SECS.asking * this.fcWaitMore())) + ' seconds more for every ' + L + ' beyond that. '
+        warn: 'This card pays up to ' + L + ' straight away, change or no change. Over it, the card has to be held about ' + this.fcHoldSecs(2) + ' seconds, and ' + (this.fcHoldSecs(3) - this.fcHoldSecs(2)) + (this.fcHoldSecs(3) - this.fcHoldSecs(2) === 1 ? ' second' : ' seconds') + ' more for every ' + L + ' beyond that. '
           + (usd > 0 ? 'It is kept at this many dollars: this phone sets the card again when the price has moved. ' : '')
           + (this.fcAbove(this._fcCard, sats, U, true) > 0 ? 'It holds ' + this.fcPrice(this.fcAbove(this._fcCard, sats, U, true), (fc && fc.unit) || U) + ' in pieces larger than that: with your PIN they are recut under the new limit in the same tap. ' : '')
           + this.fcAboveKept(this._fcCard, sats, U)
@@ -27713,7 +28165,7 @@ class Component extends DCLogic {
       title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A PER TAP LIMIT OF:',
       amount: fig(sats).main, amountSub: fig(sats).sub, rows: [],
       warn: (this.fcShaped()
-        ? 'This card will pay up to this straight away, change or no change. Over it, the card has to be held about ' + this.fcWaitSecs(this.fcWaitOver()) + ' seconds, and ' + Math.max(1, Math.round(this.FC_TAP_SECS.asking * this.fcWaitMore())) + ' seconds more for every limit\u2019s worth beyond that. '
+        ? 'This card will pay up to this straight away, change or no change. Over it, the card has to be held about ' + this.fcHoldSecs(2) + ' seconds, and ' + (this.fcHoldSecs(3) - this.fcHoldSecs(2)) + (this.fcHoldSecs(3) - this.fcHoldSecs(2) === 1 ? ' second' : ' seconds') + ' more for every limit\u2019s worth beyond that. '
         : 'This card will pay up to this straight away when it pays exactly. With change, or over the limit, it has to be held 3 seconds for every limit\u2019s worth. ')
         + (((this.state.fcLimit || {}).usd > 0) ? 'It is kept at this many dollars: this phone sets the card again when the price has moved. ' : '')
         + (this.fcAbove(this._fcCard, sats, U, true) > 0 ? 'It holds ' + this.fcPrice(this.fcAbove(this._fcCard, sats, U, true), (this.state.fc && this.state.fc.unit) || U) + ' in pieces larger than that: with your PIN they are recut under the new limit in the same tap. ' : '')
@@ -27934,10 +28386,10 @@ class Component extends DCLogic {
     // a dollar card's limit is its cents, and is kept at nothing: no dollars are sent for it (the wallet writes no pace note for one)
     const keep = v123 ? (lu === 'sat' ? usd : 0) : this.fcUnit() === 'usd' ? 0 : usd;
     const more = v123 ? Object.assign({ unit: lu, price: (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0) }, answer || {}) : {};
-    this.fcTap({}, (link, on, progress) => {
+    this.fcApprove({ label: 'set-limit', figures: [np ? 'noPin' : tap ? 'tap' : 'day'] }).then(() => this.fcTap({}, (link, on, progress) => {
       on('writing');
       return W.cardSetLimit(link, Object.assign(np ? { sats, noPin: true, usd: keep, on, progress } : { sats, tap: !!tap, usd: (tap || v123) ? keep : 0, pin, on, progress }, more));
-    })
+    }))
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
@@ -28266,6 +28718,8 @@ class Component extends DCLogic {
     const end = () => this.fcMoveEnd();
     Promise.resolve()
       .then(() => (String(W.mintUrl || '').replace(/\/+$/, '') === to ? null : W.connect(to, null, null, { remember: false })))
+      // the keeper's yes to the mint it goes to, before the card is held up (`fcApprove`)
+      .then(() => this.fcApprove({ label: 'set-card' }))
       .then(() => this.fcTap({}, (link, on) => { on('writing'); return W.cardRepoint(link); }))
       .then((card) => {
         this.fcShow(card);
@@ -28282,10 +28736,21 @@ class Component extends DCLogic {
     const W = this.fcW();
     const m = this.state.fcMove;
     if (!W || !m) return;
-    const put = (more) => { if (this.state.fcMove) this.setState({ fcMove: Object.assign({}, this.state.fcMove, more) }); };
+    const bare = (u) => String(u || '').replace(/\/+$/, '');
+    /* Only the mint the holder chose, and only while its confirmation is the one up (`gen`): a quote for a mint picked and backed out
+     * of went on in the background on 2026-11-03 (macadamia, quoted for 25 s beside minibits) and could have landed its figures on the
+     * other mint's confirmation. What it says when it is not this one's is let go, and said in the log. */
+    const gen = this._fcMoveGen = (this._fcMoveGen || 0) + 1;
+    const mine = () => gen === this._fcMoveGen && !!this.state.fcMove && bare(this.state.fcMove.to) === bare(m.to);
+    const put = (more) => {
+      if (!mine()) {
+        console.log('[foxy] card: TRANSFER quote for ' + bare(m.to).replace(/^https?:\/\//, '') + ' let go: it is not the confirmation on screen');
+        return;
+      }
+      this.setState({ fcMove: Object.assign({}, this.state.fcMove, more) });
+    };
     put({ quoting: true, err: '' });
     // to the card's mint first, where this phone is not there already: a visit, not a change of this phone's own mint
-    const bare = (u) => String(u || '').replace(/\/+$/, '');
     this._fcVisit = Promise.resolve()
       .then(() => (bare(W.mintUrl) === bare(m.from) ? null : W.connect(m.from, null, null, { remember: false })));
     /* (a TRANSFER being finished: the card on show, empty, as if it held what is in this phone for it, so that the new mint's pieces
@@ -28294,9 +28759,15 @@ class Component extends DCLogic {
     const card = !m.resume ? shown
       : shown ? Object.assign({}, shown, { balance: m.have, pieces: [], units: undefined, whole: undefined, record: Object.assign({}, shown.record, { unit: m.unit }) })
       : { record: { unit: m.unit, mint: m.from }, balance: m.have, pieces: [], info: null };
-    this._fcVisit.then(() => W.cardTransferQuote(card, m.to)).then((q) => {
+    const ask = () => {
+      if (mine()) return W.cardTransferQuote(card, m.to);
+      console.log('[foxy] card: TRANSFER quote for ' + bare(m.to).replace(/^https?:\/\//, '') + ' not asked: it is not the confirmation on screen');
+      return Promise.reject(Object.assign(new Error('let go'), { letGo: true }));
+    };
+    this._fcVisit.then(ask).then((q) => {
       put({ quoting: false, quote: q, lands: q.lands, fee: q.fee, toUnit: q.toUnit });
     }, (e) => {
+      if (e && e.letGo) return;
       put({ quoting: false, quote: null, fee: null, err: (e && (e.card === 'too-little' || e.card === 'both-units')) ? String(e.message) : W.reason(e) });
     });
   }
@@ -28382,9 +28853,12 @@ class Component extends DCLogic {
     this._fcQuiet = true;
     W.transactions(50).then((list) => { this._sweepBefore = new Set(list.map(x => x.hash)); },
                             () => { this._sweepBefore = null; });
-    this.fcTap({ amount: this.stageMoney(m.have, m.unit), warm: true },
-      (link, on, progress) => W.cardTransfer(link, { pin, on, progress, to: m.to, most: m.quote.fee, toUnit: m.quote.toUnit, unit: m.unit,
-                                                     only: fc && fc.key, resume: !!m.resume }))
+    // the keeper's yes to the mint and currency it goes to, kept for this card until its record is written (`fcApprove`)
+    // (in the currency it is turned into, where the quote says it changes; otherwise the one its record holds)
+    this.fcApprove(Object.assign({ label: 'set-card', mint: m.to, keep: true }, m.quote && m.quote.toUnit ? { units: [m.quote.toUnit] } : {}))
+      .then(() => this.fcTap({ amount: this.stageMoney(m.have, m.unit), warm: true },
+        (link, on, progress) => W.cardTransfer(link, { pin, on, progress, to: m.to, most: m.quote.fee, toUnit: m.quote.toUnit, unit: m.unit,
+                                                       only: fc && fc.key, resume: !!m.resume })))
       .then((r) => {
         const end = r.visit ? r.visit.end() : Promise.resolve();
         this.fcMoveEnd(r.card, end);
@@ -28409,13 +28883,19 @@ class Component extends DCLogic {
       return;
     }
     // made for the card and owed to it at the new mint: the next tap writes it, with the phone still there
+    /* Still there: the visit the crossing made is kept open for that tap (`_fcMoveHeld`), and TAP CARD writes in it. It used to be
+     * ended here, the phone went home to the card's old mint and came straight back for the write, two connects over Tor between the
+     * swap and the write (2026-11-03, 09:04:41 to 09:04:46). LATER, the card closed any other way, or two minutes with no tap end it. */
     if (e.stage === 'owed') {
-      this.fcMoveEnd(null, end());
+      const held = this.fcMoveHold(m.to, e && e.visit);
+      this.fcMoveEnd(null, held.over);
       this.blockedCard('fc-move-tap', {
         tone: 'warn', title: 'TAP THE CARD AGAIN',
         reason: 'Its money is at ' + to + ', waiting to go onto this card.',
         retry: 'TAP CARD', go: () => this.fcMoveWrite(m.to, pin),
-        shut: { label: 'LATER' },
+        shut: { label: 'LATER', tap: () => held.end() },
+        // closed without TAP CARD (outside the card, say): the visit is let go; TAP CARD has taken it by then (`fcMoveWrite`)
+        onClose: () => setTimeout(() => { if (this._fcMoveHeld === held) held.end(); }, 0),
       });
       return;
     }
@@ -28430,12 +28910,46 @@ class Component extends DCLogic {
     });
   }
 
+  /* The visit a TRANSFER's crossing made to the new mint, kept open for the tap that writes the card (`fcMoveCut`, `fcMoveWrite`):
+   * { to, end(), ended, over }. `end()` ends the visit once, which brings the phone home; `over` resolves then, and is what
+   * `fcMoveEnd` waits on before it puts the phone back where it was. Ended by itself after two minutes with no tap. */
+  fcMoveHold(to, visit) {
+    clearTimeout(this._fcMoveHoldT);
+    let done = null;
+    const held = { to: String(to || ''), ended: false, over: null, end: null };
+    held.over = new Promise((res) => { done = res; });
+    held.end = () => {
+      if (held.ended) return held.over;
+      held.ended = true;
+      clearTimeout(this._fcMoveHoldT);
+      if (this._fcMoveHeld === held) this._fcMoveHeld = null;
+      Promise.resolve().then(() => (visit && visit.end ? visit.end() : null)).then(done, done);
+      return held.over;
+    };
+    this._fcMoveHeld = held;
+    this._fcMoveHoldT = setTimeout(() => held.end(), 120000);
+    return held;
+  }
+
   /* What a TRANSFER left owed to the card at its new mint, written: the phone visits that mint for the tap (the wallet's `cardVisit`),
    * the card is told its new mint and the pieces go on, under its PIN where it wants one for every load (software 1.21). */
   fcMoveWrite(to, pin0) {
     const W = this.fcW();
     if (!W) return;
-    const go = (pin) => W.cardVisit(to).then((v) => this.fcTap({},
+    // the visit the crossing left open for this tap, where there is one: the write is made in it, with no second visit (`fcMoveHold`)
+    const bare = (u) => String(u || '').replace(/\/+$/, '');
+    let kept = (this._fcMoveHeld && !this._fcMoveHeld.ended && bare(this._fcMoveHeld.to) === bare(to)) ? this._fcMoveHeld : null;
+    if (kept) this._fcMoveHeld = null;
+    const visitFor = () => {
+      const k = kept;
+      kept = null;
+      if (k && !k.ended) {
+        console.log('[foxy] card: the write is made in the visit the TRANSFER left open at ' + bare(to).replace(/^https?:\/\//, ''));
+        return Promise.resolve({ end: () => k.end() });
+      }
+      return W.cardVisit(to);
+    };
+    const go = (pin) => visitFor().then((v) => this.fcTap({},
       (link, on, progress) => { on('writing'); return W.cardWrite(link, pin ? { pin, progress } : { owner: true, progress }); })
       .then((r) => {
         v.end();
@@ -28714,13 +29228,13 @@ class Component extends DCLogic {
     const fc = this.state.fc;
     if (!W || !fc) return;
     const money = this.fcAnyMoney(fc);
-    this.fcTap({ amount: money ? this.fcWholeStage(fc) : '', warm: money },
+    this.fcApprove({ label: 'reset' }).then(() => this.fcTap({ amount: money ? this.fcWholeStage(fc) : '', warm: money },
       (link, on, progress) => {
         // the card is held through the money coming off and the reset: the steps that say it may go are not said
         const held = (step, info) => { if (step !== 'done' && step !== 'checking') on(step, info); };
         on('resetting');
         return W.cardEmptyAndReset(link, { pin: pin || undefined, on: held, progress });
-      })
+      }))
       .then((r) => {
         if (r && r.hash) this.txIsNew(r.hash);
         if (r && r.withdrew > 0) this.fcMoved({});
@@ -30209,8 +30723,8 @@ class Component extends DCLogic {
      * change them. The round button at the top left is HOME (`fcGoHome`). */
     const shut = (go) => () => { this.setState({ open0: false }); go(); };
     // (software 1.23: for both its currencies together, in dollars, `LU`)
-    const noPinSub = !(noPin && fc && fc.pin !== 'blocked') ? '' : 'No PIN up to ' + this.fcPrice(noPin.limit, LU) + ' \u00b7 '
-      + (noPin.left > 0 || !px || LU === 'usd' ? this.fcPrice(noPin.left, LU) : '$0.00') + ' left' + (fc.pinFirst ? '' : ' today')
+    const noPinSub = !(noPin && fc && fc.pin !== 'blocked') ? '' : 'No PIN up to ' + this.fcPrice(noPin.limit, LU) + (fc.noPinDay ? ' in 24 hours' : '') + ' \u00b7 '
+      + (noPin.left > 0 || !px || LU === 'usd' ? this.fcPrice(noPin.left, LU) : '$0.00') + ' left' + (fc.noPinDay ? this.fcNoPinResets(noPin) : fc.pinFirst ? '' : ' today')
       + (two ? ' \u00b7 both currencies' : '');
     // (a card this phone set up or claimed: the wallet's `cardKnownHere`)
     const renamable = !!(fc && fc.key && W && typeof W.cardKnownHere === 'function' && W.cardKnownHere(fc.key));
@@ -30410,12 +30924,10 @@ class Component extends DCLogic {
    * list, so that the whole rule is on the screen when the buttons come: a
    * payment within the limit is as quick as any tap, and every limit's worth
    * over it holds the card a few seconds longer. The example is a ten-dollar
-   * limit, and the seconds beside each tier are what a card that makes its
-   * own change takes (the card's wait schedule: ten signatures for the first
-   * limit's worth over the limit, three for every limit's worth beyond that,
-   * on top of a tap of two to five; a card before software 1.17 asks for seven
-   * for the first), and they are said as "about", for that is what they are;
-   * they are the design's, not computed. A tap anywhere skips
+   * limit, and the seconds beside each tier are what the card's software
+   * holds a payment of that many limits' worth for (`fcHoldSecs`: from 1.25
+   * about 2.4 s and 1.2 s a limit after the first, about three a limit before),
+   * and they are said as "about", for that is what they are. A tap anywhere skips
    * the statement on the screen; once the list is whole, a tap on it plays
    * it again. A phone that asks for less motion is shown the whole list at
    * once, and so is a phone that has seen it play through once.
@@ -30438,11 +30950,10 @@ class Component extends DCLogic {
     const money = (n) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     // every statement in one shape, whatever its kind, so that a reader of the list needs no cases
     const item = (kind, o) => Object.assign({ kind, text: '', limit: '', range: '', secs: '', long: '', bar: '' }, o || {});
-    /* The seconds are what the screen behind the sheet reaches, from the card's own counts (`opts.over` askings for the first
-     * limit's worth over, `opts.more` for each further one; ten and four from software 1.18, ten and three on 1.17, seven and
-     * three before): a payment within the limit is a second or two, up to four with change. */
-    const over = Number(opts.over) || 10, more = Number(opts.more) || 4;
-    const tiers = ['1–4'].concat([over, over + more, over + 2 * more].map((n) => String(this.fcWaitSecs(n))));
+    /* The seconds a payment of two, three and four limits' worth holds the card, by its software (26j-card-wheel.js, `fcHoldSecs`):
+     * from 1.25, about 2.4 s and 1.2 s more for each limit's worth after the first; before it, about three for each. */
+    // (1.25: the floor even within the limit, about two seconds; before it a second or two, up to four with change)
+    const tiers = [this.fcCard125() ? String(this.fcHoldSecs(1)) : '1–4'].concat([2, 3, 4].map((n) => String(this.fcHoldSecs(n))));
     const most = parseInt(tiers[tiers.length - 1], 10);
     const items = [
       item('text', { text: 'Any payment request over your limit requires you to tap and hold your card longer.' }),
@@ -31900,9 +32411,11 @@ class Component extends DCLogic {
    *   SPEND PER SECOND   "Do you want to limit how much the card pays each second?" YES or NO; YES opens MAX SPEND PER SECOND
    *                      (`fcSpeedOpen`): six figures a second to choose from, and the figure itself to type another on SET AMOUNT
    *
-   * The card holds one limit on a payment, L, which it pays at once, and waits about three seconds for each further L (it has no
-   * clock: it counts the phone's askings). So a rate of R a second is L = 3 × R, and a card's limit is said as L / 3 a second
-   * wherever it is shown (`fcSpeedText`): $5 a second is a limit of $15.
+   * The card holds one limit on a payment, L, which it pays at once, and waits about a second for each further L (software 1.25:
+   * every payment waits a floor of three askings, about 2.4 s into the tap, then two more, about 1.2 s, for each limit's worth after
+   * the first; it has no clock, it counts the phone's askings). So a rate of R a second is L = R (FC_SPEED_SECS, one), and a card's limit is said as L a
+   * second wherever it is shown (`fcSpeedText`): $5 a second is a limit of $5. A card before 1.25 waits about three seconds a limit,
+   * and what the screens say a payment takes on one is worked out by its software (`fcHoldSecs`).
    *
    * The amounts are typed on the SET AMOUNT screen every amount is typed on (`fcAmount`, flows 'cardSuNoPin' and 'cardSuTap'),
    * in the card's own money: a dollar card's in dollars and nothing else; a bitcoin card's in dollars first, with the screen's
@@ -32048,7 +32561,7 @@ class Component extends DCLogic {
 
   /* NEXT: the figure in the card's unit (`fcTyped`: cents for a dollar card, sats for a bitcoin card) and, for a bitcoin card typed in
    * dollars, those dollars (as LIMITS keeps them, `fcAmountNext`); then the next step. Nothing typed is refused, as LIMITS refuses it. */
-  /* (the limit on a payment is typed as a rate, so what the card is sent is three seconds of it: FC_SPEED_SECS) */
+  /* (the limit on a payment is typed as a rate, so what the card is sent is one second of it: FC_SPEED_SECS) */
   fcSuAmountNext() {
     const su = this._fcSu;
     const which = this.fcSuAsking();
@@ -32099,24 +32612,44 @@ class Component extends DCLogic {
     return true;
   }
 
-  /* The line under the amount on SET AMOUNT for the rate: "It will take N seconds to pay $X." for the limit it makes (three seconds of
+  /* The line under the amount on SET AMOUNT for the rate: "It will take N seconds to pay $X." for the limit it makes (one second of
    * what is typed), in the unit it is typed in; '' for the other, and before anything is typed. */
   fcSuAmountLine() {
     if (this.fcSuAsking() !== 'tap') return '';
     return this.fcWaitLine(this.fcTyped() * this.FC_SPEED_SECS, this.fcSuUnitNow(), this.state.unit === 'SATS' ? 'sat' : 'usd');
   }
 
-  /* "It will take 13 seconds to pay $40.00.": what a payment of four limits' worth waits, by the app's own seconds (`fcWaitSecs`)
-   * for the askings of the card's software (`fcWaitOver`, `fcWaitMore`): the first limit's worth over, and two more after it. A
+  /* "It will take 6 seconds to pay $40.00.": what a payment of four limits' worth waits on the card's software (`fcHoldSecs`). A
    * round figure above the limit, so that the line says something. In the unit the figure was chosen in (`as`): "₿ 40,000" for a
    * bitcoin card's limit chosen in sats. */
   FC_WAIT_EXAMPLE = 4;
   fcWaitLine(limit, unit, as) {
     if (!(limit > 0)) return '';
     const units = this.FC_WAIT_EXAMPLE;
-    const askings = this.fcWaitOver() + this.fcWaitMore() * (units - 2);
     const pay = (unit !== 'usd' && as === 'sat') ? '₿ ' + this.group(Math.round(limit * units)) : this.fcPrice(limit * units, unit);
-    return 'It will take ' + this.fcWaitSecs(askings) + ' seconds to pay ' + pay + '.';
+    return 'It will take ' + this.fcHoldSecs(units) + ' seconds to pay ' + pay + '.';
+  }
+
+  /* Whether the card on show is of software 1.25 or later, whose wait is a second a limit (a card not read yet is taken as the
+   * newest, as `fcShaped` takes it). */
+  fcCard125() {
+    const c = this._fcCard;
+    const v = String((c && c.info && c.info.version) || '').split('.');
+    if (!v[0]) return true;
+    return Number(v[0]) > 1 || (Number(v[0]) === 1 && Number(v[1]) >= 25);
+  }
+
+  /* How long a payment of `n` limits' worth holds the card, in whole seconds, by the card's software. 1.25 waits by a floor:
+   * every payment answers "not yet" three times before it signs, about 2.4 s from the card being found on a J3R180 (a wait is
+   * 579 ms), and each limit's worth past the first adds two more waits, about 1.2 s: 2.4 + 1.2 × (n − 1), the floor said even
+   * within the limit. A card before it signs a payment within its limit at once and waits about three seconds for each limit's
+   * worth after: 3 × (n − 1). */
+  FC_HOLD = { floor: 2.4, each: 1.2, eachBefore: 3 };
+  fcHoldSecs(n) {
+    const k = Math.max(1, Math.round(Number(n) || 0));
+    const H = this.FC_HOLD;
+    if (this.fcCard125()) return Math.round(H.floor + H.each * (k - 1));
+    return H.eachBefore * (k - 1);
   }
 
   // the end of the questions: the tap
@@ -32159,14 +32692,14 @@ class Component extends DCLogic {
   /* ---- MAX SPEND PER SECOND -------------------------------------------------------------------------------------------
    *
    * The limit on a payment, asked as how fast the card pays (the design): the figure a second, big, six of them to choose
-   * from, and why a card has a limit. A rate R is the limit L = FC_SPEED_SECS × R (the card pays L at once and waits about three
-   * seconds for each further L), sent to the card as every limit is: cents for a dollar card; sats for a bitcoin card, at this
+   * from, and why a card has a limit. A rate R is the limit L = FC_SPEED_SECS × R, one second of it (the card pays L at once and,
+   * from software 1.25, waits a second for each further L), sent to the card as every limit is: cents for a dollar card; sats for a bitcoin card, at this
    * phone's price, with the dollars kept so that this phone sets the card again when the price has moved. Asked by the set-up
    * (`mode` 'su', `fcSuAmount`) and by CARD LIMITS (`mode` 'limit', `fcLimitAmount`) for a card that waits for its limit (`paced`);
    * a figure that is none of the six is typed on SET AMOUNT, by tapping the figure (`fcSpeedOther`), where it is a figure a second
    * too. A bitcoin card with no price has nothing to say dollars at, and is asked on SET AMOUNT in sats straight away. */
   FC_SPEED_CHIPS = [1, 2, 5, 10, 25, 50];
-  FC_SPEED_SECS = 3;
+  FC_SPEED_SECS = 1;
   FC_SPEED_FIRST = 5;
 
   // whether a rate in dollars can be turned into a card's limit in `unit`: a dollar card's always, a bitcoin card's where there is a price
@@ -34154,9 +34687,12 @@ class Component extends DCLogic {
     /* Nor any screen the till has none of: a card's (LOAD and SEND are on it), SEND's, the menu's. Whatever reached one, a road
      * this file has not heard of, it is the till's SET AMOUNT before the next frame (and SET AMOUNT only for a receive: a
      * card's amounts are typed on it too, 26f-flashcard.js `fcAmount`). A keeper's receive paid by a card at
-     * another mint shows the charge first (26f-flashcard.js, `fcXmBegin`), and that is the one more a keeper's till has. */
+     * another mint shows the charge first (26f-flashcard.js, `fcXmBegin`), and that is the one more a keeper's till has.
+     * And in either role a card paying in its other currency (dollars for a bitcoin invoice) shows the total the holder
+     * agrees to first (`fcOtherAgree`, `fcOuConfirm`): the payer pays the fee and sees it. Thrown out, no card could pay a
+     * till across currencies (review, card-in-till); its TAP CARD and its back return to the till's receive screen. */
     const kept = this.TILL_SCREENS.indexOf(s.screen) >= 0 && (s.screen !== 'amount' || s.flow === 'receive');
-    if (!kept && !(s.till.role === 'keeper' && s.screen === 'fcXmConfirm')) {
+    if (!kept && !(s.till.role === 'keeper' && s.screen === 'fcXmConfirm') && s.screen !== 'fcOuConfirm') {
       console.log('[foxy] till: ' + s.screen + ' is not a screen the till has; back to its SET AMOUNT');
       this.setState(this.homeState());
       return;
@@ -34237,6 +34773,187 @@ class Component extends DCLogic {
       histAuditEdge: 'rgba(var(--ink-rgb),.12)',
     };
   }
+  /* ---- a card's WITHDRAW TO: which of this phone's mints all of it lands at -------------------------------------------
+   *
+   * WITHDRAW, ALL OF IT, on a phone that uses more than one mint (2026-11-03: "it should ask me which mint I want to withdraw it to,
+   * showing the cheapest first"). Before anything comes off the card, the SWITCH MINT list, as the till's set list is drawn on it,
+   * titled WITHDRAW TO: the card's own mint first, at NO FEE, where the money comes off as it always has; then each other mint this
+   * phone uses (`tillMints`), with what the crossing there costs, asked of both mints the way a transfer between this phone's mints
+   * is (`transferQuote`, `quoteOnly`: an invoice at the far mint and the card's mint's fee quote for it, nothing paid), the cheapest
+   * first as the answers come in. A phone with one mint is asked nothing.
+   *
+   * Picked, the withdrawal runs as before, into this phone at the card's mint (`fcWithdrawRun`), and what came off then crosses by
+   * Lightning to the mint picked (`fcWdCross`: `transferQuote` again, for what is in hand now, and `moveRun` as a visit), and the phone
+   * comes back to the card's mint. A crossing that does not go leaves the money in this phone at the card's mint, and says so.
+   * A dollar card's money crosses from the dollars as a transfer from dollars does (14-moving-between-mints.js), landing as bitcoin. */
+
+  /* The question, where there is one to ask: true when the list is up (`go` runs once a mint is picked), false where there is
+   * nothing to ask (one mint, no route, nothing on the card) and the withdrawal goes on to the card's own mint. */
+  fcWdToAsk(go) {
+    const W = this.fcW ? this.fcW() : window.FoxyWallet;
+    const fc = this.state.fc;
+    if (!W || !fc || !W.transferQuote) return false;
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const card = String(fc.mint || W.mintUrl || '').replace(/\/+$/, '');
+    const others = (this.tillMints ? this.tillMints() : []).filter((m) => strip(m.url) !== strip(card));
+    if (!others.length || this.offlineNow()) return false;
+    const unit = this.fcUnit ? this.fcUnit() : 'sat';
+    const amount = this.fcHeld ? this.fcHeld(fc, unit) : Math.round(Number(fc.balance) || 0);
+    if (!(amount > 0)) return false;
+    const run = (this._fcWdRun || 0) + 1;
+    this._fcWdRun = run;
+    this._fcWd = { run, go, unit, amount, card };
+    const quotes = {};
+    others.forEach((m) => { quotes[String(m.url).replace(/\/+$/, '')] = { state: 'asking' }; });
+    console.log('[foxy] card: WITHDRAW TO, ' + (others.length + 1) + ' mints; asking ' + others.length + ' what the crossing costs');
+    // through the one way into that list, which clears every other question it can be asking
+    this.goSwitchMint({ wdPick: true, wdQuotes: quotes });
+    others.forEach((m) => this.fcWdQuote(String(m.url).replace(/\/+$/, ''), run));
+    return true;
+  }
+
+  /* What the card's money comes to in sats, for the far mint's invoice: sats as they are, cents at this phone's price. */
+  fcWdLand(n, unit) {
+    const v = Math.max(0, Math.round(Number(n) || 0));
+    if (unit !== 'usd') return v;
+    const px = (this.px && this.px()) || 0;
+    return px > 0 ? Math.floor(v / 100 / px * 1e8) : 0;
+  }
+
+  /* One other mint asked what the crossing there costs (`transferQuote`, nothing paid). Its row says it when it answers. */
+  fcWdQuote(to, run) {
+    const W = window.FoxyWallet;
+    const w = this._fcWd;
+    if (!W || !w || w.run !== run) return;
+    const put = (q) => {
+      if (!this._fcWd || this._fcWd.run !== run) return;
+      this.setState((p) => ({ wdQuotes: Object.assign({}, p.wdQuotes || {}, { [to]: q }) }));
+    };
+    const land = this.fcWdLand(w.amount, w.unit);
+    if (!(land > 0)) { put({ state: 'no', why: 'There is no price to work out what the dollars come to.' }); return; }
+    Promise.resolve()
+      .then(() => W.transferQuote(w.card, land, Object.assign({ to, quoteOnly: true }, w.unit === 'usd' ? { unit: 'usd' } : {})))
+      .then((plan) => {
+        // the fee in the card's own unit: sats over what lands, or the dollar quote's cents over what the invoice cost
+        const fee = w.unit === 'usd' ? Math.max(0, Math.round(Number(plan.feeUnit) || 0)) : Math.max(0, Math.round(Number(plan.feeSats) || 0));
+        const px = (this.px && this.px()) || 0;
+        const rank = w.unit === 'usd' ? (px > 0 ? Math.round(fee / 100 / px * 1e8) : fee * 1000) : fee;
+        console.log('[foxy] card: WITHDRAW TO ' + String(to).replace(/^https?:\/\//, '') + ' costs about ' + this.unitFigure(fee, w.unit));
+        put({ state: 'ok', fee, rank });
+      }, (e) => {
+        put({ state: 'no', why: (W.reason ? W.reason(e) : String((e && e.message) || e)) });
+      });
+  }
+
+  // the line under the title
+  fcWdLine() {
+    const w = this._fcWd;
+    const fc = this.state.fc;
+    const at = this.mintNameOf((w && w.card) || (fc && fc.mint) || '');
+    return 'This card is at ' + at + '. Any other mint costs a crossing by Lightning.';
+  }
+
+  /* The rows, in the list's own look (`row`, 27-render-mints-restore-backup.js): the card's mint first at NO FEE, then the others
+   * the cheapest first, those still being asked after them, and those that cannot be reached last, greyed. */
+  fcWdRows(row) {
+    const w = this._fcWd;
+    if (!w) return [];
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const quotes = this.state.wdQuotes || {};
+    const all = this.allMints ? this.allMints() : [];
+    const used = this.tillMints ? this.tillMints() : all;
+    const cardRow = all.find((m) => strip(m.url) === strip(w.card)) || { url: w.card, name: this.mintNameOf(w.card), host: strip(w.card), logo: '', tint: '#5A5A5A' };
+    const q = (m) => quotes[String(m.url).replace(/\/+$/, '')] || { state: 'asking' };
+    const order = (m) => { const x = q(m); return x.state === 'ok' ? 0 : x.state === 'asking' ? 1 : 2; };
+    const others = used.filter((m) => strip(m.url) !== strip(w.card)).sort((a, b) => {
+      const d = order(a) - order(b);
+      if (d) return d;
+      return order(a) === 0 ? (q(a).rank - q(b).rank) : 0;
+    });
+    const asLands = w.unit === 'usd' ? ' · AS BITCOIN' : '';
+    return [Object.assign(row(cardRow, true), { text: 'NO FEE', tap: () => this.fcWdPick(cardRow.url) })]
+      .concat(others.map((m) => {
+        const x = q(m);
+        const base = row(m, false);
+        const text = x.state === 'ok' ? 'FEE ABOUT ' + this.unitFigure(x.fee, w.unit) + asLands
+          : x.state === 'asking' ? 'CALCULATING…' : 'NOT AVAILABLE';
+        return Object.assign(base, {
+          text,
+          dim: x.state === 'no' ? '0.4' : base.dim,
+          ink: x.state === 'ok' ? 'var(--acc-ink)' : 'rgba(var(--ink-rgb),.45)',
+          tap: () => this.fcWdPick(m.url),
+        });
+      }));
+  }
+
+  /* A row tapped: the card's own mint, or one whose crossing has been priced. Off the list, and on to the PIN (`go`). */
+  fcWdPick(url) {
+    const w = this._fcWd;
+    if (!w || !this.state.wdPick) return;
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const own = strip(url) === strip(w.card);
+    const x = own ? { state: 'ok' } : ((this.state.wdQuotes || {})[String(url).replace(/\/+$/, '')] || { state: 'asking' });
+    if (x.state === 'asking') { this.toast('Still asking ' + this.mintNameOf(url) + ' what it costs.', true); return; }
+    if (x.state === 'no') { this.toast(String(x.why || (this.mintNameOf(url) + ' cannot be reached now.')), true); return; }
+    this._fcWdTo = own ? '' : String(url).replace(/\/+$/, '');
+    this._fcWdFee = own ? 0 : Math.round(Number(x.fee) || 0);
+    console.log('[foxy] card: WITHDRAW TO ' + strip(url) + (own ? ', the card’s own mint' : ', a crossing of about ' + this.unitFigure(this._fcWdFee, w.unit)));
+    const go = w.go;
+    this.setState((p) => ({ wdPick: false, wdQuotes: {}, screen: p.stack.length ? p.stack[p.stack.length - 1] : 'flashcard', stack: p.stack.slice(0, -1) }));
+    if (go) go();
+  }
+
+  /* After the withdrawal: what came off (`got`, in `unit`) crosses to the mint picked, and the phone comes back to the card's mint.
+   * Nothing where the card's own mint was picked. The crossing is quoted again for what is in hand, a little under where the fee
+   * came out higher than the list said. */
+  fcWdCross(got, unit) {
+    const W = window.FoxyWallet;
+    const to = this._fcWdTo;
+    const w = /** @type {any} */ (this._fcWd || {});
+    this._fcWdTo = '';
+    if (!W || !to || !(got > 0)) return;
+    const from = String(w.card || W.mintUrl || '').replace(/\/+$/, '');
+    const name = this.mintNameOf(to);
+    const u = unit === 'usd' ? 'usd' : 'sat';
+    const how = u === 'usd' ? { to, unit: 'usd' } : { to };
+    const fee0 = Math.max(0, Math.round(Number(this._fcWdFee) || 0));
+    this.showMelt('Moving it to ' + name + '…', 0, { mint: name });
+    const ask = (n, left) => {
+      if (!(n > 0)) return Promise.reject(new Error('What came off the card is too little to cross: the fees would take it all.'));
+      return W.transferQuote(from, n, how).then(null, (e) => {
+        if (!(left > 0)) throw e;
+        const fits = Math.round(Number(e && e.foxyFits) || 0);
+        if (u === 'sat' && fits > 0 && fits < n) return ask(fits, left - 1);
+        if (e && /costs up to/.test(String(e.message || ''))) return ask(Math.floor(n * 0.97), left - 1);
+        throw e;
+      });
+    };
+    const first = this.fcWdLand(Math.max(0, got - fee0), u);
+    console.log('[foxy] card: WITHDRAW TO ' + String(to).replace(/^https?:\/\//, '') + ': ' + this.unitFigure(got, u) + ' off the card cross from '
+      + String(from).replace(/^https?:\/\//, ''));
+    ask(first, 3)
+      .then((plan) => W.moveRun(plan, () => {}, { visit: true }))
+      .then((done) => {
+        const back = String(W.mintUrl || '').replace(/\/+$/, '') !== from ? W.connect(from).then(null, () => null) : Promise.resolve();
+        return back.then(() => done);
+      })
+      .then((done) => {
+        this.hideMelt();
+        this.refreshBalance();
+        this.loadHistory();
+        const sats = Math.round(Number(done && done.sats) || 0);
+        this.toast('Moved ' + this.unitFigure(sats, 'sat') + ' to ' + name + '.');
+      }, (e) => {
+        this.hideMelt();
+        this.refreshBalance();
+        // back at the card's mint, unless the crossing was paid and its claim is still being made where the phone is
+        if (String(W.mintUrl || '').replace(/\/+$/, '') !== from && !(e && e.movePaid)) W.connect(from).then(null, () => null);
+        const why = W.reason ? W.reason(e) : String((e && e.message) || e);
+        this.toast(e && e.movePaid
+          ? 'It was paid to ' + name + ' and is still being collected there: ' + why
+          : 'It is in this phone at ' + this.mintNameOf(from) + ', not moved to ' + name + ': ' + why, true);
+      });
+  }
 
   /* switchMint: the mint list. */
   /** @param {RenderContext} c */
@@ -34248,7 +34965,7 @@ class Component extends DCLogic {
     return {
       isSwitchMint: sc === 'switchMint',
       // adding a mint belongs to switching, not to picking one to move between
-      mintPickers: !s.trStep && !s.fcPick && !s.tillPick,
+      mintPickers: !s.trStep && !s.fcPick && !s.tillPick && !s.wdPick,
       /* The same list does three jobs: switching, and the two steps of a
        * transfer between your own mints. */
       /* And a fourth, for a card: which mint it moves to (26f-flashcard.js).
@@ -34256,12 +34973,15 @@ class Component extends DCLogic {
        * list and cleared by every other way in. */
       /* And the till's two (26m-till.js): every mint it takes, ticked, then NEXT (`tillPick` 'set'); then which of those is
        * the default (`tillPick` 'default'). */
-      mintTitle: s.tillPick === 'default' ? 'DEFAULT MINT'
+      // and a card's WITHDRAW TO (26n-card-withdraw-to.js, `wdPick`): where all of it lands, the cheapest first
+      mintTitle: s.wdPick ? 'WITHDRAW TO'
+        : s.tillPick === 'default' ? 'DEFAULT MINT'
         : s.tillPick ? 'TILL AT WHICH MINTS?'
         : s.fcPick ? 'TO WHICH MINT?'
         : s.trStep === 'from' ? 'FROM WHICH MINT?'
         : s.trStep === 'to' ? 'TO WHICH MINT?' : 'SWITCH MINT',
-      mintNowLine: s.tillPick === 'default' ? 'Payments from mints you did not pick are moved here. Invoices are made here.'
+      mintNowLine: s.wdPick ? (this.fcWdLine ? this.fcWdLine() : '')
+        : s.tillPick === 'default' ? 'Payments from mints you did not pick are moved here. Invoices are made here.'
         : s.tillPick ? 'Pick every mint this till takes. Payments from other mints cross into the default, the payer paying the fee.'
         : s.fcPick ? 'This card is at ' + this.mintNameOf(s.fc && s.fc.mint) + '.'
         : s.trStep === 'from' ? 'Move money between the mints you use.'
@@ -34312,14 +35032,16 @@ class Component extends DCLogic {
           if (s.tillPick === 'default') return ordered.filter(m => this.tillTicked(m.url)).map(m => row(m, false));
           return ordered.map(m => row(m, this.tillTicked(m.url)));
         }
+        if (s.wdPick) return this.fcWdRows ? this.fcWdRows(row) : [];
         if (s.fcPick) {
           // every mint but the one the card is at
           const at = String((s.fc && s.fc.mint) || '').replace(/\/+$/, '');
           return all.filter(m => m.url.replace(/\/+$/, '') !== at).map(m => row(m, false));
         }
         if (s.trStep === 'from') {
-          // only mints with something at them can be moved from
-          return all.filter(m => this.mintPile(m.url).sats > 0).map(m => row(m, false));
+          // only mints with something at them can be moved from (dollars too: a mint holding only dollars is one to move from)
+          return all.filter(m => this.mintPile(m.url).sats > 0 || (this.mintPile(m.url).units || []).some(b => b && b.unit === 'usd' && b.amount > 0))
+            .map(m => row(m, false));
         }
         if (s.trStep === 'to') {
           const from = String(s.trFrom || '').replace(/\/+$/, '');

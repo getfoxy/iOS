@@ -1448,28 +1448,94 @@ final class WebHostController: UIViewController {
     #endif
 
     static func forgetSeedIfReinstalled() {
-        let fm = FileManager.default
-        guard let support = fm.urls(for: .applicationSupportDirectory,
-                                    in: .userDomainMask).first else { return }
+        guard let support = FileManager.default.urls(for: .applicationSupportDirectory,
+                                                     in: .userDomainMask).first else { return }
+        forgetSeedIfReinstalled(disk: LiveInstallDisk(), support: support, forget: forgetPreviousInstallation)
+    }
+
+    /// What the marker check did, for the log and for FoxyTests.
+    enum InstallCheck: Equatable {
+        /// The marker was there: an ordinary launch, or an update.
+        case marked
+        /// No marker: it was written, read back, and only then was the old seed removed.
+        case firstLaunch
+        /// No marker, and none could be written: nothing was removed, and the next launch looks again.
+        case markerNotWritten(String)
+    }
+
+    /// The file operations the marker needs, so FoxyTests can stand in a disk that fails.
+    protocol InstallDisk {
+        func fileExists(atPath path: String) -> Bool
+        func createDirectory(at url: URL) throws
+        func write(_ data: Data, to url: URL, options: Data.WritingOptions) throws
+    }
+
+    struct LiveInstallDisk: InstallDisk {
+        func fileExists(atPath path: String) -> Bool { FileManager.default.fileExists(atPath: path) }
+        func createDirectory(at url: URL) throws {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+        func write(_ data: Data, to url: URL, options: Data.WritingOptions) throws {
+            try data.write(to: url, options: options)
+        }
+    }
+
+    /* The marker is written first, and read back, before anything is removed.
+     *
+     * It used to be the other way round: the seed went, and then the marker was
+     * written with every error swallowed and "install marker written" printed
+     * whatever happened. A first write that failed - a full phone is the real
+     * case - left no marker, so the next launch took a wallet already in use for
+     * a reinstall and deleted its seed before the page had loaded, with nobody
+     * asked. Now a marker that cannot be written, or is not there when it is
+     * looked for again, means nothing is removed at all: the keychain is left
+     * as it is and the next launch looks again. A reinstall whose marker could
+     * not be written keeps the old seed for one more launch; a wallet in use
+     * never loses its seed to a disk that was full.
+     *
+     * The marker holds no secret, so it is readable from the first unlock after
+     * a restart (completeUntilFirstUserAuthentication) rather than only while
+     * the phone is unlocked. */
+    @discardableResult
+    static func forgetSeedIfReinstalled(disk: InstallDisk, support: URL, forget: () -> Void) -> InstallCheck {
         let marker = support.appendingPathComponent("foxy.install")
 
-        if fm.fileExists(atPath: marker.path) {
+        if disk.fileExists(atPath: marker.path) {
             includeInBackups(marker)                // markers written before this were excluded
-            return                                  // an ordinary launch, or an update
+            return .marked                          // an ordinary launch, or an update
         }
 
-        /* No marker: this installation has never run before, and whatever the
-         * keychain holds came from one that was deleted. Both seed items go —
-         * the one behind Face ID too, which this used to miss once the seed
-         * moved there, so a reinstall offered the old words — and the hosts
-         * that installation approved, and its Orbot key. Deleting reads
-         * nothing, so it asks for no Face ID. */
+        // in backups: it says nothing, and a restored backup must look like the
+        // installation it came from
+        do {
+            try disk.createDirectory(at: support)
+            try disk.write(Data("1".utf8), to: marker, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        } catch {
+            print("[foxy] install marker could not be written (\(error)); nothing from a previous installation was removed, and the next launch looks again")
+            return .markerNotWritten("\(error)")
+        }
+        guard disk.fileExists(atPath: marker.path) else {
+            print("[foxy] install marker was written but is not there; nothing from a previous installation was removed, and the next launch looks again")
+            return .markerNotWritten("not there after writing")
+        }
+        print("[foxy] install marker written and read back")
+        forget()
+        return .firstLaunch
+    }
+
+    /* No marker, and now one is on disk: this installation has never run
+     * before, and whatever the keychain holds came from one that was deleted.
+     * Both seed items go — the one behind Face ID too, which this used to miss
+     * once the seed moved there, so a reinstall offered the old words — and the
+     * hosts that installation approved, and its Orbot key. Deleting reads
+     * nothing, so it asks for no Face ID. */
+    private static func forgetPreviousInstallation() {
         let seeds = [SeedStore.protectedKey, SeedStore.mnemonicKey]
             .map { SeedStore.deleteIfPresent(key: $0) }
         if seeds.contains(true) { print("[foxy] a seed from a previous installation was removed") }
         // and its note that a seed was behind the passcode, which a new wallet must not inherit
         SeedStore.deleteIfPresent(key: SeedStore.heldKey)
-        for key in [HostApprovals.storeKey, HostApprovals.carriedKey, OrbotLink.tokenKey] {
+        for key in [HostApprovals.storeKey, HostApprovals.carriedKey, OrbotLink.tokenKey, CardMoves.key] {
             if SeedStore.deleteIfPresent(key: key) { print("[foxy] \(key) from a previous installation was removed") }
         }
 
@@ -1483,12 +1549,6 @@ final class WebHostController: UIViewController {
          * left exactly as it is. */
         SeedVault.protection = .none
         print("[foxy] seed: a new wallet starts with nothing in front of it; SECURE FOXY asks later")
-
-        try? fm.createDirectory(at: support, withIntermediateDirectories: true)
-        // in backups: it says nothing, and a restored backup must look like the
-        // installation it came from
-        try? Data("1".utf8).write(to: marker, options: .completeFileProtection)
-        print("[foxy] install marker written")
     }
 
     private static func includeInBackups(_ url: URL) {

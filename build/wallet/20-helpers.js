@@ -1257,6 +1257,11 @@
        * opened on the payer's mint from then on
        * (tools/live/offline-cross-scenarios.js `one-side-b`). A visit, now. */
       var startedAt = canonicalMint(mintUrl || '');
+      /* A switch made after the walk began (a person's, or a till's visit: `mintPendingGen`) is where the phone is to be:
+       * the walk claims nothing more and does not come home over it. Its rows stay, for the next walk. A walk that went
+       * home over a till's visit left the till taking requests at the mint it had come from (review, till-at-default). */
+      var walkGen = mintPendingGen;
+      var walkOvertaken = function () { return mintPendingGen !== walkGen; };
       var carried = false;
       // payments in the pile now that are to be swapped into dollars, told once the walk is over
       var convertDueIds = [];
@@ -1287,6 +1292,7 @@
       });
       var walk = ids.reduce(function (chain, id) {
         return chain.then(function () {
+          if (walkOvertaken()) return null;
           var one = all[id];
           if (!one || typeof one.token !== 'string') { dropUnclaimed(id); return null; }
           /* Less anything already signed away from it. A row that gave pieces
@@ -1476,8 +1482,8 @@
             });
         });
       }, Promise.resolve()).then(function () {
-        // home again, if a claim took the wallet to another mint
-        if (startedAt && canonicalMint(mintUrl || '') !== startedAt) {
+        // home again, if a claim took the wallet to another mint (and nobody has switched it since)
+        if (startedAt && canonicalMint(mintUrl || '') !== startedAt && !walkOvertaken()) {
           return FoxyWallet.connect(startedAt, null, null, { remember: false }).then(null, function (e) {
             console.warn('[foxy] could not get back to', hostOf(startedAt), 'after a late claim:', e && e.message);
           });
@@ -1509,7 +1515,8 @@
        * it. A phone opened a moment ago has a route two seconds off, so the
        * judging waits for it, a few seconds at most (`routeSoon`); the payer's
        * phone is holding its link for the answer far longer than that. */
-      if (!waited && FoxyWallet._routeWaitMs > 0 && routeComing()) {
+      // and a mint switched to a moment ago is waited for the same way (`mintComing`)
+      if (!waited && FoxyWallet._routeWaitMs > 0 && (routeComing() || mintComing())) {
         var self = this;
         return routeSoon(FoxyWallet._routeWaitMs).then(function () {
           return FoxyWallet._requestPaid.call(self, body, answerId, over, true);
@@ -1772,6 +1779,18 @@
        *
        * Nothing is written down on any of these paths, so the payer keeps their
        * ecash and can offer it again to either phone with a route. */
+      /* A mint switched to that has still not answered, after the wait above (`mintPending`): ecash locked to this
+       * phone and checked by the keys on file is kept as it arrived and swapped in once the mint answers, as with no
+       * route; anything else would have to be swapped now to be safe, and cannot be, so it is refused before anything
+       * is written and the payer keeps it. */
+      if (!held && !away && mintPendingNow()) {
+        console.warn('[foxy] a payment arrived not locked to this phone while ' + hostOf(mintUrl) + ' has not answered yet; refusing it');
+        delete FoxyWallet._requestsBeingPaid[p.id];
+        tell('failed');
+        answer(422, 'This phone is still connecting to its mint, so it can only take ecash locked to it.'
+          + ' Try again in a moment.');
+        return;
+      }
       var bothOffline = !held && !routeOpen();
       /* At another mint with no route, only ecash locked to this phone and signed by that mint, checked by its keys on
        * file: it is kept, and taken there when the route returns (`claimUnclaimed`). Nothing else is weighed. */
@@ -1860,7 +1879,8 @@
           /* With no route, who paid (`payer`: their `from`, '' when they named
            * none), so the till caps can count it until it settles (`payerHeld`). */
           /* And at another mint, `away`: its claim is made there by a wallet made for it, the phone not moving. */
-          var keepExtra = /** @type {any} */ (routeOpen() ? null : { payer: p.from || '' });
+          // (and while the mint switched to has not answered, so the payer is counted as it is offline: review p4)
+          var keepExtra = /** @type {any} */ ((routeOpen() && !mintPendingNow()) ? null : { payer: p.from || '' });
           if (away) keepExtra = Object.assign(keepExtra || {}, { away: true });
           keepUnclaimed(p.id, token, p.amount, trusted, /^carry:/.test(String(p.purpose || '')), pu, keepExtra);
         } catch (e) {
@@ -2166,7 +2186,7 @@
           answer(422, capNo);
           return;
         }
-      } else if (!routeOpen() && tillRefusal(p.amount, pu, p.from, false)) {
+      } else if ((!routeOpen() || mintPendingNow()) && tillRefusal(p.amount, pu, p.from, false)) {
         console.warn('[foxy] till cap: a payment locked to this phone is over a cap; it is taken, since refusing it would only strand it');
       }
       if (bothOffline) {
@@ -2206,7 +2226,7 @@
        * rather than paid around: without it the payment goes unlocked from
        * pieces on hand, over by whatever the pieces come to, to a receiver
        * who may be offline and able to take only locked ecash. */
-      if (FoxyWallet._routeWaitMs > 0 && routeComing() && !(opts && opts.waited)) {
+      if (FoxyWallet._routeWaitMs > 0 && (routeComing() || mintComing()) && !(opts && opts.waited)) {
         var self = this;
         var again = Object.assign({}, opts || {}, { waited: true });
         return routeSoon(FoxyWallet._routeWaitMs).then(function () {

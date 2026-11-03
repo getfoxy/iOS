@@ -367,8 +367,8 @@ function amt(a) {
     s = amt(holder);
     ok(s && s.flow === 'cardSuTap' && s.unit === 'USD' && s.amount === '' && s.line === '' && holder.state.stack.slice(-1)[0] === 'fcSpeed',
        'the figure opens SET AMOUNT for another rate, empty, with no line before a figure', JSON.stringify(s));
-    ok(amt(holder).type('10.00').line === 'It will take 13 seconds to pay $120.00.', 'typed, the line under it says the seconds a payment of four limits waits, a limit being three seconds of the rate', amt(holder).line);
-    ok(amt(holder).type('20.00').line === 'It will take 13 seconds to pay $240.00.', 'and follows the figure as it is typed', amt(holder).line);
+    ok(amt(holder).type('10.00').line === 'It will take 9 seconds to pay $40.00.', 'typed, the line under it says the seconds a payment of four limits waits, a limit being three seconds of the rate', amt(holder).line);
+    ok(amt(holder).type('20.00').line === 'It will take 9 seconds to pay $80.00.', 'and follows the figure as it is typed', amt(holder).line);
     amt(holder).back();
     sp = speed(holder);
     ok(!amt(holder) && sp && sp.mode === 'su' && sp.chosen === '$5' && holder.state.stack.slice(-1)[0] === 'flashcard' && holder.state.flow !== 'cardSuTap',
@@ -380,8 +380,8 @@ function amt(a) {
     H.sheet.length = 0;
     speed(holder).next();
     await until('the card to be set up', () => !!c.state.owner && holder.state.fc && holder.state.fc.ownedHere === true);
-    ok(c.state.pin === hexOf('2580') && c.state.noPinLimit === Math.round(5 / 60000 * 1e8) && c.state.tapLimit === Math.round(15 / 60000 * 1e8) && c.state.record.limit === 0,
-       'one tap wrote the PIN, the no-PIN amount and the limit on one payment in sats at the price ($5 a second: $15), and no daily limit', JSON.stringify([c.state.noPinLimit, c.state.tapLimit]));
+    ok(c.state.pin === hexOf('2580') && c.state.noPinLimit === Math.round(5 / 60000 * 1e8) && c.state.tapLimit === Math.round(5 / 60000 * 1e8) && c.state.record.limit === 0,
+       'one tap wrote the PIN, the no-PIN amount and the limit on one payment in sats at the price ($5 a second: $5), and no daily limit', JSON.stringify([c.state.noPinLimit, c.state.tapLimit]));
     ok(H.sheet.filter((x) => x === 'say: Keep holding.').length >= 6 && holder.toasts.indexOf('The card is set up.') >= 0,
        'the sheet said Keep holding at every asking of the claim, and the screen said it is set up', String(H.sheet.filter((x) => x === 'say: Keep holding.').length));
     v = vals(holder);
@@ -478,20 +478,20 @@ function amt(a) {
     ok(amt(a).unit === 'USD' && amt(a).cardUnit === 'sat', 'a bitcoin card’s SET AMOUNT opens in dollars, for sats', JSON.stringify(amt(a)));
     amt(a).type('2000', 'SATS').next();
     speed(a).other();
-    ok(amt(a).flow === 'cardSuTap' && amt(a).type('10000', 'SATS').line === 'It will take 13 seconds to pay ₿ 120,000.', 'another rate, swapped to sats: the seconds line is in sats', amt(a).line);
-    ok(amt(a).type('20000', 'SATS').line === 'It will take 13 seconds to pay ₿ 240,000.', 'and follows the figure in sats', amt(a).line);
-    ok(amt(a).type('10.00', 'USD').line === 'It will take 13 seconds to pay $120.00.', 'swapped back, the line is in dollars', amt(a).line);
+    ok(amt(a).flow === 'cardSuTap' && amt(a).type('10000', 'SATS').line === 'It will take 6 seconds to pay ₿ 40,000.', 'another rate, swapped to sats: the seconds line is in sats', amt(a).line);
+    ok(amt(a).type('20000', 'SATS').line === 'It will take 6 seconds to pay ₿ 80,000.', 'and follows the figure in sats', amt(a).line);
+    ok(amt(a).type('10.00', 'USD').line === 'It will take 6 seconds to pay $40.00.', 'swapped back, the line is in dollars', amt(a).line);
     amt(a).type('50000', 'SATS').next();
-    ok(chose && chose.noPin === 2000 && chose.noPinUsd === 0 && chose.tapLimit === 150000 && chose.tapUsd === 0 && a.state.screen === 'flashcard',
-       'what the card is sent is three seconds of the sats typed a second, and no dollars are kept for figures typed in sats', JSON.stringify(chose));
+    ok(chose && chose.noPin === 2000 && chose.noPinUsd === 0 && chose.tapLimit === 50000 && chose.tapUsd === 0 && a.state.screen === 'flashcard',
+       'what the card is sent is one second of the sats typed a second, and no dollars are kept for figures typed in sats', JSON.stringify(chose));
     // typed in dollars, a bitcoin card is sent their sats, and the dollars are kept, as LIMITS keeps them
     chose = null;
     a.fcSetUpSteps({ unit: 'sat', run: (c) => { chose = c; } });
     pad(a).type('2580'); pad(a).type('2580');
     amt(a).type('2.00').next();
     speed(a).pick(10).next();
-    ok(chose && chose.noPin === Math.round(2 / 60000 * 1e8) && chose.noPinUsd === 2 && chose.tapLimit === Math.round(30 / 60000 * 1e8) && chose.tapUsd === 30 && a.state.screen === 'flashcard',
-       'in dollars: their sats at the price, and the dollars kept; $10 a second is a limit of $30', JSON.stringify(chose));
+    ok(chose && chose.noPin === Math.round(2 / 60000 * 1e8) && chose.noPinUsd === 2 && chose.tapLimit === Math.round(10 / 60000 * 1e8) && chose.tapUsd === 10 && a.state.screen === 'flashcard',
+       'in dollars: their sats at the price, and the dollars kept; $10 a second is a limit of $10', JSON.stringify(chose));
     // a dollar card: dollars and nothing else, price or not
     chose = null;
     a.fcSetUpSteps({ unit: 'usd', run: (c) => { chose = c; } });
@@ -500,15 +500,15 @@ function amt(a) {
     amt(a).type('2.00').next();
     ok(speed(a) && speed(a).chosen === '$5', 'its rate on MAX SPEND PER SECOND, in dollars');
     speed(a).other();
-    ok(amt(a).type('10.00').line === 'It will take 13 seconds to pay $120.00.', 'another rate too, its seconds line in dollars', amt(a).line);
+    ok(amt(a).type('10.00').line === 'It will take 6 seconds to pay $40.00.', 'another rate too, its seconds line in dollars', amt(a).line);
     amt(a).next();
-    ok(chose && chose.noPin === 200 && chose.tapLimit === 3000 && chose.noPinUsd === 0 && chose.tapUsd === 0, 'and the card is sent cents, three seconds of the rate', JSON.stringify(chose));
+    ok(chose && chose.noPin === 200 && chose.tapLimit === 1000 && chose.noPinUsd === 0 && chose.tapUsd === 0, 'and the card is sent cents, one second of the rate', JSON.stringify(chose));
     chose = null;
     a.fcSetUpSteps({ unit: 'usd', run: (c) => { chose = c; } });
     pad(a).type('2580'); pad(a).type('2580');
     amt(a).skip();
     speed(a).next();
-    ok(chose && chose.noPin === 0 && chose.tapLimit === 1500 && chose.tapUsd === 0, 'NEXT on $5 a second: a limit of $15.00, in cents', JSON.stringify(chose));
+    ok(chose && chose.noPin === 0 && chose.tapLimit === 500 && chose.tapUsd === 0, 'NEXT on $5 a second: a limit of $5.00, in cents', JSON.stringify(chose));
     a.price = 0;
     a.fcSetUpSteps({ unit: 'usd', run: () => {} });
     pad(a).type('2580'); pad(a).type('2580');
@@ -941,7 +941,7 @@ function amt(a) {
     card(payer).press('TRY AGAIN');
     await until('the money on the card', () => u1.balance() === 1500);
     await settle();
-    ok(u1.state.tapLimit === Math.round(30 / 60000 * 1e8) && u1.state.noPinLimit === Math.round(2 / 60000 * 1e8) && !u1.state.owner && !ins(u1).includes('43'),
+    ok(u1.state.tapLimit === Math.round(10 / 60000 * 1e8) && u1.state.noPinLimit === Math.round(2 / 60000 * 1e8) && !u1.state.owner && !ins(u1).includes('43'),
        'TRY AGAIN takes the set-up up again: the holder’s two numbers are on the card with the money, and still no owner', JSON.stringify([u1.state.tapLimit, u1.state.noPinLimit]));
     if (card(payer)) card(payer).press('DONE');
 
@@ -1012,7 +1012,7 @@ function amt(a) {
     u3.tap();
     await until('the money on the card', () => u3.balance() === 1500);
     await settle();
-    ok(u3.state.tapLimit === Math.round(30 / 60000 * 1e8) && !u3.state.owner, 'and the holder’s limit is written with the money', String(u3.state.tapLimit));
+    ok(u3.state.tapLimit === Math.round(10 / 60000 * 1e8) && !u3.state.owner, 'and the holder’s limit is written with the money', String(u3.state.tapLimit));
     if (card(payer)) card(payer).press('DONE');
 
     // the card's own log says nothing of a daily limit

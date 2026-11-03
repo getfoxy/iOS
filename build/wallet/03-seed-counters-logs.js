@@ -1271,13 +1271,20 @@
    * caller that starts local and then decides to ask the mint must re-acquire
    * through it — `sendToken` does exactly that in its swap branch. */
   function needLocal() {
+    // a mint switched to with no keysets on file: there is nothing to work with until they come (`mintPending`)
+    var pend = mintPendingNow();
+    if (pend && pend.noKeys) throw mintPendingRefusal(pend);
     if (!wallet) throw new Error('No mint connected yet. Call FoxyWallet.connect() first.');
     return wallet;
   }
 
   /* The connected wallet, on a Tor circuit of its own for the job asking. */
+  /* Not while a mint switched to has still to answer (`mintPending`): the wallet in hand was built from keysets on
+   * file, and what it would ask is refused in the words for that, as it would be offline in its own. */
   function need() {
     assertRoute();
+    var pend = mintPendingNow();
+    if (pend) throw mintPendingRefusal(pend);
     if (!wallet) throw new Error('No mint connected yet. Call FoxyWallet.connect() first.');
     return onCircuit(wallet);
   }
@@ -1441,6 +1448,106 @@
     setTimeout(function () { warmSpare(); }, FoxyWallet._spareAfterMs === undefined ? 1500 : FoxyWallet._spareAfterMs);
   }
 
+  /* The road to a mint, opened as a screen that will ask it something opens (`warm`; the screens are in
+   * 19-update-keypad-balance.js, `warmRoad`).
+   *
+   * The circuit kept ready is let go after five minutes, so the first request after a quiet spell paid for a
+   * whole circuit, three to six seconds of it, in front of the person waiting: "a circuit to ... is ready for
+   * what comes next, in 6081 ms", logged after the invoice it was opened for had left on one of its own. A
+   * receive's amount, the till's SET AMOUNT, SEND's keypad and a card's screen are each a few seconds ahead
+   * of an invoice, a fee quote, a load or a claim, so they open the road as they open: at the connected mint,
+   * the circuit kept ready (`warmSpare`), which the job then takes (`takeSpare`); at another mint, a circuit
+   * kept for the next quote asked there (`quoteRoad`). What the mint sees is a question about its keysets and
+   * then the job, on the same circuit, as the spare has always been.
+   *
+   * Once a minute a mint at most, however often the screens come and go; never with no route, nor before Tor
+   * is up (it is building what everything else is waiting for), nor while a mint switched to has still to
+   * answer (`connectPending`): what is asked of that mint then is the switch's own question, and nothing goes
+   * in front of it. Resolves whether a road is ready or on its way. Never rejects. */
+  var WARM_EVERY_MS = 60000;
+  var warmedAt = /** @type {Object<string, number>} */ (Object.create(null));
+  /* A circuit opened at a mint this phone is not on, and kept for the next quote there, as the spare is kept
+   * at the mint it is on: { label, at }, by mint. Handed out once, and let go when the spare would be. */
+  var farRoads = /** @type {Object<string, { label: string, at: number }>} */ (Object.create(null));
+
+  function farRoadReady(at) {
+    var r = farRoads[at];
+    return !!(r && Date.now() - r.at < SPARE_FOR_MS);
+  }
+
+  function warmRoad(url) {
+    try {
+      if (FoxyWallet._spareOff || !bridged() || !routeOpen() || privacy.tor !== 'up' || privacy.offline) return Promise.resolve(false);
+      if (typeof FoxyWallet.connectPending === 'function' && FoxyWallet.connectPending()) return Promise.resolve(false);
+    } catch (e) { return Promise.resolve(false); }
+    var here = wallet ? mintOf(wallet) : '';
+    var at = url ? canonicalMint(String(url)) : here;
+    if (!at) return Promise.resolve(false);
+    // one ready, or on its way, is the road: nothing more is asked for it
+    if (at === here) {
+      if (spareReady()) return Promise.resolve(true);
+      if (sparing && !(warming && warming.taken)) return sparing;
+    } else if (farRoadReady(at)) {
+      return Promise.resolve(true);
+    }
+    if (Date.now() - (warmedAt[at] || 0) < WARM_EVERY_MS) return Promise.resolve(false);
+    warmedAt[at] = Date.now();
+    if (at === here) return warmSpare();
+    var label = newCircuitLabel();
+    farRoads[at] = { label: label, at: Date.now() };
+    return openRoad(at, label).then(function (ok) {
+      if (!ok && farRoads[at] && farRoads[at].label === label) delete farRoads[at];
+      return ok;
+    });
+  }
+
+  /* One question on circuit `label` at mint `at`, for the circuit's sake: its keysets, which it tells anybody,
+   * asked afresh so that it really leaves. Not marked as the spare's (`foxyWarm`): the phone keeps one warmed
+   * connection at a time, and that one is the spare's. Resolves whether the mint answered on it. */
+  function openRoad(at, label) {
+    var began = Date.now();
+    return Promise.resolve().then(function () {
+      return FoxyWallet.nativeRequest({ endpoint: at + '/v1/keysets', method: 'GET', foxyFresh: true, foxyCircuit: label });
+    }).then(function () {
+      console.log('[foxy] a circuit to ' + hostOf(at) + ' is open for the question that follows, in ' + (Date.now() - began) + ' ms');
+      return true;
+    }, function () { return false; });
+  }
+
+  /* The circuit a crossing's quote at `url` is asked on, chosen as the crossing begins (`transferQuote`,
+   * `sweepQuote`, `moveQuote`, a card's crossings in 08a-flashcard.js).
+   *
+   * A crossing asks two mints in turn: the far one for an invoice, then the near one what paying it costs. The
+   * second cannot be asked before the invoice exists, but its circuit can be built while the invoice is being
+   * made, and that was most of its wait: each leg two seconds or so over Tor, nearly all of it the circuit. So
+   * the leg that waits takes its road now: at the connected mint the circuit kept ready, ready or being opened
+   * (`takeSpare`); at another, one `warm` opened there, or one opened now (`openRoad`). Its quote then goes the
+   * moment the invoice lands, on a circuit that is already there.
+   *
+   * It is one job's circuit, as every quote's has been: the keysets question and the quote, nothing else. ''
+   * where nothing is opened ahead (no route, or a test that opens nothing it was not asked to, `_spareOff`;
+   * `_quoteWarmOff` for a test that measures what it saves): the quote asks as it always did, on one of its own. */
+  function quoteRoad(url) {
+    if (FoxyWallet._spareOff || FoxyWallet._quoteWarmOff || !bridged() || !routeOpen()) return '';
+    var at = canonicalMint(String(url || ''));
+    if (!at) return '';
+    if (wallet && at === mintOf(wallet)) {
+      var kept = takeSpare();
+      if (kept) { warmSpareSoon(); return kept; }
+    }
+    var far = farRoadReady(at) ? farRoads[at].label : '';
+    delete farRoads[at];
+    if (far) return far;
+    var label = newCircuitLabel();
+    openRoad(at, label);
+    return label;
+  }
+
+  // `w` on the road `quoteRoad` chose, or as it is where it chose none
+  function onRoad(w, label) {
+    return label && w ? onLabel(w, label) : w;
+  }
+
   /* The spare's label for a job somebody is waiting on, or '' when there is
    * none. The one kept ready first; failing that, on the connected wallet's
    * mint, the one being opened right now, which is further along than any
@@ -1477,6 +1584,8 @@
 
   function needNow() {
     assertRoute();
+    var pend = mintPendingNow();
+    if (pend) throw mintPendingRefusal(pend);
     if (!wallet) throw new Error('No mint connected yet. Call FoxyWallet.connect() first.');
     return viewNow(wallet);
   }
@@ -1770,11 +1879,42 @@
         loose.sort(function (a, b) { return (all[a].at || 0) - (all[b].at || 0); });
         loose.slice(0, Math.min(loose.length, urls.length - MINT_CACHE_MAX)).forEach(function (old) { delete all[old]; });
       }
-      save(K.mintCache, all);
+      /* `save` answers false when the store refused the write (full): that used to pass unseen, and the next switch
+       * to this mint was built from an older entry, or found none and waited for the mint, with nothing on file to
+       * say why (2026-11-03). Said, and remembered for the switch (`mintCacheUnkept`, `lazyWaitWhy`). */
+      if (save(K.mintCache, all)) {
+        delete mintCacheUnkept[canonicalMint(key)];
+      } else {
+        mintCacheUnkept[canonicalMint(key)] = true;
+        console.warn('[foxy] could not keep ' + hostOf(u) + "'s keysets: the store is full");
+      }
     } catch (e) {
       // a full localStorage must not fail a connect that otherwise worked
+      mintCacheUnkept[canonicalMint(key)] = true;
       console.warn('[foxy] could not keep ' + hostOf(u) + "'s keysets:", e && e.message);
     }
+  }
+
+  /* The mints whose keysets this launch answered and could not write down, by URL: what is on file for them, if
+   * anything, is older than what the mint last said, so a switch to one does not land from it (`lazyWaitWhy`). */
+  var mintCacheUnkept = /** @type {Record<string, boolean>} */ ({});
+
+  /* Why a person's switch to this mint (`switchTo`, `connect` with `lazy`) waits for the mint rather than landing at
+   * once from the keys on file, or '' when it lands at once. The lazy branch's every fall-through, in one place, so
+   * the page can say which path a switch took (09-melt-paste-switch.js, `justSwitch`) and the wallet says the same. */
+  function lazyWaitWhy(u) {
+    var key = canonicalMint(String(u || ''));
+    if (!key) return 'no mint';
+    // as `connect` waits for it: a visit away that is not only a late claim's walk (a card's)
+    if (claimAway && !(claimingLate && !cardAway)) return 'a visit to another mint is away, and the switch waits for it to come home';
+    if (!routeOpen()) return 'no route';
+    if (mintCacheUnkept[key]) return 'its keysets could not be kept: the store is full';
+    var keys = mintCacheFor(key);
+    if (!keys) return 'no keys on file';
+    if (!window.CashuTS || !window.CashuTS.Wallet || typeof window.CashuTS.Wallet.prototype.loadMintFromCache !== 'function') {
+      return 'the wallet library cannot build from keys on file';
+    }
+    return '';
   }
 
   /* The entry for this mint, or null. Only what loadMintFromCache needs counts:

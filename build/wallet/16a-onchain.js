@@ -31,6 +31,14 @@
       if (FoxyWallet._onchain && FoxyWallet._onchain.mint === at) {
         return Promise.resolve(FoxyWallet._onchain.limits);
       }
+      /* A mint switched to that has not answered (`mintPending`): asked once it has, when what it says about itself is
+       * this session's already. Asked at the switch, it was a second load of the mint's info beside the switch's own
+       * (review, double load). One that did not answer has none to say. */
+      var pend = mintPendingNow();
+      if (pend && pend.url === canonicalMint(at)) {
+        if (pend.failed) return Promise.resolve(null);
+        return mintPendingSoon(30000).then(function (landed) { return landed ? FoxyWallet.onchainLimits() : null; });
+      }
       return FoxyWallet._onchainLimitsAt(at).then(function (limits) {
         FoxyWallet._onchain = { mint: at, limits: limits };
         return limits;

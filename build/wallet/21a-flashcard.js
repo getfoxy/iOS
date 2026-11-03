@@ -846,6 +846,9 @@
     /* The rate guard's yes (software 1.23): the card's owner read it and was asked once whether to write a rate more than twice, or under
      * half, the card's (`card.rateAsk` from `cardLook`, or `rate-far` from `cardSetLimit`), and said yes. One tap: the owner's grant, the
      * figures as the card has them, and the rate at `opts.price`. Resolves the card as its owner reads it after (short). */
+    /* The keeper's yes before an owner's command, asked by the phone itself before the card is held up (`cardApprove`). */
+    cardApprove: function (op) { return cardApprove(op); },
+
     cardSetRate: function (link, opts) {
       var o = opts || {};
       var t = cardTalk(link);

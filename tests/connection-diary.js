@@ -130,7 +130,7 @@ function method(sig) {
   return src.slice(start + 3, i + 1);
 }
 const SIGS = ['mirrorConsole() {', '_installMirror() {', 'goFieldLog(onlyBad) {', 'flShow(view) {', 'flIsDiary(text) {',
-  'loadFieldLog(view) {', 'flStamp(at) {', 'flText() {', 'copyFieldLog() {', 'renderFieldLog(c) {'];
+  'loadFieldLog(view) {', 'flStamp(at) {', 'flText() {', 'flTextOf(lines, view) {', 'copyFieldLog() {', 'renderFieldLog(c) {'];
 const METHODS = new Function('CTA_INK', 'return {' + SIGS.map(method).join(',\n') + '}')(() => '#fff');
 
 function app(lines) {

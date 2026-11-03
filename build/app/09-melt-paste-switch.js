@@ -344,6 +344,44 @@
     return why.join('; ') || 'nothing';
   }
 
+  /* Is the only thing in the way a background sweep holding the proof lock? A claim walked in from another mint, a
+   * held melt settled, change tidied: each lets go within seconds, and a switch refused for one said "a payment is in
+   * progress" to somebody who had made none (2026-11-03, `_onchainClaimAwayWith` for 3 s). A person's own payment
+   * (`own` below), or anything else moving money, is not a sweep. */
+  sweepHoldsLock() {
+    const W = window.FoxyWallet;
+    const held = W && W.proofLockHolder && W.proofLockHolder();
+    if (!held || !held.what) return false;
+    // what a person starts holds it under these names (99-proof-lock-and-export.js): not a sweep
+    const own = ['pay', 'sendToken', 'receiveToken', 'reclaimToken', 'onchainPay', 'importProofs', 'adoptScan'];
+    if (own.indexOf(String(held.what)) >= 0) return false;
+    return !(this._sendRun || this._chasingChange || this.state.nmBusy || this.state.reqBusy || this._swapRun || this._homeGoing);
+  }
+
+  /* Waits up to five seconds for such a sweep, the row showing it was tapped, then goes on (`go`), which refuses as
+   * before if the lock is still held. True when it is waiting. */
+  switchAfterSweep(url, go) {
+    if (!this.sweepHoldsLock()) return false;
+    const W = window.FoxyWallet;
+    const held = W.proofLockHolder() || {};
+    console.log('[foxy] mint switch: waiting up to 5s for ' + held.what + ' (a background sweep) to let go of the proof lock');
+    this.setState({ switchBusy: true, mintBusy: String(url).replace(/\/+$/, '') });
+    const t0 = Date.now();
+    clearTimeout(this._switchSweepT);
+    const poll = () => {
+      if (this.sweepHoldsLock() && Date.now() - t0 < 5000) {
+        this._switchSweepT = setTimeout(poll, 150);
+        return;
+      }
+      this._switchSweepT = null;
+      if (!this.sweepHoldsLock()) console.log('[foxy] mint switch: the sweep let go after ' + Math.round((Date.now() - t0) / 100) / 10 + 's');
+      this.setState({ switchBusy: false, mintBusy: '' });
+      go();
+    };
+    this._switchSweepT = setTimeout(poll, 150);
+    return true;
+  }
+
   refuseSwitchWhileBusy() {
     /* An invoice nobody has paid is let go, not waited for.
      *
@@ -379,19 +417,33 @@
 
   /* Point the wallet at another mint. Nothing moves — each mint's proofs stay
    * filed under it, so switching back brings that balance into view again. */
-  justSwitch(url) {
+  /* At once (`switchTo`): the wallet is built from the mint's keys on file, so home is drawn straight away from what
+   * is on the phone (the pile, the history), the drawer closes, and the shield says CONNECTING TO the mint until it
+   * answers (`shieldVals`). "Now on" is said when it has answered (`mintConnected`), not at the tap: the switch has
+   * shown itself already, and the toast is the word that the mint is there. A wallet with no `switchTo` connects and
+   * waits, as it always did. */
+  justSwitch(url, waited) {
     const W = window.FoxyWallet;
     const host = String(url).replace(/^https?:\/\//, '');
     if (this.state.switchBusy) return;
+    // a background sweep holding the proof lock is waited for, a few seconds, rather than refused (`switchAfterSweep`)
+    if (!waited && this.switchAfterSweep(url, () => this.justSwitch(url, true))) return;
     // a payment or claim in progress finishes at the mint it started on
     if (this.refuseSwitchWhileBusy()) return;
     // Connecting takes a second or two over Tor, and until now the row gave no
     // sign it had been tapped at all.
     this.setState({ switchBusy: true, mintBusy: String(url).replace(/\/+$/, '') });
+    // an earlier switch's "Now on" is not this one's to say (`mintConnected` matches by the switch, review 7)
+    this._switchSay = null;
     const back = this.state.mintReturn;
     // asked before connecting, which adds it to the list
     const usedBefore = !!(W.mintUsedBefore && W.mintUsedBefore(url));
-    W.connect(url).then(w => {
+    const lazy = typeof W.switchTo === 'function';
+    /* Which path this switch took, in one line: the phone that "still showed connecting" on 2026-11-03 left nothing to
+     * say whether it had landed at once or was waiting on the mint, nor why. */
+    const waits = !lazy ? 'no switchTo in the wallet' : (typeof W.switchWaits === 'function' ? String(W.switchWaits(url) || '') : '');
+    console.log('[foxy] switch: ' + host + (waits ? ' \u2014 waiting for the mint: ' + waits : ' \u2014 at once (switchTo)'));
+    (lazy ? W.switchTo(url) : W.connect(url)).then(w => {
       this.setState({ switchBusy: false, mintBusy: '', mintReturn: '' });
       this.walletReady({ name: (w && w.name) || host });
       // came from history, so go back to it — now showing this mint
@@ -399,12 +451,64 @@
         this.setState({ screen: 'history', stack: ['home'] });
         this.loadHistory();
       }
+      /* Still being asked: what waits for its answer is said when it comes (`mintConnected`), this switch's own
+       * toast and a first visit's seed check among them. */
+      if (w && w.pending) {
+        this._switchSay = { url: String(url).replace(/\/+$/, ''), host, firstTime: !usedBefore, gen: w.gen };
+        return;
+      }
       this.toast('Now on ' + host);
       if (!usedBefore) this.sweepNewMint(url, host);
     }).catch(e => {
       this.setState({ switchBusy: false, mintBusy: '' });
       this.toast(W.reason(e), true);
     });
+  }
+
+  /* A mint switched to at once has answered, or has not (the wallet's `onMintConnected`): { url, ok, why, back }.
+   *
+   * Answered: the balance and history are read again from the wallet that answered, the shield's ring stops, the
+   * switch's "Now on" is said, and a mint new to this phone has its seed check. Not: the phone stays on it, from the
+   * keys on file, and the shield says it is not answering; it is asked again behind the screen, as a launch's wallet
+   * from storage is (`connectForRealOnceOnline`). A switch with no keys on file goes back where it was (`back`). */
+  mintConnected(ev) {
+    const W = window.FoxyWallet;
+    const e = ev || {};
+    const strip = u => String(u || '').replace(/\/+$/, '');
+    /* This switch's own answer, by the switch (`gen`), not by its mint: going back to a mint and away again is two
+     * switches. Kept through NOT ANSWERING, so "Now on" is said once when it does answer. */
+    const own = this._switchSay;
+    const say = own && (own.gen != null || e.gen != null ? own.gen === e.gen : strip(own.url) === strip(e.url)) ? own : null;
+    if (say && (e.ok || e.back)) this._switchSay = null;
+    const host = String(e.url || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    this.setState({ routeAt: Date.now() });
+    if (e.ok) {
+      this.refreshBalance();
+      this.loadHistory();
+      this.offerQuarantine();
+      // the mint's own keys now: sats a dollars wallet was paid can be swapped into dollars
+      if (this.convertOnReturn) this.convertOnReturn();
+      if (say) {
+        this.toast('Now on ' + host);
+        if (say.firstTime) this.sweepNewMint(say.url, host);
+      }
+      return;
+    }
+    if (e.back) {
+      // with no keys on file there was nothing to stay on: home, on the mint it was on
+      this.walletReady({ name: this.mintHost() });
+      this.toast('Could not reach ' + host + ' (' + (e.why || 'no answer') + '). Still on ' + this.mintHost() + '.', true);
+      // the wallet put back may be one from the keys on file, itself still to be connected to for real
+      if (W && W.fromCache && W.fromCache()) { clearTimeout(this._catchUpT); this._catchUpConnect = false; this.connectForRealOnceOnline(); }
+      return;
+    }
+    this.refreshBalance();
+    if ((say && !say.toldDown) || (!say && this.onMint(e.url))) this.toast(host + ' is not answering yet. Foxy keeps trying.', true);
+    if (say) say.toldDown = true;
+    // and is asked again for real, behind whatever the person is doing
+    clearTimeout(this._catchUpT);
+    this._catchUpConnect = false;
+    if (W && W.fromCache && W.fromCache()) this.connectForRealOnceOnline();
   }
 
   /* Nothing filed under this mint — so ask it what it has signed for our seed

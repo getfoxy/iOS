@@ -597,4 +597,213 @@ final class NUT13Tests: XCTestCase {
         }
         XCTAssertEqual(checked, 18, "three seeds, each signing every label: six since the card could be reset")
     }
+
+    /// A new owner key is a point on P-256, and not only 65 bytes that begin 04:
+    /// a card given anything else would take no owner's order again.
+    func testANewOwnerKeyIsAPointOnTheCurve() throws {
+        let g = bytes("046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296"
+                      + "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5")
+        XCTAssertTrue(CardOwner.isOwnerKey(g), "P-256's generator")
+        for c in try ownerCases() {
+            XCTAssertTrue(CardOwner.isOwnerKey(bytes(try XCTUnwrap(c["pub"] as? String))), "an owner key the seed makes")
+        }
+        var offCurve = g
+        offCurve[64] ^= 1
+        for notAKey in [offCurve, [0x04] + [UInt8](repeating: 0x55, count: 64), [0x04] + [UInt8](repeating: 0, count: 64),
+                        [0x02] + Array(g.dropFirst()), Array(g.dropLast()), []] {
+            XCTAssertFalse(CardOwner.isOwnerKey(notAKey), NUT13.hex(notAKey))
+        }
+    }
+
+    /// The keeper's yes before the tap, by label: exact bytes for change-pin,
+    /// reset and set-owner; a mint and units for set-card; which figures for
+    /// set-limit. Load is asked nothing, and anything else is no approval.
+    func testAnApprovalTakesTheShapeItsLabelNames() throws {
+        let at: TimeInterval = 1_000
+        func approve(_ body: [String: Any]) -> CardOwner.Approval? { CardOwner.approval(body, at: at) }
+        let card = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+        XCTAssertEqual(approve(["label": "change-pin", "value": "31323334"])?.value, Array("1234".utf8))
+        XCTAssertNil(approve(["label": "change-pin", "value": "313233"]), "three digits")
+        XCTAssertEqual(approve(["label": "reset", "value": ""])?.value, [])
+        XCTAssertEqual(approve(["label": "reset", "value": "03", "card": card])?.card, bytes(card))
+        XCTAssertNil(approve(["label": "reset", "value": "08"]))
+        XCTAssertNil(approve(["label": "set-owner", "value": "04" + String(repeating: "55", count: 64)]), "no point on the curve")
+        XCTAssertNil(approve(["label": "load"]), "a top-up is asked nothing")
+        XCTAssertNil(approve(["label": "lock"]))
+        let move = try XCTUnwrap(approve(["label": "set-card", "mint": "https://mint.example.com/Bitcoin", "units": ["usd"], "card": card, "keep": true]))
+        XCTAssertEqual(move.mint, Array("https://mint.example.com/Bitcoin".utf8))
+        XCTAssertEqual(move.units, [0x01])
+        XCTAssertTrue(move.keep)
+        XCTAssertNil(approve(["label": "set-card", "mint": "https://mint.example.com", "keep": true]), "a kept move names its card")
+        XCTAssertNil(approve(["label": "set-card", "mint": "x.com Nothing changes"]), "a mint is printable and has no spaces")
+        XCTAssertNil(approve(["label": "set-card", "mint": "https://m.example", "units": ["eur"]]))
+        XCTAssertEqual(approve(["label": "set-limit", "figures": ["day", "noPin"]])?.figures, [.day, .noPin])
+        XCTAssertNil(approve(["label": "set-limit", "figures": ["day", "day"]]))
+        XCTAssertNil(approve(["label": "set-limit", "figures": []]))
+        XCTAssertNil(approve(["label": "set-limit", "figures": ["rate"]]), "the rate is the phone's price, not a figure the keeper sets")
+        XCTAssertNil(approve(["label": "reset", "value": "", "card": "04" + String(card.dropFirst(2))]), "a card's key is a compressed key")
+    }
+
+    /// A signature needs a yes for that command: the same bytes, the mint and
+    /// unit chosen, the figure chosen with every other figure the card's own.
+    func testASignatureMatchesOnlyTheYesItWasGiven() throws {
+        let key = bytes("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+        let other = bytes("03" + String(repeating: "11", count: 32))
+        let nonce = [UInt8](repeating: 7, count: 16)
+        func request(_ label: CardOwner.Label, _ value: [UInt8], key k: [UInt8]? = nil) -> CardOwner.SignRequest {
+            CardOwner.SignRequest(key: k ?? key, label: label, nonce: nonce, value: value)
+        }
+        func approval(_ body: [String: Any]) throws -> CardOwner.Approval { try XCTUnwrap(CardOwner.approval(body, at: 0)) }
+        let none = CardOwner.Seen()
+        // exact bytes
+        let pin = try approval(["label": "change-pin", "value": "31323334"])
+        XCTAssertTrue(CardOwner.matches(request(.changePin, Array("1234".utf8)), pin, seen: none))
+        XCTAssertFalse(CardOwner.matches(request(.changePin, Array("9999".utf8)), pin, seen: none), "another PIN")
+        XCTAssertFalse(CardOwner.matches(request(.reset, []), pin, seen: none), "another command")
+        let named = try approval(["label": "reset", "value": "", "card": NUT13.hex(key)])
+        XCTAssertTrue(CardOwner.matches(request(.reset, []), named, seen: none))
+        XCTAssertFalse(CardOwner.matches(request(.reset, [], key: other), named, seen: none), "another card")
+        XCTAssertFalse(CardOwner.matches(request(.reset, [2]), named, seen: none), "a let-go is not a reset")
+        // a record: the mint and unit said yes to
+        let mint = Array("https://mint.example.com/Bitcoin".utf8)
+        func record(_ unit: UInt8, _ mint: [UInt8]) -> [UInt8] {
+            var r: [UInt8] = [unit]
+            r += [0x02] + [UInt8](repeating: 0x44, count: 32)
+            r += [0x04] + [UInt8](repeating: 0x33, count: 64)
+            r.append(UInt8(mint.count))
+            r += mint
+            return r
+        }
+        let move = try approval(["label": "set-card", "mint": "https://mint.example.com/Bitcoin", "units": ["sat"]])
+        XCTAssertTrue(CardOwner.matches(request(.setCard, record(0x00, mint)), move, seen: none))
+        XCTAssertFalse(CardOwner.matches(request(.setCard, record(0x01, mint)), move, seen: none), "another unit")
+        XCTAssertFalse(CardOwner.matches(request(.setCard, record(0x00, Array("https://evil.example".utf8))), move, seen: none), "another mint")
+        let either = try approval(["label": "set-card", "mint": "https://mint.example.com/Bitcoin"])
+        XCTAssertTrue(CardOwner.matches(request(.setCard, record(0x01, mint)), either, seen: none), "no unit named is either")
+        // a limit: the figure chosen, and every other figure the card's own, as it said in this tap
+        let day = try approval(["label": "set-limit", "figures": ["day"]])
+        func u32(_ n: UInt32) -> [UInt8] { [UInt8(n >> 24), UInt8(n >> 16 & 0xff), UInt8(n >> 8 & 0xff), UInt8(n & 0xff)] }
+        var seen = CardOwner.Seen()
+        seen.limits = [.day: 1000, .tap: 200, .noPin: 50]
+        XCTAssertTrue(CardOwner.matches(request(.setLimit, u32(5000)), day, seen: none), "the day's alone needs nothing the card said")
+        XCTAssertTrue(CardOwner.matches(request(.setLimit, u32(5000) + u32(200) + u32(50) + u32(97_000)), day, seen: seen))
+        XCTAssertFalse(CardOwner.matches(request(.setLimit, u32(5000) + u32(9_999) + u32(50) + u32(97_000)), day, seen: seen),
+                       "a figure not chosen, raised behind the keeper's back")
+        XCTAssertFalse(CardOwner.matches(request(.setLimit, u32(5000) + u32(200)), day, seen: none), "and with nothing said by the card, no")
+    }
+
+    /// What signs with nobody asked: a rate written with the card's own figures,
+    /// a limit in the tap that sets a card up, and a record at the card's own mint
+    /// and unit (only its refund key changes, which SeedActions checks).
+    func testWhatSignsUnaskedChangesNothingTheKeeperChose() {
+        let key = bytes("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+        let nonce = [UInt8](repeating: 7, count: 16)
+        func u32(_ n: UInt32) -> [UInt8] { [UInt8(n >> 24), UInt8(n >> 16 & 0xff), UInt8(n >> 8 & 0xff), UInt8(n & 0xff)] }
+        func request(_ label: CardOwner.Label, _ value: [UInt8]) -> CardOwner.SignRequest {
+            CardOwner.SignRequest(key: key, label: label, nonce: nonce, value: value)
+        }
+        var seen = CardOwner.Seen()
+        XCTAssertFalse(CardOwner.signsUnasked(request(.setLimit, u32(1) + u32(2) + u32(3) + u32(4)), seen: seen), "the card said nothing")
+        seen.limits = [.day: 1, .tap: 2, .noPin: 3]
+        XCTAssertTrue(CardOwner.signsUnasked(request(.setLimit, u32(1) + u32(2) + u32(3) + u32(96_000)), seen: seen), "the rate, first")
+        XCTAssertFalse(CardOwner.signsUnasked(request(.setLimit, u32(9) + u32(2) + u32(3) + u32(96_000)), seen: seen))
+        XCTAssertFalse(CardOwner.signsUnasked(request(.setLimit, u32(1) + u32(2)), seen: seen), "only a rate's own form")
+        var setUp = CardOwner.Seen()
+        setUp.unowned = true
+        XCTAssertTrue(CardOwner.signsUnasked(request(.setLimit, u32(0) + u32(500) + u32(100)), seen: setUp), "a card being set up")
+        let mint = Array("https://mint.example.com".utf8)
+        var record: [UInt8] = [0x00]
+        record += [0x02] + [UInt8](repeating: 0x44, count: 32)
+        record += [UInt8](repeating: 0, count: 65)
+        record.append(UInt8(mint.count))
+        record += mint
+        var at = CardOwner.Seen()
+        XCTAssertFalse(CardOwner.signsUnasked(request(.setCard, record), seen: at))
+        at.unit = 0x00
+        at.mint = mint
+        XCTAssertTrue(CardOwner.signsUnasked(request(.setCard, record), seen: at), "its own mint and unit")
+        at.mint = Array("https://other.example".utf8)
+        XCTAssertFalse(CardOwner.signsUnasked(request(.setCard, record), seen: at), "another mint needs a yes")
+        for label in [CardOwner.Label.changePin, .reset, .setOwner] {
+            XCTAssertFalse(CardOwner.signsUnasked(request(label, label == .changePin ? Array("1234".utf8) : []), seen: setUp), label.rawValue)
+        }
+    }
+
+    /// A move kept for a later tap is for its card, its mint and its unit, and is used once.
+    func testAKeptMoveIsForItsCardAndIsUsedOnce() throws {
+        let key = bytes("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+        let mint = Array("https://mint.example.com".utf8)
+        var record: [UInt8] = [0x00]
+        record += [0x02] + [UInt8](repeating: 0x44, count: 32)
+        record += [UInt8](repeating: 0, count: 65)
+        record.append(UInt8(mint.count))
+        record += mint
+        let request = CardOwner.SignRequest(key: key, label: .setCard, nonce: [UInt8](repeating: 1, count: 16), value: record)
+        let move = try XCTUnwrap(CardOwner.approval(["label": "set-card", "mint": "https://mint.example.com", "units": ["sat"],
+                                                     "card": NUT13.hex(key), "keep": true], at: 0))
+        let elsewhere = try XCTUnwrap(CardOwner.approval(["label": "set-card", "mint": "https://mint.example.com",
+                                                          "card": "03" + String(repeating: "11", count: 32), "keep": true], at: 0))
+        let kept = CardOwner.keepMove(CardOwner.keepMove([], elsewhere), move)
+        XCTAssertEqual(kept.count, 2)
+        let left = try XCTUnwrap(CardOwner.useMove(kept, for: request, seen: CardOwner.Seen()))
+        XCTAssertEqual(left, [elsewhere], "used, and only it")
+        XCTAssertNil(CardOwner.useMove(left, for: request, seen: CardOwner.Seen()), "and not twice")
+        XCTAssertEqual(CardOwner.keepMove(kept, move).count, 2, "a newer move for a card replaces the one before")
+        // kept and read back as the Keychain holds it
+        let data = try JSONEncoder().encode(kept)
+        XCTAssertEqual(try JSONDecoder().decode([CardOwner.Approval].self, from: data), kept)
+    }
+
+    /// What the card said, as the phone carried it: its limits from GET_INFO, its
+    /// record's unit and mint, and whether it had an owner.
+    func testTheCardsOwnAnswersAreReadAsThePageReadsThem() {
+        var info = [UInt8](repeating: 0, count: 51)
+        info[16] = 1
+        info[12...15] = [0, 0, 0x03, 0xE8]
+        info[30...33] = [0, 0, 0, 0xC8]
+        info[34...37] = [0, 0, 0, 0x32]
+        XCTAssertEqual(CardOwner.limitsSeen(info), [.day: 1000, .tap: 200, .noPin: 50])
+        XCTAssertEqual(CardOwner.limitsSeen(Array(info.prefix(42))), [.day: 1000, .tap: 200, .noPin: 50])
+        XCTAssertNil(CardOwner.limitsSeen(Array(info.prefix(30))), "an answer with no limit on one payment")
+        XCTAssertFalse(CardOwner.unownedSeen(info))
+        info[16] = 0
+        XCTAssertTrue(CardOwner.unownedSeen(info))
+        XCTAssertTrue(CardOwner.unownedSeen(Array(info.prefix(30))))
+        XCTAssertFalse(CardOwner.unownedSeen(Array(info.prefix(20))))
+        let mint = Array("https://mint.example.com".utf8)
+        var answer = [UInt8](repeating: 0, count: 106)
+        answer[2] = 0x01
+        answer[105] = UInt8(mint.count)
+        answer += mint
+        XCTAssertEqual(CardOwner.recordSeen(answer)?.unit, 0x01)
+        XCTAssertEqual(CardOwner.recordSeen(answer)?.mint, mint)
+        XCTAssertEqual(CardOwner.recordSeen(answer + Array("FX1".utf8))?.mint, mint, "with its design after the mint")
+        XCTAssertNil(CardOwner.recordSeen(answer + [0]), "a length that does not add up")
+    }
+
+    /// The alert in the phone's own words, from what the approval holds: the
+    /// command, the card where it is named, and the keeper's choices. A limit asks
+    /// the alert alone; the rest ask for Face ID or the passcode too.
+    func testEachYesIsAskedInThePhonesOwnWords() throws {
+        func q(_ body: [String: Any]) throws -> CardOwner.Question {
+            try XCTUnwrap(CardOwner.question(for: try XCTUnwrap(CardOwner.approval(body, at: 0))))
+        }
+        let card = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+        let limit = try q(["label": "set-limit", "figures": ["tap"]])
+        XCTAssertFalse(limit.askOwner)
+        XCTAssertTrue(limit.message.contains("limit on one payment"), limit.message)
+        let move = try q(["label": "set-card", "mint": "https://mint.example.com/Bitcoin", "units": ["usd"], "card": card])
+        XCTAssertTrue(move.message.contains("https://mint.example.com/Bitcoin") && move.message.contains("dollars"), move.message)
+        XCTAssertTrue(move.message.contains("79be667e"), "the card is named: \(move.message)")
+        XCTAssertTrue(try q(["label": "change-pin", "value": "31323334"]).message.contains("next card"), "no card named, the next one held up")
+        let asked: [[String: Any]] = [["label": "change-pin", "value": "31323334"], ["label": "reset", "value": ""], ["label": "reset", "value": "03"],
+                                      ["label": "set-card", "mint": "https://m.example"]]
+        for body in asked {
+            let question = try q(body)
+            XCTAssertTrue(question.askOwner, "\(body)")
+            XCTAssertFalse(question.reason.isEmpty || question.title.isEmpty || question.yes.isEmpty)
+            XCTAssertFalse(question.message.contains("31323334") || question.message.contains("1234"), "the PIN is never shown")
+        }
+        XCTAssertNotEqual(try q(["label": "reset", "value": ""]).title, try q(["label": "reset", "value": "03"]).title)
+    }
 }

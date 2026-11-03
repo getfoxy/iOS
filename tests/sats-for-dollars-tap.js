@@ -82,7 +82,7 @@ const COMMON = ['agoWords(ms) {', 'priceAgeWords(ms) {', 'cfRow(label, value, op
   'unitFigure(amount, unit) {', 'moneyIn(n, unit) {', 'shortForReceiver() {', 'walletChoiceNow() {'];
 
 /* The history card's audits (16-history-lists.js), as tests/usd-tap.js lifts them. */
-const auditMethods = new Function('return {' + ['histAudit() {', 'histAuditUsd() {', 'txTotalOut(t) {', 'arrivingBucket(unit) {',
+const auditMethods = new Function('return {' + ['histAudit() {', 'histAuditUsd() {', 'txTotalOut(t) {', 'txTotalUnit(t) {', 'arrivingBucket(unit) {',
   'arrivingNow() {', 'heldPill() {'].map(method).join(',') + '}')();
 async function appAudit(c) {
   const W = c.W;

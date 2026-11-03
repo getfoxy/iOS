@@ -32,6 +32,9 @@
       var old;
       try { old = need(); } catch (e) { return Promise.reject(e); }
       var dest = newWallet(to);
+      /* This mint's fee quote waits on the invoice there, so its circuit is opened now, while the far mint loads and makes
+       * the invoice (`quoteRoad`), and the quote goes the moment the invoice lands. */
+      var oldRoad = quoteRoad(from);
       // Held back so the split that funds the melt can pay this mint's own
       // input fee. Everything below sizes against what is left, not the total.
       // The split has to pay this mint's input fee, and the amount it lands on
@@ -82,7 +85,7 @@
             });
           }).then(function (mq) {
             console.log('[foxy] asking', hostOf(from), 'what melting it costs \u2026');
-            return withTimeout(old.createMeltQuoteBolt11(mq.request), 25000,
+            return withTimeout(onRoad(old, oldRoad).createMeltQuoteBolt11(mq.request), 25000,
                                hostOf(from) + ' melt quote').catch(function (e) {
               throw new Error(hostOf(from) + ' could not quote that payment: ' +
                 ((e && e.message) || e));
@@ -140,6 +143,8 @@
       var src = newWallet(from);
       var dest = newWallet(to);
       console.log('[foxy] sweep sizing: token', gross, 'margin', MARGIN, '-> spendable', spendable);
+      // the token's mint's fee quote waits on the invoice here: its circuit is opened beside the loads (`quoteRoad`)
+      var srcRoad = quoteRoad(from);
 
       /* Both mints at once. They are different mints on different circuits
        * with nothing to say to each other, and asking them in turn put one
@@ -157,7 +162,7 @@
             amount = Math.floor(amount);
             return withTimeout(createQuote(dest, amount, undefined, (moveLock = quoteLock(dest))).then(function (q) { if (moveLock) q.foxyLock = moveLock; return q; }), 25000, hostOf(to) + ' invoice')
               .then(function (mq) {
-                return withTimeout(src.createMeltQuoteBolt11(mq.request), 25000,
+                return withTimeout(onRoad(src, srcRoad).createMeltQuoteBolt11(mq.request), 25000,
                                    hostOf(from) + ' melt quote').then(function (xq) {
                   var owed = satsOf(xq.amount) + satsOf(xq.fee_reserve);
                   console.log('[foxy] sweep pass', pass, ': asking', amount, 'owed', owed);
@@ -246,15 +251,26 @@
       var from = String(fromUrl || '').replace(/\/+$/, '');
       var to = String(opts.to || mintUrl || '').replace(/\/+$/, '');
       var want = Math.round(Number(sats) || 0);
+      /* The balance it leaves (`o.unit`): sats, as always, or dollars at a mint that holds both on this phone (the
+       * transfer screen's TRANSFER WHICH?). Dollars melt at the source, in cents at the source's own quote, into the far
+       * mint's invoice, which is in sats as every invoice is: `want` is still the sats that land, and what leaves is
+       * that quote's cents (`gross`, in the unit). */
+      var tu = unitOf(opts.unit) || 'sat';
+      var tuNo = tu === 'sat' ? null : unitRefusal(tu, from);
+      if (tuNo) return Promise.reject(tuNo);
       if (!to) return Promise.reject(new Error('No mint is connected to move it to.'));
       if (!from) return Promise.reject(new Error('No mint to move it from.'));
       if (from === to) return Promise.reject(new Error('That is the mint it is already at.'));
       if (!(want > 0)) return Promise.reject(new Error('Ask for an amount above zero.'));
       if (!window.CashuTS) return Promise.reject(new Error('cashu-ts.js did not load.'));
 
-      var src = newWallet(from);
+      var src = newWallet(from, tu === 'sat' ? undefined : { unit: tu });
       var dest = newWallet(to);
-      var have = sumProofs(proofs(from));
+      /* The source's fee quote is of the far mint's invoice, so it cannot be asked first; but its circuit can be built
+       * while the invoice is made, and that was most of its two seconds. Opened now (`quoteRoad`), beside the two loads,
+       * and the quote goes on it the moment the invoice lands. */
+      var srcRoad = quoteRoad(from);
+      var have = sumProofs(proofs(from, tu));
       /* Both mints at once. They are different mints on different circuits
        * with nothing to say to each other, and asking them in turn put one
        * full round trip of waiting on the VERIFYING ECASH screen for nothing.
@@ -269,6 +285,11 @@
         withTimeout(dest.loadMint(), 25000, hostOf(to)),
       ])
         .then(function () {
+          if (tu !== 'sat') {
+            var sets = [];
+            try { sets = (src.keyChain && src.keyChain.getKeysets) ? src.keyChain.getKeysets() : []; } catch (eK) { sets = []; }
+            if (!sets || !sets.length) throw new Error(hostOf(from) + ' does not issue ' + unitName(tu) + ' ecash.');
+          }
           if (opts.land) {
             /* Padded on the generous side, and deliberately.
              *
@@ -326,14 +347,15 @@
           }, function () { return shared[key] && shared[key] !== had ? shared[key] : mine(); });
         })
         .then(function (mq) {
-          return withTimeout(src.createMeltQuoteBolt11(mq.request), 25000,
+          return withTimeout(onRoad(src, srcRoad).createMeltQuoteBolt11(mq.request), 25000,
                              hostOf(from) + ' melt quote').then(function (xq) {
             /* The invoice is the far mint's, and the near mint's quote says
              * what it is for. Anything but the figure asked for is refused
              * before anything moves: more is a fee the far mint chose, shown
              * only as FEE on the crossing card, and less is a move that lands
              * short of the payment it was for. */
-            if (satsOf(xq.amount) !== issue) {
+            // (in dollars the quote's amount is the source's cents for it, its price: nothing to compare)
+            if (tu === 'sat' && satsOf(xq.amount) !== issue) {
               console.warn('[foxy] transfer: asked', hostOf(to), 'for', issue, 'and its invoice is for', satsOf(xq.amount));
               throw new Error(hostOf(to) + ' gave an invoice for ' + satsOf(xq.amount) + ' sats, not the ' + issue
                 + ' asked for. Nothing was moved.');
@@ -343,17 +365,21 @@
              * mint's own fee for splitting the proofs. The reserve is a ceiling
              * — whatever the route does not use comes back as change — so the
              * screen shows this as the most it can cost. */
-            var swapFee = swapFeeFor(src, proofs(from));
+            var swapFee = swapFeeFor(src, proofs(from, tu));
             var owed = satsOf(xq.amount) + reserve + swapFee;
             /* In hand, it is the sum the payment itself will be refused on
              * (`meltNeed`), so a quote that says yes is a payment that goes. */
-            var mn = opts.quoteOnly ? null : meltNeed(src, proofs(from), satsOf(xq.amount) + reserve);
+            var mn = opts.quoteOnly ? null : meltNeed(src, proofs(from, tu), satsOf(xq.amount) + reserve);
             if (mn && mn.ok) owed = mn.need;
             if (mn && !mn.ok) {
               owed = mn.need;
               /** @type {Error & { foxyFits?: number, foxyHave?: number }} */
-              var short = new Error('Moving ' + want + ' sats costs up to ' + owed +
-                ' with the mint\u2019s fees, and you hold ' + have + ' at ' + hostOf(from) + '.');
+              var short = new Error(tu === 'sat'
+                ? 'Moving ' + want + ' sats costs up to ' + owed + ' with the mint\u2019s fees, and you hold ' + have + ' at ' + hostOf(from) + '.'
+                : 'Moving ' + want + ' sats costs up to ' + moneyWords(owed, tu) + ' with the mint\u2019s fees, and you hold '
+                  + moneyWords(have, tu) + ' at ' + hostOf(from) + '.');
+              // (what would fit is worked out in sats; in dollars the screen asks again with a smaller figure)
+              if (tu !== 'sat') { short.foxyFits = 0; short.foxyHave = have; throw short; }
               /* And what would fit, so the screen can offer it.
                *
                * The fee is only knowable by asking, and it is asked after the
@@ -376,8 +402,24 @@
               short.foxyHave = have;
               throw short;
             }
-            console.log('[foxy] transfer:', issue, 'to land at', hostOf(to), '— up to', owed,
+            console.log('[foxy] transfer:', issue, 'to land at', hostOf(to), '— up to', tu === 'sat' ? owed : moneyWords(owed, tu),
                         'from', hostOf(from));
+            if (tu !== 'sat') {
+              /* Dollars: what leaves is in cents (`gross`, `feeUnit` the mint's reserve and its fee for the split), and
+               * the price it was quoted at, for the confirmation's two figures (`rate`, usd per bitcoin). */
+              var msatIn = 0;
+              try { msatIn = Number(FoxyWallet.msatOf(mq.request)) || 0; } catch (eM) { msatIn = 0; }
+              var rq = rateFrom(satsOf(xq.amount), msatIn || issue * 1000);
+              return {
+                from: from, to: to, unit: tu,
+                balance: have, gross: owed, moving: issue, net: want, padSats: pad, inPadSats: 0,
+                // the fee in sats is not this pile's to say: the cents are (`feeUnit`)
+                feeSats: 0, feeMax: 0, feeMin: 0, feeUnit: owed - satsOf(xq.amount),
+                amountUnit: satsOf(xq.amount), reserve: reserve, margin: 0,
+                rate: rq > 0 ? { usdPerBtc: rq } : null,
+                mintQuote: mq, meltQuote: xq, quotedAt: Date.now(),
+              };
+            }
             return {
               from: from, to: to,
               balance: have, gross: owed,
@@ -523,13 +565,18 @@
        * while the mint's expiry allows (`keptAway`), and does not ask the same
        * mint the same question again, 1.5 s on a phone. Only from the mint the
        * plan was quoted at, which is where the phone is now. */
-      var keptQuote = (opts && opts.quoted && plan.meltQuote && plan.mintQuote && plan.from
-                       && canonicalMint(plan.from) === canonicalMint(mintUrl || ''))
-        ? { quote: plan.meltQuote, bolt11: plan.mintQuote.request, unit: 'sat', mint: plan.from, at: Number(plan.quotedAt) || 0 }
+      /* A transfer from dollars (`plan.unit`) melts the dollar pile, and always with the quote its confirmation showed:
+       * reused while it stands, and asked again only to be refused if the price moved against it (`pay`'s `shownMost`). */
+      var planUnit = unitOf(plan.unit) || 'sat';
+      var keptQuote = ((opts && opts.quoted) || planUnit !== 'sat') && plan.meltQuote && plan.mintQuote && plan.from
+                       && canonicalMint(plan.from) === canonicalMint(mintUrl || '')
+        ? { quote: plan.meltQuote, bolt11: plan.mintQuote.request, unit: planUnit, mint: plan.from, at: Number(plan.quotedAt) || 0 }
         : null;
       var payBegan = Date.now();
       var meltMs = 0;
-      var moved = FoxyWallet.pay(plan.mintQuote.request, stage, keptQuote ? { quote: keptQuote } : undefined).then(null, function (e) {
+      var payHow = /** @type {any} */ (keptQuote ? { quote: keptQuote } : undefined);
+      if (planUnit !== 'sat') payHow = Object.assign({}, payHow || {}, { unit: planUnit });
+      var moved = FoxyWallet.pay(plan.mintQuote.request, stage, payHow).then(null, function (e) {
         /* It did not go. If nothing is being held for it, nothing is on its
          * way, and the note would be a note of nothing: left behind, every
          * launch asked the far mint to issue a quote nobody had paid

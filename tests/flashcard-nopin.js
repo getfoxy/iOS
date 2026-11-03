@@ -523,6 +523,99 @@ async function world(pin, o) {
     await settle();
   }
 
+  /* ---- 2026-11-03, software 1.25: the no-PIN allowance a 24-hour total of its own ---------------------------------------
+   * Only payments made without the PIN count; the window begins at the first of them (by the card's clock) and ends 24 hours later
+   * or at any good proof from the owner's phone; the PIN alone no longer fills it. Used up, the card answers 6A9E (LIMIT REACHED.
+   * ENTER PIN.), and the same payment goes with the PIN. GET_INFO P1 = 4 says when the window began (bytes 51 to 54). */
+  for (const software of [25, 24]) {
+    const PRICE = 100000;           // a sat is a tenth of a cent
+    const H = await funded({}, 20000);
+    const R = await funded({ sharedMint: H.mint, words: OTHER_WORDS }, 0);
+    // (the till weighs a payment in sats in cents at its own price: the card says its rate to its holder only)
+    R.W._rate = PRICE; R.W._rateAt = Date.now(); H.W._rate = PRICE; H.W._rateAt = Date.now();
+    const card = newCard(H, undefined, { format: 4, software });
+    await H.W.cardSetUp(card, { pin: '1234', unit: 'sat', price: PRICE, noPin: 20000, recoverable: true });
+    card.tap();
+    await H.W.cardAdd(card, { amount: 6000, unit: 'sat', pin: '1234', price: PRICE });
+    const T0 = 1793725040;
+    card.state.now = T0;
+    const v = software === 25 ? '1.25' : '1.24';
+    ok(card.state.noPinLimit === 2000, v + ': the allowance is written in cents: 20,000 sats at $100,000 is $20.00', String(card.state.noPinLimit));
+    card.tap();
+    card.sent.length = 0;
+    const first = await R.W.cardPay(card, { sats: 300, price: PRICE }).then((r) => r, (e) => ({ no: e }));
+    ok(!first.no && card.state.noPinSpent > 0, v + ': a payment within it goes with no PIN, and counts', first.no ? String(first.no.message) : String(card.state.noPinSpent));
+    if (software === 25) {
+      ok(card.sent.some((x) => /^b00104/.test(x)), '1.25: the card is read with GET_INFO P1 = 4', card.sent.filter((x) => /^b001/.test(x)).join());
+      ok(card.state.noPinStart === T0, '1.25: its window begins at that first payment without the PIN, by the card\u2019s clock', String(card.state.noPinStart));
+      card.tap();
+      const read = await R.W.cardLook(card);
+      ok(read.info.noPinOwn === true && read.info.noPinStart === T0 && read.noPin.turns === T0 + DAY && read.noPin.spent === card.state.noPinSpent,
+         '1.25: the read says the window, its start and when it turns (start + 24 h)', JSON.stringify({ own: read.info.noPinOwn, start: read.info.noPinStart, turns: read.noPin.turns }));
+    }
+    // over what is left: stopped before the card is asked, said as the limit reached on 1.25
+    card.state.noPinSpent = 1990;
+    card.tap();
+    const over = await R.W.cardPay(card, { sats: 900, price: PRICE }).then(() => null, (e) => e);
+    ok(over && over.card === 'pin-needed' && (software === 25 ? over.early === true && over.limitReached === true : !over.limitReached),
+       v + (software === 25 ? ': over what is left of the 24 hours: pin-needed, LIMIT REACHED (limitReached)' : ': over it: pin-needed, as ever'), over && JSON.stringify({ c: over.card, r: over.limitReached }));
+    // the card's own word: 6A9E at its signature, where the read thought there was room
+    if (software === 25) {
+      const send0 = card.send.bind(card);
+      card.send = (apdu) => { if (/^b024/.test(apdu)) card.state.noPinSpent = card.state.noPinLimit; return send0(apdu); };
+      card.state.noPinSpent = 0;
+      card.tap();
+      const at = await R.W.cardPay(card, { sats: 100, price: PRICE }).then(() => null, (e) => e);
+      card.send = send0;
+      ok(at && at.card === 'pin-needed' && at.limitReached === true && at.sw === '6a9e' && /Limit reached, enter PIN/.test(at.message),
+         '1.25: the card\u2019s own 6A9E is a PIN ask, LIMIT REACHED. ENTER PIN.', at && JSON.stringify({ c: at.card, sw: at.sw, m: at.message }));
+      card.state.noPinSpent = 30;
+    } else card.state.noPinSpent = 1990;
+    const before = card.state.noPinSpent;
+    card.tap();
+    const withPin = await R.W.cardPay(card, { sats: 900, pin: '1234', price: PRICE }).then((r) => r, (e) => ({ no: e }));
+    ok(!withPin.no, v + ': the same payment with the PIN goes through', withPin.no ? String(withPin.no.message) : '');
+    ok(software === 25 ? card.state.noPinSpent === before : card.state.noPinSpent === 0,
+       software === 25 ? '1.25: and neither counts nor fills the allowance: the PIN alone does not start the 24 hours over'
+         : '1.24: and the PIN given filled the allowance again', String(card.state.noPinSpent));
+    if (software === 25) {
+      // 24 hours on by the card's clock: the window is over and counts from nothing
+      card.state.noPinSpent = card.state.noPinLimit;
+      card.state.now = T0 + DAY + 1;
+      card.tap();
+      const later = await R.W.cardPay(card, { sats: 200, price: PRICE }).then((r) => r, (e) => ({ no: e }));
+      ok(!later.no && card.state.noPinStart === T0 + DAY + 1, '1.25: 24 hours later the window is over: a payment goes with no PIN and begins a new one',
+         later.no ? String(later.no.message) : String(card.state.noPinStart));
+      // the owner's phone: its proof ends the window
+      card.tap();
+      await H.W.cardLook(card, { mine: true, price: PRICE });
+      ok(card.state.noPinSpent === 0 && card.state.noPinStart === 0, '1.25: held to its owner\u2019s phone, the window ends', JSON.stringify([card.state.noPinSpent, card.state.noPinStart]));
+    }
+  }
+  {
+    // the app's side: LIMIT REACHED. ENTER PIN. before the PIN, and the line under LIMITS with when the 24 hours start over
+    const { appOn, card: face } = require('./flashcard-ui-kit');
+    const H = await funded({}, 0);
+    const a = appOn(H, { screen: 'flashcard', stack: ['home'] });
+    let asked = 0;
+    a.fcLimitReached(() => { asked += 1; });
+    ok(face(a) && face(a).title === 'LIMIT REACHED. ENTER PIN.' && face(a).has('ENTER PIN') && asked === 0, 'the app says LIMIT REACHED. ENTER PIN. in a card, before the PIN', face(a) && face(a).all);
+    face(a).press('ENTER PIN');
+    ok(asked === 1, 'and ENTER PIN goes on to the PIN, for the same payment');
+    const soon = Math.floor(Date.now() / 1000) + 3600;
+    ok(/^ \u00b7 resets /.test(a.fcNoPinResets({ turns: soon, spent: 40 })) && a.fcNoPinResets({ turns: soon, spent: 0 }) === '' && a.fcNoPinResets({ turns: 0, spent: 40 }) === '',
+       'the card\u2019s LIMITS line says when the 24 hours start over, and nothing where none is running', a.fcNoPinResets({ turns: soon, spent: 40 }));
+    const fs = require('fs'), path = require('path');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'build', 'app', '26f-flashcard.js'), 'utf8');
+    ok(/if \(e && e\.card === 'pin-needed' && !pin\) \{\s*const ask = \(\) => this\.fcPayAsk\([^)]*\);\s*if \(e\.limitReached\) \{ this\.fcLimitReached\(ask\); return; \}/.test(src),
+       'a card\u2019s payment that reaches the limit says so first and then asks the PIN, signing the same payment with it', 'fcPayRun');
+    const amount = fs.readFileSync(path.join(__dirname, '..', 'build', 'app', '23-render-home-and-amount.js'), 'utf8');
+    ok(amount.indexOf("s.flow === 'cardSuNoPin' ? 'What\\u2019s the most this card should pay in 24 hours without asking you for a PIN?'") >= 0,
+       'the set-up asks for the 24-hour figure in the owner\u2019s words', 'amountSubtitle');
+    ok(/noPinDay[\s\S]{0,400}Entering the PIN does not start the 24 hours over: they end after 24 hours, or when the card is next held to this phone/.test(src),
+       'the NO PIN LIMIT explainer says the owner\u2019s phone ends the 24 hours and the PIN alone does not', 'fcLimitAsk');
+  }
+
   await settle();
   console.log('\n' + (failed ? failed + ' flashcard-nopin check(s) failed' : 'all flashcard-nopin checks pass'));
   process.exit(failed ? 1 : 0);

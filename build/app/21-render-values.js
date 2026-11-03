@@ -233,14 +233,20 @@
     /* RESTORE LOST CARD: the money of a card this phone loaded, taken back if the card is lost (26f-flashcard.js `fcRestoreLost`: the
      * RESTORE CARD screen, or a card saying this phone has loaded none). Under SETTINGS, not on a card's screens: a lost card cannot be tapped. */
     const restoreCardRow = { label: 'RESTORE LOST CARD', path: MENU_ICON.cardBack, tap: shut(() => this.fcRestoreLost()) };
-    /* The till (26m-till.js): this phone as a point of sale, receive and this session's history only. In the menu itself,
-     * right after HISTORY, behind the lock this phone already has (`tillGate`). The cashier code is on the till's own screen
-     * (23-render-home-and-amount.js `amtCodeTap`), so it follows the mints and currency the till was opened with. */
-    const tillRows = [
+    /* TOOLS, a drop-down like SETTINGS: the till (26m-till.js: this phone as a point of sale, receive and this session's history
+     * only, behind the lock this phone already has, `tillGate`; the cashier code is on the till's own screen, 23-render-home-and-amount.js
+     * `amtCodeTap`), SPLIT A BILL and CONTACTS. Opens and closes in place; the drawer stays. */
+    const toolsOpen = !!this.state.menuToolsOpen;
+    const toolsRows = [
+      { label: 'TOOLS', path: MENU_ICON.split, hasChev: true, chevRot: toolsOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+        tap: () => this.setState({ menuToolsOpen: !toolsOpen }) },
+    ].concat(!toolsOpen ? [] : [
       { label: 'POINT OF SALE', path: MENU_ICON.receive,
         tap: shut(() => this.tillGate(() => this.tillOpen(), 'To open the till.')) },
-    ];
-    v.menuItems = /** @type {any[]} */ ([historyRow]).concat(tillRows).concat(verified ? [] : [backupRow]).concat([
+      { label: 'SPLIT A BILL', path: MENU_ICON.split, tap: shut(v.goSplit) },
+      { label: 'CONTACTS', path: MENU_ICON.contacts, tap: shut(v.goContacts) },
+    ].map(inSettings));
+    v.menuItems = /** @type {any[]} */ ([historyRow]).concat(verified ? [] : [backupRow]).concat([
       /* Hiding the balance moved here from the pill, where its button sat on
        * top of the figures. The label says what the tap
        * will do, so it reads the same whichever way round it is. */
@@ -250,10 +256,7 @@
        * button does it when both pills are up. */
     ]).concat(twoHere && !twoPills ? [
       { label: 'SWAP', path: MENU_ICON.swap, tap: shut(() => this.swapStart()) },
-    ] : []).concat([
-      { label: 'SPLIT A BILL', path: MENU_ICON.split, tap: shut(v.goSplit) },
-      { label: 'CONTACTS', path: MENU_ICON.contacts, tap: shut(v.goContacts) },
-    ]).concat(mintsWithMoney > 1 ? [
+    ] : []).concat(toolsRows).concat(mintsWithMoney > 1 ? [
       { label: 'TRANSFER', path: MENU_ICON.transfer, tap: shut(() => this.goTransfer()) },
     ] : []).concat([
       { label: 'SWITCH', path: MENU_ICON.switch,
@@ -280,6 +283,11 @@
        * drawer stays open so it can be seen to move. */
       Object.assign({ label: 'AUTO TAP TO PAY', path: MENU_ICON.change,
         tap: () => { this.tapAutoSet(!tapAuto); this.setState({ menuTick: (this.state.menuTick || 0) + 1 }); } }, sw(tapAuto)),
+    ]).concat((() => {
+      /* SECURITY, a drop-down inside SETTINGS: what stands in front of the wallet, the PIN, and what this phone takes with no
+       * route (26j-till-caps.js). Opens and closes in place; its rows sit a step further in. */
+      const securityOpen = !!this.state.menuSecurityOpen;
+      const inSecurity = (m) => Object.assign({}, m, { indent: '20px' });
       /* What stands in front of the wallet, changed after the SECURE FOXY card
        * has been and gone (10-pin.js). Pressing it answers `device`, which
        * locks the screen and keeps the seed where it already was; turning it
@@ -287,7 +295,7 @@
        * that is deliberate: this answer guards the seed AND locks the screen.
        * Nobody having answered reads as off, which is what `faceLock()` does
        * with it. */
-      Object.assign({
+      const faceRow = Object.assign({
         label: 'FACE / FINGER LOCK',
         path: MENU_ICON.faceid,
         tap: shut(() => {
@@ -297,11 +305,8 @@
           // taking a guard off is never one tap
           this.confirmNoProtection();
         }),
-      }, sw(faceOn)),
-    ]).concat([
-      /* The label is the tap, not the state: SET, REMOVE — a verb cannot be
-       * read as a state. */
-      {
+      }, sw(faceOn));
+      const pinRow = {
         label: (window.FoxyWallet && window.FoxyWallet.pinIsSet
           && window.FoxyWallet.pinIsSet()) ? 'REMOVE PIN' : 'SET PIN',
         path: MENU_ICON.lock,
@@ -328,10 +333,11 @@
           }
           this.pinSetup(() => {});
         }),
-      },
-      /* What this phone takes with no route before it settles: from one payer,
-       * and in all (26j-till-caps.js). Dollars, with the sats under. */
-    ]).concat(this.tillCapRows ? this.tillCapRows(MENU_ICON.receive, shut) : []).concat([
+      };
+      return [{ label: 'SECURITY', path: MENU_ICON.lock, hasChev: true, chevRot: securityOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                tap: () => this.setState({ menuSecurityOpen: !securityOpen }) }]
+        .concat(!securityOpen ? [] : [faceRow, pinRow].concat(this.tillCapRows ? this.tillCapRows(MENU_ICON.receive, shut) : []).map(inSecurity));
+    })()).concat([
       restoreCardRow,
       /* The phone's own screens, straight over home: no Foxy screen before
        * RESTORE A WALLET or after YOUR SEED PHRASE. */

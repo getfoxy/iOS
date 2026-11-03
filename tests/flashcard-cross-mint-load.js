@@ -727,6 +727,28 @@ async function world(o) {
     void k;
   }
 
+  /* ---- 17: this phone's fee quote on the circuit opened while A made the invoice (2026-11-02) --------------------------------
+   * The fee quote here is of A's invoice, so it waits for it; the circuit it takes (the one kept ready at B) is opened as the
+   * quote begins (`warmSpare`, tests/circuit-warm.js). */
+  {
+    const { R } = await world({ own: true, onCard: 1000, atB: 4000 });
+    const seen = [];
+    const prev = R.fate;
+    R.fate = (m) => { const u = new URL(m.url); seen.push({ m: m.method, u: bare(u.origin) + u.pathname, c: m.circuit || '', warm: !!m.warm }); return prev(m); };
+    R.W._spareAfterMs = 1e9;   // nothing opened behind a job: the circuit below is the quote's
+    R.W._spareOff = false;
+    const plan = await R.W.cardLoadQuote(MINT, 800, { cardUnit: 'sat', payUnit: 'sat' });
+    const at = seen.findIndex((r) => r.m === 'GET' && r.u === bare(MINT2) + '/v1/keysets' && r.c && r.warm);
+    const inv = seen.findIndex((r) => r.m === 'POST' && r.u === bare(MINT) + '/v1/mint/quote/bolt11');
+    const melt = seen.find((r) => r.m === 'POST' && r.u === bare(MINT2) + '/v1/melt/quote/bolt11');
+    ok(at >= 0 && inv > at && !!melt && melt.c === seen[at].c && plan.total > 800,
+       'loading a card at another mint: this phone’s fee quote rides the circuit opened at its own mint before the invoice was asked for',
+       JSON.stringify(seen.map((r) => r.m + ' ' + r.u.replace(/^https:\/\//, '') + (r.c ? ' @' + r.c.slice(0, 4) : '') + (r.warm ? ' warm' : ''))));
+    R.W._spareOff = true;
+    R.fate = prev;
+    booksGood('a card load’s fee quote on the circuit kept ready', R);
+  }
+
   console.log('\n' + passed + ' passed, ' + failed + ' failed' + (until.failed ? ', ' + until.failed + ' waits timed out' : ''));
   process.exit(failed || until.failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

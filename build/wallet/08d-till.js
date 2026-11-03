@@ -1454,7 +1454,8 @@
       mustSave(K.tillCashier, row);
     } catch (e) { return Promise.reject(e); }
     var there = !!wallet && canonicalMint(mintUrl || '') === pass.mint;
-    var going = there ? Promise.resolve(null) : FoxyWallet.connect(pass.mint, null, null, { remember: false });
+    // at once where the keys are on file, the mint asked behind it (`connect`'s `lazy`); waited for where they are not
+    var going = there ? Promise.resolve(null) : FoxyWallet.connect(pass.mint, null, null, { remember: false, lazy: true });
     return going.then(function () {
       console.log('[foxy] till: working the till for a keeper at ' + hostOf(pass.mint) + ', in ' + pass.unit
         + (tillMintsOf(pass).length > 1 ? ', taking ' + (tillMintsOf(pass).length - 1) + ' other mint(s) too' : ''));
@@ -1537,7 +1538,8 @@
       var wrote = !(tillKeeperNow() && load(K.tillKeeperHome, null));
       if (wrote) mustSave(K.tillKeeperHome, { mint: here });
       try { mustSave(K.tillKeeper, rec); } catch (e) { if (wrote) tillClear(K.tillKeeperHome); throw e; }
-      return FoxyWallet.connect(to, null, null, { remember: false }).then(function () {
+      // at once: every mint's keys are on file by now, so the till is open before its mint has answered (`lazy`)
+      return FoxyWallet.connect(to, null, null, { remember: false, lazy: true }).then(function () {
         console.log('[foxy] till: opened at ' + hostOf(to) + ', away from ' + hostOf(here)
           + (list.length > 1 ? ', taking ' + (list.length - 1) + ' other mint(s) too' : ''));
         return Object.assign({ mint: to, moved: true }, answer);
@@ -1556,7 +1558,8 @@
     tillClear(K.tillKeeper);
     var to = home && typeof home.mint === 'string' ? canonicalMint(home.mint) : '';
     if (!to || to === canonicalMint(mintUrl || '')) return Promise.resolve({ mint: canonicalMint(mintUrl || ''), moved: false });
-    return FoxyWallet.connect(to, null, null).then(function () {
+    // home at once from the keys on file, and its mint asked behind it (`lazy`)
+    return FoxyWallet.connect(to, null, null, { lazy: true }).then(function () {
       console.log('[foxy] till: closed; back at ' + hostOf(to));
       return { mint: to, moved: true };
     }, function (e) {
@@ -1572,7 +1575,7 @@
     if (tillOutboxRows().some(tillUnsent)) tillDeliverAll().then(null, function () {});
     var to = home && typeof home.mint === 'string' ? canonicalMint(home.mint) : '';
     if (!to || to === canonicalMint(mintUrl || '')) return Promise.resolve({ left: true, mint: canonicalMint(mintUrl || ''), home: true });
-    return FoxyWallet.connect(to, null, null).then(function () {
+    return FoxyWallet.connect(to, null, null, { lazy: true }).then(function () {
       console.log('[foxy] till: left the till; back at ' + hostOf(to));
       return { left: true, mint: to, home: true };
     }, function (e) {

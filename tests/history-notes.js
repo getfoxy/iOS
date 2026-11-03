@@ -161,7 +161,7 @@ console.log('\n5. a card’s own list is the card’s account');
   Object.assign(a, {
     histAudit: () => ({ balOf: new Map(), balNow: 0, run: 0, dueChange: 0, dueCount: 0, off: 0, flagged: new Map(), toShowCount: 0, toShowSats: 0 }),
     stageMoney: (n) => '₿ ' + n, money: (n) => ({ main: '₿ ' + n, sub: '' }), txFiat: () => 0,
-    txTotalOut: (t) => (t.sats || 0) + (t.fee || 0), px: () => 0, group: (n) => String(n),
+    txTotalOut: (t) => (t.sats || 0) + (t.fee || 0), txTotalUnit: (t) => (t.amount || 0) + (t.dir === 'in' ? 0 : (t.feeAmount || 0)), px: () => 0, group: (n) => String(n),
     topUpFeeSats: () => 0, recoveringSats: () => 0, unitMoney: (n) => String(n), unitLabel: (u) => u,
     openTx: () => {}, openPendingSplit: () => {}, goSwitchMint: () => {}, go: () => {}, setState: () => {}, histRef: () => {},
   });
@@ -215,7 +215,7 @@ console.log('\n6. a card’s business is in the card’s list, and not in home�
   Object.assign(a, {
     histAuditIn: function (u) { return this.histAudit(); }, histAuditUsd: function () { return this.histAudit(); },
     stageMoney: (n) => '₿ ' + n, money: (n) => ({ main: '₿ ' + n, sub: '' }), txFiat: () => 0,
-    txTotalOut: (t) => (t.sats || 0) + (t.fee || 0), px: () => 0, group: (n) => String(n),
+    txTotalOut: (t) => (t.sats || 0) + (t.fee || 0), txTotalUnit: (t) => (t.amount || 0) + (t.dir === 'in' ? 0 : (t.feeAmount || 0)), px: () => 0, group: (n) => String(n),
     topUpFeeSats: () => 0, recoveringSats: () => 0, unitMoney: (n) => String(n), unitLabel: (u) => u,
     unitFigure: (n, u) => (u === 'usd' ? '$' + (n / 100).toFixed(2) : '₿ ' + n), unitWord: (u) => (u === 'usd' ? 'DOLLARS' : 'BITCOIN'),
     homePills: () => ['usd', 'sat'], segLook: () => ({}), twoUnitsOn: () => false, fcTwoUnits: () => true,
@@ -276,5 +276,81 @@ console.log('\n6. a card’s business is in the card’s list, and not in home�
   ok('with no word from the wallet about cards, home hides only what a card paid from its own screen', view(false).rows.length === 8, names(view(false).rows));
 }
 
-console.log(R.fail ? '\n' + R.fail + ' history-notes check(s) failed, ' + R.pass + ' passed' : '\nall ' + R.pass + ' history-notes checks pass');
-process.exit(R.fail ? 1 : 0);
+console.log('\n7. clearing history asks twice, with cards, and only the second YES deletes');
+{
+  /* 2026-11-03: the clear button armed itself with a toast up top ("Tap again to clear history"). Now: ARE YOU SURE?, then
+   * ARE YOU TRIPLE SURE?, each a card in the asking tone with YES, DELETE and KEEP IT. */
+  const a = lift(['askClear(which) {', 'clearHistoryNow() {']);
+  const cards = [], toasts = [];
+  let cleared = 0, loaded = 0;
+  global.window = { FoxyWallet: {
+    clearHistory: () => { cleared += 1; },
+    tokensNotClaimed: () => Promise.resolve([]),
+    clearContacts: () => {},
+  } };
+  Object.assign(a, {
+    state: {}, setState(x) { Object.assign(this.state, x); },
+    blockedCard(kind, spec) { cards.push(Object.assign({ kind }, spec)); },
+    toast(m) { toasts.push(m); }, loadHistory() { loaded += 1; },
+    group: (n) => String(n), unitMoney: (n, u) => n + ' ' + u,
+  });
+  const last = () => cards[cards.length - 1];
+  a.askClear('history');
+  ok('the clear button opens a card, ARE YOU SURE?, in the asking tone, and no toast', cards.length === 1 && last().title === 'ARE YOU SURE?'
+     && last().tone === 'ask' && toasts.length === 0, JSON.stringify({ cards, toasts }));
+  ok('its two answers: YES, DELETE and KEEP IT', last().retry === 'YES, DELETE' && last().shut && last().shut.label === 'KEEP IT' && typeof last().go === 'function',
+     JSON.stringify(last()));
+  ok('and nothing is deleted by it', cleared === 0, String(cleared));
+  last().go();
+  ok('YES opens the second: ARE YOU TRIPLE SURE?, with YES, DELETE and KEEP IT', cards.length === 2 && last().title === 'ARE YOU TRIPLE SURE?'
+     && last().tone === 'ask' && last().retry === 'YES, DELETE' && last().shut.label === 'KEEP IT', JSON.stringify(last()));
+  ok('and still nothing is deleted', cleared === 0, String(cleared));
+}
+(async () => {
+  // the second YES deletes (the wallet's unclaimed-token question answers through a promise)
+  const a = lift(['askClear(which) {', 'clearHistoryNow() {']);
+  const cards = [], toasts = [];
+  let cleared = 0;
+  global.window = { FoxyWallet: { clearHistory: () => { cleared += 1; }, tokensNotClaimed: () => Promise.resolve([]), clearContacts: () => {} } };
+  Object.assign(a, { state: {}, setState(x) { Object.assign(this.state, x); }, blockedCard(kind, spec) { cards.push(Object.assign({ kind }, spec)); },
+    toast(m) { toasts.push(m); }, loadHistory() {}, group: (n) => String(n), unitMoney: (n, u) => n + ' ' + u });
+  a.askClear('history');
+  cards[0].go();
+  cards[1].go();
+  await new Promise((r) => setTimeout(r, 10));
+  ok('only the second YES deletes the history', cleared === 1, String(cleared));
+  // KEEP IT, on either card, deletes nothing (the card closes; nothing is called)
+  const b = lift(['askClear(which) {', 'clearHistoryNow() {']);
+  const bc = [];
+  let bcl = 0;
+  global.window = { FoxyWallet: { clearHistory: () => { bcl += 1; }, tokensNotClaimed: () => Promise.resolve([]) } };
+  Object.assign(b, { state: {}, setState() {}, blockedCard(kind, spec) { bc.push(spec); }, toast() {}, loadHistory() {} });
+  b.askClear('history');
+  if (bc[0].shut && bc[0].shut.tap) bc[0].shut.tap();
+  b.askClear('history');
+  bc[1].go();
+  if (bc[2].shut && bc[2].shut.tap) bc[2].shut.tap();
+  await new Promise((r) => setTimeout(r, 10));
+  ok('KEEP IT on either card deletes nothing', bcl === 0 && !bc[0].shut.tap && !bc[2].shut.tap, String(bcl));
+  // tapping the button twice quickly is not a delete any more: it is the first card, twice
+  const c = lift(['askClear(which) {', 'clearHistoryNow() {']);
+  const cc = [];
+  let ccl = 0;
+  global.window = { FoxyWallet: { clearHistory: () => { ccl += 1; }, tokensNotClaimed: () => Promise.resolve([]) } };
+  Object.assign(c, { state: {}, setState() {}, blockedCard(kind, spec) { cc.push(Object.assign({ kind }, spec)); }, toast() {}, loadHistory() {} });
+  c.askClear('history'); c.askClear('history');
+  await new Promise((r) => setTimeout(r, 10));
+  ok('two quick taps of the button delete nothing: the same first card', ccl === 0 && cc.length === 2 && cc.every((x) => x.kind === 'clearHistoryAsk'), JSON.stringify(cc.map((x) => x.kind)));
+  // contacts keep their two taps
+  const d = lift(['askClear(which) {', 'clearHistoryNow() {']);
+  const dt = [];
+  let dcl = 0;
+  global.window = { FoxyWallet: { clearContacts: () => { dcl += 1; } } };
+  Object.assign(d, { state: {}, setState() {}, blockedCard() { dt.push('card'); }, toast(m) { dt.push(m); } });
+  d.askClear('contacts'); d.askClear('contacts');
+  ok('contacts are cleared on two taps, as before', dcl === 1 && dt[0] === 'Tap again to clear contacts' && dt.indexOf('card') < 0, JSON.stringify(dt));
+  ok('the history screen\u2019s button is the one that asks', /v\.clearHistory = \(\) => this\.askClear\('history'\);/.test(app), 'renderVals');
+
+  console.log(R.fail ? '\n' + R.fail + ' history-notes check(s) failed, ' + R.pass + ' passed' : '\nall ' + R.pass + ' history-notes checks pass');
+  process.exit(R.fail ? 1 : 0);
+})();

@@ -317,6 +317,16 @@
     return sats + Math.max(0, Number(t.fee || t.feeSats || 0));
   }
 
+  /* The same for a row in a unit (dollars): what left the wallet is the
+   * amount and the fee, in the unit's own minor units (`feeAmount`, cents).
+   * A card paying a $1.01 invoice with a 5-cent fee showed SENT $1.01, FEE
+   * $0.05 and TOTAL $1.01, and the person read the fee as a cent. */
+  txTotalUnit(t) {
+    const amount = Number((t && t.amount) || 0);
+    if (!t || t.dir === 'in') return amount;
+    return amount + Math.max(0, Number(t.feeAmount || 0));
+  }
+
   txWhen(t) {
     const v = t.at;
     if (!v) return new Date();

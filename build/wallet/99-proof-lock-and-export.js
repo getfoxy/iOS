@@ -115,7 +115,8 @@
         return homeFirst(turn);
       };
       // not the walk's own claim, nor change being made: both only ever run with a route
-      if (ROUTE_FIRST[name] && !own && !changeBack && FoxyWallet._routeWaitMs > 0 && routeComing()) {
+      // (or for a mint switched to that has not answered yet, `mintComing`: the same wait, for that mint)
+      if (ROUTE_FIRST[name] && !own && !changeBack && FoxyWallet._routeWaitMs > 0 && (routeComing() || mintComing())) {
         return routeSoon(FoxyWallet._routeWaitMs).then(go);
       }
       return go();

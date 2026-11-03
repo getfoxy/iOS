@@ -91,6 +91,8 @@
           // a PAID, NOT COLLECTED YET card says "retrying" only with a route
           this.stuckInvoiceRoute();
         });
+        // a mint switched to at once has answered, or has not (09-melt-paste-switch.js)
+        if (W.onMintConnected) W.onMintConnected((ev) => this.mintConnected(ev));
         // A mint whose signatures do not match the keys it publishes is broken
         // or singling this wallet out. Said plainly, with nothing to retry.
         if (W.onMintTrouble) {
@@ -210,6 +212,8 @@
         });
         // the phone turned over: the invoice screen follows (syncFlip)
         if (W.onTurned) W.onTurned((on) => this.setState({ upsideDown: !!on }));
+        // the phone shaken off the receive screen: COPY YOUR LOGS? (26c-field-log.js)
+        if (W.onShaken) W.onShaken(() => this.shakenForLogs());
         /* The paying phone's price, for a request this phone made in dollars.
          * Nothing has moved: the card is a person agreeing to a number, and
          * only their ACCEPT sends the request back in sats. */
@@ -278,8 +282,29 @@
   /* Everything past the gate: runs once Tor is up or the person chose to
    * continue. Resolves once the balance has loaded, the mint has failed three
    * times, or 45 seconds have passed; the launch screen stays up until then. */
+  /* Are the page and the wallet from one build? tools/pack-index.py writes the same stamp into both (the page's meta
+   * foxy-wallet-stamp, the wallet's `buildStamp`). A phone ran a page from one build beside a wallet from another on
+   * 2026-11-03, and nothing said so. A line in the log, nothing on the screen; a page with no stamp (a test's, an
+   * unpacked one) says nothing. */
+  buildStampCheck() {
+    const W = window.FoxyWallet;
+    let page = '';
+    try {
+      const meta = typeof document !== 'undefined' && document.querySelector
+        ? document.querySelector('meta[name="foxy-wallet-stamp"]') : null;
+      page = meta ? String(meta.getAttribute('content') || '') : '';
+    } catch (e) { page = ''; }
+    if (!/^[0-9a-f]{64}$/.test(page)) return true;
+    const wallet = String((W && W.buildStamp) || '');
+    if (wallet === page) return true;
+    console.log('[foxy] page and wallet from different builds (page ' + page.slice(0, 8) + ', wallet '
+      + (wallet ? wallet.slice(0, 8) : 'none') + ')');
+    return false;
+  }
+
   bootWalletNow() {
     const W = window.FoxyWallet;
+    this.buildStampCheck();
     const saved = W.saved();
     const G = window.FoxyGate;
     if (G && G.launchStage) {
@@ -525,6 +550,12 @@
      * refreshes what is shown. A failure changes nothing (`connect` keeps the
      * wallet it had) and is tried again: 3s, 6s, 12s, then every 30s. */
     const again = (attempt) => {
+      // a switch made since is that mint's to connect (`switchTo`), and this one is not tried again over it
+      if (String(W.mintUrl || '').replace(/\/+$/, '') !== String(url || '').replace(/\/+$/, '')) {
+        console.log('[foxy] the connect behind the home screen: the phone is on another mint now; leaving it');
+        this._catchUpConnect = false;
+        return;
+      }
       W.connect(url).then(() => {
         this.refreshBalance();
         this.loadHistory();

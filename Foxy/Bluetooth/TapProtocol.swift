@@ -622,6 +622,79 @@ enum TapPlace {
     static func taken(by writer: UUID, holder: UUID?, listening: Bool, linked: Bool, early: Bool) -> Bool {
         holder == nil && listening && !linked && !early
     }
+
+    /* And how the place is given back.
+     *
+     * A first word is all it takes to hold the place, so it has to be given
+     * back by everything that ends a handshake that came to nothing: the
+     * clock, bytes that will not read, the phone leaving. It was not. The
+     * clock let go only when nothing was half-written, so a phone that wrote
+     * one byte and stayed was never let go by it; one that wrote a byte and left
+     * cleared the byte and kept the place; and bytes that would not read ended
+     * the session and kept the place too. Each left the receiver off the air,
+     * holding a place for a phone that was gone, and every customer after it
+     * ignored, with the TAP button doing nothing because it was armed already. */
+
+    /// The handshake clock has run: before the link, whatever was half-written,
+    /// the place goes and the receiver is back on the air.
+    static func givenBackByClock(linked: Bool) -> Bool { !linked }
+
+    /// A message that would not read, before the link: the place goes as for a stop.
+    static func givenBackByBadBytes(linked: Bool) -> Bool { !linked }
+
+    /// The holder left while something was in flight: the place goes when
+    /// nothing reached the page, no answer was sent and no change is owed.
+    /// Anything that did reach the page is the page's to finish.
+    static func givenBackByLeaving(paymentHeard: Bool, resultSent: Bool, changeOwed: Bool) -> Bool {
+        !paymentHeard && !resultSent && !changeOwed
+    }
+}
+
+/// The payer's words on their way out, piece by piece, each marked with
+/// whether it is the question "what became of it" (M12).
+///
+/// A write that fails is judged by which word it was (`TapWriteFailure`), and
+/// that has to be the word the failed piece belonged to. It used to be judged
+/// by a flag set as the question was queued, and only when nothing else was
+/// queued ahead of it: a question queued behind the last pieces of a payment
+/// was never marked, and when the payment's pieces went and the question's
+/// did not, the failure was read as the payment's and the payment was given
+/// up as lost while the receiver held it.
+struct TapOutbox {
+    private var pieces: [(data: Data, question: Bool)] = []
+    /// Whether the piece on its way now is the question's.
+    private(set) var questionInFlight = false
+
+    var isEmpty: Bool { pieces.isEmpty }
+    var count: Int { pieces.count }
+
+    /// A framed message, in pieces of `size`.
+    mutating func add(_ frame: Data, size: Int, question: Bool = false) {
+        var i = 0
+        while i < frame.count {
+            pieces.append((frame.subdata(in: i..<min(i + size, frame.count)), question))
+            i += size
+        }
+    }
+
+    /// The next piece to write, now on its way.
+    mutating func take() -> Data? {
+        guard !pieces.isEmpty else { return nil }
+        let next = pieces.removeFirst()
+        questionInFlight = next.question
+        return next.data
+    }
+
+    /// The piece on its way went.
+    mutating func written() { questionInFlight = false }
+
+    /// Everything still to go is dropped: a piece failed, and the link carries nothing more.
+    mutating func drop() {
+        pieces.removeAll()
+    }
+
+    /// Whether any piece of the question is still to go.
+    var questionWaiting: Bool { pieces.contains { $0.question } }
 }
 
 /// What a paying phone does about a word that would not go out.

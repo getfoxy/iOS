@@ -16,6 +16,14 @@ import UIKit
 /// Access is granted by the person, in Orbot. Orbot copies the key it issues to
 /// the clipboard, and Foxy reads it when it next comes to the foreground — only
 /// after asking for it, so the clipboard is not read on every return.
+///
+/// And only a key that was put there after Foxy asked: the clipboard's change
+/// count is taken as Orbot's screen is opened, and a UUID that was already on
+/// the clipboard, or that arrives without the count moving, is not Orbot's
+/// answer and is left alone. A key taken is held, unconfirmed and in memory
+/// only, until Orbot's API answers 200 to it; a 403 drops it. Any UUID used to
+/// be stored as the key, and with a VPN up and something answering on
+/// Orbot's port, that something named the port Foxy's Tor went out through.
 enum OrbotLink {
     enum State: Equatable {
         case absent                                   // nothing answers on 127.0.0.1:15182
@@ -32,6 +40,12 @@ enum OrbotLink {
 
     private static var timer: Timer?
     private static var awaitingKey = false
+    /// The clipboard's change count as Orbot's screen was opened: a key is one
+    /// put there after it.
+    private static var askedAtChange: Int?
+    /// A key taken from the clipboard and not yet answered 200 by Orbot's API.
+    /// Memory only: it is stored once Orbot has taken it.
+    private static var unconfirmedKey: String?
     /// Polls in a row that got no answer at all. See refresh().
     private static var silentPolls = 0
     /// Whether the "nothing answers" line has been printed this run.
@@ -101,6 +115,7 @@ enum OrbotLink {
                 // it went unnoticed.
                 print("[foxy] orbot: asked for a key two minutes ago and none came back")
                 awaitingKey = false
+                askedAtChange = nil
             }
             if awaitingKey { pickUpKey() }   // logs when it stores one
             refresh()
@@ -122,8 +137,22 @@ enum OrbotLink {
     /// One look at Orbot's API. A 403 means Orbot is running and the key Foxy
     /// holds, if any, is refused.
     static func refresh(_ done: (() -> Void)? = nil) {
-        let token = SeedStore.load(key: tokenKey)
+        // a key waiting for Orbot's word is the one asked about, before the stored one
+        let trying = unconfirmedKey
+        let token = trying ?? SeedStore.load(key: tokenKey)
         LoopbackHTTP.get(port: apiPort, path: "/info", token: token) { code, body in
+            if let trying, trying == unconfirmedKey {
+                switch KeyAnswer.after(code: code) {
+                case .confirmed:
+                    unconfirmedKey = nil
+                    if SeedStore.save(trying, key: tokenKey) { print("[foxy] orbot: access key confirmed by Orbot and stored") }
+                case .refused:
+                    unconfirmedKey = nil
+                    print("[foxy] orbot: the key from the clipboard was refused by Orbot (403); dropped")
+                case .unanswered:
+                    break
+                }
+            }
             var next: State = .absent
             /* No answer at all is not the same as "Orbot is gone".
              *
@@ -233,6 +262,8 @@ enum OrbotLink {
          *
          * The three query names are OrbotKit's own: app-id, need-bypass,
          * app-name. */
+        // counted before the link opens: a key is one put on the clipboard after this
+        askedAtChange = UIPasteboard.general.changeCount
         let url = URL(string: "orbot:request/token?app-id=io.getfoxi.foxy&need-bypass=true&app-name=Foxy")!
         UIApplication.shared.open(url) { opened in
             if !opened { awaitingKey = false }
@@ -240,14 +271,43 @@ enum OrbotLink {
         }
     }
 
+    /// What Orbot's API said to a key taken from the clipboard.
+    enum KeyAnswer: Equatable {
+        /// 200: Orbot issued it. It is stored.
+        case confirmed
+        /// 403: not a key Orbot issued. It is dropped.
+        case refused
+        /// Anything else, or nothing: it is held and asked about again.
+        case unanswered
+
+        static func after(code: Int?) -> KeyAnswer {
+            switch code {
+            case 200: return .confirmed
+            case 403: return .refused
+            default: return .unanswered
+            }
+        }
+    }
+
+    /// Whether a clipboard string is Orbot's answer to this app's request: a
+    /// UUID, put there after the request was made.
+    static func keyFromClipboard(_ text: String?, changeCount: Int, askedAt: Int?) -> String? {
+        guard let askedAt, changeCount > askedAt,
+              let key = text?.trimmingCharacters(in: .whitespacesAndNewlines), UUID(uuidString: key) != nil else { return nil }
+        return key
+    }
+
     /// Orbot copied the key it issued. Take it, and clear the clipboard: it is
     /// a credential.
     private static func pickUpKey() {
-        guard UIPasteboard.general.hasStrings,
-              let text = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines),
-              UUID(uuidString: text) != nil else { return }
+        // the count first, which reads nothing: nothing new on the clipboard, nothing is read
+        let board = UIPasteboard.general
+        guard let askedAt = askedAtChange, board.changeCount > askedAt, board.hasStrings,
+              let key = keyFromClipboard(board.string, changeCount: board.changeCount, askedAt: askedAt) else { return }
         awaitingKey = false
-        UIPasteboard.general.string = ""
-        if SeedStore.save(text, key: tokenKey) { print("[foxy] orbot: access key stored") }
+        askedAtChange = nil
+        board.string = ""
+        unconfirmedKey = key
+        print("[foxy] orbot: an access key was on the clipboard; held until Orbot confirms it")
     }
 }

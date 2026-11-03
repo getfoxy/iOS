@@ -15,9 +15,11 @@
    *   SPEND PER SECOND   "Do you want to limit how much the card pays each second?" YES or NO; YES opens MAX SPEND PER SECOND
    *                      (`fcSpeedOpen`): six figures a second to choose from, and the figure itself to type another on SET AMOUNT
    *
-   * The card holds one limit on a payment, L, which it pays at once, and waits about three seconds for each further L (it has no
-   * clock: it counts the phone's askings). So a rate of R a second is L = 3 × R, and a card's limit is said as L / 3 a second
-   * wherever it is shown (`fcSpeedText`): $5 a second is a limit of $15.
+   * The card holds one limit on a payment, L, which it pays at once, and waits about a second for each further L (software 1.25:
+   * every payment waits a floor of three askings, about 2.4 s into the tap, then two more, about 1.2 s, for each limit's worth after
+   * the first; it has no clock, it counts the phone's askings). So a rate of R a second is L = R (FC_SPEED_SECS, one), and a card's limit is said as L a
+   * second wherever it is shown (`fcSpeedText`): $5 a second is a limit of $5. A card before 1.25 waits about three seconds a limit,
+   * and what the screens say a payment takes on one is worked out by its software (`fcHoldSecs`).
    *
    * The amounts are typed on the SET AMOUNT screen every amount is typed on (`fcAmount`, flows 'cardSuNoPin' and 'cardSuTap'),
    * in the card's own money: a dollar card's in dollars and nothing else; a bitcoin card's in dollars first, with the screen's
@@ -163,7 +165,7 @@
 
   /* NEXT: the figure in the card's unit (`fcTyped`: cents for a dollar card, sats for a bitcoin card) and, for a bitcoin card typed in
    * dollars, those dollars (as LIMITS keeps them, `fcAmountNext`); then the next step. Nothing typed is refused, as LIMITS refuses it. */
-  /* (the limit on a payment is typed as a rate, so what the card is sent is three seconds of it: FC_SPEED_SECS) */
+  /* (the limit on a payment is typed as a rate, so what the card is sent is one second of it: FC_SPEED_SECS) */
   fcSuAmountNext() {
     const su = this._fcSu;
     const which = this.fcSuAsking();
@@ -214,24 +216,44 @@
     return true;
   }
 
-  /* The line under the amount on SET AMOUNT for the rate: "It will take N seconds to pay $X." for the limit it makes (three seconds of
+  /* The line under the amount on SET AMOUNT for the rate: "It will take N seconds to pay $X." for the limit it makes (one second of
    * what is typed), in the unit it is typed in; '' for the other, and before anything is typed. */
   fcSuAmountLine() {
     if (this.fcSuAsking() !== 'tap') return '';
     return this.fcWaitLine(this.fcTyped() * this.FC_SPEED_SECS, this.fcSuUnitNow(), this.state.unit === 'SATS' ? 'sat' : 'usd');
   }
 
-  /* "It will take 13 seconds to pay $40.00.": what a payment of four limits' worth waits, by the app's own seconds (`fcWaitSecs`)
-   * for the askings of the card's software (`fcWaitOver`, `fcWaitMore`): the first limit's worth over, and two more after it. A
+  /* "It will take 6 seconds to pay $40.00.": what a payment of four limits' worth waits on the card's software (`fcHoldSecs`). A
    * round figure above the limit, so that the line says something. In the unit the figure was chosen in (`as`): "₿ 40,000" for a
    * bitcoin card's limit chosen in sats. */
   FC_WAIT_EXAMPLE = 4;
   fcWaitLine(limit, unit, as) {
     if (!(limit > 0)) return '';
     const units = this.FC_WAIT_EXAMPLE;
-    const askings = this.fcWaitOver() + this.fcWaitMore() * (units - 2);
     const pay = (unit !== 'usd' && as === 'sat') ? '₿ ' + this.group(Math.round(limit * units)) : this.fcPrice(limit * units, unit);
-    return 'It will take ' + this.fcWaitSecs(askings) + ' seconds to pay ' + pay + '.';
+    return 'It will take ' + this.fcHoldSecs(units) + ' seconds to pay ' + pay + '.';
+  }
+
+  /* Whether the card on show is of software 1.25 or later, whose wait is a second a limit (a card not read yet is taken as the
+   * newest, as `fcShaped` takes it). */
+  fcCard125() {
+    const c = this._fcCard;
+    const v = String((c && c.info && c.info.version) || '').split('.');
+    if (!v[0]) return true;
+    return Number(v[0]) > 1 || (Number(v[0]) === 1 && Number(v[1]) >= 25);
+  }
+
+  /* How long a payment of `n` limits' worth holds the card, in whole seconds, by the card's software. 1.25 waits by a floor:
+   * every payment answers "not yet" three times before it signs, about 2.4 s from the card being found on a J3R180 (a wait is
+   * 579 ms), and each limit's worth past the first adds two more waits, about 1.2 s: 2.4 + 1.2 × (n − 1), the floor said even
+   * within the limit. A card before it signs a payment within its limit at once and waits about three seconds for each limit's
+   * worth after: 3 × (n − 1). */
+  FC_HOLD = { floor: 2.4, each: 1.2, eachBefore: 3 };
+  fcHoldSecs(n) {
+    const k = Math.max(1, Math.round(Number(n) || 0));
+    const H = this.FC_HOLD;
+    if (this.fcCard125()) return Math.round(H.floor + H.each * (k - 1));
+    return H.eachBefore * (k - 1);
   }
 
   // the end of the questions: the tap
@@ -274,14 +296,14 @@
   /* ---- MAX SPEND PER SECOND -------------------------------------------------------------------------------------------
    *
    * The limit on a payment, asked as how fast the card pays (the design): the figure a second, big, six of them to choose
-   * from, and why a card has a limit. A rate R is the limit L = FC_SPEED_SECS × R (the card pays L at once and waits about three
-   * seconds for each further L), sent to the card as every limit is: cents for a dollar card; sats for a bitcoin card, at this
+   * from, and why a card has a limit. A rate R is the limit L = FC_SPEED_SECS × R, one second of it (the card pays L at once and,
+   * from software 1.25, waits a second for each further L), sent to the card as every limit is: cents for a dollar card; sats for a bitcoin card, at this
    * phone's price, with the dollars kept so that this phone sets the card again when the price has moved. Asked by the set-up
    * (`mode` 'su', `fcSuAmount`) and by CARD LIMITS (`mode` 'limit', `fcLimitAmount`) for a card that waits for its limit (`paced`);
    * a figure that is none of the six is typed on SET AMOUNT, by tapping the figure (`fcSpeedOther`), where it is a figure a second
    * too. A bitcoin card with no price has nothing to say dollars at, and is asked on SET AMOUNT in sats straight away. */
   FC_SPEED_CHIPS = [1, 2, 5, 10, 25, 50];
-  FC_SPEED_SECS = 3;
+  FC_SPEED_SECS = 1;
   FC_SPEED_FIRST = 5;
 
   // whether a rate in dollars can be turned into a card's limit in `unit`: a dollar card's always, a bitcoin card's where there is a price

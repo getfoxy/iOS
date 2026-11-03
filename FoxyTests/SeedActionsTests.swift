@@ -151,12 +151,12 @@ final class SeedActionsTests: XCTestCase {
         // status, create, migrate in each state
         run(SeedActions.status(env))
         run(SeedActions.create(env))
-        run(SeedActions.migrate(saved, env: env))
-        run(SeedActions.migrate(typedOther, env: env))
+        run(SeedActions.migrate(saved, env: env) { true })
+        run(SeedActions.migrate(typedOther, env: env) { true })
         vault.failRead = true
         run(SeedActions.status(env))
         run(SeedActions.create(env))
-        run(SeedActions.migrate(saved, env: env))
+        run(SeedActions.migrate(saved, env: env) { true })
         run(SeedActions.counterReserve(range(v00, 0, 3), env: env))
         vault.failRead = false
         // counters
@@ -209,7 +209,7 @@ final class SeedActionsTests: XCTestCase {
         // with no seed at all
         vault.words = nil
         vault.windowOpen = false
-        run(SeedActions.migrate(saved, env: env))
+        run(SeedActions.migrate(saved, env: env) { true })
         run(SeedActions.status(env))
         run(SeedActions.counterReserve(range(v00, 0, 1), env: env))
         run(SeedActions.cardOwnerKey(key: cardKeyBytes, env: env))
@@ -376,25 +376,72 @@ final class SeedActionsTests: XCTestCase {
 
     func testMigrateStillComparesWithTheWindowClosedAndNeverWrites() {
         vault.windowOpen = false
-        XCTAssertEqual(run(SeedActions.migrate(saved, env: env)).text, #"{"migrated":false,"same":true}"#)
-        XCTAssertEqual(run(SeedActions.migrate(typedOther, env: env)).text, #"{"different":true,"migrated":false}"#)
+        XCTAssertEqual(run(SeedActions.migrate(saved, env: env) { true }).text, #"{"migrated":false,"same":true}"#)
+        XCTAssertEqual(run(SeedActions.migrate(typedOther, env: env) { true }).text, #"{"different":true,"migrated":false}"#)
         vault.words = nil
-        XCTAssertEqual(run(SeedActions.migrate(saved, env: env)).error, "no migration here")
+        XCTAssertEqual(run(SeedActions.migrate(saved, env: env) { true }).error, "no migration here")
         XCTAssertTrue(vault.writes.isEmpty)
         XCTAssertNil(vault.words)
         vault.failRead = true
-        XCTAssertEqual(run(SeedActions.migrate(saved, env: env)).error, "the seed could not be read")
+        XCTAssertEqual(run(SeedActions.migrate(saved, env: env) { true }).error, "the seed could not be read")
     }
 
     func testMigrateWritesOnlyWithTheWindowOpenAndClosesItOnAnAnswer() {
         vault.words = nil
         vault.failRead = true
-        XCTAssertEqual(run(SeedActions.migrate(saved, env: env)).error, "the seed could not be read")
+        XCTAssertEqual(run(SeedActions.migrate(saved, env: env) { true }).error, "the seed could not be read")
         XCTAssertTrue(vault.windowOpen, "an error leaves it open for the words to come again")
         vault.failRead = false
-        XCTAssertEqual(run(SeedActions.migrate(saved, env: env)).text, #"{"migrated":true}"#)
+        XCTAssertEqual(run(SeedActions.migrate(saved, env: env) { true }).text, #"{"migrated":true}"#)
         XCTAssertEqual(vault.writes, [saved])
         XCTAssertEqual(vault.windowClosedBy, ["seedMigrate answered"])
+    }
+
+    /// Words are written only after the alert and Face ID or the passcode,
+    /// and asking is for a write alone: a compare asks nothing.
+    func testMigrateAsksBeforeItWritesAndOnlyThen() {
+        var asked = 0
+        // a saved seed: compared, nobody asked
+        XCTAssertEqual(run(SeedActions.migrate(saved, env: env) { asked += 1; return true }).text, #"{"migrated":false,"same":true}"#)
+        XCTAssertEqual(asked, 0)
+        // no seed, the window open (the compare above closed it): asked, and a no writes nothing and leaves it open
+        vault.words = nil
+        vault.windowOpen = true
+        XCTAssertEqual(run(SeedActions.migrate(saved, env: env) { asked += 1; return false }).error, "Nothing was changed.")
+        XCTAssertEqual(asked, 1)
+        XCTAssertTrue(vault.writes.isEmpty)
+        XCTAssertNil(vault.words)
+        XCTAssertTrue(vault.windowOpen, "a no leaves the old install's words to be moved at the next launch")
+        // and the one-time move still works once the person says yes
+        XCTAssertEqual(run(SeedActions.migrate(saved, env: env) { asked += 1; return true }).text, #"{"migrated":true}"#)
+        XCTAssertEqual(asked, 2)
+        XCTAssertEqual(vault.writes, [saved])
+        XCTAssertFalse(vault.windowOpen)
+        // the window closed, with no seed: nobody is asked
+        vault.words = nil
+        XCTAssertEqual(run(SeedActions.migrate(saved, env: env) { asked += 1; return true }).error, "no migration here")
+        XCTAssertEqual(asked, 2)
+    }
+
+    /// The old seed's counters cannot be set aside after the replace: deleted,
+    /// counter file and lock-key index both, so the new seed counts from where
+    /// its own words were found and a restore from them reaches its ecash.
+    func testAReplaceWhoseCountersCannotBeSetAsideDeletesThem() throws {
+        run(SeedActions.counterReserve(range(v00, 0, 7_000), env: env))
+        run(SeedActions.p2pkReserve(count: 8, env: env))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: env.counters.fileURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: env.counters.p2pkURL.path))
+        let id = try env.candidates.add(typedOther)
+        XCTAssertNil(run(SeedActions.restoreSecrets(.init(range: range(v01, 0, 1_420), candidate: id), env: env)).error)
+        env.setCountersAside = { _ in throw CounterStore.Failure.unwritable }
+        let reply = run(SeedActions.adopt(id, env: env) { true })
+        XCTAssertEqual(reply.text, #"{"adopted":true}"#)
+        XCTAssertEqual(vault.words, typedOther)
+        XCTAssertEqual(try env.counters.snapshot(), [v01: 420], "the old seed's 7,000 counted on under the new seed")
+        XCTAssertEqual(try env.counters.p2pkNext(), 0, "the old lock-key index counted on under the new seed")
+        let left = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+        XCTAssertFalse(left.contains { $0.hasPrefix("foxy-p2pk") }, "\(left)")
+        XCTAssertFalse(left.contains { $0.contains("replaced") }, "nothing was set aside: \(left)")
     }
 
     // MARK: L5: a wipe that could not delete
@@ -579,14 +626,25 @@ final class SeedActionsTests: XCTestCase {
         switch label {
         case .changePin: return "31323334"
         case .setLimit: return "000186a0"
-        case .setOwner: return "04" + String(repeating: "ab", count: 64)
-        case .setCard: return "01" + "02" + String(repeating: "22", count: 32) + "04" + String(repeating: "33", count: 64) + "03" + "6d6d6d"
+        // a new owner key is a point on P-256: its generator
+        case .setOwner: return "04" + "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296"
+            + "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5"
+        // a record whose refund key is this phone's own lock key at index 3 (`refundIndex`): the one kind of record signed
+        case .setCard: return "01" + refundHex + "04" + String(repeating: "33", count: 64) + "03" + "6d6d6d"
         case .load, .reset: return ""
         }
     }
 
     private func sampleRequest(_ label: CardOwner.Label, key: String? = nil) -> CardOwner.SignRequest {
-        CardOwner.SignRequest(key: bytes(key ?? cardKey), label: label, nonce: nonceBytes, value: bytes(sampleValue(label)))
+        CardOwner.SignRequest(key: bytes(key ?? cardKey), label: label, nonce: nonceBytes, value: bytes(sampleValue(label)),
+                              refundIndex: label == .setCard ? 3 : nil)
+    }
+
+    /// The stub vault's seed's lock key at index 3, as hex: this phone's own refund key in a sample record.
+    private var refundHex: String {
+        guard let seed = try? NUT13.seed(mnemonic: vault.words ?? saved),
+              let key = try? P2PK.publicKeys(seed: seed, start: 3, count: 1).first else { return String(repeating: "22", count: 33) }
+        return NUT13.hex(key)
     }
 
     private func fixtureCases() throws -> [[String: Any]] {
@@ -693,9 +751,50 @@ final class SeedActionsTests: XCTestCase {
                 let label = try XCTUnwrap(s["label"]), value = try XCTUnwrap(s["value"]), nonce = try XCTUnwrap(s["nonce"])
                 let body: [String: Any] = ["key": card, "label": label, "nonce": nonce, "value": value]
                 let request = try XCTUnwrap(CardOwner.signRequest(body), "case \(index) \(label)")
+                // the fixture's records name refund keys of no seed here: not signed (CardOwner.signature signs them, NUT13Tests)
+                if label == "set-card" {
+                    XCTAssertEqual(run(SeedActions.cardOwnerSign(request, env: env)).error, CardOwner.declined, "case \(index)")
+                    continue
+                }
                 XCTAssertTrue(verifies(ownerSig(request), pub: c["pub"] as? String, label: label, nonce: nonce, value: value), "case \(index) \(label)")
             }
         }
+    }
+
+    /// A record is signed only when the key its money goes back to is this phone's own: the lock key its seed
+    /// derives at the index the request names. Another key, the right key at another index, no index, or no key
+    /// at all is not signed, whatever the record's mint and unit.
+    func testARecordIsSignedOnlyWithThisPhonesOwnRefundKey() throws {
+        vault.words = abandonAbout
+        let good = sampleRequest(.setCard)
+        XCTAssertNil(run(SeedActions.cardOwnerSign(good, env: env)).error)
+        let value = good.value
+        var foreign = value
+        foreign.replaceSubrange(1..<34, with: [0x02] + [UInt8](repeating: 0x22, count: 32))
+        var none = value
+        none.replaceSubrange(1..<34, with: [UInt8](repeating: 0, count: 33))
+        for (what, request) in [("another key", CardOwner.SignRequest(key: cardKeyBytes, label: .setCard, nonce: nonceBytes, value: foreign, refundIndex: 3)),
+                                ("another index", CardOwner.SignRequest(key: cardKeyBytes, label: .setCard, nonce: nonceBytes, value: value, refundIndex: 4)),
+                                ("no index", CardOwner.SignRequest(key: cardKeyBytes, label: .setCard, nonce: nonceBytes, value: value)),
+                                ("no key", CardOwner.SignRequest(key: cardKeyBytes, label: .setCard, nonce: nonceBytes, value: none, refundIndex: 3))] {
+            let reply = run(SeedActions.cardOwnerSign(request, env: env))
+            XCTAssertNil(reply.text, what)
+            XCTAssertEqual(reply.error, CardOwner.declined, what)
+        }
+        // another seed's phone: its own key at that index is another key
+        vault.words = saved
+        XCTAssertEqual(run(SeedActions.cardOwnerSign(good, env: env)).error, CardOwner.declined)
+        // and the page's index is read as a whole number for set-card only
+        let body: [String: Any] = ["key": cardKey, "label": "set-card", "nonce": nonce, "value": NUT13.hex(value), "refundIndex": 3]
+        XCTAssertEqual(CardOwner.signRequest(body)?.refundIndex, 3)
+        for bad in [-1, 1.5, Double(1 << 31), true, "3"] as [Any] {
+            var b = body
+            b["refundIndex"] = bad
+            XCTAssertNil(CardOwner.signRequest(b), "\(bad)")
+        }
+        var onLoad: [String: Any] = ["key": cardKey, "label": "load", "nonce": nonce, "value": ""]
+        onLoad["refundIndex"] = 3
+        XCTAssertNil(CardOwner.signRequest(onLoad), "an index on anything but a record")
     }
 
     /// A card's record with its design after the mint (card software 1.10 and on) is signed whole: the signature
@@ -707,7 +806,7 @@ final class SeedActionsTests: XCTestCase {
         let plain = sampleValue(.setCard)
         for design in ["465831", "000000"] {                  // FX1, and none
             let value = plain + design
-            let body: [String: Any] = ["key": cardKey, "label": "set-card", "nonce": nonce, "value": value]
+            let body: [String: Any] = ["key": cardKey, "label": "set-card", "nonce": nonce, "value": value, "refundIndex": 3]
             let request = try XCTUnwrap(CardOwner.signRequest(body), "a record and \(design)")
             let sig = ownerSig(request)
             XCTAssertTrue(verifies(sig, pub: pub, label: "set-card", nonce: nonce, value: value), "a record and \(design)")
@@ -812,6 +911,14 @@ final class SeedActionsTests: XCTestCase {
             let reply = run(SeedActions.cardOwnerSign(request, env: env))
             XCTAssertNil(reply.text, "\(request.label) \(request.value.count) bytes")
             XCTAssertEqual(reply.error, "bad request")
+        }
+        XCTAssertEqual(vault.reads, before, "the seed was not asked for")
+        // a new owner key of the right shape that is no point on the curve: a card given it would answer nobody again
+        for notAKey in [[0x04] + [UInt8](repeating: 0xab, count: 64), [0x04] + [UInt8](repeating: 0, count: 64),
+                        [0x04] + [UInt8](repeating: 0xff, count: 64)] {
+            let request = CardOwner.SignRequest(key: cardKeyBytes, label: .setOwner, nonce: nonceBytes, value: notAKey)
+            XCTAssertTrue(request.isWellFormed, "the shape is right; the point is not")
+            XCTAssertEqual(run(SeedActions.cardOwnerSign(request, env: env)).error, "bad request")
         }
         XCTAssertEqual(vault.reads, before, "the seed was not asked for")
         // and a whole one is the one thing that asks for it

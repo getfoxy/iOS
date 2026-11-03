@@ -6,12 +6,10 @@
    * list, so that the whole rule is on the screen when the buttons come: a
    * payment within the limit is as quick as any tap, and every limit's worth
    * over it holds the card a few seconds longer. The example is a ten-dollar
-   * limit, and the seconds beside each tier are what a card that makes its
-   * own change takes (the card's wait schedule: ten signatures for the first
-   * limit's worth over the limit, three for every limit's worth beyond that,
-   * on top of a tap of two to five; a card before software 1.17 asks for seven
-   * for the first), and they are said as "about", for that is what they are;
-   * they are the design's, not computed. A tap anywhere skips
+   * limit, and the seconds beside each tier are what the card's software
+   * holds a payment of that many limits' worth for (`fcHoldSecs`: from 1.25
+   * about 2.4 s and 1.2 s a limit after the first, about three a limit before),
+   * and they are said as "about", for that is what they are. A tap anywhere skips
    * the statement on the screen; once the list is whole, a tap on it plays
    * it again. A phone that asks for less motion is shown the whole list at
    * once, and so is a phone that has seen it play through once.
@@ -34,11 +32,10 @@
     const money = (n) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     // every statement in one shape, whatever its kind, so that a reader of the list needs no cases
     const item = (kind, o) => Object.assign({ kind, text: '', limit: '', range: '', secs: '', long: '', bar: '' }, o || {});
-    /* The seconds are what the screen behind the sheet reaches, from the card's own counts (`opts.over` askings for the first
-     * limit's worth over, `opts.more` for each further one; ten and four from software 1.18, ten and three on 1.17, seven and
-     * three before): a payment within the limit is a second or two, up to four with change. */
-    const over = Number(opts.over) || 10, more = Number(opts.more) || 4;
-    const tiers = ['1–4'].concat([over, over + more, over + 2 * more].map((n) => String(this.fcWaitSecs(n))));
+    /* The seconds a payment of two, three and four limits' worth holds the card, by its software (26j-card-wheel.js, `fcHoldSecs`):
+     * from 1.25, about 2.4 s and 1.2 s more for each limit's worth after the first; before it, about three for each. */
+    // (1.25: the floor even within the limit, about two seconds; before it a second or two, up to four with change)
+    const tiers = [this.fcCard125() ? String(this.fcHoldSecs(1)) : '1–4'].concat([2, 3, 4].map((n) => String(this.fcHoldSecs(n))));
     const most = parseInt(tiers[tiers.length - 1], 10);
     const items = [
       item('text', { text: 'Any payment request over your limit requires you to tap and hold your card longer.' }),

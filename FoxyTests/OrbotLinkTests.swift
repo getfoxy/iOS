@@ -59,4 +59,33 @@ final class OrbotLinkTests: XCTestCase {
         XCTAssertTrue(source.contains("asked for a key two minutes ago and none came back"),
                       "the two-minute give-up is silent again")
     }
+
+    /// A key is one put on the clipboard after Orbot's screen was opened. Any
+    /// UUID that happened to be there was stored as Orbot's key, and with a VPN
+    /// up, whatever answered on Orbot's port with it chose the port Foxy's Tor
+    /// went out through.
+    func testOnlyAKeyPutThereAfterTheAskIsTaken() {
+        let key = "3F2504E0-4F89-41D3-9A0C-0305E82C3301"
+        XCTAssertEqual(OrbotLink.keyFromClipboard(key, changeCount: 8, askedAt: 7), key)
+        XCTAssertEqual(OrbotLink.keyFromClipboard("  \(key)\n", changeCount: 8, askedAt: 7), key, "trimmed as Orbot copies it")
+        XCTAssertNil(OrbotLink.keyFromClipboard(key, changeCount: 7, askedAt: 7), "on the clipboard before the ask")
+        XCTAssertNil(OrbotLink.keyFromClipboard(key, changeCount: 6, askedAt: 7))
+        XCTAssertNil(OrbotLink.keyFromClipboard(key, changeCount: 8, askedAt: nil), "nothing was asked for")
+        XCTAssertNil(OrbotLink.keyFromClipboard("not a key", changeCount: 8, askedAt: 7))
+        XCTAssertNil(OrbotLink.keyFromClipboard(nil, changeCount: 8, askedAt: 7))
+    }
+
+    /// And a key taken is not kept until Orbot itself has answered 200 to it:
+    /// 403 drops it, and no answer holds it to be asked about again.
+    func testAKeyIsKeptOnlyOnceOrbotAnswers200() throws {
+        XCTAssertEqual(OrbotLink.KeyAnswer.after(code: 200), .confirmed)
+        XCTAssertEqual(OrbotLink.KeyAnswer.after(code: 403), .refused)
+        for code in [nil, 500, 404, 0] as [Int?] {
+            XCTAssertEqual(OrbotLink.KeyAnswer.after(code: code), .unanswered, "\(String(describing: code))")
+        }
+        let source = try String(contentsOf: repoRoot().appendingPathComponent("Foxy/Network/OrbotLink.swift"), encoding: .utf8)
+        let pick = try XCTUnwrap(source.components(separatedBy: "private static func pickUpKey()").last)
+        XCTAssertFalse(pick.prefix(900).contains("SeedStore.save"), "a key from the clipboard is stored before Orbot confirms it")
+        XCTAssertTrue(source.contains("askedAtChange = UIPasteboard.general.changeCount"), "the count is not taken before the link opens")
+    }
 }

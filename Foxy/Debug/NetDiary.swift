@@ -13,7 +13,10 @@ import Foundation
 /// So the line says how a request went and nothing of what it said: the
 /// method, the host, the path with every id masked, the first six characters
 /// of the circuit label, the milliseconds and the outcome. Never a body, a
-/// header's value or a query. It goes through FieldLog like every other line,
+/// header's value or a query. The host by name only in a Debug build: in a
+/// Release one it is `host` and a short hash of the name (LogRedaction.host),
+/// so a mint's operator who knows their own host can find its lines, and a
+/// pasted log does not name the mints this wallet uses. It goes through FieldLog like every other line,
 /// so redaction still applies (an onion host is removed there).
 ///
 /// No UIKit here, so tools/nativetests can build it on a Mac (FoxyNetDiary).
@@ -31,7 +34,8 @@ enum NetDiary {
     /// One request: written when its answer or its error comes back.
     static func line(method: String, host: String, path: String, circuit: String,
                      ms: Int, outcome: String, mark: String? = nil) -> String {
-        var s = "\(prefix) \(method) \(host.lowercased())\(pathShape(path))"
+        // the host by name in a Debug build, and as a short hash in a Release one (LogRedaction.host)
+        var s = "\(prefix) \(method) \(LogRedaction.host(host.lowercased()))\(pathShape(path))"
             + " · circuit \(circuit.prefix(6)) · \(max(0, ms)) ms · \(outcome)"
         // the first six of what the test mint was sent, so its log line can be found
         if let mark, !mark.isEmpty { s += " · mark \(mark.prefix(6))" }

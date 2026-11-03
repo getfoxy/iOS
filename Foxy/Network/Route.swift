@@ -125,7 +125,7 @@ enum Route {
                       _ done: @escaping (Data?, URLResponse?, Error?) -> Void) -> URLSessionDataTask? {
         // Foxy is being put away: nothing new leaves (the door, below)
         guard !shut() else {
-            print("[foxy] route: a request to", request.url?.host ?? "?", "not sent; Foxy is being put away")
+            print("[foxy] route: a request to", LogRedaction.host(request.url?.host), "not sent; Foxy is being put away")
             return nil
         }
 #if canImport(Tor)
@@ -666,15 +666,16 @@ final class RedirectGuard: NSObject, URLSessionTaskDelegate, URLSessionDataDeleg
         let follows = collecting[ObjectIdentifier(task)]?.redirects ?? true
         lock.unlock()
         if !follows {
-            print("[foxy] redirect not followed:", original?.host ?? "?", "answered", response.statusCode)
+            print("[foxy] redirect not followed:", LogRedaction.host(original?.host), "answered", response.statusCode)
             completionHandler(nil)
             return
         }
         if let problem = Route.redirectProblem(from: original, to: target) {
             // Cancelled: the task completes with the redirect response itself,
             // a 3xx the page reports as a failure, and nothing is sent to the target.
-            print("[foxy] redirect refused:", original?.host ?? "?", "->",
-                  target.absoluteString.prefix(120), "-", problem)
+            // hosts by name in a Debug build only, and the target's path and query never in a Release one (LogRedaction)
+            print("[foxy] redirect refused:", LogRedaction.host(original?.host), "->",
+                  LogRedaction.address(target), "-", problem)
             completionHandler(nil)
             return
         }
@@ -746,7 +747,7 @@ final class RedirectGuard: NSObject, URLSessionTaskDelegate, URLSessionDataDeleg
         lock.unlock()
         guard let entry else { return }
         if entry.tooLarge {
-            print("[foxy] answer refused: more than \(entry.cap.limit) bytes from", task.originalRequest?.url?.host ?? "?")
+            print("[foxy] answer refused: more than \(entry.cap.limit) bytes from", LogRedaction.host(task.originalRequest?.url?.host))
             entry.done(nil, task.response, AnswerTooLarge())
         } else if let error {
             entry.done(nil, task.response, error)
@@ -939,7 +940,7 @@ enum HostApprovals {
                 return
             }
             store(stored().union([h]))
-            print("[foxy] hosts: allowed \(h)")
+            print("[foxy] hosts: allowed \(LogRedaction.host(h))")
             finish(h, true, on: presenter)
         }
     }

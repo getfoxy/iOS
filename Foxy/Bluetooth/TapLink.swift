@@ -586,10 +586,12 @@ final class TapReceiver: NSObject, CBPeripheralManagerDelegate {
         onEvent(.connecting, nil)
         handshakeTimer?.invalidate()
         handshakeTimer = Timer.scheduledTimer(withTimeInterval: Self.handshakeWait, repeats: false) { [weak self] _ in
-            guard let self, !self.linked, !self.finished, self.talkingTo == central.identifier,
-                  self.arriving.buffer.isEmpty else { return }
+            // whatever it left half-written: a byte and silence held the place for good while this asked for an empty buffer
+            guard let self, TapPlace.givenBackByClock(linked: self.linked), !self.finished,
+                  self.talkingTo == central.identifier else { return }
             print("[tap] receive: that phone began and did not finish in \(Int(Self.handshakeWait))s; back on the air")
             self.subscribed.removeAll { $0.identifier == central.identifier }
+            self.arriving = TapProtocol.Bytes()
             self.talkingTo = nil
             self.session = nil
             self.linkedCentral = nil
@@ -642,6 +644,20 @@ final class TapReceiver: NSObject, CBPeripheralManagerDelegate {
                 changeOwed = false
                 print("[tap] receive: the payer has gone, so the change is no longer waited for")
                 changeAnswered(false)
+            }
+            /* And when nothing of it reached the page, the place goes with the
+             * phone that held it. This used to clear what had arrived and stop:
+             * a phone that wrote one byte and left kept the place, the receiver
+             * stayed off the air, and every payer after it was ignored. */
+            if TapPlace.givenBackByLeaving(paymentHeard: paymentHeard, resultSent: resultSent, changeOwed: changeOwed) {
+                print("[tap] receive: nothing of it reached the page; the place is given back and this phone is on the air again")
+                handshakeTimer?.invalidate(); handshakeTimer = nil
+                talkingTo = nil
+                session = nil
+                linked = false
+                linkedCentral = nil
+                offerSent = false
+                advertise()
             }
             return
         }
@@ -703,6 +719,15 @@ final class TapReceiver: NSObject, CBPeripheralManagerDelegate {
             case .bad:
                 arriving = TapProtocol.Bytes()
                 made.stopped("a message that would not read")
+                // before the link, as a stop: the place goes and this phone is back on the air
+                if TapPlace.givenBackByBadBytes(linked: linked) {
+                    handshakeTimer?.invalidate(); handshakeTimer = nil
+                    session = nil
+                    talkingTo = nil
+                    linkedCentral = nil
+                    offerSent = false
+                    advertise()
+                }
             case .done(let body):
                 arriving = TapProtocol.Bytes()
                 // a part that is in counts towards the whole; anything else ends the count
@@ -1508,7 +1533,7 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         warmReadings = 0
         warmOpen = 0
         slowSaid = false
-        outgoing.removeAll()
+        outgoing.drop()
         writing = false
         scan()
     }
@@ -1770,17 +1795,13 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
      * as notifications, which `pump()` already paces against
      * `peripheralManagerIsReady`. This is that, for the direction the payment
      * takes now. */
-    private var outgoing: [Data] = []
+    private var outgoing = TapOutbox()
     private var writing = false
 
-    private func write(_ message: Data, to p: CBPeripheral) {
-        let frame = framed(message)
-        let size = max(20, p.maximumWriteValueLength(for: .withResponse))
-        var i = 0
-        while i < frame.count {
-            outgoing.append(frame.subdata(in: i..<min(i + size, frame.count)))
-            i += size
-        }
+    /// `question`: this is M12, and a write of one of its pieces that fails is
+    /// the question failing, not the payment (`TapOutbox`).
+    private func write(_ message: Data, to p: CBPeripheral, question: Bool = false) {
+        outgoing.add(framed(message), size: max(20, p.maximumWriteValueLength(for: .withResponse)), question: question)
         pumpWrites(to: p)
     }
 
@@ -1790,15 +1811,18 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
               let ch = p.services?.first(where: { $0.uuid == CBUUID(nsuuid: s) })?
                 .characteristics?.first(where: { $0.uuid == CBUUID(nsuuid: TapCrypto.inCharacteristic(for: s)) })
         else { return }
+        guard let piece = outgoing.take() else { return }
         writing = true
-        p.writeValue(outgoing.removeFirst(), for: ch, type: .withResponse)
+        // the question is out only once one of its own pieces is
+        againOut = outgoing.questionInFlight
+        p.writeValue(piece, for: ch, type: .withResponse)
     }
 
     func peripheral(_ p: CBPeripheral, didWriteValueFor ch: CBCharacteristic, error: Error?) {
         writing = false
         if let error {
             print("[tap] pay: a piece would not go —", error.localizedDescription)
-            outgoing.removeAll()
+            outgoing.drop()
             // which word it was decides what follows (`TapWriteFailure`)
             let failed = TapWriteFailure.after(question: againOut, payment: sendDone != nil, changeKept: ackOut)
             if ackOut { ackOut = false; print("[tap] pay: the word that the change was kept did not get through") }
@@ -1841,7 +1865,9 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             ackOut = false
             print("[tap] pay: the receiver was told the change was kept")
         }
-        if againOut, outgoing.isEmpty { againOut = false }
+        // the piece that went was the one in flight; the next one says whether it is the question's
+        outgoing.written()
+        againOut = false
         if closingAfterWrites, outgoing.isEmpty {
             closingAfterWrites = false
             stop()
@@ -1927,8 +1953,9 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private var paymentSent = false
     private var askedAgainAt: TimeInterval = 0
     private var againTimer: Timer?
-    /// The question is on its way and nothing else is: a write that fails now
-    /// is the question failing, not the payment (`didWriteValueFor`).
+    /// The piece on its way is the question's: a write that fails now is the
+    /// question failing, not the payment (`didWriteValueFor`). Set as one of
+    /// the question's own pieces is written, whatever was queued before it.
     private var againOut = false
     func askAgain() {
         dispatchPrecondition(condition: .onQueue(.main))
@@ -1937,12 +1964,13 @@ final class TapPayer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
               let made = session, let p = target, p.state == .connected else { return }
         askedAgainAt = now
         incoming = TapProtocol.Bytes()
-        // only when nothing else is waiting to be written: then a refusal is this question's
-        let alone = outgoing.isEmpty && !writing
         guard let sealed = made.sealAgain() else { return }
         print("[tap] pay: back in front with a payment handed over; asking the receiver to say it again")
-        againOut = alone
-        write(sealed, to: p)
+        /* Marked as the question piece by piece, behind whatever is still going
+         * out. It used to be marked only when nothing was queued ahead of it, so
+         * behind a payment's last pieces it was not, and its write failing was
+         * taken for the payment's: given up as lost while the receiver held it. */
+        write(sealed, to: p, question: true)
         guard sendDone != nil else { return }
         againTimer?.invalidate()
         againTimer = Timer.scheduledTimer(withTimeInterval: 6, repeats: false) { [weak self] _ in

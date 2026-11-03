@@ -790,8 +790,11 @@
    * or `ms` have gone by. Never rejects: what follows goes on either way, by
    * whatever the route then is. */
   function routeSoon(ms) {
-    if (routeOpen()) return Promise.resolve(true);
     var wait = ms === undefined ? ROUTE_WAIT_MS : Math.max(0, Number(ms) || 0);
+    /* A route, and a mint switched to that has not answered yet (`mintPendingNow`): the wait is for that mint, the
+     * same few seconds, and true only once it has answered. */
+    if (routeOpen() && mintPendingNow()) return mintPendingSoon(wait);
+    if (routeOpen()) return Promise.resolve(true);
     if (!(wait > 0) || !routeComing()) return Promise.resolve(false);
     console.log('[foxy] a connection is on its way; waiting for it, ' + Math.round(wait / 1000) + 's at most');
     return new Promise(function (done) {
@@ -826,5 +829,131 @@
       : privacy.everUp
         ? 'Tor is reconnecting. Try again in a moment.'
         : 'Foxy is still connecting to Tor.');
+  }
+
+  /* ---- a mint switched to and not heard from yet -----------------------------
+   *
+   * A switch took as long as the mint took to answer: its info and keysets over
+   * Tor, a second or two from this session's answers and longer from none, with
+   * the row saying CONNECTING… and the drawer open the whole while. Everything
+   * the home screen shows of a mint is on this phone already: its pile, its
+   * history, and its keysets from the last time (`mintCacheFor`), which is all a
+   * wallet needs to be built (the offline launch builds one from nothing else).
+   *
+   * So a person's switch lands at once, on a wallet built from the keysets on
+   * file, and the mint is asked behind it (11-routing.js, `connect` with
+   * `lazy`). Until it answers this is the record of that, and what needs the
+   * live mint waits for it or is refused in its words (`need`), as it would be
+   * offline: nothing is asked of a mint on keysets it may have rotated away
+   * from. What is local (the balance, history, pieces already on hand, ecash
+   * locked to this phone checked by the keys on file) goes on as offline.
+   *
+   * Pending is a wallet, not a mint: the record holds the very wallet object
+   * it was built as, and stops being true the moment anything else is
+   * connected (a later switch, a visit), so a mint that answers after the
+   * phone has gone elsewhere is let go rather than adopted over it. With no
+   * keysets on file there is no wallet at all (`w` null): nothing is made at
+   * that mint until its keys have come.
+   *
+   * { url, gen, w, since, noKeys, before, beforeUrl } */
+  var mintPending = /** @type {any} */ (null);
+  var mintPendingGen = 0;
+  var mintPendingWaiters = /** @type {Function[]} */ ([]);
+  // the last switch whose mint did not answer, for the shield's card: { url, why, at }
+  var mintPendingLast = /** @type {any} */ (null);
+
+  function mintPendingNow() {
+    var c = mintPending;
+    if (!c) return null;
+    if (canonicalMint(mintUrl || '') !== c.url) return null;
+    if (c.w ? wallet !== c.w : !!wallet) return null;
+    return c;
+  }
+
+  /* The refusal, marked, so a screen can wait for the mint rather than spend a try (12-receive.js); and as one that
+   * asked the mint nothing (`neverSent`), which it is, so whatever it stops puts back what it had set aside. */
+  function mintPendingRefusal(c) {
+    var e = /** @type {any} */ (new Error(c.failed
+      ? hostOf(c.url) + ' is not answering yet, so this has to wait. Foxy keeps trying.'
+      : 'Foxy is still connecting to ' + hostOf(c.url) + '. Try again in a moment.'));
+    e.foxyConnecting = true;
+    e.unsent = true;
+    return e;
+  }
+
+  /* Resolves true the moment the mint pending answers, false if it does not within `ms` or will not. Never rejects. */
+  function mintPendingSoon(ms) {
+    var c = mintPendingNow();
+    if (!c) return Promise.resolve(routeOpen());
+    if (!(ms > 0) || c.failed) return Promise.resolve(false);
+    return new Promise(function (done) {
+      var settled = false;
+      var answer = function (ok) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        mintPendingWaiters = mintPendingWaiters.filter(function (fn) { return fn !== answer; });
+        done(!!ok);
+      };
+      var timer = setTimeout(function () { answer(false); }, ms);
+      mintPendingWaiters.push(answer);
+    });
+  }
+
+  /* The pending switch is over: its mint answered (`ok`), or the phone went elsewhere first (`superseded`, said to
+   * nobody but the waiters), or a switch with no keys on file went back where it was (`back`). Once for each. */
+  function mintPendingSettle(c, ok, why, extra) {
+    if (!c || mintPending !== c) return;
+    mintPending = null;
+    var gone = !!(extra && extra.superseded);
+    if (!gone) mintPendingLast = ok ? null : { url: c.url, why: String(why || ''), at: Date.now() };
+    console.log('[foxy] switch: ' + hostOf(c.url) + (ok ? ' answered, ' + (Date.now() - c.since) + ' ms after the switch'
+      : gone ? ' was left before it answered' : ' did not answer (' + (why || 'no reason given') + '); back on ' + hostOf(mintUrl)));
+    mintPendingWaiters.slice().forEach(function (fn) { fn(!!ok); });
+    if (!gone) mintPendingTell(c, !!ok, why, !!(extra && extra.back));
+  }
+
+  /* Its mint did not answer, and the phone stays on it, on the wallet from the keys on file, which is the offline
+   * state: what needs the live mint is still refused, now in the words of why (`mintPendingRefusal`), until a connect
+   * for real lands (the app's `connectForRealOnceOnline` tries again) or the phone goes elsewhere. `w`: the wallet
+   * from the file in hand now, where a confirmation rebuilt it. */
+  function mintPendingFail(c, why, w) {
+    if (!c || mintPending !== c) return;
+    if (w) c.w = w;
+    c.failed = String(why || 'the mint did not answer');
+    mintPendingLast = { url: c.url, why: c.failed, at: Date.now() };
+    console.log('[foxy] switch: ' + hostOf(c.url) + ' did not answer (' + c.failed + '); still on it, from the keys on file');
+    mintPendingWaiters.slice().forEach(function (fn) { fn(false); });
+    mintPendingTell(c, false, c.failed, false);
+  }
+
+  function mintPendingTell(c, ok, why, back) {
+    if (typeof FoxyWallet._onMintConnected !== 'function') return;
+    try {
+      FoxyWallet._onMintConnected({ url: c.url, ok: ok, why: ok ? '' : String(why || ''), back: back,
+                                    noKeys: !!c.noKeys, ms: Date.now() - c.since, gen: c.gen });
+    } catch (e) { console.warn('[foxy] the connected watcher:', e && e.message); }
+  }
+
+  /* A connect has just put `w` in hand at `u` (11-routing.js), built from the keys on file where `fromFile`: a switch
+   * pending for another wallet is over. Answered, if this is its mint for real; not, if this is its mint from the
+   * file again (the route went while it was asked); and left, if this is another mint. */
+  function mintPendingReplaced(w, u, fromFile) {
+    var c = mintPending;
+    if (!c || c.w === w) return;
+    if (canonicalMint(u || '') !== c.url) { mintPendingSettle(c, false, '', { superseded: true }); return; }
+    if (!fromFile) { mintPendingSettle(c, true, ''); return; }
+    /* From the file again with a route: a switch to this same mint made again, which has not been asked yet and is
+     * pending in its own right, not a mint that did not answer (review p5). */
+    if (routeOpen()) { mintPendingSettle(c, false, '', { superseded: true }); return; }
+    var off = '';
+    try { assertRoute(); } catch (eR) { off = (eR && eR.message) || String(eR); }
+    mintPendingFail(c, off || 'the mint did not answer', w);
+  }
+
+  /* Is a step that would ask the mint to wait for one switched to (`routeSoon` waits for it)? Beside `routeComing`,
+   * which is Tor on its way. */
+  function mintComing() {
+    return !!(routeOpen() && mintPendingNow());
   }
 

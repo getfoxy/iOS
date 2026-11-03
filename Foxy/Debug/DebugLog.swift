@@ -23,8 +23,9 @@ import UIKit
 //    `Print.swift` reaches this from its Release half.
 //  - A log in the system log is ephemeral. A log in a FILE persists, is copied
 //    to a Mac, and may be pasted into a chat. So the lines are redacted on the
-//    way in: a cashu token, a lightning invoice and any long hex run are
-//    replaced by their length. `Print.swift`'s own note explains why the prints
+//    way in, by the field log's own list (LogRedaction): a cashu token, a
+//    lightning invoice, a payment request, an onion address, a nostr key and
+//    any long hex run are replaced by their length. `Print.swift`'s own note explains why the prints
 //    name mint hosts and amounts; those stay, because they are the evidence.
 //  - Bounded: two files of 4 MB. A long test cannot fill the phone.
 //
@@ -200,31 +201,12 @@ enum DebugLog {
 
     // MARK: Redaction
     //
-    // A file is copied and pasted in a way the system log is not. These are the
-    // three shapes that carry money or a payee in this app's logs.
+    // A file is copied and pasted in a way the system log is not. What comes
+    // out of a line here is what comes out of a field log line: one list, in
+    // LogRedaction, so the two cannot drift apart. They had: this file's own
+    // copy knew tokens, invoices and long hex, and still kept the payment
+    // requests, onion addresses and nostr keys the field log took out.
 
-    private static let secrets: [(NSRegularExpression, String)] = {
-        func re(_ p: String) -> NSRegularExpression? {
-            try? NSRegularExpression(pattern: p, options: [.caseInsensitive])
-        }
-        return [
-            (re("cashu[AB][A-Za-z0-9_=-]{20,}"), "cashu token"),
-            (re("ln(bc|tb|bcrt)[0-9][a-z0-9]{30,}"), "lightning invoice"),
-            (re("\\b[0-9a-f]{64,}\\b"), "hex"),
-        ].compactMap { pair in pair.0.map { ($0, pair.1) } }
-    }()
-
-    private static func redact(_ line: String) -> String {
-        var out = line
-        for (pattern, what) in secrets {
-            let full = NSRange(out.startIndex..., in: out)
-            // back to front, so an earlier replacement cannot move a later range
-            for m in pattern.matches(in: out, range: full).reversed() {
-                guard let r = Range(m.range, in: out) else { continue }
-                out.replaceSubrange(r, with: "<\(what), \(m.range.length) chars, not logged>")
-            }
-        }
-        return out
-    }
+    private static func redact(_ line: String) -> String { LogRedaction.redact(line) }
 }
 #endif

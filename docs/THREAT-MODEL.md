@@ -65,7 +65,7 @@ The bridge exposes exactly these actions:
 - `awake`, which holds the screen lit while a screen is being looked at rather than touched
 - `shakeStart`, `shakeStop`: whether a shake of the phone presses TAP, armed only on the receive screen (TAP-TO-PAY.md)
 - a card that holds ecash, held to the phone: `cardBegin`, `cardSend`, `cardSay`, `cardAgain`, `cardEnd`
-- a card's owner key, which never leaves native code: `cardOwnerKey` (its public half) and `cardOwnerSign` (a signature for one of six labels). A card takes no signed time: its clock is the Bitcoin block headers the page fetches over Tor and shows it
+- a card's owner key, which never leaves native code: `cardOwnerKey` (its public half), `cardOwnerSign` (a signature for one of six labels) and `cardOwnerApprove` (the keeper's yes, before the card session, that every label but load signs against). A card takes no signed time: its clock is the Bitcoin block headers the page fetches over Tor and shows it
 
 Haptics arrive as a separate `{haptic}` message with no action. The review-era
 `open`, `vpn`, `path` and `torcheck` are gone. `open` handed https links to
@@ -90,7 +90,7 @@ answer for a third of them.
 | `scan` | — | the full-screen camera sheet, from the presenter, with one of Foxy's own prompts. A person has to point it at something |
 | `covered` | — | a nudge with nothing in it: the page saying it has the screen to itself (the launch intro, or CONNECTING TO TOR) so the native splash can come down without the bare home shell showing in between. Carries no data, answers nothing, and the splash lifts on its own timers anyway |
 | `log` | — | the device log in Debug, where it reaches NSLog and a file. In Release it reaches `FieldLog` and nothing else: memory on the phone, for the ERRORS and LOGS screens, and a subset of the lines kept in a file for the next run |
-| `fieldLog` | — | reads back what `FieldLog` holds, for the ERRORS and LOGS screens: the native lines and the page's own, redacted on the way in (tokens, invoices, payment requests, onion addresses, keys, long hex). The LOGS screen shows it three ways: ALL, ERRORS, and CONNECTION, the connection diary (one line per mint request with its method, host, path with every id masked, six characters of its circuit, milliseconds and outcome; the asks on another circuit; network changes; going to the background; Tor's lines). Memory, apart from a subset of the lines (Tor, tap, screens, payment timing, the network's kind, going to the background) that is also saved to `Library/Caches/foxy-lastrun.log` for the next run, excluded from backups and deleted when read back; nothing is sent anywhere, and it leaves the phone only if the person taps COPY |
+| `fieldLog` | — | reads back what `FieldLog` holds, for the ERRORS and LOGS screens: the native lines and the page's own, redacted on the way in (tokens, invoices, payment requests, onion addresses, keys, long hex), by one list that the Debug file log uses too (`LogRedaction`). The app's own lines name no host in a Release build: a mint, a payee, a redirect's target or a host the person allowed is `host` and the first eight hex characters of the SHA-256 of its name (`LogRedaction.host`), the rule the Tor lines keep for relays, so two lines about one host still match and nobody reading a pasted log learns which; a Debug build names it. The page's own lines are as the page wrote them. The LOGS screen shows it three ways: ALL, ERRORS, and CONNECTION, the connection diary (one line per mint request with its method, host, path with every id masked, six characters of its circuit, milliseconds and outcome; the asks on another circuit; network changes; going to the background; Tor's lines). Memory, apart from a subset of the lines (Tor, tap, screens, payment timing, the network's kind, going to the background) that is also saved to `Library/Caches/foxy-lastrun.log` for the next run, excluded from backups and deleted when read back; nothing is sent anywhere, and it leaves the phone only if the person taps COPY |
 | `fieldLogClear` | — | forgets all of it |
 | `price` | route | refused with "Foxy is not connected to Tor." unless Tor is up, or the person chose to continue without it |
 | `candles` | route | as `price` |
@@ -100,7 +100,7 @@ answer for a third of them.
 | `biometric` | reasons | one of three fixed reasons; the page cannot write its own |
 | `seedStatus` | seed queue | reads whether a seed exists |
 | `seedCreate` | one change + seed queue | the words are made in Swift; one seed change at a time, or "Another change to the seed is still waiting." |
-| `seedMigrate` | one change + seed queue | only a BIP-39 phrase, only inside the one-time window, and never over a seed already saved |
+| `seedMigrate` | one change + seed queue + seed alert | only a BIP-39 phrase, only inside the one-time window, and never over a seed already saved; a write only after the Save alert and then Face ID or the passcode |
 | `countersImport` | seed queue | once per install |
 | `counterReserve` | seed queue | the range is written before its secrets are answered |
 | `counterReserveAt` | seed queue | refuses a range already issued, or a start more than 100 past the counter |
@@ -127,7 +127,7 @@ answer for a third of them.
 | `hostsKnown` | once | the first run only, never again once the marker is stored; the page's list is filtered and kept apart from the hosts the person allowed |
 | `previewStart` | presenter | a finite rectangle inside the web view |
 | `previewStop` | — | stops the preview |
-| `pasteStart` | presenter + rect limits | wider than 30 and taller than 20, at most 90% of the width and half the height, inside the view and below its top third |
+| `pasteStart` | presenter + rect limits + paste button | wider than 30 and taller than 20, at most 90% of the width and half the height, inside the view and below its top third; and over one of the page's own paste buttons: a script run in a content world of the bridge's own, which the page's scripts cannot change, must find at the middle of the rectangle an element marked `data-foxy-paste="1"`, shown, labelled PASTE, whose box is the rectangle within two points. Anything else is refused, so the invisible system button cannot be parked over a confirm button |
 | `pasteStop` | — | removes the control |
 | `notify` | kinds + throttle | two texts only, "Payment sent" and "Payment received", no amounts, one every 3 s at most |
 | `share` | — | the iOS share sheet from the presenter, refused when something else is already up or the text is empty |
@@ -165,7 +165,8 @@ answer for a third of them.
 | `cardAgain` | card session | the card left part way through: the open sheet looks for a card again, with one line of the page's text on it, under the same limits. Answers when a card is there, or why not. The applet must be chosen again before any of its instructions is carried |
 | `cardEnd` | card session | closes the sheet, with a word or with a reason; also how the page takes down a sheet still waiting for a card |
 | `cardOwnerKey` | seed queue | the owner PUBLIC key for one card, as 130 lowercase hex characters (`04`, X, Y of a P-256 key). The private half is derived from the seed and the card's public key, which the page gives as 66 hex characters starting 02 or 03; anything else is "bad request" before the seed is read. The page gives the answer to the card at set-up. No counter moves, and the same twelve words derive the same key on a new phone, so that phone is the owner of the same cards. Only the public half is ever answered |
-| `cardOwnerSign` | seed queue | an ECDSA signature (P-256, SHA-256, DER, lowercase hex) by that owner key, and nothing else, over `FoxyCard/` and a label, a 16-byte nonce and a value. Only six labels are signed: `change-pin`, `set-limit`, `set-owner`, `set-card`, `load` and `reset` (card software 1.17: the owner gives the card back to what it was in its packet, which needs no money on it and wipes the card's PIN, owner, record and key), each with the shape of value its card command takes (a PIN of 4 to 8 digits; a limit of 4 bytes, or of 8 for the day's and the one tap's together, or of 12 with the no-PIN allowance after them; a 65-byte key beginning 04; a card record of 100 + L bytes, L from 1 to 80, or of 103 + L with the card's design after the mint, L then 77 at most; nothing at all). Anything else is "bad request" before the seed is read: a lock (`lock`) and a time (`time`) cannot be asked for, and no label is the start of another. A page that had been got at can ask for any of the five for any card whose key it knows. A nonce comes only from a card held to the phone, and a signature is good for that nonce, in that tap, and no other, so it needs the card held to the phone; with that, it can do what the card's owner can, with no PIN, which includes setting the PIN, lifting the limit and so spending what is on the card. The owner key and the seed are never in an answer |
+| `cardOwnerSign` | seed queue | an ECDSA signature (P-256, SHA-256, DER, lowercase hex) by that owner key, and nothing else, over `FoxyCard/` and a label, a 16-byte nonce and a value. Only six labels are signed: `change-pin`, `set-limit`, `set-owner`, `set-card`, `load` and `reset` (card software 1.17: the owner gives the card back to what it was in its packet, which needs no money on it and wipes the card's PIN, owner, record and key), each with the shape of value its card command takes (a PIN of 4 to 8 digits; a limit of 4 bytes, or of 8 for the day's and the one tap's together, or of 12 with the no-PIN allowance after them; a 65-byte key beginning 04; a card record of 100 + L bytes, L from 1 to 80, or of 103 + L with the card's design after the mint, L then 77 at most; nothing at all). Anything else is "bad request" before the seed is read: a lock (`lock`) and a time (`time`) cannot be asked for, and no label is the start of another. A page that had been got at can ask for a signature for any card whose key it knows. A nonce comes only from a card held to the phone, and a signature is good for that nonce, in that tap, and no other, so it needs the card held to the phone. Every label but `load` signs only against the keeper's yes, given before the card session (`cardOwnerApprove`, below), and uses it up: the same bytes for `change-pin`, `reset` and `set-owner`; the mint, and the unit where it was named, for `set-card`; the figures chosen for `set-limit`, every other figure in the value the card's own as its GET_INFO answer in this tap said it. Three things sign with no yes because they change nothing the keeper chose: a 16-byte limit whose day's, one payment's and no-PIN figures are the card's own (the rate written before a top-up in sats); a limit in the tap whose GET_INFO said the card had no owner (its set-up); and a record at the mint and unit the card's own record, read in this tap, names. A move to another mint the keeper said yes to (`keep`) is kept in the Keychain (`foxy.card.moves`) for its card until the write that uses it, which may be a later tap. A record (`set-card`) is signed only when the key its money goes back to is this phone's own: the request names the lock-key index (`refundIndex`) and native derives the key again from the seed; any other key, none, or no index is "Nothing was changed on the card.", whatever the mint and unit. Nothing is asked during a tap: the phone's alert would sit under the card sheet. A new owner key for `set-owner` must be a point on P-256, not only 65 bytes beginning 04, or it is "bad request" before anything else. What such a page can still have signed with nobody asked is a top-up; a limit needs a tap on the alert. The owner key and the seed are never in an answer |
+| `cardOwnerApprove` | seed alert | the keeper's yes to one owner's command, asked at the screen where it begins and before any card is held up: the phone's own alert, its words built from the approval itself (the command; the card, where the page names it; the mint and unit for `set-card`; which limits for `set-limit`; never the PIN), then for `set-owner`, `set-card`, `change-pin` and `reset` Face ID or the passcode with a context of its own, so neither a seed already unlocked nor the seconds after an unlock stand in for the keeper. `set-limit` asks the alert alone, and `load` is asked nothing ("bad request"). One question at a time; no answer in 50 seconds is a no. A yes lasts for the next card session or 90 seconds, whichever ends first, and is used up by the signature it allows; a move (`keep`, for one named card) is kept in the Keychain until its record is written. What stays trusted: the figures of a limit the keeper chose and the rate a 1.23 card is written at come from the page; a record's design and time key, and its unit where the approval named none, are the page's; the card's own answers are read as the page reads them, and a page can choose which card command it sends |
 
 Two things the table does not check, and does not pretend to: each action's own
 argument checks (`FoxyTests/NativeSeedTests.swift` and `CounterRangeCheckTests`
@@ -188,9 +189,12 @@ What bounds the bridge:
     goes to the background, so none is left over the PIN lock.
   - **`seedMigrate` never replaces a seed.** It is the one-time move for an
     install whose page still holds words from before the keychain. It takes
-    only a BIP-39 phrase and writes it only where no seed is saved. Otherwise
-    it answers `same` or `different`, changing nothing and asking nothing, and
-    it never answers words. It writes only inside a one-time window
+    only a BIP-39 phrase and writes it only where no seed is saved, and before
+    it writes it asks, as a replace does: the iOS alert "Save this wallet's
+    seed?", and after its yes Face ID or the passcode. A no changes nothing and
+    leaves the window open for the next launch. It was the one way into the
+    seed that asked nobody. Otherwise it answers `same` or `different`,
+    changing nothing and asking nothing, and it never answers words. It writes only inside a one-time window
     (`SeedMigrationWindow`): an install that had page storage before this
     launch, until its first answer or until a seed is made or found saved.
     Closed, it still compares with a saved seed, and
@@ -382,11 +386,18 @@ What bounds the bridge:
     carries 128 random bits and the path is checked **before** the method: a
     caller without it is answered 404 and learns nothing else about what is
     listening.
-  - What is read is bounded before it is believed: at most 4 connections at
+  - What is read is bounded before it is believed: at most 32 connections at
     once, an 8 kB head, a `Content-Length` of at most 256 kB refused *before*
     its body arrives, no chunked bodies and no other method than `POST`, a
-    payer that stalls loses its slot after 30 seconds, and a page that has not
-    answered in 100 seconds answers 504 for it.
+    connection that has not sent a whole head to the right path in 5 seconds
+    loses its place, a payer that stalls loses its slot after 30 seconds, and a
+    page that has not answered in 100 seconds answers 504 for it. With every
+    place taken, the oldest connection that has sent no head gives its place
+    to the newcomer; a connection with a head is never the one let go. Four
+    places used to be all there were, so another app holding four silent
+    connections kept the payer's out for thirty seconds at a time. The
+    address's own opening, Tor's answer and the deadline on both are read and
+    written on the main queue alone.
   - What arrives is a claim, not an instruction. It must name a request open on
     this phone right now, at the mint that request named *and* the mint this
     wallet is connected to, in sats, with at most 500 proofs, each of a shape
@@ -741,8 +752,13 @@ seconds in the foreground, and on return.
 - **Getting a key.** ALLOW FOXY IN ORBOT opens
   `orbot:request/token?…need-bypass=true` (no `//`). Orbot issues a key and copies it
   to the clipboard. Foxy picks it up on its next return to the foreground, only
-  after having asked, only if it is shaped like a UUID. It clears the clipboard
-  and stores the key in the keychain.
+  after having asked, only if it is shaped like a UUID, and only if it was put
+  on the clipboard after the request: the clipboard's change count is taken as
+  Orbot's screen is opened, and a UUID that was already there, or one that
+  arrives without the count moving, is left alone. It clears the clipboard and
+  holds the key unconfirmed, in memory only, until Orbot's API answers 200 to
+  it; only then is it stored in the keychain. A 403 drops it. Any UUID on the
+  clipboard used to be stored as the key.
 - **Using it.** With the key, Foxy's direct Tor reaches its relays through
   Orbot's bypass SOCKS port (`Socks5Proxy`). A bridge transport reaches its
   bridge through the same port. Requests still go only to Foxy's Tor. If Orbot
@@ -1032,7 +1048,7 @@ Details and test results: `SEED-HANDLING.md`.
 | the seed | keychain: `foxy.seed.v2` with Face ID on, `foxy.seed.v1` with it off (where a new install starts) or on a phone with no passcode | this-device-only: never moved to another device or to iCloud Keychain | `WhenUnlockedThisDeviceOnly`, unreadable while locked; v2 adds `.userPresence`, so every read needs Face ID or the passcode, and with v1 the phone's own lock is all that stands in front of it |
 | the Orbot key | keychain, `foxy.orbot.token`, saved with `SeedStore.save` | this-device-only, as the seed | `WhenUnlockedThisDeviceOnly`, without `.userPresence`: unreadable while locked, read without Face ID or the passcode |
 | proofs, log, notes, contacts, counter, PIN hash and wrong-PIN count | web view localStorage, `Library/WebKit` | **excluded** | `completeUnlessOpen` |
-| the install marker | `Application Support/foxy.install` | **included**, on purpose (below) | `completeFileProtection` |
+| the install marker | `Application Support/foxy.install` | **included**, on purpose (below) | `completeUntilFirstUserAuthentication` (it holds no secret) |
 | Tor's state | `Application Support/tor` | excluded | directory mode 0700 |
 | the web files | `Library/Caches/web/` | — | copied fresh from the app bundle every launch, served at `foxy-app://wallet`; hold nothing of the wallet's |
 
@@ -1107,9 +1123,13 @@ replaced the real seed. Now:
 Keychain items outlive app deletion. Minibits shipped a fix for exactly this:
 a reinstall found the old seed and collided with onboarding. Foxy checks for a
 marker file in its own container at launch, before the web view exists. With
-no marker, both seed items, the approved hosts and the Orbot key are deleted,
-and the marker is written. An earlier version deleted only the older seed item,
-so once the seed had moved behind Face ID a reinstall kept it.
+no marker, the marker is written and read back, and only then are both seed
+items, the approved hosts and the Orbot key deleted. A marker that cannot be
+written deletes nothing, and the next launch looks again: deleting first and
+writing after, with the write's error swallowed, let a full phone turn a
+wallet in use into a reinstall at its next launch. An earlier version deleted
+only the older seed item, so once the seed had moved behind Face ID a reinstall
+kept it.
 
 The marker is **included** in backups. It used to be excluded, and that turned
 a restore into a reinstall. A this-device-only keychain item comes back when a

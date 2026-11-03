@@ -127,6 +127,52 @@ final class NetDiaryTests: XCTestCase {
         XCTAssertTrue(kept.contains("<cashu token,") && kept.contains("<lightning invoice,") && kept.contains("<hex, 64 chars"), kept)
     }
 
+    /// A Release build's lines name no host: `host` and the first eight hex
+    /// characters of the SHA-256 of its name, lowercased. Two lines about one
+    /// host still read as the same host; a Debug build names it.
+    func testAReleaseLineNamesNoHost() throws {
+        let hidden = LogRedaction.host("Mint.Minibits.Cash", named: false)
+        XCTAssertEqual(hidden, LogRedaction.host("mint.minibits.cash", named: false), "one host, one name, whatever its case")
+        XCTAssertTrue(hidden.hasPrefix("host "), hidden)
+        XCTAssertEqual(hidden.count, "host ".count + 8, hidden)
+        XCTAssertFalse(hidden.lowercased().contains("minibits"), hidden)
+        XCTAssertNotEqual(hidden, LogRedaction.host("kashu.me", named: false))
+        XCTAssertEqual(LogRedaction.host("mint.minibits.cash", named: true), "mint.minibits.cash")
+        XCTAssertEqual(LogRedaction.host(nil, named: false), "?")
+        let target = try XCTUnwrap(URL(string: "https://pay.example.com/callback?k1=" + String(repeating: "9", count: 40)))
+        let shown = LogRedaction.address(target, named: false)
+        XCTAssertEqual(shown, LogRedaction.host("pay.example.com", named: false), "the host alone, never the path or the query")
+        XCTAssertTrue(LogRedaction.address(target, named: true).hasPrefix("https://pay.example.com/callback"))
+    }
+
+    /// The lines that named a host in every build go through that rule now: the
+    /// route's refusals, the hosts allowed, a payment posted to a payee, and the
+    /// diary's own lines.
+    func testThePrintsThatNamedHostsGoThroughTheRule() throws {
+        let route = try String(contentsOf: repoRoot().appendingPathComponent("Foxy/Network/Route.swift"), encoding: .utf8)
+        for line in route.split(separator: "\n") where line.contains("print(") {
+            XCTAssertFalse(line.contains(".host ?? \"?\"") || line.contains("allowed \\(h)"), String(line))
+        }
+        XCTAssertTrue(route.contains("LogRedaction.address(target)"), "a redirect's target is printed whole again")
+        let delivery = try String(contentsOf: repoRoot().appendingPathComponent("Foxy/Bridge/FoxyBridge+Delivery.swift"), encoding: .utf8)
+        XCTAssertFalse(delivery.contains("POST \\(host)"), "a payee's host is printed by name again")
+        let diary = try String(contentsOf: repoRoot().appendingPathComponent("Foxy/Debug/NetDiary.swift"), encoding: .utf8)
+        XCTAssertTrue(diary.contains("LogRedaction.host(host.lowercased())"))
+    }
+
+    /// The Debug file log takes out what the field log takes out, from the one
+    /// list: its own copy had no payment requests, onion addresses or nostr keys.
+    func testTheDebugFileLogUsesTheFieldLogsList() throws {
+        let source = try String(contentsOf: repoRoot().appendingPathComponent("Foxy/Debug/DebugLog.swift"), encoding: .utf8)
+        XCTAssertTrue(source.contains("LogRedaction.redact(line)"))
+        XCTAssertFalse(source.contains("NSRegularExpression"), "DebugLog keeps a list of its own again")
+        let request = "creqA" + String(repeating: "b", count: 40)
+        let onion = String(repeating: "c", count: 56) + ".onion"
+        let nsec = "nsec1" + String(repeating: "q", count: 58)
+        let kept = LogRedaction.redact("[foxy] \(request) \(onion) \(nsec)")
+        XCTAssertFalse(kept.contains(request) || kept.contains(onion) || kept.contains(nsec), kept)
+    }
+
     // MARK: The request mark
 
     override func tearDown() {

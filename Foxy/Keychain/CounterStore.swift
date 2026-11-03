@@ -341,6 +341,29 @@ final class CounterStore {
         }
     }
 
+    /// The files deleted, when they could not be set aside, and the store
+    /// empty: true when neither is left. For a seed already replaced, whose old
+    /// counters must not count on under the new one. Kept, they put the new
+    /// seed's next ecash at the old seed's high counters, past where any restore
+    /// from the new words looks; gone, a restore scans from zero and finds it.
+    func discard() -> Bool {
+        locked {
+            let fm = FileManager.default
+            for url in [fileURL, p2pkURL] where fm.fileExists(atPath: url.path) {
+                do {
+                    try fm.removeItem(at: url)
+                } catch {
+                    print("[foxy] \(url.lastPathComponent): could not be deleted either: \(error)")
+                }
+            }
+            p2pkServedEnd = 0
+            let gone = !fm.fileExists(atPath: fileURL.path) && !fm.fileExists(atPath: p2pkURL.path)
+            counters = gone ? [:] : nil
+            p2pkStored = gone ? 0 : nil
+            return gone
+        }
+    }
+
     static func replacedURL(_ directory: URL, _ stamp: Int) -> URL {
         directory.appendingPathComponent("foxy-counters.replaced.\(stamp).json")
     }

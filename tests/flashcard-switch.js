@@ -359,6 +359,82 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
     done();
     await until('the card’s screen, the empty card', () => app.state.screen === 'flashcard' && String(U.W.mintUrl).replace(/\/+$/, '') === MINT);
 
+    /* ---- 2026-11-03: a quote only for the mint on screen, and one visit for the crossing and the write --------------- */
+    U.nfc = c;
+    c.tap();
+    app.fcRead();
+    await until('the card read again at its mint', () => app.state.fc && app.state.fc.key === c.key && app.state.fc.check !== 'asking');
+    {
+      // a quote whose confirmation is no longer the one on screen is let go, not landed on another mint's figures
+      const said = [];
+      const log0 = U.window.console.log;
+      const log1 = console.log;
+      U.window.console.log = (...x) => { said.push(x.join(' ')); };
+      app.fcSwitchMint();
+      app.fcSwitchPick(MINT2);
+      const first = app.state.fcMove;
+      console.log = (...x) => { said.push(x.join(' ')); };
+      app.setState({ fcMove: Object.assign({}, first, { to: 'https://elsewhere.test', quote: null }) });
+      await settle();
+      await new Promise((r) => setTimeout(r, 200));
+      console.log = log1;
+      U.window.console.log = log0;
+      ok(!app.state.fcMove.quote && app.state.fcMove.to === 'https://elsewhere.test' && said.some((l) => /TRANSFER quote for n\.test (let go|not asked): it is not the confirmation on screen/.test(l)),
+         'a TRANSFER quote for a mint that is no longer the confirmation on screen is let go, and said', JSON.stringify({ q: app.state.fcMove.quote, said: said.filter((l) => /let go/.test(l)) }));
+      app.fcMoveCancel();
+      await settle();
+      await until('the phone home after the cancel', () => String(U.W.mintUrl).replace(/\/+$/, '') === MINT && app.state.screen === 'flashcard');
+    }
+    {
+      // the tap dropped after the pieces were made: TAP CARD writes in the visit the crossing made, with no trip home between
+      const visits = [];
+      const visit0 = U.W.cardVisit;
+      U.W.cardVisit = function (to) { visits.push(String(to)); return visit0.apply(this, arguments); };
+      c.tap();
+      app.fcSwitchMint();
+      app.fcSwitchPick(MINT2);
+      await until('the cost to be known, once more', () => app.state.fcMove && app.state.fcMove.quote);
+      const tapX = c.tap.bind(c);
+      c.tap = () => { tapX(); c.leaveBefore('32', 1); c.tap = tapX; };
+      app.fcMoveSpec().go();
+      pad(app).type('1234');
+      await until('the card asked for again, once more', () => face(app) && face(app).title === 'TAP THE CARD AGAIN');
+      const visitsAtCut = visits.length;
+      await settle();
+      await new Promise((r) => setTimeout(r, 100));
+      ok(String(U.W.mintUrl).replace(/\/+$/, '') === MINT2 && !!app._fcMoveHeld && !app._fcMoveHeld.ended,
+         'cut short with the pieces made: the phone stays at the new mint, its visit kept open for the tap', U.W.mintUrl);
+      const connects = [];
+      let beforeWrite = -1, visitsBeforeWrite = -1;
+      const connect0 = U.W.connect, write0 = U.W.cardWrite;
+      U.W.connect = function (url) { connects.push(String(url)); return connect0.apply(this, arguments); };
+      U.W.cardWrite = function () { if (beforeWrite < 0) { beforeWrite = connects.length; visitsBeforeWrite = visits.length; } return write0.apply(this, arguments); };
+      face(app).press('TAP CARD');
+      await until('the money written in the same visit', () => app.state.screen === 'paid' && app.state.paidSays === 'CARD MOVED');
+      ok(beforeWrite === 0 && visitsBeforeWrite === visitsAtCut,
+         'TAP CARD writes in that visit: no second visit, and no connect home between the crossing and the write',
+         JSON.stringify({ visits: visits.slice(visitsAtCut), connects, beforeWrite }));
+      U.W.cardWrite = write0;
+      ok(c.state.record.mint === MINT2 && U.W.cardOwed().length === 0, 'and the card is at the new mint with its money', c.state.record.mint);
+      U.W.connect = connect0;
+      U.W.cardVisit = visit0;
+      done();
+      await until('the card’s screen after the write', () => app.state.screen === 'flashcard');
+      await until('and the phone home once the write is done', () => String(U.W.mintUrl).replace(/\/+$/, '') === MINT && !app._fcMoveHeld);
+      ok(true, 'the visit ends with the write, and the phone goes home');
+      // back, for what follows
+      c.tap();
+      app.fcSwitchMint();
+      app.fcSwitchPick(MINT);
+      await until('the cost home to be known', () => app.state.fcMove && app.state.fcMove.quote);
+      app.fcMoveSpec().go();
+      pad(app).type('1234');
+      await until('the card moved home', () => app.state.screen === 'paid' && app.state.paidSays === 'CARD MOVED');
+      await settle();
+      done();
+      await until('the card’s screen, home', () => app.state.screen === 'flashcard' && String(U.W.mintUrl).replace(/\/+$/, '') === MINT);
+    }
+
     /* ---- what stops it before it starts ------------------------------------- */
     app.offline = true;
     app.fcSwitchMint();

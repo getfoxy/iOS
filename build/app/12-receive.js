@@ -704,6 +704,9 @@
     }));
   }
 
+  // how long a receive waits for a mint switched to that has not answered (a connect's own deadline)
+  MINT_ANSWER_WAIT_MS = 30000;
+
   openReceiveNow() {
     const W = window.FoxyWallet;
     /* A dollar balance asks in cents, exactly, by a mint quote in dollars: one
@@ -799,6 +802,15 @@
      * (26m-till.js, `tillLockFor`; the wallet's `invoice`). Asked as it always was otherwise. */
     const tillLock = this.tillLockFor ? this.tillLockFor() : '';
     const attempt = (n, waits) => (tillLock ? W.invoice(sats, memo, { lockPub: tillLock }) : W.invoice(sats, memo)).catch(e => {
+      /* A mint switched to a moment ago that has not answered yet (`switchTo`): the invoice is its to make, so the
+       * screen waits for it, as long as a connect waits, without spending a try; one that will not answer ends it. */
+      if (e && e.foxyConnecting && waits < WAITS && W.routeSoon) {
+        console.log('[foxy] invoice: the mint switched to has not answered yet — waiting for it');
+        return W.routeSoon(this.MINT_ANSWER_WAIT_MS).then(ok => {
+          if (!ok) throw e;
+          return attempt(n, waits + 1);
+        });
+      }
       const closed = !!(W.neverSent && W.neverSent(e));
       if (closed && waits < WAITS && G && G.quiet) {
         console.warn('[foxy] invoice: the request never left \u2014 waiting for Tor'
@@ -936,6 +948,10 @@
     // (a cashier's till: locked to the keeper's key, as `openReceiveNow` asks)
     const tillLock = this.tillLockFor ? this.tillLockFor() : '';
     const attempt = (n, waits) => W.invoice(cents, memo, Object.assign({ unit: 'usd' }, tillLock ? { lockPub: tillLock } : {})).catch(e => {
+      // a mint switched to that has not answered yet: waited for, as `openReceiveNow` waits
+      if (e && e.foxyConnecting && waits < 3 && W.routeSoon) {
+        return W.routeSoon(this.MINT_ANSWER_WAIT_MS).then(ok => { if (!ok) throw e; return attempt(n, waits + 1); });
+      }
       const closed = !!(W.neverSent && W.neverSent(e));
       if (closed && waits < 3 && G && G.quiet) return G.quiet().then(ok => { if (!ok) throw e; return attempt(n, waits + 1); });
       if (n >= 3) throw e;

@@ -377,7 +377,10 @@ const STATES = [
     ok(/CARD BALANCE/.test(text()), 'and so does the screen before a card is tapped');
     // a card before software 1.23 reports no units, and fcShow keeps none; one of 1.23 the units the wallet sorted its pieces into (`cardUnits`)
     const src = app.slice(app.indexOf('  fcShow(card, open) {'));
-    ok(/units: \(W && W\.cardUnits && W\.cardUnits\(card\)\) \? W\.cardUnits\(card\)\.map\(\(x\) => x\.unit\) : null/.test(src),
+    // (less any its own mint does not issue, `fcUnitsAt`: tests/flashcard-screens.js pins that)
+    const at = app.slice(app.indexOf('  fcUnitsAt(card) {'));
+    ok(/units: this\.fcUnitsAt\(card\),/.test(src)
+       && /const list = \(W && W\.cardUnits && W\.cardUnits\(card\)\) \? W\.cardUnits\(card\)\.map\(\(x\) => x\.unit\) : null;\s*if \(!list\) return null;/.test(at),
       'a card is read with the units its software reports, and none where it reports none');
   }
 
@@ -550,6 +553,94 @@ const STATES = [
     ok(markup.indexOf('swipeDot') < 0 && markup.indexOf('Swipe left for your card') < 0, 'the dots and the swipe hint are gone from both screens');
     ok(markup.indexOf('data-snow-cap') < 0 && !/foxySnow(Drape|Pile|Clump)/.test(markup + app),
       'no snow settles on the money card or on the card’s picture any more');
+  }
+
+  // ---- 9. a mint switched to at once: CONNECTING TO it until it answers, NOT ANSWERING if it will not --------------
+  {
+    const ringOf = () => { const el = shieldEl(); const r = el && el.firstElementChild && el.firstElementChild.firstElementChild; return r ? r.style.animation : ''; };
+    let pend = { url: 'https://forge.flashapp.me', host: 'forge.flashapp.me', since: Date.now(), noKeys: false, failed: '' };
+    const withPending = async (r) => {
+      route = r;
+      await home(false);
+      w.FoxyWallet.connectPending = () => pend;
+      A.setState({ routeAt: Date.now() });
+      await settle();
+    };
+    await withPending(ROUTE());
+    let v = V();
+    ok(v.shieldState === 'mint' && v.shieldLabel === 'CONNECTING TO FORGE.FLASHAPP.ME' && v.shieldBg === 'var(--frost-chip)' && v.shieldMark === '',
+      'Tor up and a mint not answered yet: CONNECTING TO it, in the securing look', JSON.stringify([v.shieldState, v.shieldLabel, v.shieldBg]));
+    ok(shieldEl().getAttribute('data-shield') === 'mint' && shieldEl().getAttribute('aria-label') === 'CONNECTING TO FORGE.FLASHAPP.ME'
+      && /foxyRing/.test(ringOf()), 'and the shield on the card says so, with its ring turning', ringOf());
+    shieldEl().dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+    await settle();
+    const card = A._blockedEl ? A._blockedEl.textContent : '';
+    ok(/CONNECTING TO FORGE\.FLASHAPP\.ME/.test(card) && /waits until it answers/.test(card) && /locked to this phone/.test(card),
+      'its tap says what is on screen and what waits for the mint', card.slice(0, 200));
+    if (A._blockedEl) { A._blockedEl.remove(); A._blockedEl = null; A._blockedKind = null; }
+    // with no keys on file there is nothing to check a tap's ecash by, and the card does not promise it
+    pend = Object.assign({}, pend, { noKeys: true });
+    await withPending(ROUTE());
+    shieldEl().dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+    await settle();
+    const cardNoKeys = A._blockedEl ? A._blockedEl.textContent : '';
+    ok(/waits until it answers/.test(cardNoKeys) && !/locked to this phone/.test(cardNoKeys),
+      'at a mint with no keys on file the card does not say a tap can still be taken', cardNoKeys.slice(0, 240));
+    if (A._blockedEl) { A._blockedEl.remove(); A._blockedEl = null; A._blockedKind = null; }
+    pend = Object.assign({}, pend, { noKeys: false });
+    // over a VPN the same; over no network, or with IP EXPOSED, the route's own state comes first
+    await withPending(ROUTE({ tor: 'connecting', progress: 0, unprotected: true, vpn: true }));
+    ok(V().shieldState === 'mint', 'through a tunnel as well', V().shieldState);
+    await withPending(ROUTE({ tor: 'connecting', progress: 0, unprotected: true }));
+    ok(V().shieldState === 'exposed', 'IP EXPOSED is never quietened by it', V().shieldState);
+    await withPending(ROUTE({ network: 'none' }));
+    ok(V().shieldState === 'offline', 'and with no network the shield says OFFLINE, not the mint', V().shieldState);
+    await withPending(ROUTE({ tor: 'connecting', progress: 40, everUp: false }));
+    ok(V().shieldState === 'securing', 'nor while Tor is still on its way', V().shieldState);
+    // one that will not answer
+    pend = Object.assign({}, pend, { failed: 'forge.flashapp.me did not answer within 30s.' });
+    await withPending(ROUTE());
+    v = V();
+    ok(v.shieldState === 'mintDown' && v.shieldLabel === 'FORGE.FLASHAPP.ME IS NOT ANSWERING' && v.shieldBg === '#E6D8A8'
+      && v.shieldMark === 'M12 8v4.6M12 15.8h.01' && !/foxyRing/.test(ringOf()),
+      'a mint that did not answer: NOT ANSWERING, amber with the exclamation, no ring', JSON.stringify([v.shieldState, v.shieldLabel, ringOf()]));
+    shieldEl().dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+    await settle();
+    const card2 = A._blockedEl ? A._blockedEl.textContent : '';
+    ok(/IS NOT ANSWERING/.test(card2) && /keeps asking/.test(card2) && /did not answer within 30s/.test(card2), 'and its tap says why', card2.slice(0, 240));
+    if (A._blockedEl) { A._blockedEl.remove(); A._blockedEl = null; A._blockedKind = null; }
+    // answered: the shield is Tor's again
+    pend = null;
+    A.setState({ routeAt: Date.now() });
+    await settle();
+    ok(V().shieldState === 'secure' && shieldEl().getAttribute('aria-label') === 'Connected Over Tor', 'once it answers the shield clears to Tor', V().shieldState);
+    delete w.FoxyWallet.connectPending;
+  }
+
+  // ---- 10. SWITCH MINT's row, as drawn, switches at once: the row's own tap reaches the wallet's `switchTo` ------------
+  {
+    route = ROUTE();
+    await home(false);
+    const W = w.FoxyWallet;
+    const asked = [];
+    W.switchTo = (url) => { asked.push(['switchTo', url]); W.mintUrl = url; return Promise.resolve({ name: 'mint.macadamia.cash', pending: true, gen: 7 }); };
+    W.connect = (url, a, b, opts) => { asked.push(['connect', url, opts]); return new Promise(() => {}); };
+    W.mintUsedBefore = () => true;
+    const reads = [A.refreshBalance, A.loadHistory];
+    A.refreshBalance = () => {}; A.loadHistory = () => {};
+    A.setState({ screen: 'switchMint', stack: ['home'], trStep: '', tillPick: false, fcPick: false, mintReturn: '' });
+    await settle();
+    const row = (V().mintRows || []).find((r) => /macadamia/.test(r.host));
+    ok(!!row && !row.here, 'SWITCH MINT draws a row for another mint', JSON.stringify((V().mintRows || []).map((r) => r.host)));
+    if (row) row.tap();
+    await wait(0); await wait(0);
+    ok(asked.length === 1 && asked[0][0] === 'switchTo' && /macadamia/.test(asked[0][1]),
+      'its tap asks the wallet to switch at once (`switchTo`), never a connect that waits', JSON.stringify(asked));
+    await settle();
+    ok(A.state.screen === 'home' && !A.state.switchBusy && !A.state.mintBusy, 'and the list closes at once, home drawn',
+      JSON.stringify([A.state.screen, A.state.switchBusy, A.state.mintBusy]));
+    [A.refreshBalance, A.loadHistory] = reads;
+    delete W.switchTo; delete W.connect; W.mintUrl = MINT;
   }
 
   const real = errors.filter((e) => !/Not implemented|navigation/i.test(e));

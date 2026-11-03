@@ -11,7 +11,9 @@ import Foundation
 /// on this phone and reaches nobody unless the person taps COPY on the LOGS
 /// screen. Nothing here reaches the system log or a file, which is what "a
 /// Release build says nothing" has always meant, and what smoke check 35 and
-/// tools/sim/release-silence.sh hold it to.
+/// tools/sim/release-silence.sh hold it to. And the lines that would name a
+/// host name it here only as a short hash (LogRedaction.host), since a copied
+/// field log goes into messages.
 @inline(__always)
 func print(_ items: Any..., separator: String = " ", terminator: String = "\n") {
     FieldLog.write(items.map { "\($0)" }.joined(separator: separator))

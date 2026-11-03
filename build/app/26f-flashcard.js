@@ -555,6 +555,16 @@
       if (p.second) return 'Keep holding.';
       /* Over the limit: the first limit's worth over takes ten askings of the card (seven before software 1.17, `info.waitOver`),
        * and each further limit's worth three or four (`info.waitMore`); said as the level it has come to, "x2" when the second begins, and so on. */
+      /* (software 1.25, `p.floor`: every payment waits its floor of three askings first, within the limit or not; only an asking
+       * past the floor is over the limit, and each further limit's worth two more) */
+      const floor = Math.round(Number(p.floor) || 0);
+      if (floor > 0) {
+        const polls25 = Math.round(Number(p.polls) || 0);
+        if (p.ahead ? !(Number(p.left) > floor) : polls25 <= floor) return 'Keep holding.';
+        const more25 = Number(p.more) || 2;
+        const level25 = 1 + Math.ceil((polls25 - floor) / more25);
+        return 'Over per tap limit' + (level25 > 1 ? ' x' + level25 : '');
+      }
       const over = Number(p.over) || this.fcWaitOver();
       const more = Number(p.more) || this.fcWaitMore();
       const polls = Math.round(Number(p.polls) || 0);
@@ -771,7 +781,7 @@
     else if (flow === 'cardWd') this.fcWithdrawPin(sats);
     /* A limit typed in dollars is kept in dollars (`fcLimitRun`): the card holds sats, and the price moves. A dollar card's
      * limit is dollars, and is never kept at anything: no dollars are sent to keep it at. */
-    // (the limit on a payment of a card that waits for it is typed as a rate: the card is sent three seconds of it, 26j-card-wheel.js)
+    // (the limit on a payment of a card that waits for it is typed as a rate: the card is sent one second of it, 26j-card-wheel.js)
     else if (flow === 'cardLimit') {
       const k = (this._fcLimitTap && this.fcPacedNow && this.fcPacedNow()) ? this.FC_SPEED_SECS : 1;
       this.fcLimitConfirm(sats * k, (unit === 'usd' ? 0 : this.state.unit === 'USD' ? Number(this.state.amount) || 0 : 0) * k);
@@ -924,7 +934,8 @@
       'no-pin': () => ({ tone: 'warn', title: 'THIS CARD HAS NO PIN', reason: said }),
       'has-pin': () => ({ tone: 'warn', title: 'THIS CARD HAS A PIN', reason: said }),
       // a PIN is wanted where none was given (the card's word at a tap that was not a payment's)
-      'pin-needed': () => ({ tone: 'warn', title: 'THE CARD WANTS ITS PIN', reason: said + safe }),
+      'pin-needed': () => (e && e.limitReached ? { tone: 'warn', title: 'LIMIT REACHED. ENTER PIN.', reason: this.FC_LIMIT_REACHED + safe }
+        : { tone: 'warn', title: 'THE CARD WANTS ITS PIN', reason: said + safe }),
       'not-owner': () => ({ tone: 'warn', title: 'NOT THIS PHONE’S CARD',
         reason: 'This phone does not hold the seed phrase this card was set up with, so it cannot change the card’s PIN or limit.',
         chip: 'Restore that seed phrase in Foxy, on this phone or another, to do it.' }),
@@ -1652,6 +1663,18 @@
   /* The card's PIN, for the second tap: asked for after the card has said it wants one, or after a wrong
    * one. TAP AGAIN pays with it. `cardUnit`: the unit of the card that asked for it, where it said (its `pin-needed`):
    * a dollar card is told the cents it pays, whatever else the till asked. */
+  /* A card of 1.25 whose no-PIN total for these 24 hours is used up (6A9E): LIMIT REACHED. ENTER PIN., in the card's style, and ENTER
+   * PIN goes on to the PIN (`then`), with which the same payment is signed. Nothing was signed or taken. */
+  FC_LIMIT_REACHED = 'This card has paid all it pays without its PIN in these 24 hours. With its PIN this payment goes through.';
+  fcLimitReached(then) {
+    this.blockedCard('fc-limit-reached', {
+      tone: 'warn', title: 'LIMIT REACHED. ENTER PIN.',
+      reason: this.FC_LIMIT_REACHED,
+      retry: 'ENTER PIN', go: () => then(),
+      shut: { label: 'CANCEL' },
+    });
+  }
+
   fcPayAsk(sats, offline, resuming, share, send, usd, terms, cardUnit) {
     let figure;
     // a card at another mint: the total it pays from there, its fee in it (`fcXmPay`)
@@ -1900,7 +1923,14 @@
         if (e && e.card === 'choose-unit') { this.fcPayChoose(e, () => opt.again()); return; }
         /* The card wants its PIN for this payment (it has one and no no PIN limit covers it, or its software
          * always asks): the sheet ended saying so, nothing was signed or taken, and the pad comes up. */
-        if (e && e.card === 'pin-needed' && !pin) { this.fcPayAsk(sats, offline, resuming, share, send, usd, terms, e.cardUnit); return; }
+        /* (1.25: the no-PIN total for these 24 hours is used up, 6A9E, `limitReached`: said first, LIMIT REACHED. ENTER PIN., and the same
+         * payment is then signed with the PIN, `fcLimitReached`) */
+        if (e && e.card === 'pin-needed' && !pin) {
+          const ask = () => this.fcPayAsk(sats, offline, resuming, share, send, usd, terms, e.cardUnit);
+          if (e.limitReached) { this.fcLimitReached(ask); return; }
+          ask();
+          return;
+        }
         /* The card left part way through signing, and the sheet that looked for
          * it again was dismissed: what it signed is held, said with TAP CARD.
          * Where the phone could not keep the sheet up (an older one), a new
@@ -3251,8 +3281,40 @@
 
   /* Does this card hold two balances? Only a card whose software reports more than one unit, and none does yet:
    * a card of software 1.20 and before holds sats alone and reports no units at all. */
+  /* When a card of 1.25's 24 hours without the PIN start over (`noPin.turns`: its window's start and 24 hours, by the card's header
+   * clock), said after what is left: " · resets 3:04 PM", or nothing where no window is running (nothing spent without the PIN yet). */
+  fcNoPinResets(noPin) {
+    const at = Math.round(Number(noPin && noPin.turns) || 0);
+    if (!(at > 0) || !(Number(noPin.spent) > 0)) return '';
+    const d = new Date(at * 1000);
+    const clock = this.txClock ? this.txClock(d) : d.toISOString().slice(11, 16);
+    const sameDay = new Date().toDateString() === d.toDateString();
+    return ' \u00b7 resets ' + (sameDay ? clock : (this.txDay ? this.txDay(d, new Date()) + ' ' : '') + clock);
+  }
+
   fcTwoUnits(fc) {
     return !!(fc && Array.isArray(fc.units) && fc.units.length > 1);
+  }
+
+  /* The currencies a card's screen has a row for (`units`): those its table lists (the wallet's `cardUnits`), less any its own mint
+   * does not issue, from what this phone knows of that mint (`mintUnits`, the keys on file: the card's mint, not the one this phone is
+   * connected to). A card of 1.23 moved to a mint of bitcoin alone still lists dollars in its table, and its screen showed a dollar row
+   * of $0.00 at a mint that has no dollars (2026-11-03). A currency the card holds money in keeps its row; a mint this phone knows
+   * nothing of takes nothing away. */
+  fcUnitsAt(card) {
+    const W = this.fcW();
+    const list = (W && W.cardUnits && W.cardUnits(card)) ? W.cardUnits(card).map((x) => x.unit) : null;
+    if (!list) return null;
+    const mint = card && card.record && card.record.mint;
+    const issued = (mint && W && typeof W.mintUnits === 'function') ? (W.mintUnits(mint) || []) : [];
+    if (!issued.length) return list;
+    const holds = (u) => !!(card.units && card.units[u] && Number(card.units[u].balance) > 0);
+    const kept = list.filter((u) => issued.indexOf(u) >= 0 || holds(u));
+    if (kept.length < list.length) {
+      console.log('[foxy] card: no ' + list.filter((u) => kept.indexOf(u) < 0).join(', ') + ' row: ' + String(mint).replace(/^https?:\/\//, '')
+        + ' issues ' + issued.join(', ') + ' only');
+    }
+    return kept.length ? kept : list;
   }
 
   /* The sats the balance on the card's screen says now: what it holds, or where its count has got to. */
@@ -3325,6 +3387,8 @@
       /* software 1.16 and on: the PIN is optional. `setUp`: the card has its record (and, before 1.16, a PIN); `pinSet`: it has a PIN (a blocked one does);
        * `noPinKnown`: its software can be without one and has the no PIN limit; `noPin`: that limit and what is left of it today (`known`, `set`, `limit`, `left`) */
       setUp: !!card.info.setUp, pinSet: !!card.info.pinSet, noPinKnown: !!card.info.noPinKnown, noPin: card.noPin || null,
+      // software 1.25: the no-PIN allowance is a 24-hour total of its own, from its first payment without the PIN (`noPinOwn`)
+      noPinDay: !!card.info.noPinOwn,
       // software 1.21 and on: a PIN before any money, every load under it, and the owner taken in a held claim
       pinFirst: (() => { const v = String(card.info.version || '').split('.'); return Number(v[0]) > 1 || (Number(v[0]) === 1 && Number(v[1]) >= 21); })(),
       /* software 1.22 and on: a card with a PIN and no owner is a holder's with no phone, shown with VIEW AS GUEST and TIE OWNERSHIP
@@ -3361,7 +3425,7 @@
        * (`cents`); `units`: the two it holds (or may: format 5), for `fcTwoUnits`, or the one; `bal`: what it holds in each; `rate`: the
        * sats a dollar its sats payments are weighed at, where it said (to its owner). */
       v123: !!(card.info && card.info.units), cents: !!(card.info && card.info.cents),
-      units: (W && W.cardUnits && W.cardUnits(card)) ? W.cardUnits(card).map((x) => x.unit) : null,
+      units: this.fcUnitsAt(card),
       bal: card.units ? { usd: card.units.usd.balance, sat: card.units.sat.balance } : null,
       /* `only`: the one currency its owner chose for it when this phone set it up ('usd' or 'sat'), which this phone's ADD FUNDS and
        * SEND put on it and nothing else; '' for a card of both, one this phone made no such promise for, or one that holds the other
@@ -3494,7 +3558,8 @@
   fcGiveUpRun(x, pin) {
     const W = this.fcW();
     if (!W) return;
-    this.fcTap({}, (link, on) => { on('writing'); return W.cardGiveUp(link, { number: x.number, B_: x.B_, amount: x.amount, pin, onHold: () => on('writing') }); })
+    this.fcApprove({ label: 'reset', number: x.number })
+      .then(() => this.fcTap({}, (link, on) => { on('writing'); return W.cardGiveUp(link, { number: x.number, B_: x.B_, amount: x.amount, pin, onHold: () => on('writing') }); }))
       .then((r) => {
         // what the screen said of the card's change, without the one given up
         const card = Object.assign({}, r.card, { owes: this.fcOwesWithout(this.state.fc && this.state.fc.owes, x.number) });
@@ -3881,9 +3946,13 @@
     this.fcAmount('cardWd');
   }
 
-  fcWithdrawPin(sats) {
+  fcWithdrawPin(sats, asked) {
     const fc = this.state.fc;
     if (!fc) return;
+    /* ALL OF IT, on a phone that uses other mints too: where it lands is asked first, WITHDRAW TO, the card's own mint at no fee and
+     * each other with what crossing there costs (26n-card-withdraw-to.js, `fcWdToAsk`). A typed amount lands at the card's mint. */
+    if (!sats && !asked && this.fcWdToAsk && this.fcWdToAsk(() => this.fcWithdrawPin(0, true))) return;
+    if (sats || !asked) this._fcWdTo = '';
     const u = this.fcUnit();
     this.fcPinOr({
       title: 'ENTER PIN TO WITHDRAW',
@@ -3955,6 +4024,8 @@
         if (r && r.hash) this.txIsNew(r.hash);
         this.fcMoved({});
         said(r);
+        // and on to the mint WITHDRAW TO chose, where it was another (26n-card-withdraw-to.js, `fcWdCross`)
+        if (this.fcWdCross) this.fcWdCross(took + this.fcAmt(r), u);
         const ch = r && r.change;
         if (ch && !ch.written && !ch.unmade && this.fcAmt(ch) > 0) this.fcChangeWaiting(this.fcAmt(ch), 0, u);
       }, (e) => {
@@ -4022,6 +4093,19 @@
   /* CHANGE PIN, and UNBLOCK, which is the same: the owner's phone sets a new PIN
    * with its proof. The old PIN is not asked for, because this phone does not
    * know it and a blocked or forgotten PIN is the case that needs this. */
+  /* The keeper's yes to an owner's command, asked by the phone itself, in its own alert and (for all but a limit) with Face ID or
+   * the passcode, at the screen where the command begins and before the card is held up (the wallet's `cardApprove`). The owner
+   * key signs that command in the next tap and nothing like it that was not said yes to, so this is asked before the tap and
+   * never during it, where the phone's alert would sit under the card sheet. Named for the card on screen. A no rejects
+   * `declined`, said as any refusal is. */
+  fcApprove(op) {
+    const W = this.fcW();
+    const fc = this.state.fc;
+    const card = fc && /^0[23][0-9a-f]{64}$/.test(String(fc.key || '')) ? fc.key : undefined;
+    if (!W || !W.cardApprove) return Promise.resolve(true);
+    return W.cardApprove(Object.assign(card ? { card } : {}, op));
+  }
+
   fcChangePin() {
     const fc = this.state.fc;
     if (!fc) return;
@@ -4034,7 +4118,8 @@
       title: 'NEW PIN', subtitle: 'Four to eight digits.', warn: warn || '',
     }, (a) => this.fcAskPin({ title: 'NEW PIN AGAIN', subtitle: 'So a mistyped digit does not become the card’s PIN.' }, (b) => {
       if (a !== b) { fresh('Those did not match. Start again.'); return; }
-      this.fcTap({}, (link, on) => { on('writing'); return W.cardChangePin(link, { newPin: a }); })
+      this.fcApprove({ label: 'change-pin', pin: a })
+        .then(() => this.fcTap({}, (link, on) => { on('writing'); return W.cardChangePin(link, { newPin: a }); }))
         .then(() => {
           this.haptic && this.haptic('success');
           this.blockedCard('fc-pin', { tone: 'ask', title: was ? 'CARD UNBLOCKED' : 'PIN CHANGED', reason: 'The card asks for the new one from now on.', shut: { label: 'DONE' } });
@@ -4134,7 +4219,12 @@
     this.blockedCard('fc-limit-warn', np ? {
       tone: 'warn', title: 'SET NO PIN LIMIT',
       // (from 1.21 the allowance is refilled each time the PIN is entered on the card, not by the day)
-      reason: (this.state.fc && this.state.fc.pinFirst
+      /* (1.25: a total of its own over 24 hours from the first payment without the PIN; contact with this phone, the owner's, ends the
+       * 24 hours, and the PIN alone does not: `noPinDay`) */
+      reason: (this.state.fc && this.state.fc.noPinDay
+        ? 'A \u201cNo PIN\u201d limit is the most this card pays by tap alone in 24 hours before it asks for your PIN. The 24 hours begin at its first payment without the PIN.\n\n'
+          + 'Once it is used up, the card says LIMIT REACHED and asks for the PIN, and a payment with the PIN goes through. Entering the PIN does not start the 24 hours over: they end after 24 hours, or when the card is next held to this phone.\n\n'
+        : this.state.fc && this.state.fc.pinFirst
         ? 'A \u201cNo PIN\u201d limit is how much this card can pay by tap alone before it asks for your PIN.\n\n'
           + 'Once it is used up, the PIN is asked for, and entering it fills the limit again.\n\n'
         : 'A \u201cNo PIN\u201d limit is the most this card will pay in one day without requiring your PIN.\n\n'
@@ -4157,6 +4247,8 @@
   fcLimitQuestion() {
     // (from 1.21 the allowance is filled again by the PIN, not by the day)
     if (this._fcLimitNoPin) {
+      // (1.25: a 24-hour total of its own, `noPinDay`)
+      if (this.state.fc && this.state.fc.noPinDay) return 'What\u2019s the most this card should pay in 24 hours without asking you for a PIN?';
       return (this.state.fc && this.state.fc.pinFirst) ? 'What is the most this card should pay by tap alone before it asks for its PIN?'
         : 'What is the most this card should pay in a day without its PIN?';
     }
@@ -4191,7 +4283,8 @@
         title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A NO PIN LIMIT OF:',
         amount: fig(sats).main, amountSub: fig(sats).sub, rows: [],
         // (from 1.21 the PIN fills the allowance again, and no day does)
-        warn: ((this.state.fc && this.state.fc.pinFirst) ? 'This card will pay up to this much without its PIN, and entering the PIN fills it again. '
+        warn: ((this.state.fc && this.state.fc.noPinDay) ? 'This card will pay up to this much in 24 hours without its PIN; the 24 hours end early when the card is held to this phone, not when the PIN is entered. '
+          : (this.state.fc && this.state.fc.pinFirst) ? 'This card will pay up to this much without its PIN, and entering the PIN fills it again. '
           : 'This card will pay up to this much a day without its PIN. ') + 'Over it, the PIN is asked for the whole payment. '
           + (((this.state.fcLimit || {}).usd > 0) ? 'It is kept at this many dollars: this phone sets the card again when the price has moved. ' : '')
           + 'Only this phone, or a phone restored from its seed phrase, can change or remove it.',
@@ -4214,7 +4307,7 @@
       } : {
         title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A PER SECOND LIMIT OF:',
         amount: this.fcSpeedText(sats, U, usd) + ' / sec', amountSub: '', rows: [],
-        warn: 'This card pays up to ' + L + ' straight away, change or no change. Over it, the card has to be held about ' + this.fcWaitSecs(this.fcWaitOver()) + ' seconds, and ' + Math.max(1, Math.round(this.FC_TAP_SECS.asking * this.fcWaitMore())) + ' seconds more for every ' + L + ' beyond that. '
+        warn: 'This card pays up to ' + L + ' straight away, change or no change. Over it, the card has to be held about ' + this.fcHoldSecs(2) + ' seconds, and ' + (this.fcHoldSecs(3) - this.fcHoldSecs(2)) + (this.fcHoldSecs(3) - this.fcHoldSecs(2) === 1 ? ' second' : ' seconds') + ' more for every ' + L + ' beyond that. '
           + (usd > 0 ? 'It is kept at this many dollars: this phone sets the card again when the price has moved. ' : '')
           + (this.fcAbove(this._fcCard, sats, U, true) > 0 ? 'It holds ' + this.fcPrice(this.fcAbove(this._fcCard, sats, U, true), (fc && fc.unit) || U) + ' in pieces larger than that: with your PIN they are recut under the new limit in the same tap. ' : '')
           + this.fcAboveKept(this._fcCard, sats, U)
@@ -4233,7 +4326,7 @@
       title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A PER TAP LIMIT OF:',
       amount: fig(sats).main, amountSub: fig(sats).sub, rows: [],
       warn: (this.fcShaped()
-        ? 'This card will pay up to this straight away, change or no change. Over it, the card has to be held about ' + this.fcWaitSecs(this.fcWaitOver()) + ' seconds, and ' + Math.max(1, Math.round(this.FC_TAP_SECS.asking * this.fcWaitMore())) + ' seconds more for every limit\u2019s worth beyond that. '
+        ? 'This card will pay up to this straight away, change or no change. Over it, the card has to be held about ' + this.fcHoldSecs(2) + ' seconds, and ' + (this.fcHoldSecs(3) - this.fcHoldSecs(2)) + (this.fcHoldSecs(3) - this.fcHoldSecs(2) === 1 ? ' second' : ' seconds') + ' more for every limit\u2019s worth beyond that. '
         : 'This card will pay up to this straight away when it pays exactly. With change, or over the limit, it has to be held 3 seconds for every limit\u2019s worth. ')
         + (((this.state.fcLimit || {}).usd > 0) ? 'It is kept at this many dollars: this phone sets the card again when the price has moved. ' : '')
         + (this.fcAbove(this._fcCard, sats, U, true) > 0 ? 'It holds ' + this.fcPrice(this.fcAbove(this._fcCard, sats, U, true), (this.state.fc && this.state.fc.unit) || U) + ' in pieces larger than that: with your PIN they are recut under the new limit in the same tap. ' : '')
@@ -4454,10 +4547,10 @@
     // a dollar card's limit is its cents, and is kept at nothing: no dollars are sent for it (the wallet writes no pace note for one)
     const keep = v123 ? (lu === 'sat' ? usd : 0) : this.fcUnit() === 'usd' ? 0 : usd;
     const more = v123 ? Object.assign({ unit: lu, price: (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0) }, answer || {}) : {};
-    this.fcTap({}, (link, on, progress) => {
+    this.fcApprove({ label: 'set-limit', figures: [np ? 'noPin' : tap ? 'tap' : 'day'] }).then(() => this.fcTap({}, (link, on, progress) => {
       on('writing');
       return W.cardSetLimit(link, Object.assign(np ? { sats, noPin: true, usd: keep, on, progress } : { sats, tap: !!tap, usd: (tap || v123) ? keep : 0, pin, on, progress }, more));
-    })
+    }))
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
@@ -4786,6 +4879,8 @@
     const end = () => this.fcMoveEnd();
     Promise.resolve()
       .then(() => (String(W.mintUrl || '').replace(/\/+$/, '') === to ? null : W.connect(to, null, null, { remember: false })))
+      // the keeper's yes to the mint it goes to, before the card is held up (`fcApprove`)
+      .then(() => this.fcApprove({ label: 'set-card' }))
       .then(() => this.fcTap({}, (link, on) => { on('writing'); return W.cardRepoint(link); }))
       .then((card) => {
         this.fcShow(card);
@@ -4802,10 +4897,21 @@
     const W = this.fcW();
     const m = this.state.fcMove;
     if (!W || !m) return;
-    const put = (more) => { if (this.state.fcMove) this.setState({ fcMove: Object.assign({}, this.state.fcMove, more) }); };
+    const bare = (u) => String(u || '').replace(/\/+$/, '');
+    /* Only the mint the holder chose, and only while its confirmation is the one up (`gen`): a quote for a mint picked and backed out
+     * of went on in the background on 2026-11-03 (macadamia, quoted for 25 s beside minibits) and could have landed its figures on the
+     * other mint's confirmation. What it says when it is not this one's is let go, and said in the log. */
+    const gen = this._fcMoveGen = (this._fcMoveGen || 0) + 1;
+    const mine = () => gen === this._fcMoveGen && !!this.state.fcMove && bare(this.state.fcMove.to) === bare(m.to);
+    const put = (more) => {
+      if (!mine()) {
+        console.log('[foxy] card: TRANSFER quote for ' + bare(m.to).replace(/^https?:\/\//, '') + ' let go: it is not the confirmation on screen');
+        return;
+      }
+      this.setState({ fcMove: Object.assign({}, this.state.fcMove, more) });
+    };
     put({ quoting: true, err: '' });
     // to the card's mint first, where this phone is not there already: a visit, not a change of this phone's own mint
-    const bare = (u) => String(u || '').replace(/\/+$/, '');
     this._fcVisit = Promise.resolve()
       .then(() => (bare(W.mintUrl) === bare(m.from) ? null : W.connect(m.from, null, null, { remember: false })));
     /* (a TRANSFER being finished: the card on show, empty, as if it held what is in this phone for it, so that the new mint's pieces
@@ -4814,9 +4920,15 @@
     const card = !m.resume ? shown
       : shown ? Object.assign({}, shown, { balance: m.have, pieces: [], units: undefined, whole: undefined, record: Object.assign({}, shown.record, { unit: m.unit }) })
       : { record: { unit: m.unit, mint: m.from }, balance: m.have, pieces: [], info: null };
-    this._fcVisit.then(() => W.cardTransferQuote(card, m.to)).then((q) => {
+    const ask = () => {
+      if (mine()) return W.cardTransferQuote(card, m.to);
+      console.log('[foxy] card: TRANSFER quote for ' + bare(m.to).replace(/^https?:\/\//, '') + ' not asked: it is not the confirmation on screen');
+      return Promise.reject(Object.assign(new Error('let go'), { letGo: true }));
+    };
+    this._fcVisit.then(ask).then((q) => {
       put({ quoting: false, quote: q, lands: q.lands, fee: q.fee, toUnit: q.toUnit });
     }, (e) => {
+      if (e && e.letGo) return;
       put({ quoting: false, quote: null, fee: null, err: (e && (e.card === 'too-little' || e.card === 'both-units')) ? String(e.message) : W.reason(e) });
     });
   }
@@ -4902,9 +5014,12 @@
     this._fcQuiet = true;
     W.transactions(50).then((list) => { this._sweepBefore = new Set(list.map(x => x.hash)); },
                             () => { this._sweepBefore = null; });
-    this.fcTap({ amount: this.stageMoney(m.have, m.unit), warm: true },
-      (link, on, progress) => W.cardTransfer(link, { pin, on, progress, to: m.to, most: m.quote.fee, toUnit: m.quote.toUnit, unit: m.unit,
-                                                     only: fc && fc.key, resume: !!m.resume }))
+    // the keeper's yes to the mint and currency it goes to, kept for this card until its record is written (`fcApprove`)
+    // (in the currency it is turned into, where the quote says it changes; otherwise the one its record holds)
+    this.fcApprove(Object.assign({ label: 'set-card', mint: m.to, keep: true }, m.quote && m.quote.toUnit ? { units: [m.quote.toUnit] } : {}))
+      .then(() => this.fcTap({ amount: this.stageMoney(m.have, m.unit), warm: true },
+        (link, on, progress) => W.cardTransfer(link, { pin, on, progress, to: m.to, most: m.quote.fee, toUnit: m.quote.toUnit, unit: m.unit,
+                                                       only: fc && fc.key, resume: !!m.resume })))
       .then((r) => {
         const end = r.visit ? r.visit.end() : Promise.resolve();
         this.fcMoveEnd(r.card, end);
@@ -4929,13 +5044,19 @@
       return;
     }
     // made for the card and owed to it at the new mint: the next tap writes it, with the phone still there
+    /* Still there: the visit the crossing made is kept open for that tap (`_fcMoveHeld`), and TAP CARD writes in it. It used to be
+     * ended here, the phone went home to the card's old mint and came straight back for the write, two connects over Tor between the
+     * swap and the write (2026-11-03, 09:04:41 to 09:04:46). LATER, the card closed any other way, or two minutes with no tap end it. */
     if (e.stage === 'owed') {
-      this.fcMoveEnd(null, end());
+      const held = this.fcMoveHold(m.to, e && e.visit);
+      this.fcMoveEnd(null, held.over);
       this.blockedCard('fc-move-tap', {
         tone: 'warn', title: 'TAP THE CARD AGAIN',
         reason: 'Its money is at ' + to + ', waiting to go onto this card.',
         retry: 'TAP CARD', go: () => this.fcMoveWrite(m.to, pin),
-        shut: { label: 'LATER' },
+        shut: { label: 'LATER', tap: () => held.end() },
+        // closed without TAP CARD (outside the card, say): the visit is let go; TAP CARD has taken it by then (`fcMoveWrite`)
+        onClose: () => setTimeout(() => { if (this._fcMoveHeld === held) held.end(); }, 0),
       });
       return;
     }
@@ -4950,12 +5071,46 @@
     });
   }
 
+  /* The visit a TRANSFER's crossing made to the new mint, kept open for the tap that writes the card (`fcMoveCut`, `fcMoveWrite`):
+   * { to, end(), ended, over }. `end()` ends the visit once, which brings the phone home; `over` resolves then, and is what
+   * `fcMoveEnd` waits on before it puts the phone back where it was. Ended by itself after two minutes with no tap. */
+  fcMoveHold(to, visit) {
+    clearTimeout(this._fcMoveHoldT);
+    let done = null;
+    const held = { to: String(to || ''), ended: false, over: null, end: null };
+    held.over = new Promise((res) => { done = res; });
+    held.end = () => {
+      if (held.ended) return held.over;
+      held.ended = true;
+      clearTimeout(this._fcMoveHoldT);
+      if (this._fcMoveHeld === held) this._fcMoveHeld = null;
+      Promise.resolve().then(() => (visit && visit.end ? visit.end() : null)).then(done, done);
+      return held.over;
+    };
+    this._fcMoveHeld = held;
+    this._fcMoveHoldT = setTimeout(() => held.end(), 120000);
+    return held;
+  }
+
   /* What a TRANSFER left owed to the card at its new mint, written: the phone visits that mint for the tap (the wallet's `cardVisit`),
    * the card is told its new mint and the pieces go on, under its PIN where it wants one for every load (software 1.21). */
   fcMoveWrite(to, pin0) {
     const W = this.fcW();
     if (!W) return;
-    const go = (pin) => W.cardVisit(to).then((v) => this.fcTap({},
+    // the visit the crossing left open for this tap, where there is one: the write is made in it, with no second visit (`fcMoveHold`)
+    const bare = (u) => String(u || '').replace(/\/+$/, '');
+    let kept = (this._fcMoveHeld && !this._fcMoveHeld.ended && bare(this._fcMoveHeld.to) === bare(to)) ? this._fcMoveHeld : null;
+    if (kept) this._fcMoveHeld = null;
+    const visitFor = () => {
+      const k = kept;
+      kept = null;
+      if (k && !k.ended) {
+        console.log('[foxy] card: the write is made in the visit the TRANSFER left open at ' + bare(to).replace(/^https?:\/\//, ''));
+        return Promise.resolve({ end: () => k.end() });
+      }
+      return W.cardVisit(to);
+    };
+    const go = (pin) => visitFor().then((v) => this.fcTap({},
       (link, on, progress) => { on('writing'); return W.cardWrite(link, pin ? { pin, progress } : { owner: true, progress }); })
       .then((r) => {
         v.end();
@@ -5234,13 +5389,13 @@
     const fc = this.state.fc;
     if (!W || !fc) return;
     const money = this.fcAnyMoney(fc);
-    this.fcTap({ amount: money ? this.fcWholeStage(fc) : '', warm: money },
+    this.fcApprove({ label: 'reset' }).then(() => this.fcTap({ amount: money ? this.fcWholeStage(fc) : '', warm: money },
       (link, on, progress) => {
         // the card is held through the money coming off and the reset: the steps that say it may go are not said
         const held = (step, info) => { if (step !== 'done' && step !== 'checking') on(step, info); };
         on('resetting');
         return W.cardEmptyAndReset(link, { pin: pin || undefined, on: held, progress });
-      })
+      }))
       .then((r) => {
         if (r && r.hash) this.txIsNew(r.hash);
         if (r && r.withdrew > 0) this.fcMoved({});
@@ -6729,8 +6884,8 @@
      * change them. The round button at the top left is HOME (`fcGoHome`). */
     const shut = (go) => () => { this.setState({ open0: false }); go(); };
     // (software 1.23: for both its currencies together, in dollars, `LU`)
-    const noPinSub = !(noPin && fc && fc.pin !== 'blocked') ? '' : 'No PIN up to ' + this.fcPrice(noPin.limit, LU) + ' \u00b7 '
-      + (noPin.left > 0 || !px || LU === 'usd' ? this.fcPrice(noPin.left, LU) : '$0.00') + ' left' + (fc.pinFirst ? '' : ' today')
+    const noPinSub = !(noPin && fc && fc.pin !== 'blocked') ? '' : 'No PIN up to ' + this.fcPrice(noPin.limit, LU) + (fc.noPinDay ? ' in 24 hours' : '') + ' \u00b7 '
+      + (noPin.left > 0 || !px || LU === 'usd' ? this.fcPrice(noPin.left, LU) : '$0.00') + ' left' + (fc.noPinDay ? this.fcNoPinResets(noPin) : fc.pinFirst ? '' : ' today')
       + (two ? ' \u00b7 both currencies' : '');
     // (a card this phone set up or claimed: the wallet's `cardKnownHere`)
     const renamable = !!(fc && fc.key && W && typeof W.cardKnownHere === 'function' && W.cardKnownHere(fc.key));

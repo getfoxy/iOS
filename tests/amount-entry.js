@@ -393,7 +393,7 @@ const amountVals = (o) => app.renderAmount(Object.assign(
 {
   reset({ screen: 'amount', flow: 'cardSuNoPin' });
   const v = amountVals();
-  ok(v.amountTitle === 'NO PIN AMOUNT?' && v.amountSubtitle === 'What is the most this card should pay without asking you to enter your PIN?',
+  ok(v.amountTitle === 'NO PIN AMOUNT?' && v.amountSubtitle === 'What\u2019s the most this card should pay in 24 hours without asking you for a PIN?',
      'the set-up\u2019s no PIN amount: NO PIN AMOUNT?, and its question', v.amountTitle + ' | ' + v.amountSubtitle);
   ok(v.nextBg === 'rgba(var(--ink-rgb),.14)' && v.nextFur === 'none,none,none' && amountVals({ val: 5 }).nextBg === 'var(--acc)',
      'NEXT is grey until an amount is typed, and the fur button once it is', v.nextBg);

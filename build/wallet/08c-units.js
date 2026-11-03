@@ -486,7 +486,8 @@
     return askedAgain(w, 'the mint’s invoice', function (via) {
       var key = quoteLock(via);
       if (key) console.log('[foxy] invoice: signed quote (NUT-20), a one-time key');
-      return createQuote(via, amount, memo || '', key).then(function (made) { return { q: made, lock: key }; });
+      // (asked once there: this is the asking again, `createQuote`'s `once`)
+      return createQuote(via, amount, memo || '', key, true).then(function (made) { return { q: made, lock: key }; });
     }).then(function (won) { return { q: won.got.q, lock: won.got.lock, w: won.w }; });
   }
 

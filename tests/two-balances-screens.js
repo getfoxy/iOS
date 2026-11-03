@@ -391,7 +391,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq(A.state.screen, 'currency', 'the next send asks again');
     A.setState({ screen: 'home', stack: [] }); await settle();
     // SETTINGS: no RECEIVE IN or SEND IN rows
-    A.setState({ menuSettingsOpen: true });
+    A.setState({ menuSettingsOpen: true, menuSecurityOpen: true });
     const labels = V().menuItems.map((m) => m.label);
     ok(labels.indexOf('SET PIN') >= 0 && labels.indexOf('RECEIVE IN') < 0 && labels.indexOf('SEND IN') < 0,
       'SETTINGS has no RECEIVE IN or SEND IN rows', labels.join(','));
@@ -739,7 +739,10 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     const realCard = A.blockedCard;
     A.blockedCard = (kind, over) => { card = { kind, over }; };
     await fresh(W);
-    A.askClear('history'); A.askClear('history');
+    // clearing asks twice, ARE YOU SURE? and ARE YOU TRIPLE SURE? (14-reconcile-seed-restore.js): both YESes, then the tokens' card
+    A.askClear('history');
+    if (card && card.over && card.over.go) card.over.go();
+    if (card && card.over && card.over.go) card.over.go();
     await settle();
     A.blockedCard = realCard;
     ok(card && card.kind === 'unclaimedTokens', 'two unclaimed tokens: the UNCLAIMED ECASH card');
@@ -831,6 +834,17 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     await settle();
     const d = V();
     eq([d.txSwapShown, d.txSwapRate, d.txMint, d.txTotalAlt], [true, '₿ 1 = $ 81,786', 'forge.example.com', 'DOLLARS'], 'a swap’s detail: its rate, its own mint, DOLLARS');
+    /* A dollar payment out with a fee: SENT is the amount, TOTAL is the amount
+     * and the fee. A card paying a $1.01 invoice with a 5-cent fee showed
+     * TOTAL $1.01, and the fee read as a cent. */
+    A.setState({ screen: 'txDetail', tx: { dir: 'out', unit: 'usd', amount: 101, feeAmount: 5, mint: MINT, kind: 'melt', at: Date.now() } });
+    await settle();
+    const f = V();
+    eq([f.txSent, f.txFee, f.txTotal], ['−' + A.unitMoney(101, 'usd'), A.unitMoney(5, 'usd'), '−' + A.unitMoney(106, 'usd')],
+      'a dollar payment’s TOTAL is the amount and the fee');
+    A.setState({ screen: 'txDetail', tx: { dir: 'in', unit: 'usd', amount: 101, feeAmount: 5, mint: MINT, at: Date.now() } });
+    await settle();
+    eq(V().txTotal, '+' + A.unitMoney(101, 'usd'), 'and a dollar receipt’s TOTAL is what arrived');
   }
 
   // ---- 12. what dollars can and cannot do, said in words --------------------------------------

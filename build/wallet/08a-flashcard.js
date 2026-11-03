@@ -90,8 +90,9 @@
      * it knows; a card of version 1.1 gives 29, without the last, and may still be read. */
     /* (and 51 from a card of 1.23 asked with P1 = 3: the 43 of P1 = 2, then the book's format, the rate, the entries in use, those
      * without the mark and the last payment's unit) */
-    if (!cardHexOk(h, 51) && !cardHexOk(h, 42) && !cardHexOk(h, 30) && !cardHexOk(h, 29)) throw new Error('The card did not say what it is.');
-    var tapKnown = h.length === 84 || h.length === 102;
+    /* (and 55 from a card of 1.25 asked with P1 = 4: P1 3's 51, then when the no-PIN window began, bytes 51 to 54, 0 for none) */
+    if (!cardHexOk(h, 55) && !cardHexOk(h, 51) && !cardHexOk(h, 42) && !cardHexOk(h, 30) && !cardHexOk(h, 29)) throw new Error('The card did not say what it is.');
+    var tapKnown = h.length === 84 || h.length === 102 || h.length === 110;
     var b = function (i) { return parseInt(h.substr(i * 2, 2), 16); };
     // the format of a card that signs once for a payment: 4, or (1.23) 5 for one that holds both units
     var all4 = cardAllFormat(b(8));
@@ -102,6 +103,8 @@
     var resetKnown = all4 && (b(0) > 1 || (b(0) === 1 && b(1) >= 17));
     // 1.18: each further limit's worth over waits four askings, not three
     var moreKnown = all4 && (b(0) > 1 || (b(0) === 1 && b(1) >= 18));
+    // 1.25 (version byte 0x19): every payment waits a floor of three askings, and each limit's worth past the first two more (`cardWaitSigns`)
+    var floorKnown = all4 && (b(0) > 1 || (b(0) === 1 && b(1) >= 25));
     // 1.20: the card keeps the mint's proof (NUT-12) with each piece it is loaded with one for, and gives it back (`cardRealCheck`)
     var proofsKnown = all4 && (b(0) > 1 || (b(0) === 1 && b(1) >= 20));
     // 1.21: a PIN before any money, every load under it, the owner claimed in a held tap (`cardIs121`, by the card's own version)
@@ -115,7 +118,7 @@
     var units = all4 && (b(0) > 1 || (b(0) === 1 && b(1) >= 23));
     // 1.24: a card with no owner is tied to a phone while it holds money as well as empty (`claimFull`, `cardClaim`)
     var claimFull = guests && (b(0) > 1 || (b(0) === 1 && b(1) >= 24));
-    var bookSaid = units && h.length === 102;
+    var bookSaid = units && (h.length === 102 || h.length === 110);
     var unitSaid = function (v) { return v === 0x80 ? 'record' : v === 0xa0 ? 'other' : ''; };
     return { version: b(0) + '.' + b(1), slots: b(2), unspent: b(3), spent: b(4), empty: b(5),
              pin: b(7) === 0 ? 'none' : b(7) === 1 ? 'set' : 'blocked', format: b(8), tries: b(9),
@@ -164,9 +167,19 @@
              resetKnown: resetKnown,
              /* `waitOver`: the signatures a card of this software asks for the first limit's worth over its limit on one payment:
               * seven on 1.13 to 1.16, ten from 1.17 (`cardWaitSigns`). */
-             waitOver: resetKnown ? CARD_WAIT_OVER_17 : CARD_WAIT_OVER,
-             // `waitMore`: the askings for each further limit's worth: four from 1.18, three before (`cardWaitSigns`)
-             waitMore: moreKnown ? CARD_WAIT_MORE_18 : CARD_WAIT_MORE,
+             /* (1.25: the floor and the first limit's worth past it, five) */
+             waitOver: floorKnown ? CARD_WAIT_FLOOR_25 + CARD_WAIT_MORE_25 : resetKnown ? CARD_WAIT_OVER_17 : CARD_WAIT_OVER,
+             // `waitMore`: the askings for each further limit's worth: two from 1.25, four from 1.18, three before (`cardWaitSigns`)
+             waitMore: floorKnown ? CARD_WAIT_MORE_25 : moreKnown ? CARD_WAIT_MORE_18 : CARD_WAIT_MORE,
+             /* `waitFloor`: the "not yet" answers every payment of a card of 1.25 gives before it signs, within its limit or not, less
+              * two for every three outputs of change; 0 before 1.25, which signed a payment within its limit at once. */
+             waitFloor: floorKnown ? CARD_WAIT_FLOOR_25 : 0,
+             /* `noPinOwn` (1.25): the no-PIN allowance is a 24-hour total of its own: only payments made without the PIN count, its window
+              * begins at the first of them (`noPinStart`, by the card's header clock; GET_INFO P1 = 4, 0 for none) and ends 24 hours later or
+              * at any good proof from the owner's phone (a load's grant, SET_LIMIT, SET_CARD, CHANGE_PIN, SET_TAG, LOCK, RESET, a hand-over);
+              * the PIN alone (VERIFY_PIN) no longer fills it. Used up, the card answers 6A9E, and the same payment goes with the PIN. */
+             noPinOwn: floorKnown,
+             noPinStart: (floorKnown && h.length === 110) ? cardU32(h, 51) : 0,
              /* This tap is the one after a payment: the card lets pieces be put
               * on with no PIN (the change). Said by the card for this tap only. */
              changeDue: h.length >= 60 && b(29) === 1,
@@ -216,7 +229,8 @@
   function cardIs123(card) { return !!(card && card.info && card.info.units); }
 
   /* GET_INFO's P1 for a card: 3 for a card of 1.23 (its book and, to its holder, its rate), 1 for every other (its limit on one tap). */
-  function cardInfoP1(card) { return cardIs123(card) ? 3 : 1; }
+  /* (4 for a card of 1.25: P1 3's, and when its no-PIN window began, `noPinStart`) */
+  function cardInfoP1(card) { return (card && card.info && card.info.noPinOwn) ? 4 : cardIs123(card) ? 3 : 1; }
 
   /* GET_CARD with P1 = 2 (1.23): the table of keysets the card holds, a count and nine bytes an entry (the keyset as a piece holds it,
    * and a state byte: 40 in use, 80 the mark, bit 0 the unit code, 00 sats or 01 dollars). Answers { list: [{ keyset, unit, marked }],
@@ -603,14 +617,16 @@
     var limit = known ? (Number(info.noPin && info.noPin.limit) || 0) : 0;
     if (!limit) return { known: known, set: false, limit: 0, spent: 0, left: 0, turns: 0, now: Number(info && info.now) || 0 };
     var now = Number(info.now) || 0;
-    var begun = Number(info.windowStart) || 0;
+    // (1.25: the allowance's own window, from its first no-PIN payment, `noPinStart`; none begun, nothing counted)
+    var begun = info.noPinOwn ? (Number(info.noPinStart) || 0) : (Number(info.windowStart) || 0);
     var counted = Number(info.noPin && info.noPin.spent) || 0;
+    if (info.noPinOwn && !begun) return { known: true, set: true, limit: limit, spent: 0, left: limit, turns: 0, now: now, own: true };
     if (now === 0 && begun === 0) {
       return { known: true, set: true, limit: limit, spent: counted, left: Math.max(0, limit - counted), turns: 0, now: 0, onTrust: true };
     }
     var over = now >= begun + CARD_DAY;
     var spent = over ? 0 : counted;
-    return { known: true, set: true, limit: limit, spent: spent, left: Math.max(0, limit - spent), turns: over ? 0 : begun + CARD_DAY, now: now };
+    return { known: true, set: true, limit: limit, spent: spent, left: Math.max(0, limit - spent), turns: over ? 0 : begun + CARD_DAY, now: now, own: !!info.noPinOwn };
   }
 
   /* Whether the card will ask for its PIN to sign for a payment that takes `net` sats off it (the pieces less the change the
@@ -714,6 +730,13 @@
   var CARD_WAIT_MORE = 3;
   // and from software 1.18 each further limit's worth waits four (`info.waitMore`)
   var CARD_WAIT_MORE_18 = 4;
+  /* and software 1.25 (0x19) waits by a floor: three "not yet" answers before every payment's signature (four signatures of work
+   * in all, from its own SPEND_ALL_BEGIN), the change it makes counting toward the floor only, two for every three outputs; then
+   * two more for each limit's worth past the first, a second payment in the tap at least two limits' worth (the owner's grant in
+   * the tap: the floor alone). The most there is, 3 + 2 × 254: 511 (it was 1,022). Measured on the J3R180: a wait 579 ms, a
+   * payment within its limit about 2.4 s from BEGIN to its signature, five waits 3.9 s, seven 4.7 s; a slower chip about 750 ms a wait. */
+  var CARD_WAIT_FLOOR_25 = 3;
+  var CARD_WAIT_MORE_25 = 2;
   var CARD_WAIT_UNITS = 255;
   // the longest a till asks anybody to hold a card for, in seconds: a payment that would wait longer is not begun
   var CARD_WAIT_MOST = 40;
@@ -742,11 +765,21 @@
    * without one, and takes the same off.
    * `over`: the signatures for the first limit's worth over the limit, which the card says by its software (`info.waitOver`):
    * 7 from 1.13 to 1.16 (and where it is not given), 10 from 1.17. */
-  function cardWaitSigns(limit, leaves, made, second, costed, over, more) {
+  /* `floor` (software 1.25, `info.waitFloor`): the floor's askings, which every payment waits, less two for every three outputs of
+   * change (the change counts toward the floor only), and `more` for each limit's worth past the first:
+   *     max(0, floor − floor(2 × made / 3)) + more × (N − 1),   N the limits' worth leaving the card (1 within it), at least 2 for a
+   * `second` payment in the tap with no owner's grant. */
+  function cardWaitSigns(limit, leaves, made, second, costed, over, more, floor) {
     var first = Number(over) > 0 ? Math.round(Number(over)) : CARD_WAIT_OVER;
     var step = Number(more) > 0 ? Math.round(Number(more)) : CARD_WAIT_MORE;
     var l = Math.round(Number(limit) || 0), n = Math.round(Number(leaves) || 0);
     var pieces = Math.max(0, Math.round(Number(made) || 0));
+    if (Number(floor) > 0) {
+      var base = Math.max(0, Math.round(Number(floor)) - Math.floor(2 * pieces / 3));
+      var many = !(l > 0) || n <= l + Math.floor(l / 32) ? 1 : Math.min(CARD_WAIT_UNITS, Math.ceil(n / l));
+      if (second && many <= 1) many = 2;
+      return base + step * (many - 1);
+    }
     var done = costed ? Math.floor(2 * pieces / 3) : pieces;
     if (!(l > 0)) return second ? Math.max(0, first - done) : 0;
     var units = n <= l + Math.floor(l / 32) ? 1 : Math.min(CARD_WAIT_UNITS, Math.ceil(n / l));
@@ -758,9 +791,15 @@
    * than CARD_WAIT_MOST seconds (software 1.13 and on), to say what can be taken. It
    * takes nothing off for change, so it is the same whatever the card counts that
    * for (`costed`) and a part of that size is waited for no longer than that. */
-  function cardWaitUnitsMost(over, more) {
+  function cardWaitUnitsMost(over, more, floor) {
     var first = Number(over) > 0 ? Math.round(Number(over)) : CARD_WAIT_OVER;
     var step = Number(more) > 0 ? Math.round(Number(more)) : CARD_WAIT_MORE;
+    // (1.25: the floor and `more` for each limit's worth past the first)
+    if (Number(floor) > 0) {
+      var u = 1;
+      while (u < CARD_WAIT_UNITS && cardWaitSeconds(Math.round(Number(floor)) + step * u) <= CARD_WAIT_MOST) u += 1;
+      return u;
+    }
     var units = 2;
     while (units < CARD_WAIT_UNITS && cardWaitSeconds(first + step * (units - 1)) <= CARD_WAIT_MOST) units += 1;
     return units;
@@ -1309,6 +1348,8 @@
     if (w === '6983') return cardError('blocked', 'This card is blocked: its PIN was typed wrong too many times.', { tries: 0 });
     if (w === '6984') return cardError('no-pin', 'This card has no PIN yet.');
     if (w === '6982') return cardError('pin-needed', 'Card needs PIN entered.');
+    // (1.25: the no-PIN total for this window is used up; with the PIN the same payment goes)
+    if (w === '6a9e') return cardError('pin-needed', 'Limit reached, enter PIN.', { sw: w, limitReached: true });
     if (w === '6a8f') return cardError('limit', 'This payment is over what the card can spend in a day.');
     if (w === '6a95') return cardError('tap-limit', 'This payment is over what the card can spend in one tap.');
     if (w === '6a90') return cardError('no-owner', 'This card has no owner, so it cannot be loaded, and its PIN and its limit cannot be changed.');
@@ -1413,14 +1454,80 @@
   }
 
   /* The owner's signature over `name`, a nonce the card gave and `value`, made
-   * by the phone (which holds the owner's key and never shows it). */
+   * by the phone (which holds the owner's key and never shows it). Every label
+   * but load is asked about first, in the phone's own alert, and most of them
+   * with Face ID or the passcode too: a No there is the person's answer, said
+   * as theirs (`declined`), and not a missing seed. */
   function cardProof(cardKey, name, nonce, value) {
-    return nativeJson('cardOwnerSign', { key: cardKey, label: name, nonce: nonce, value: String(value || '') }, 60000).then(function (j) {
+    var asked = /** @type {any} */ ({ key: cardKey, label: name, nonce: nonce, value: String(value || '') });
+    /* A record's refund key is signed only when it is this phone's own, which the phone checks by deriving it again: the
+     * lock-key index it was taken at goes with it (`cardRefundIndex`). Without one the phone says no. */
+    if (name === 'set-card') {
+      var at = cardRefundIndex(String(value || '').substr(2, 66));
+      if (at >= 0) asked.refundIndex = at;
+    }
+    return nativeJson('cardOwnerSign', asked, 60000).then(function (j) {
       var sig = String((j && j.sig) || '').toLowerCase();
       if (!/^(?:[0-9a-f]{2}){8,72}$/.test(sig)) throw new Error('not a signature');
       return sig;
-    }, function () {
+    }, function (e) {
+      if (e && /^Nothing was changed on the card\.$/.test(String(e.message))) throw cardError('declined', 'Nothing was changed on the card.');
+      if (e && /^Another change to a card is still waiting/.test(String(e.message))) throw cardError('declined', String(e.message));
       throw cardError('no-owner-key', 'This phone could not make the key that shows it owns this card. Its seed phrase may be missing.');
+    });
+  }
+
+  /* The lock-key index this phone took a refund key at, or -1: the card's row (`cardRefundKey` keeps it), else the lock key
+   * rows (`lockKeys`), which hold every key taken from the pool with its index. */
+  function cardRefundIndex(refundKey) {
+    var key = String(refundKey || '').toLowerCase();
+    if (!/^0[23][0-9a-f]{64}$/.test(key)) return -1;
+    var files = cardsOnFile();
+    var found = -1;
+    Object.keys(files).forEach(function (k) {
+      var row = files[k];
+      if (found < 0 && row && String(row.refundKey || '').toLowerCase() === key && Number.isInteger(row.refundIndex) && row.refundIndex >= 0) found = row.refundIndex;
+    });
+    if (found >= 0) return found;
+    var rows = lockKeys();
+    Object.keys(rows).forEach(function (id) {
+      var row = rows[id];
+      if (found < 0 && row && Number.isInteger(row.i) && row.i >= 0 && lockPubOf(row) === key) found = row.i;
+    });
+    return found;
+  }
+
+  /* The keeper's yes to an owner's command, asked by the phone itself before the card is held up (`cardOwnerApprove`): the phone's
+   * own alert, and Face ID or the passcode for all but a limit. The owner key then signs that command, in the next tap or within
+   * ninety seconds, and nothing like it that was not said yes to (NativeSeedBridge.swift). `op`:
+   *   { label: 'change-pin', pin }              the PIN just typed
+   *   { label: 'reset', number? }               a reset, or the let-go of one opening of change, 0 to 7
+   *   { label: 'set-card', mint?, units?, keep? } a move to `mint` (the mint this phone is at, where none is named), holding
+   *                                             `units` ('sat', 'usd'; either where none are named); `keep`: written at a later
+   *                                             tap, and kept on the phone for the card until then
+   *   { label: 'set-limit', figures }           which of 'day', 'tap' and 'noPin' the keeper set
+   *   and `card`, the card's key, where the screen is the card's.
+   * Resolves true at a yes; a no, or no answer, rejects `declined`. */
+  function cardApprove(op) {
+    var o = op || {};
+    var body = /** @type {any} */ ({ label: String(o.label || '') });
+    if (/^0[23][0-9a-f]{64}$/.test(String(o.card || '').toLowerCase())) body.card = String(o.card).toLowerCase();
+    try {
+      if (o.label === 'change-pin') body.value = cardPinHex(o.pin);
+      else if (o.label === 'reset') body.value = (o.number === undefined || o.number === null) ? '' : cardByte(Number(o.number));
+      else if (o.label === 'set-card') {
+        body.mint = canonicalMint(o.mint || mintOf(wallet));
+        if (Array.isArray(o.units) && o.units.length) body.units = o.units.map(function (u) { return unitOf(u) || u; });
+        if (o.keep) body.keep = true;
+      } else if (o.label === 'set-limit') body.figures = (o.figures || []).slice();
+    } catch (e) { return Promise.reject(e); }
+    return nativeJson('cardOwnerApprove', body, 60000).then(function (j) {
+      if (!j || j.approved !== true) throw new Error('not approved');
+      return true;
+    }, function (e) {
+      var said = String((e && e.message) || '');
+      if (/^Another change to a card is still waiting/.test(said)) throw cardError('declined', said);
+      throw cardError('declined', 'Nothing was changed on the card.');
     });
   }
 
@@ -1842,7 +1949,7 @@
      * nothing else does, and which a re-tap empties: a card that has left the
      * field has not been told this time it is powered up). */
     var one = (link && link.one) || null;
-    var clocked = false, said23 = false;
+    var clocked = false, said23 = false, said25 = false;
     return t.ask('00a40400' + cardByte(CARD_AID.length / 2) + CARD_AID + '00').then(function (r) {
       if (r.sw !== '9000' || r.data.length !== 4) throw cardError('not-a-card', 'That is not a Foxy card.');
       mark('chosen');
@@ -1851,11 +1958,13 @@
       clocked = major > 1 || (major === 1 && minor >= 15);
       // 1.23 and on: asked with P1 = 3, its book and (to its holder) its rate as well (`cardInfoP1`)
       said23 = major > 1 || (major === 1 && minor >= 23);
+      // 1.25 and on: P1 = 4, with when its no-PIN window began as well (`noPinStart`)
+      said25 = major > 1 || (major === 1 && minor >= 25);
       return 0;
     }).then(function () {
       mark('time');
       // P1 = 1: with the limit on one tap, from a card that has one; an older card answers as it always did
-      return t.want(cardCommand(CARD_INS.info, said23 ? 3 : 1, '', 0), 'to say what it is');
+      return t.want(cardCommand(CARD_INS.info, said25 ? 4 : said23 ? 3 : 1, '', 0), 'to say what it is');
     }).then(function (d) {
       card.info = cardInfoOf(d);
       /* Format 3 and 4, and 5 from a card of 1.23 that holds both units, whose secrets are format 4's; a format past that (or 5 from a card
@@ -5715,6 +5824,9 @@
              * It signed nothing and gave the payment up, as it does for a limit: this one's row goes with it (below), and the
              * person is asked for the PIN and taps again. */
             if (r.sw === '6a94') throw cardError('pin-needed', 'Card needs PIN entered.', { sw: r.sw, need: plan.leaves, sheetText: CARD_PIN_SHEET });
+            /* 6A9E (1.25): the no-PIN total for this window is used up. The same payment goes with the PIN: it is a PIN ask like 6A94's,
+             * said for what it is (`limitReached`: LIMIT REACHED. ENTER PIN.). */
+            if (r.sw === '6a9e') throw cardError('pin-needed', 'Limit reached, enter PIN.', { sw: r.sw, need: plan.leaves, limitReached: true, sheetText: CARD_PIN_SHEET });
             if (r.sw !== '9000') throw cardRefused(r.sw, 'to sign for a payment');
             return r.data;
           }).then(function (d) {
@@ -5723,7 +5835,11 @@
              * pays (`other`: this one was chosen for the change it brings
              * back, `cardRefillPick`). The card has signed nothing and said
              * so; the payer is not made to wait for change. */
-            if (polls === 0 && other && other.group && other.group.length) {
+            /* (1.25: every payment answers "not yet" for its floor first, `waitFloor`, less two for every three outputs of change; only a
+             * wait past the floor says the limit was passed, so that is the asking a cheaper set is turned to at) */
+            var floorWaits = (card && card.info && Number(card.info.waitFloor) > 0)
+              ? Math.max(0, Math.round(Number(card.info.waitFloor)) - Math.floor(2 * ((plan.change || []).length) / 3)) : 0;
+            if (polls === floorWaits && other && other.group && other.group.length) {
               asked = false;
               cardSwapDrop(plan.id);
               var turn = /** @type {any} */ (new Error('a cheaper set'));
@@ -5744,7 +5860,7 @@
              * which is what a payment within the limit waits for, and a payment over it too: the card does not say which, and it is said for
              * what it may be until it goes on past that. A card of 1.13 does not wait for change, only for the limit, and says so: the work of
              * making it is said as it is done (`progress`, `change`, above). */
-            try { if (typeof progress === 'function') progress({ step: 'waiting', over: (typeof card !== 'undefined' && card && card.info && card.info.waitOver) || 7, more: (typeof card !== 'undefined' && card && card.info && card.info.waitMore) || 3, polls: polls, seconds: Math.max(1, Math.round((Date.now() - since) / 1000)),
+            try { if (typeof progress === 'function') progress({ step: 'waiting', over: (typeof card !== 'undefined' && card && card.info && card.info.waitOver) || 7, more: (typeof card !== 'undefined' && card && card.info && card.info.waitMore) || 3, floor: (typeof card !== 'undefined' && card && card.info && card.info.waitFloor) || 0, polls: polls, seconds: Math.max(1, Math.round((Date.now() - since) / 1000)),
                                                                 sum: plan.leaves, want: wantN, making: !cardIsShaped(card) && plan.cardChange > 0 && polls <= CARD_WAIT_SIGNS }); } catch (e) {}
             return again();
           });
@@ -7325,8 +7441,8 @@
           var madeBy = cut.reduce(function (n, a) { return n + a; }, 0);
           // (1.23: what leaves the card, in cents, as the card weighs it; with no rate to weigh sats at, the limit's part of the guess is left out)
           var leavesC = cardCeil(card, worth - madeBy);
-          signs = cardWaitSigns((tap.limited && leavesC !== null) ? tap.limit : 0, leavesC === null ? 0 : leavesC, cut.length, second, costed, card.info.waitOver, card.info.waitMore);
-          unitsMost = cardWaitUnitsMost(card.info.waitOver, card.info.waitMore);
+          signs = cardWaitSigns((tap.limited && leavesC !== null) ? tap.limit : 0, leavesC === null ? 0 : leavesC, cut.length, second, costed, card.info.waitOver, card.info.waitMore, card.info.waitFloor);
+          unitsMost = cardWaitUnitsMost(card.info.waitOver, card.info.waitMore, card.info.waitFloor);
         } else {
           // 1.12: what leaves the card (the price and the fee on the pieces) and whether it makes change; before, the pieces whole
           signs = ownChange ? cardWaitSigns12(tap.limit, want + fee, worth - fee > want)
@@ -7340,7 +7456,7 @@
           throw cardError('tap-limit', 'This card would have to be held for ' + secs + ' seconds to pay this. Take it in parts of '
             + cardSaid(mostNow, cu) + ' or less.', { left: mostNow, need: sumProofs(picked), limit: cardCeilBack(card, tap.limit), wait: secs, paced: true, cardUnit: cu });
         }
-        if (signs > 0) { try { if (typeof o.progress === 'function') o.progress({ step: 'waiting', over: (typeof card !== 'undefined' && card && card.info && card.info.waitOver) || 7, more: (typeof card !== 'undefined' && card && card.info && card.info.waitMore) || 3, left: signs, seconds: secs, ahead: true, second: second }); } catch (eW) {} }
+        if (signs > 0) { try { if (typeof o.progress === 'function') o.progress({ step: 'waiting', over: (typeof card !== 'undefined' && card && card.info && card.info.waitOver) || 7, more: (typeof card !== 'undefined' && card && card.info && card.info.waitMore) || 3, floor: (typeof card !== 'undefined' && card && card.info && card.info.waitFloor) || 0, left: signs, seconds: secs, ahead: true, second: second }); } catch (eW) {} }
       }
       if (o.all) want = worth - fee;
       if (!(want > 0) || worth - fee < want) throw cardError('not-enough', 'The card holds ' + cardSaid(card.balance, cu) + '.', { balance: card.balance, cardUnit: cu });
@@ -7366,8 +7482,10 @@
       if (!pin && card.info.pinSet && picked && picked.length) {
         var leastNet = o.all ? sumProofs(picked) : want + fee;
         if (cardNeedsPin(card, leastNet)) {
-          throw cardError('pin-needed', 'Card needs PIN entered.',
-                          { early: true, need: leastNet, set: !!(card.noPin && card.noPin.set), left: card.noPin ? card.noPin.left : 0, blocked: card.info.pin === 'blocked',
+          // (1.25, an allowance set and this payment over what is left of its 24 hours: the card would answer 6A9E, LIMIT REACHED)
+          var reached = !!(card.info.noPinOwn && card.noPin && card.noPin.set && card.info.pin !== 'blocked');
+          throw cardError('pin-needed', reached ? 'Limit reached, enter PIN.' : 'Card needs PIN entered.',
+                          { early: true, need: leastNet, set: !!(card.noPin && card.noPin.set), left: card.noPin ? card.noPin.left : 0, blocked: card.info.pin === 'blocked', limitReached: reached,
                             sheetText: CARD_PIN_SHEET, cardUnit: cu });
         }
       }
@@ -7993,13 +8111,15 @@
     if (!/^ln(bc|tb|bcrt)/i.test(inv)) return Promise.reject(new Error('There is no invoice to pay.'));
     var w;
     try { w = newWallet(from, u === 'sat' ? undefined : { unit: u }); } catch (e1) { return Promise.reject(e1); }
+    // the quote's circuit, opened while that mint loads (`quoteRoad`); the wallet kept with the quote stays as it was made
+    var road = quoteRoad(from);
     return withTimeout(w.loadMint(), 25000, hostOf(from)).then(function () {
       if (u !== 'sat') {
         var sets = [];
         try { sets = (w.keyChain && w.keyChain.getKeysets) ? w.keyChain.getKeysets() : []; } catch (e2) { sets = []; }
         if (!sets || !sets.length) throw new Error(hostOf(from) + ' does not issue ' + unitName(u) + ' ecash.');
       }
-      return withTimeout(w.createMeltQuoteBolt11(inv), 25000, hostOf(from) + ' melt quote');
+      return withTimeout(onRoad(w, road).createMeltQuoteBolt11(inv), 25000, hostOf(from) + ' melt quote');
     }).then(function (q) {
       var amount = satsOf(q.amount) || 0;
       var reserve = satsOf(q.fee_reserve) || 0;
@@ -8077,6 +8197,9 @@
     }
     var dest;
     try { dest = newWallet(to, cu === 'sat' ? undefined : { unit: cu }); } catch (e1) { return Promise.reject(e1); }
+    /* This phone's fee quote for the card's mint's invoice (`cardLoadCrossPay`, `quoteFee`) takes the circuit kept ready:
+     * it is opened now, while the card's mint loads and makes the invoice, so the quote finds it built (`warmSpare`). */
+    if (!FoxyWallet._quoteWarmOff) warmSpare();
     return withTimeout(dest.loadMint(), 25000, hostOf(to)).then(function () {
       if (cu !== 'sat') {
         var sets = [];
@@ -8348,7 +8471,8 @@
     if (!home || home === to) return Promise.resolve(handle(null));
     var done = /** @type {any} */ (null);
     var finished = new Promise(function (res) { done = res; });
-    var v = /** @type {any} */ ({ mint: to, home: home, uses: 1, homing: false, finished: finished, done: done, ready: null });
+    // (`gen`: the switches made so far, `mintPendingGen`; one made since is where the phone is to be, and the visit does not go home over it)
+    var v = /** @type {any} */ ({ mint: to, home: home, uses: 1, homing: false, finished: finished, done: done, ready: null, gen: mintPendingGen });
     cardAway = v;
     claimAway = finished;
     console.log('[foxy] card: this phone visits ' + hostOf(to) + ', where a card\u2019s money is; what is started meanwhile waits until it is back on ' + hostOf(home));
@@ -8374,6 +8498,13 @@
       v.done();
     };
     if (canonicalMint(mintUrl || '') === v.home) { over(); return; }
+    /* A switch made since the visit began (a till opened at its default, a person's): the phone is where that put it, and
+     * the visit does not come home over it, now or on a retry (review, till-at-default). */
+    if (mintPendingGen !== v.gen) {
+      console.log('[foxy] card: the visit to ' + hostOf(v.mint) + ' ends where the phone was switched to, ' + hostOf(mintUrl) + ', not at ' + hostOf(v.home));
+      over();
+      return;
+    }
     FoxyWallet.connect(v.home, null, null, { remember: false }).then(function () {
       console.log('[foxy] card: back on ' + hostOf(v.home) + ' after a visit to ' + hostOf(v.mint));
       over();

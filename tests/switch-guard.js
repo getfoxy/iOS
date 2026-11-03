@@ -35,7 +35,7 @@ function method(sig) {
 }
 const methods = new Function('return {' + [
   'moneyBusy() {', 'busyWhy() {', 'refuseSwitchWhileBusy() {', 'tokenSwitchRefused(text) {',
-  'justSwitch(url) {', 'reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'makeTokenForRequest(go) {', 'sweepChange(from, left, already) {',
+  'justSwitch(url, waited) {', 'sweepHoldsLock() {', 'switchAfterSweep(url, go) {', 'reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'makeTokenForRequest(go) {', 'sweepChange(from, left, already) {',
   'takeTokenFromPaste(text) {', 'takingToken(run) {', 'newMintKeep() {', 'newMintRedeem() {',
   'rowUnits(row) {', 'adoptRestoreMint() {', 'sweepNewMint(url, host) {', 'mintNameOf(url) {',
   'back() {', 'goSwitchMint(extra) {', 'goTransfer() {', 'trPick(url) {',
@@ -43,6 +43,8 @@ const methods = new Function('return {' + [
   'receivingUp(title) {', 'receivingDown() {',
   // what ends a receive (12-receive.js, 19-update-keypad-balance.js)
   'stopReceive() {', 'endReceiveAtHome() {',
+  // a switch that lands at once, and its mint's answer (09-melt-paste-switch.js)
+  'mintConnected(ev) {', 'onMint(url) {',
 ].map(method).join(',\n') + '}')();
 
 // the real offer, for the tests that need it; the rest keep the stand-in's
@@ -82,7 +84,7 @@ function app(W) {
     announcePayment(ev) { this.announced = ev; }, hushSweepEntries() { return Promise.resolve(); },
     offerNewMint() { return false; }, balNow() { return 0; }, tookToken() {},
     settleAnimate() {}, noteReceived() {}, claimFailed(e) { this.claimErr = e; },
-    watchToken() {}, mintPile() { return { sats: 0 }; },
+    watchToken() {}, mintPile() { return { sats: 0 }; }, mintHost() { return W.mintHost(); },
     group: n => String(n), unitMoney: (a, u) => a + ' ' + u, rowAmounts: () => '5 sats',
   }, methods);
 }
@@ -374,6 +376,187 @@ const touched = (W, what) => W.calls.some(c => c.indexOf(what) === 0);
     const strays = (src.match(/screen: 'switchMint'/g) || []).length;
     // goSwitchMint and goTransfer, and nothing else setting that screen by hand
     check('nothing opens the mint list around goSwitchMint', strays === 2, strays + ' places set screen switchMint');
+  }
+
+  // 9. a switch lands at once (`switchTo`), and "Now on" waits for the mint's answer (`mintConnected`)
+  {
+    let pending = null;
+    const W = wallet({
+      switchTo(url) {
+        this.calls.push('switchTo ' + url);
+        this.mintUrl = url; pending = { url, host: 'mint.there' };
+        return Promise.resolve({ name: 'mint.there', pending: true, balanceSats: 300 });
+      },
+      connectPending() { return pending; },
+      mintHost() { return String(this.mintUrl).replace(/^https?:\/\//, ''); },
+      fromCache() { return !!pending; },
+    });
+    const a = app(W);
+    const ready = [];
+    a.walletReady = (w) => { ready.push(w); a.setState({ screen: 'home', stack: [] }); };
+    a.offerQuarantine = () => {}; a.convertOnReturn = null;
+    let againCalls = 0;
+    a.connectForRealOnceOnline = () => { againCalls += 1; };
+    a.state.screen = 'switchMint'; a.state.stack = ['home'];
+    a.justSwitch(THERE);
+    await wait(0);
+    check('the switch asks the wallet to switch at once, not to connect and wait',
+      touched(W, 'switchTo ' + THERE) && !touched(W, 'connect'), JSON.stringify(W.calls));
+    check('home is drawn straight away, on the new mint, and the mint list has closed',
+      ready.length === 1 && a.state.screen === 'home' && W.mintUrl === THERE && !a.state.switchBusy && !a.state.mintBusy,
+      JSON.stringify({ ready, screen: a.state.screen, busy: a.state.switchBusy }));
+    check('nothing is said at the tap: the shield says it is connecting',
+      a.toasts.length === 0 && !!a._switchSay && a._switchSay.url === THERE, JSON.stringify(a.toasts));
+    const refreshes = W.calls.filter(c => c === 'refresh').length;
+    pending = null;
+    a.mintConnected({ url: THERE, ok: true });
+    check('when the mint answers: "Now on" it, and the balance is read again',
+      a.toasts.indexOf('Now on mint.there') >= 0 && W.calls.filter(c => c === 'refresh').length === refreshes + 1 && !a._switchSay,
+      JSON.stringify({ toasts: a.toasts, calls: W.calls }));
+    a.mintConnected({ url: THERE, ok: true });
+    check('and only once for the switch', a.toasts.filter(t => t === 'Now on mint.there').length === 1, JSON.stringify(a.toasts));
+
+    // one that does not answer: the phone stays, says so, and is asked again behind the screen
+    const b = app(W);
+    b.walletReady = () => b.setState({ screen: 'home', stack: [] });
+    b.offerQuarantine = () => {};
+    let again = 0;
+    b.connectForRealOnceOnline = () => { again += 1; };
+    b._catchUpConnect = true;
+    b.justSwitch(THERE);
+    await wait(0);
+    b.mintConnected({ url: THERE, ok: false, why: 'b timed out', back: false });
+    check('a mint that does not answer: said, the phone stays, and the connect for real is armed again',
+      b.toasts.some(t => /mint\.there is not answering yet/.test(t)) && W.mintUrl === THERE && again === 1 && b._catchUpConnect === false,
+      JSON.stringify({ toasts: b.toasts, again }));
+    // with no keys on file, it went back: home on the mint it was on
+    const c = app(W);
+    const cReady = [];
+    let cAgain = 0;
+    c.walletReady = (w) => cReady.push(w);
+    c.connectForRealOnceOnline = () => { cAgain += 1; };
+    W.mintUrl = HERE;
+    c.mintConnected({ url: 'https://mint.new', ok: false, why: 'no answer', back: true });
+    check('a switch with no keys on file that went back: home again on the old mint, and said',
+      cReady.length === 1 && c.toasts.some(t => /Could not reach mint\.new .*Still on mint\.here/.test(t)), JSON.stringify(c.toasts));
+    check('and the wallet put back, itself from the keys on file, is connected to for real behind it', cAgain === 1, String(cAgain));
+    // "Now on" by the switch's number (`gen`): an earlier switch's answer is not this one's, and after NOT ANSWERING
+    // the answer that does come is said once
+    {
+      let n = 0;
+      const G = wallet({
+        switchTo(url) { this.mintUrl = url; n += 1; return Promise.resolve({ name: 'mint.there', pending: true, gen: n }); },
+        connectPending() { return null; }, fromCache() { return false; },
+        mintHost() { return String(this.mintUrl).replace(/^https?:\/\//, ''); },
+      });
+      const g = app(G);
+      g.walletReady = () => {}; g.offerQuarantine = () => {}; g.connectForRealOnceOnline = () => {};
+      g.justSwitch(THERE); await wait(0);       // switch 1
+      g.justSwitch(HERE); await wait(0);        // switch 2, before 1 answered
+      g.justSwitch(THERE); await wait(0);       // switch 3, to the first mint again
+      g.mintConnected({ url: THERE, ok: true, gen: 1 });
+      check('an earlier switch to the same mint answering late does not say "Now on" for this one',
+        !g.toasts.some(t => /^Now on/.test(t)) && !!g._switchSay && g._switchSay.gen === 3, JSON.stringify({ toasts: g.toasts, say: g._switchSay }));
+      g.mintConnected({ url: THERE, ok: false, why: 'timed out', back: false, gen: 3 });
+      g.mintConnected({ url: THERE, ok: false, why: 'timed out', back: false, gen: 3 });
+      check('this switch not answering is said once, and its "Now on" is kept for when it does',
+        g.toasts.filter(t => /is not answering yet/.test(t)).length === 1 && !!g._switchSay, JSON.stringify(g.toasts));
+      g.mintConnected({ url: THERE, ok: true, gen: 3 });
+      check('and when it answers after all, "Now on" is said once',
+        g.toasts.filter(t => t === 'Now on mint.there').length === 1 && !g._switchSay, JSON.stringify(g.toasts));
+      const before = g.toasts.length;
+      g.justSwitch(HERE); await wait(0);
+      check('every switch starts with no "Now on" of an earlier one waiting', g._switchSay && g._switchSay.gen === 4 && g.toasts.length === before,
+        JSON.stringify(g._switchSay));
+    }
+    // a wallet with no switchTo still connects and waits, as before
+    const old = wallet(), d = app(old);
+    d.justSwitch(THERE);
+    await wait(0);
+    check('a wallet without switchTo still connects, and says "Now on" at once',
+      touched(old, 'connect ' + THERE) && d.toasts.indexOf('Now on mint.there') >= 0, JSON.stringify(d.toasts));
+    void againCalls;
+  }
+  // and the receive screen waits for a mint that has not answered, rather than spending a try
+  {
+    const at = src.indexOf('\n  openReceiveNow() {');
+    const recv = block(at + 3);
+    check('the receive screen waits for a mint switched to, by `routeSoon`, without spending a try',
+      /e && e\.foxyConnecting && waits < WAITS && W\.routeSoon\)[\s\S]{0,260}W\.routeSoon\(this\.MINT_ANSWER_WAIT_MS\)[\s\S]{0,120}return attempt\(n, waits \+ 1\)/.test(recv),
+      'openReceiveNow');
+    check('and the boot listens for the mint\u2019s answer', /W\.onMintConnected\(\(ev\) => this\.mintConnected\(ev\)\)/.test(src), 'bootWallet');
+  }
+
+  // ---- 2026-11-03: the switch names its path, and a background sweep holding the proof lock is waited for ----------------
+  {
+    const said = [];
+    const log0 = console.log;
+    const caught = (fn) => { said.length = 0; console.log = (...a) => { said.push(a.join(' ')); }; try { return fn(); } finally { console.log = log0; } };
+    // at once, from the keys on file
+    const L = wallet({ switchTo(url) { this.calls.push('switchTo ' + url); return Promise.resolve({ name: 'mint.there', pending: true, gen: 1 }); },
+                       switchWaits() { return ''; } });
+    const l = app(L);
+    l.walletReady = () => {};
+    caught(() => l.justSwitch(THERE));
+    check('a switch that lands at once says so: "switch: <host> \u2014 at once (switchTo)"',
+      said.some(x => x === '[foxy] switch: mint.there \u2014 at once (switchTo)'), JSON.stringify(said));
+    // waiting for the mint, with the wallet's reason
+    const M = wallet({ switchTo() { return Promise.resolve({ name: 'mint.there', pending: true, gen: 1 }); },
+                       switchWaits() { return 'its keysets could not be kept: the store is full'; } });
+    const m = app(M);
+    m.walletReady = () => {};
+    caught(() => m.justSwitch(THERE));
+    check('one that waits for the mint says why, in the wallet\u2019s words',
+      said.some(x => x === '[foxy] switch: mint.there \u2014 waiting for the mint: its keysets could not be kept: the store is full'), JSON.stringify(said));
+    // no switchTo in the wallet at all
+    const N = wallet(), n = app(N);
+    caught(() => n.justSwitch(THERE));
+    check('and a wallet with no switchTo is named as the reason',
+      said.some(x => x === '[foxy] switch: mint.there \u2014 waiting for the mint: no switchTo in the wallet'), JSON.stringify(said));
+    await wait(0);
+
+    // a sweep holding the lock, let go within the five seconds: the switch waits for it and goes on, with no refusal
+    let holder = { what: '_onchainClaimAwayWith', ms: 3000 };
+    const S = wallet({ proofLockHolder() { return holder; } });
+    S.depth = 1;
+    const sw = app(S);
+    sw.walletReady = () => {};
+    check('a sweep holding the proof lock is one to wait for', sw.sweepHoldsLock() === true, 'not a sweep');
+    caught(() => sw.justSwitch(THERE));
+    check('so the switch waits rather than refusing: the row shows it was tapped',
+      sw.state.switchBusy === true && sw.state.mintBusy === THERE && !said.some(x => /refused/.test(x)) && !touched(S, 'connect')
+      && said.some(x => /waiting up to 5s for _onchainClaimAwayWith \(a background sweep\)/.test(x)), JSON.stringify({ said, st: sw.state }));
+    await wait(400);
+    S.depth = 0; holder = null;
+    await wait(400);
+    check('and once the sweep lets go it switches, nothing said about a payment',
+      touched(S, 'connect ' + THERE) && sw.toasts.indexOf(WAIT) < 0 && !sw._switchSweepT, JSON.stringify({ calls: S.calls, toasts: sw.toasts }));
+
+    // a person's own payment holding the lock: refused at once, as before
+    const P = wallet({ proofLockHolder() { return { what: 'pay', ms: 1000 }; } });
+    P.depth = 1;
+    const pp = app(P);
+    check('a person\u2019s own payment in the lock is not a sweep', pp.sweepHoldsLock() === false, 'taken for a sweep');
+    pp.justSwitch(THERE);
+    await wait(0);
+    check('and the switch is refused at once for it', pp.toasts.indexOf(WAIT) >= 0 && !touched(P, 'connect') && !pp.state.switchBusy,
+      JSON.stringify(pp.toasts));
+    // a sweep that does not let go in five seconds: refused then, as before
+    const H = wallet({ proofLockHolder() { return { what: 'tidyChange', ms: 9000 }; } });
+    H.depth = 1;
+    const hh = app(H);
+    const t0 = Date.now();
+    hh.justSwitch(THERE);
+    while (!hh.toasts.length && Date.now() - t0 < 7000) await wait(100);
+    check('a sweep still holding it after five seconds: the switch is refused then, with the words it always had',
+      hh.toasts.indexOf(WAIT) >= 0 && Date.now() - t0 >= 4900 && !touched(H, 'connect') && !hh.state.switchBusy,
+      JSON.stringify({ ms: Date.now() - t0, toasts: hh.toasts }));
+    // and something else moving money is never waited for, sweep or not
+    const X = wallet({ proofLockHolder() { return { what: 'tidyChange', ms: 100 }; } });
+    X.depth = 1;
+    const xx = app(X);
+    xx._sendRun = new Promise(() => {});
+    check('a send running beside the sweep: not a sweep to wait for', xx.sweepHoldsLock() === false, 'waited');
   }
 
   results.forEach(r => console.log(r));

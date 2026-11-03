@@ -171,6 +171,24 @@
           if (!now.torBannerMaking) this.toast('Looking for Tor again\u2026');
           return;
         }
+        /* A mint switched to that has not answered: what is on screen is this phone's, and what waits is said. */
+        const sv = this.shieldVals();
+        if (sv.shieldState === 'mint' || sv.shieldState === 'mintDown') {
+          const W = window.FoxyWallet;
+          const pend = (W && W.connectPending && W.connectPending()) || {};
+          const host = pend.host || this.mintHost() || 'the mint';
+          this.blockedCard('torConnection', {
+            tone: sv.shieldState === 'mint' ? 'ask' : 'warn',
+            title: sv.shieldLabel,
+            reason: 'The balance and history shown are the ones on this phone. Receiving by Lightning, paying, '
+              + 'swapping and anything else that needs ' + host + ' waits until it answers.'
+              // checked by the mint's keys on file, so only where there are some
+              + (pend.noKeys ? '' : ' Ecash locked to this phone can still be taken by tap.')
+              + (pend.failed ? ' Foxy keeps asking it: ' + pend.failed : ''),
+            chip: sv.shieldLabel,
+          });
+          return;
+        }
         this.blockedCard('torConnection', {
           tone: 'ask',
           title: 'TOR CONNECTION',
@@ -455,15 +473,23 @@
       : (p && p.network === 'none') ? 'offline'
       : (p && (p.tor === 'failed' || p.tor === 'stopped')) ? 'cannot'
       : 'securing';
-    const state = blank || (st === 'making' ? 'securing'
+    const route = blank || (st === 'making' ? 'securing'
       : st === 'noNet' ? 'offline'
       : (st === 'orbot' || st === 'vpn') ? 'tunnel'
       : st);
+    /* A mint switched to at once that has not answered yet (`switchTo`, the wallet's `connectPending`): over a route
+     * that is up, CONNECTING TO it, the securing look with its turning ring, until it answers; and if it would not,
+     * NOT ANSWERING, amber with the exclamation, while Foxy asks again. Tor's own states come first (the route is what
+     * is missing then, not the mint), and so does IP EXPOSED, which is never quietened. */
+    const pend = (W && W.connectPending && (route === 'secure' || route === 'tunnel')) ? W.connectPending() : null;
+    const state = pend ? (pend.failed ? 'mintDown' : 'mint') : route;
+    const pendHost = pend ? String(pend.host || pend.url || '').toUpperCase() : '';
     const AMBER = ['#E6D8A8', '#3A2F0B'];
     const look = {
       secure: ['#BFE3EC', '#123642'],
       securing: ['var(--frost-chip)', '#BFE3EC'],
-      offline: AMBER, cannot: AMBER, tunnel: AMBER,
+      mint: ['var(--frost-chip)', '#BFE3EC'],
+      offline: AMBER, cannot: AMBER, tunnel: AMBER, mintDown: AMBER,
       exposed: ['#FF5C5C', '#3A0B0B'],
     }[state];
     // what goes inside the shield: a tick, a slash, a lock or an exclamation (its dot is a stroke with no length)
@@ -471,17 +497,21 @@
     const mark = {
       secure: 'M8.6 12.3l2.3 2.3 4.5-4.9',
       securing: '',
+      mint: '',
+      mintDown: BANG,
       offline: 'M6 18.5 18 5.5',
       cannot: BANG,
       tunnel: 'M10.2 11.2h3.6a1 1 0 0 1 1 1v2.4a1 1 0 0 1-1 1h-3.6a1 1 0 0 1-1-1v-2.4a1 1 0 0 1 1-1zM10.3 11.2V9.9a1.7 1.7 0 0 1 3.4 0v1.3',
       exposed: BANG,
     }[state];
-    const turning = state === 'securing';
+    const turning = state === 'securing' || state === 'mint';
     return {
       shieldState: state,
       /* Its words, for whoever cannot see the colour: the banner's own, and for the two states it said in one
        * word or none, the sentence the word stood for. */
-      shieldLabel: state === 'securing' ? 'SECURING YOUR CONNECTION'
+      shieldLabel: state === 'mint' ? 'CONNECTING TO ' + pendHost
+        : state === 'mintDown' ? pendHost + ' IS NOT ANSWERING'
+        : state === 'securing' ? 'SECURING YOUR CONNECTION'
         : state === 'secure' ? 'Connected Over Tor'
         /* a blank banner has no words of its own; the banner's for these, short of TAP TO RETRY, which is the
          * offline tap's promise and not this one's (`torBanner` opens the connection card here) */
@@ -581,15 +611,15 @@
         ? 'How much to send on chain?'
         : s.flow === 'transfer'
         // what is at the mint it leaves, so the amount is typed against it
-        ? 'From ' + (this.mintNameOf(s.trFrom) || 'that mint') + ' \u00b7 \u20bf '
-          + this.group(this.trFromSats()) + ' there'
+        ? this.trFromText()
         : s.flow === 'deposit' ? 'How much do you want to deposit?'
         : s.flow === 'cardAdd' ? 'How much to deposit?'
         : s.flow === 'cardSend' ? 'How much to put on the card?'
         : s.flow === 'cardWd' ? 'How much to withdraw?'
         : s.flow === 'cardLimit' ? (this.fcLimitQuestion ? this.fcLimitQuestion() : 'What would you like the daily limit to be?')
         // a card's set-up (26j-card-wheel.js): LIMITS' own questions for the two
-        : s.flow === 'cardSuNoPin' ? 'What is the most this card should pay without asking you to enter your PIN?'
+        // (the set-up's no-PIN figure is the card's 24-hour total without the PIN, software 1.25, written to the allowance)
+        : s.flow === 'cardSuNoPin' ? 'What\u2019s the most this card should pay in 24 hours without asking you for a PIN?'
         : s.flow === 'cardSuTap' ? 'What is the most this card should pay each second?'
         : s.flow === 'receive' ? 'How much to receive?'
         : s.flow === 'swap' ? 'How much to swap?'

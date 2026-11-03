@@ -291,6 +291,11 @@ extension FoxyBridge {
     /// seed is still compared, and with none saved the answer is "no migration
     /// here". The counters are left alone: the page's own counters come across
     /// with countersImport, and setting them aside here would lose them.
+    ///
+    /// A write asks first, as seedAdopt does: the Save alert, then Face ID or the
+    /// passcode, asked by iOS. Only a write: a compare asks nothing. A page
+    /// script in the window, on a phone with no seed saved yet, could otherwise
+    /// make words it knew the wallet's seed and receive everything sent to it.
     func handleSeedMigrate(id: String, body: [String: Any]) {
         guard let wordlist = BIP39.english else {
             return resolve(id: id, text: nil, error: "the wordlist could not be checked")
@@ -304,7 +309,13 @@ extension FoxyBridge {
         guard beginSeedChange(id: id) else { return }
         Self.seedQueue.async {
             // the window is read here, on seedQueue, where the answer that closes it is given
-            let reply = SeedActions.migrate(phrase, env: .live)
+            let reply = SeedActions.migrate(phrase, env: .live) {
+                guard self.confirmSeedChangeAndWait(
+                    title: Self.migrateSeedTitle, message: Self.noPasscodeNote(Self.migrateSeedMessage, "saved"),
+                    action: "Save") else { return false }
+                // the device owner too, as for a replace: a yes in an alert is one tap from a lure
+                return SeedVault.deviceOwnerApproves(reason: Self.migrateSeedReason)
+            }
             self.endSeedChange(id: id, text: reply.text, error: reply.error)
         }
     }
@@ -406,15 +417,152 @@ extension FoxyBridge {
         }
     }
 
-    /// {key, label, nonce, value} → {"sig"}: the owner key's signature for one of
-    /// six labels and the shape of value it takes, which is all the page can have
-    /// signed. Refused with "bad request", before the seed is read, otherwise.
+    /// {key, label, nonce, value, refundIndex?} → {"sig"}: the owner key's
+    /// signature for one of six labels and the shape of value it takes, which is
+    /// all the page can have signed. Refused with "bad request", before the seed
+    /// is read, otherwise.
+    ///
+    /// Load, which is every top-up, signs as it always has. Every other label
+    /// signs only against the keeper's yes, given before the card was held up
+    /// (`cardOwnerApprove`), which it uses up: the same bytes for change-pin,
+    /// reset and set-owner; the mint and unit chosen for set-card (a move written
+    /// at a later tap uses the yes kept for that card); the figures chosen for
+    /// set-limit, every other figure the card's own as it said it in this tap.
+    /// Two things sign with no yes because they change nothing the keeper chose
+    /// (CardOwner.signsUnasked): a rate written before a top-up with the card's
+    /// own figures, and a record at the card's own mint and unit, whose refund
+    /// key SeedActions checks is this phone's. Nothing is asked during the tap.
+    /// Anything else is CardOwner.declined.
     func handleCardOwnerSign(id: String, body: [String: Any]) {
+        let request: CardOwner.SignRequest
         switch Self.cardOwnerSignCheck(body) {
-        case .refuse(let why): resolve(id: id, text: nil, error: why)
-        case .ok(let request): onSeedQueue(id: id) { SeedActions.cardOwnerSign(request, env: $0) }
+        case .refuse(let why): return resolve(id: id, text: nil, error: why)
+        case .ok(let asked): request = asked
+        }
+        guard request.label != .load else {
+            return onSeedQueue(id: id) { SeedActions.cardOwnerSign(request, env: $0) }
+        }
+        // a new owner key that is no key is refused before anything else
+        guard request.label != .setOwner || CardOwner.isOwnerKey(request.value) else {
+            return resolve(id: id, text: nil, error: "bad request")
+        }
+        dispatchPrecondition(condition: .onQueue(.main))
+        let now = Date().timeIntervalSince1970
+        dropSpentCardApprovals(now: now)
+        if let i = cardApprovals.firstIndex(where: { $0.session == cardSession && cardSessionOpen
+                                                    && CardOwner.matches(request, $0.approval, seen: cardSeen) }) {
+            cardApprovals.remove(at: i)
+            print("[foxy] card: \(request.label.rawValue) signed against the keeper's yes before the tap")
+        } else if CardOwner.signsUnasked(request, seen: cardSeen) {
+            print("[foxy] card: \(request.label.rawValue) signed unasked: it changes nothing the keeper chose")
+        } else if request.label == .setCard, CardMoves.use(for: request, seen: cardSeen) {
+            print("[foxy] card: a move the keeper said yes to earlier is written now")
+        } else {
+            print("[foxy] card: \(request.label.rawValue) not signed: the keeper said yes to nothing like it")
+            return resolve(id: id, text: nil, error: CardOwner.declined)
+        }
+        onSeedQueue(id: id) { SeedActions.cardOwnerSign(request, env: $0) }
+    }
+
+    /// {label, …} → {"approved": true}, or CardOwner.declined: the keeper's yes to
+    /// one owner's command, asked at the screen where it begins and before the card
+    /// session (CardOwner.approval for what each label names). The phone's own
+    /// alert, its words built from what the approval holds (CardOwner.question);
+    /// then, for set-owner, set-card, change-pin and reset, Face ID or the
+    /// passcode with a context of its own, so neither a seed already unlocked nor
+    /// the seconds after an unlock stand in for the keeper. set-limit asks the
+    /// alert alone. One question at a time, and no answer in 50 seconds is a no.
+    /// A yes lasts for the next card session or 90 seconds, whichever ends first;
+    /// a move (`keep`) is kept in the Keychain for its card until the write that
+    /// uses it.
+    func handleCardOwnerApprove(id: String, body: [String: Any]) {
+        guard let approval = CardOwner.approval(body, at: Date().timeIntervalSince1970),
+              let question = CardOwner.question(for: approval) else {
+            return resolve(id: id, text: nil, error: "bad request")
+        }
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard !cardOwnerAsking else {
+            print("[foxy] card: a question refused; another is still waiting for an answer")
+            return resolve(id: id, text: nil, error: Self.cardOwnerBusy)
+        }
+        cardOwnerAsking = true
+        let finish: (Bool) -> Void = { yes in
+            DispatchQueue.main.async {
+                self.cardOwnerAsking = false
+                guard yes else { return self.resolve(id: id, text: nil, error: CardOwner.declined) }
+                if approval.keep {
+                    CardMoves.keep(approval)
+                } else {
+                    // for the next card session: one already open is not it
+                    self.cardApprovals.append((approval, nil))
+                    if self.cardApprovals.count > 4 { self.cardApprovals.removeFirst(self.cardApprovals.count - 4) }
+                }
+                self.resolve(id: id, text: Self.json(["approved": true]), error: nil)
+            }
+        }
+        var answered = false
+        let ticket = confirmSeedChange(title: question.title, message: question.message, action: question.yes) { yes in
+            answered = true
+            print("[foxy] card: \"\(question.title)\" answered \(yes ? question.yes : "Cancel")")
+            guard yes else { return finish(false) }
+            guard question.askOwner else { return finish(true) }
+            Self.cardOwnerQueue.async {
+                // a fresh LAContext: the keeper, now, and not an unlock that is still warm
+                finish(SeedVault.deviceOwnerApproves(reason: question.reason))
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.cardOwnerAnswerWait) {
+            guard !answered else { return }
+            print("[foxy] card: no answer in \(Int(Self.cardOwnerAnswerWait))s, taken as no")
+            ticket.cancel()
         }
     }
+
+    /// Yeses past their 90 seconds, or bound to a session that has ended.
+    func dropSpentCardApprovals(now: TimeInterval) {
+        cardApprovals.removeAll { now - $0.approval.at > CardOwner.approvalLife
+            || ($0.session != nil && ($0.session != cardSession || !cardSessionOpen)) }
+    }
+
+    /// A card session begins: yeses given since the last one are for it, and what
+    /// the last card said is forgotten.
+    func cardSessionBegan() {
+        cardSession += 1
+        cardSessionOpen = true
+        cardSeen = CardOwner.Seen()
+        dropSpentCardApprovals(now: Date().timeIntervalSince1970)
+        for i in cardApprovals.indices where cardApprovals[i].session == nil { cardApprovals[i].session = cardSession }
+    }
+
+    /// The session has ended, for any reason: its yeses go with it.
+    func cardSessionEnded() {
+        cardSessionOpen = false
+        cardSeen = CardOwner.Seen()
+        dropSpentCardApprovals(now: Date().timeIntervalSince1970)
+    }
+
+    /// An answer the card gave in this session, kept where it says the card's
+    /// limits or its record (CardOwner.Seen). Only the card's own answers, as the
+    /// phone carried them: the page cannot write these.
+    func cardSaw(_ command: Data, _ answer: Data) {
+        let c = [UInt8](command), a = [UInt8](answer)
+        guard c.count >= 4, a.count >= 2, a[a.count - 2] == 0x90, a[a.count - 1] == 0x00 else { return }
+        let body = Array(a.dropLast(2))
+        switch c[1] {
+        case 0x01:
+            if let limits = CardOwner.limitsSeen(body) { cardSeen.limits = limits }
+            if CardOwner.unownedSeen(body) { cardSeen.unowned = true }
+        case 0x16: if let record = CardOwner.recordSeen(body) { cardSeen.unit = record.unit; cardSeen.mint = record.mint }
+        default: break
+        }
+    }
+
+    /// The keeper's yes waits on its own queue, so Face ID holds up no counter
+    /// a payment is reserving on seedQueue meanwhile.
+    static let cardOwnerQueue = DispatchQueue(label: "foxy.card.owner")
+    /// A card question with no answer by then is a no.
+    static let cardOwnerAnswerWait: TimeInterval = 50
+    static let cardOwnerBusy = "Another change to a card is still waiting for an answer. Nothing was changed."
 
     // MARK: Screens
 
@@ -551,6 +699,10 @@ extension FoxyBridge {
     /// What iOS says when it asks for Face ID or the passcode to replace the seed.
     static let replaceSeedReason = "Replace this wallet's seed"
 
+    /// What iOS says when it asks for Face ID or the passcode to save words an
+    /// older Foxy kept in its page as this wallet's seed.
+    static let migrateSeedReason = "Save this wallet's seed"
+
     /// A seed alert's message, and on a phone with no passcode a sentence saying
     /// nothing else will be asked: iOS has no Face ID or passcode to ask there, so
     /// the change goes ahead on this alert alone (a deliberate decision).
@@ -601,5 +753,35 @@ extension FoxyBridge {
                 self.endSeedChange(id: id, text: reply.text, error: reply.error)
             }
         }
+    }
+}
+
+/// The moves to another mint the keeper said yes to, kept for the card each is
+/// for until the write that uses it, which can be a later tap than the one that
+/// moved the money (CardOwner.useMove). In the Keychain, this device only, as a
+/// list; a reinstall removes it with everything else a previous installation
+/// approved.
+enum CardMoves {
+    static let key = "foxy.card.moves"
+
+    static func kept() -> [CardOwner.Approval] {
+        guard let text = SeedStore.load(key: key),
+              let list = try? JSONDecoder().decode([CardOwner.Approval].self, from: Data(text.utf8)) else { return [] }
+        return list
+    }
+
+    private static func save(_ list: [CardOwner.Approval]) {
+        guard !list.isEmpty else { SeedStore.deleteIfPresent(key: key); return }
+        guard let data = try? JSONEncoder().encode(list), let text = String(data: data, encoding: .utf8) else { return }
+        if !SeedStore.save(text, key: key) { print("[foxy] card: the move could not be kept on the phone") }
+    }
+
+    static func keep(_ move: CardOwner.Approval) { save(CardOwner.keepMove(kept(), move)) }
+
+    /// Whether a move kept for this card is what `request` writes; if so it is used up.
+    static func use(for request: CardOwner.SignRequest, seen: CardOwner.Seen) -> Bool {
+        guard let left = CardOwner.useMove(kept(), for: request, seen: seen) else { return false }
+        save(left)
+        return true
     }
 }

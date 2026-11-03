@@ -37,6 +37,23 @@ same compiler: Tor's build is reproducible with the same Xcode and gives
 different bytes with another. Check yours against it before concluding that a
 rebuild disagrees.
 
+## The build stamp
+
+The page (`Web/index.html`) and the wallet (`Web/foxy-wallet.js`) are two files
+staged side by side, and a phone once ran a page from one build beside a wallet
+from another. `python3 tools/pack-index.py` stamps both with one figure: the
+sha256 of the joined `Web/foxy-wallet.js` with the stamp's own value blanked (a
+file cannot hold its own hash). The wallet carries it through a generated part,
+`build/wallet/zz-build-stamp.js` (last in name order, joined like any other;
+never edit it), as `FoxyWallet.buildStamp`; the page carries it as
+`<meta name="foxy-wallet-stamp">` beside its policy. At boot the page compares
+the two (`buildStampCheck`, `06-wallet-boot-and-restore.js`) and, when they
+differ, writes one line to the log and nothing to the screen:
+`[foxy] page and wallet from different builds (page 1a2b3c4d, wallet 5e6f7a8b)`
+(`wallet none` for a wallet from before the stamp). Smoke checks that the two
+in `Web/` agree and that the wallet's is its own hash; a wallet part edited
+without repacking fails there.
+
 ## Signing, the simulator and a phone
 
 For the simulator, `sh tools/sim-build.sh` builds signed to run locally, so the
@@ -70,6 +87,7 @@ node tests/run.js                    # wallet tests: proofs, payments, imports, 
 node tests/nut-vectors.js            # Cashu spec vectors (NUT-00, 01, 02, 10, 11, 12, 18, 20, 26) through the bundled libraries
 node tests/cards-logic.js            # the app's cards queue rather than replace one another
 node tests/switch-guard.js           # no mint switch while money is moving; a restore waits for its own write
+node tests/switch-instant.js         # a mint switch lands at once from the keys on file; what needs the mint waits for its answer
 node tests/render-parity.js          # every screen renders the same DOM with build/foxy-render.js as with the runtime it replaced
 node tests/p2pk-round-trip.js        # ecash locked to a key only this phone holds, and the money written down before it is touched
 node tests/tap-offer.js              # what each screen puts on the air for tap to pay, and which screens may not

@@ -114,7 +114,7 @@ index = open(INDEX, newline='').read()
 # files in the tree, so a part edited without running python3
 # tools/pack-index.py fails here instead of being quietly repacked. The
 # generated files are not copied in, so a pack that wrote nothing cannot pass.
-import shutil, tempfile
+import shutil, tempfile, hashlib
 GENERATED = ['Web/index.html', 'Web/foxy-wallet.js', 'build/foxy-app.js',
              'build/app/README.md', 'build/wallet/README.md']
 with tempfile.TemporaryDirectory(prefix='foxy-smoke-pack.') as tmp:
@@ -143,6 +143,27 @@ with tempfile.TemporaryDirectory(prefix='foxy-smoke-pack.') as tmp:
         else:
             ok('pack, in a temporary folder, makes index.html, the joined files and the part READMEs byte for byte')
 index = open(INDEX, newline='').read()
+
+# 1b. the build stamp -----------------------------------------------------
+# The page and the wallet name one build: the page's meta foxy-wallet-stamp and
+# the wallet's buildStamp are the same sha256, the wallet's own text with that
+# value blanked (tools/pack-index.py). A page from one build beside a wallet
+# from another was seen on a phone on 2026-11-03 and said nothing.
+_wtext = open('Web/foxy-wallet.js', encoding='utf-8', newline='').read()
+_ps = re.findall(r'<meta name="foxy-wallet-stamp" content="([0-9a-f]{64})">', index)
+_ws = re.findall(r"window\.FoxyWallet\.buildStamp = '([0-9a-f]{64})'", _wtext)
+_wself = hashlib.sha256(re.sub(r"(window\.FoxyWallet\.buildStamp = ')[0-9a-f]*(')", r'\1\2', _wtext)
+                        .encode('utf-8')).hexdigest()
+if len(_ps) != 1 or len(_ws) != 1:
+    fail('the build stamp: %d in Web/index.html and %d in Web/foxy-wallet.js, expected one each' % (len(_ps), len(_ws)))
+elif _ps[0] != _ws[0]:
+    fail('the page and the wallet in Web/ are from different builds (page %s, wallet %s): run python3 tools/pack-index.py'
+         % (_ps[0][:8], _ws[0][:8]))
+elif _ws[0] != _wself:
+    fail('the wallet\'s build stamp is not its own hash (stamp %s, hash %s): run python3 tools/pack-index.py'
+         % (_ws[0][:8], _wself[:8]))
+else:
+    ok('the page and the wallet carry one build stamp (%s), the wallet\'s own hash' % _ps[0][:8])
 
 # 2. parse --------------------------------------------------------------
 r = subprocess.run(['node', '-e',
@@ -1241,8 +1262,23 @@ else:
 # Keychain items outlive the app. Once the seed moved to foxy.seed.v2, a reinstall
 # that deleted only foxy.seed.v1 offered the previous installation's words.
 host28 = open(os.path.join('Foxy', 'FoxyWebView.swift'), encoding='utf8').read()
-forget28 = re.search(r'static func forgetSeedIfReinstalled\(\)(.*?)\n    }\n', host28, re.S)
+forget28 = re.search(r'static func forgetPreviousInstallation\(\)(.*?)\n    }\n', host28, re.S)
+# the marker is written and read back before anything is removed: a write that
+# failed (a full phone) used to leave no marker, and the next launch deleted the
+# seed of a wallet in use
+check28 = re.search(r'static func forgetSeedIfReinstalled\(disk:(.*?)\n    }\n', host28, re.S)
 problems28 = []
+if not check28:
+    problems28.append('the marker check is gone')
+else:
+    order28 = check28.group(1)
+    w28, r28, f28 = order28.find('try disk.write('), order28.rfind('disk.fileExists(atPath: marker.path)'), order28.find('forget()')
+    if min(w28, r28, f28) < 0 or not (w28 < r28 < f28):
+        problems28.append('the seed is no longer removed only after the marker is written and read back')
+    if 'try?' in order28:
+        problems28.append('the marker check swallows an error again')
+    if '.completeFileProtectionUntilFirstUserAuthentication' not in order28:
+        problems28.append('the marker is no longer readable from the first unlock')
 if not forget28:
     problems28.append('forgetSeedIfReinstalled is gone')
 else:
@@ -1255,7 +1291,7 @@ else:
 if problems28:
     fail('reinstall: ' + '; '.join(problems28))
 else:
-    ok('a reinstall deletes both seed items, the approved hosts and the Orbot key, reading nothing')
+    ok('a reinstall deletes both seed items, the approved hosts and the Orbot key, reading nothing, and only once its marker is written and read back')
 
 # ---- 29. the seed changes only with a yes iOS draws; proofs and literals ------
 # A page script could delete the seed with no approval and write one it knew, or
@@ -1290,16 +1326,21 @@ if 'inet_aton(' not in route29:
 if 'agree: agree' not in bridge29 or 'W.agreedRate' not in open(os.path.join('build', 'app', '03-send.js'), encoding='utf8').read():
     problems29.append('a payment typed in dollars no longer needs a price two sources agree on')
 # seedMigrate moves words the page still holds only where no seed is saved:
-# never with replace, never asking, and never a write where a seed was found
+# never with replace, never asking to replace, and never a write where a seed was found
 migrate29 = bridge_handler(bridge29 + native29, 'seedMigrate') or ''
 actions29 = open(os.path.join('Foxy', 'Keychain', 'SeedActions.swift'), encoding='utf8').read()
 window29 = open(os.path.join('Foxy', 'Keychain', 'SeedMigrationWindow.swift'), encoding='utf8').read()
 run29 = action_body(actions29, 'migrate')
 decide29 = action_body(actions29, 'decideMigration')
 if 'SeedActions.migrate(phrase, env: .live)' not in migrate29 or 'replace: true' in migrate29 + run29 + decide29 \
-        or 'confirmSeedChange' in migrate29 or 'beginSeedChange(id: id)' not in migrate29 \
+        or 'confirmSeedChange(title: Self.replaceSeedTitle' in migrate29 or 'beginSeedChange(id: id)' not in migrate29 \
         or 'env.write(words, false, nil, { false })' not in run29:
     problems29.append('seedMigrate could replace a saved seed, or ask to')
+# ...and before it writes words it asks, as seedAdopt does: the alert, then Face ID
+# or the passcode. It was the one way into the seed that asked nobody.
+if not (0 <= migrate29.find('confirmSeedChangeAndWait(') < migrate29.find('SeedVault.deviceOwnerApproves(')) \
+        or not (0 <= run29.find('guard confirmWrite() else') < run29.find('env.write(words, false, nil, { false })')):
+    problems29.append('seedMigrate writes words with no alert and no Face ID or passcode first')
 # the words are checked first, with the window open or closed (review M4)
 if not (0 <= migrate29.find('Self.seedMigrateCheck(') < migrate29.find('beginSeedChange(id: id)')):
     problems29.append('seedMigrate no longer checks the words before anything else')
@@ -1811,6 +1852,19 @@ actions32 = ['seedStatus', 'seedCreate', 'seedMigrate', 'countersImport', 'count
 declared32 = re.search(r'static let nativeSeedActions: Set<String> = \[(.*?)\]', native32, re.S)
 if not declared32 or sorted(re.findall(r'"(\w+)"', declared32.group(1))) != sorted(actions32):
     problems32.append('nativeSeedActions is not the twenty-one seed actions')
+# a card's owner key signs every label but load only against the keeper's yes, asked before the card session and never in it
+sign32 = bridge_handler(both32, 'cardOwnerSign') or ''
+approve32 = bridge_handler(both32, 'cardOwnerApprove') or ''
+if 'confirmSeedChange' in sign32 or 'deviceOwnerApproves' in sign32:
+    problems32.append('cardOwnerSign asks during the card session again, where the alert sits under the card sheet')
+for need32 in ('CardOwner.matches(request', 'CardOwner.signsUnasked(request', 'CardMoves.use(for: request', 'error: CardOwner.declined'):
+    if need32 not in sign32:
+        problems32.append('cardOwnerSign no longer has ' + need32)
+if not (0 <= approve32.find('confirmSeedChange(') < approve32.find('SeedVault.deviceOwnerApproves(')):
+    problems32.append('cardOwnerApprove no longer asks the alert and then Face ID or the passcode')
+cardsign32 = action_body(acts32, 'cardOwnerSign')
+if 'P2PK.publicKeys(seed: seed, start: index, count: 1)' not in cardsign32 or 'request.refundIndex == nil { return .refuse(CardOwner.declined) }' not in cardsign32:
+    problems32.append("a card's record is signed with a refund key that is not this phone's")
 dispatch32 = re.search(r'static func dispatch\(_ message: Any\) -> Dispatch \{(.*?)\n    \}', bridge32, re.S)
 if not dispatch32 or 'guard let handler = handlers[action] else { return .unknown(action: action, id: id) }' not in dispatch32.group(1):
     problems32.append('dispatch no longer refuses an action that is not in the table')
@@ -1975,15 +2029,21 @@ adoptfn32 = action_body(acts32, 'adopt')
 for need32 in ('beginSeedChange(id: id)', 'confirmSeedChangeAndWait(', 'Self.replaceSeedTitle', 'SeedActions.adopt(candidate, env: .live)'):
     if need32 not in adopt32:
         problems32.append('seedAdopt no longer has ' + need32)
-for need32 in ('env.write(words, true, candidate)', 'env.counters.moveAside()', 'sameBytes(as:', 'env.counters.raise(served)'):
+# the counters go aside through the environment (CounterStore.moveAside, and a stand-in that fails in the tests)
+for need32 in ('env.write(words, true, candidate)', 'env.setCountersAside(env.counters)', 'sameBytes(as:', 'env.counters.raise(served)'):
     if need32 not in adoptfn32:
         problems32.append('SeedActions.adopt no longer has ' + need32)
-if not (0 <= adoptfn32.find('env.write(') < adoptfn32.find('env.counters.moveAside()')):
+if 'var setCountersAside: (_ store: CounterStore) throws -> Void = { try $0.moveAside() }' not in acts32:
+    problems32.append('the live environment no longer sets counters aside with CounterStore.moveAside')
+if not (0 <= adoptfn32.find('env.write(') < adoptfn32.find('env.setCountersAside(env.counters)')):
     problems32.append('seedAdopt sets the counters aside before the keychain has the new words')
+# a set-aside that fails after the replace deletes them instead: the old seed's counters never count on under the new one
+if not (0 <= adoptfn32.find('env.setCountersAside(env.counters)') < adoptfn32.find('env.counters.discard()') < adoptfn32.rfind('env.counters.raise(served)')):
+    problems32.append('a replace whose counters cannot be set aside leaves them counting on under the new seed')
 # review M2: typed words raise the counters to where they were served, the saved seed's own words too
 same32 = adoptfn32.split('where saved.sameBytes(as: typed):', 1)[-1].split('case .found, .absent:', 1)[0]
 if 'env.counters.raise(served)' not in same32 or adoptfn32.count('env.counters.raise(served)') != 2 \
-        or adoptfn32.rfind('env.counters.raise(served)') < adoptfn32.find('env.counters.moveAside()'):
+        or adoptfn32.rfind('env.counters.raise(served)') < adoptfn32.find('env.setCountersAside(env.counters)'):
     problems32.append('typed words served past the counters do not raise them when adopted or found to be the saved seed')
 # M6: the adopted candidate is kept through its own write
 if 'candidates.forget(' in adoptfn32 or 'forgetNativeSeed(keepingCandidate: keepCandidate)' not in vault32:
@@ -2203,9 +2263,13 @@ need34('SeedPasteboard.holdsSeedPhrase', body34(paste34, 'static func holdsSeedP
 need34('readClipboard', body34(bridge32, 'private func readClipboard('),
        ['let text = SeedPasteboard.forPage(UIPasteboard.general.string ?? "", from: "clipboard")', 'resolve(id: id, text: text, error: nil)'],
        'the clipboard action hands the page a phrase')
-need34('startPasteControl', body34(bridge32, 'private func startPasteControl('),
+need34('placePasteControl', body34(bridge32, 'private func placePasteControl('),
        ['let given = SeedPasteboard.forPage(text, from: "paste control")', '_pasted(\\(Self.literalStatic(given)))'],
        'the paste control hands the page a phrase')
+# and is put only over one of the page's own paste buttons, asked in a world the page cannot touch
+need34('startPasteControl', body34(bridge32, 'private func startPasteControl('),
+       ['PasteAffordance.check(rect, in: webView)', 'self.placePasteControl(id: id, rect: rect, on: presenter, over: webView)'],
+       'the paste control is placed wherever the page asks again')
 # one screen at a time, cancelled, and read on seedQueue
 for action34 in ('seedShow', 'seedEnter'):
     need34(action34, bridge_handler(both32, action34) or '',

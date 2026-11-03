@@ -788,6 +788,56 @@ going through" and step 3 is never reached, or it returns pending and the claim
 in step 3 fails because the destination has not been paid. Either way the note
 stays and `finishMove()` tries the claim later.
 
+**From dollars.** A source mint that holds both balances on this phone is asked
+about on the CURRENCY screen first (TRANSFER WHICH?, `trPick` in
+`26a-transfer.js`); one that holds only one is that one, asked nothing. A dollar
+transfer is typed in dollars and capped at the dollar pile there. What lands is
+still sats: `transferQuote(from, sats, { unit: 'usd' })` asks the destination
+for a sat invoice for the typed dollars at this phone's price, and the source
+for its melt quote in cents, which is the price; `gross` is that quote's cents
+plus the reserve and the source's split fee, `feeUnit` the part over the
+invoice. `moveRun()` melts the dollar pile with that very quote (`pay()` with
+`unit: 'usd'` and the plan's quote, refused before anything moves if a fresh
+quote is dearer), and the sat pile at the source is not touched. The
+confirmation shows the sats landing and the dollars leaving. The note, the
+claim and `finishMove()` are as above: the destination's side is sats either
+way. Pinned by `tests/transfer-dollars.js`.
+
+**Every invoice a crossing asks for is asked again** (`createQuote`,
+`00-header-and-mint-errors.js`): after three seconds of nothing at a mint that
+is answering, five otherwise, on another circuit, as a fee quote is. Each asking
+after the first carries a NUT-20 key of its own, and the lock object the caller
+files is given the answering asking's key before the quote is returned, so the
+key written in the move note is always the key the quote was made with. The
+quote nobody pays expires at the mint. An invoice for a receive already asked
+again itself (`askQuote`, `08c-units.js`) and asks once here.
+
+**A card's TRANSFER** (`fcMove`, `26f-flashcard.js`; the wallet's
+`cardTransferQuote` and `cardTransfer`) is the same crossing with the card's
+money. Only the mint the holder picked is quoted: a quote whose confirmation is
+no longer the one on screen (a mint picked and backed out of) is not asked, or
+its answer is let go, and the log says so. A tap that drops after the pieces
+were made at the new mint (`stage: 'owed'`) keeps the crossing's visit to the
+new mint open (`fcMoveHold`): TAP CARD writes the card in that visit, with no
+connect home to the old mint and back between the swap and the write, and
+LATER, the card closed any other way, or two minutes with no tap end the visit.
+The money owed to the card is on file either way (`cardOwed`). Pinned by
+`tests/flashcard-switch.js`.
+
+**WITHDRAW TO.** WITHDRAW, ALL OF IT, on a phone that uses more than one mint
+asks first where it lands (`fcWdToAsk`, `26n-card-withdraw-to.js`), on the
+SWITCH MINT list: the card's own mint first at NO FEE, then each other mint the
+phone uses with what the crossing there costs, from `transferQuote(cardMint,
+sats, { to, quoteOnly: true })` (nothing is paid by asking), the cheapest
+first. A phone with one mint, or a typed amount, is asked nothing. The
+withdrawal itself is unchanged: the card's pieces come into this phone at the
+card's mint. Another mint picked, what came off then crosses there
+(`fcWdCross`: quoted again for what is in hand less the fee, `moveRun()` as a
+visit) and the phone comes back to the card's mint; a dollar card's money
+crosses from the dollars, as above, and lands as sats. A crossing that does not
+go leaves the money in this phone at the card's mint and says so. Pinned by
+`tests/flashcard-screens.js`.
+
 ---
 
 ## 8. Split a bill — `splitSave()` / `splitMarkPaid()`
@@ -1504,6 +1554,24 @@ connection over it. A scanned request that is delivered over the route, or
 asks for a lock, or is for another mint, is held the same way; if the
 connection does not come it gets no card, because the way without a route (a
 token to show) is still there. `tests/home-first.js`.
+
+**A mint switched to lands at once, and its mint is asked behind it.** SWITCH
+MINT (`switchTo`), a till opened at another mint, a cashier joining one, and
+the trip home from either connect with `lazy`: where the mint's keysets are on
+file (`foxy.cashu.mint.cache`) the wallet is built from them as an offline
+launch builds it, `mintUrl` moves, and the balance and history are the pile's
+and the list's, at once; the real connect runs in the background and its
+sweeps run when it lands (`onMintConnected`). Until then `need` refuses in the
+words for it (`foxyConnecting`), `routeSoon` waits for that mint as it waits
+for Tor, ecash locked to this phone is checked by the keys on file and kept to
+swap in later, and plain ecash or a till's payment is refused before anything
+is written. A mint that does not answer leaves the phone on it in that state,
+refusing the same way, until a connect for real lands. With no keysets on file
+SWITCH MINT lands with no wallet, making nothing, and a mint that does not
+answer puts back the one it was on. A balance drawn from the pile before the
+mint answers can include pieces spent elsewhere since the last connect there;
+the payment that picks them, or the reconcile, finds them and takes them out
+(`onSpentElsewhere`). `tests/switch-instant.js`.
 
 **One payment, one entry, whichever door it came by.** A token this phone
 already holds, or has already swapped in, is turned away at a scan and over

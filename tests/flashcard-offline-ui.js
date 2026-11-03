@@ -41,7 +41,7 @@ const lift = (src, sig) => {
   return src.slice(at + 3, i + 1);
 };
 const HISTORY_SIGS = ['loadHistory() {', 'histAudit() {', 'histAuditUsd() {', 'histAuditIn(unit) {', 'arrivingNow() {', 'arrivingBucket(unit) {',
-                      'topUpFeeSats() {', 'recoveringSats() {', 'txTotalOut(t) {', 'txWhen(t) {', 'txLabel(d, now) {', 'txStamp(d, now) {',
+                      'topUpFeeSats() {', 'recoveringSats() {', 'txTotalOut(t) {', 'txTotalUnit(t) {', 'txWhen(t) {', 'txLabel(d, now) {', 'txStamp(d, now) {',
                       'txDay(d, now) {', 'txClock(d) {', 'txWho(t) {', 'txCardName(t) {'];
 const RENDER_SIGS = ['renderHistory(c) {', 'renderTxDetail(c) {', 'histRowTwo('];
 const QUEUE = [[appFile('12-receive.js'), 'announcePayment(ev) {'], [appFile('15-paid-wake-keyboard.js'), 'nextPaidScreen() {'],

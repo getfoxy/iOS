@@ -88,7 +88,11 @@ then the body. From M4 on the body is sealed. The kind byte is in the clear
 and is bound into the seal, so it cannot be changed on the way. Before sealing, a body is padded
 with a 4-byte length in front and zeros behind: an offer to 2048 bytes, a
 result to 256, change to 2048, a payment to the next 4096. One message is at
-most 48 KB. A larger payment goes in parts, up to 128 KB in all.
+most 48 KB. A larger payment goes in parts, up to 128 KB in all, each part at
+most eleven blocks. Change too large for 2048 goes in whole blocks too, and
+also at most eleven: twelve, sealed, is past the 48 KB a message may be, and
+change that large is not sent over the link at all; it stays on the
+receiver's screen as a code.
 
 ## 4. The messages
 

@@ -211,6 +211,26 @@
       return !!(wallet && wallet.foxyFromCache);
     },
 
+    /* A person's switch (SWITCH MINT): it lands at once and the mint is asked behind it, even with no keys on file
+     * (`connect`'s `lazy` and `emptyNow`). Resolves { id, name, balanceSats, pending, noKeys }. */
+    switchTo: function (url, opts) {
+      return FoxyWallet.connect(url, null, null, Object.assign({}, opts || {}, { lazy: true, emptyNow: true }));
+    },
+
+    /* Why a switch to this mint would wait for the mint instead of landing at once from the keys on file, or '' when
+     * it lands at once (`lazyWaitWhy`): no route, no keys on file, keys the store could not keep. For the page's line
+     * naming the path a switch took (09-melt-paste-switch.js, `justSwitch`). */
+    switchWaits: function (url) {
+      return lazyWaitWhy(canonicalMint(url || ''));
+    },
+
+    /* The mint switched to that has not answered yet, or null: { url, host, since, noKeys, failed }. `failed` is why it
+     * did not answer when it was asked ('' while it is being asked); the phone is on it all the same. For the shield. */
+    connectPending: function () {
+      var c = mintPendingNow();
+      return c ? { url: c.url, host: hostOf(c.url), since: c.since, noKeys: !!c.noKeys, failed: String(c.failed || '') } : null;
+    },
+
     /* Can this mint be connected to with no route? Only if it told this phone
      * its keysets at some point. The mint list asks, so a mint that cannot be
      * reached offline is greyed out rather than tapped and refused. */
@@ -253,7 +273,20 @@
        * and a switch made while it was away was undone by that: the phone
        * on the old mint, with the new one saved as its own. Visits, which are
        * what the walk itself makes, do not wait. */
-      if (claimAway && !(opts && opts.remember === false)) {
+      /* The mint a visit switched to and that has not answered, asked again by somebody who did not say whether to keep it
+       * (the page's `connectForRealOnceOnline`): still a visit. Kept, it became the phone's own mint behind a till, and its
+       * connect ran the sweeps a visit leaves alone (review, p2). */
+      var pv = mintPendingNow();
+      if (pv && pv.visit && canonicalMint(url || '') === pv.url && !(opts && 'remember' in opts)) {
+        opts = Object.assign({}, opts || {}, { remember: false });
+      }
+      /* Nor a person's switch (`switchTo`, `emptyNow`) behind a late claim's walk: the walk stops where it is and does
+       * not come home over it (20-helpers.js, `walkOvertaken`), so the switch lands at once rather than showing
+       * CONNECTING for as long as the walk is away. A card's visit is still waited for: it is in the middle of a card's
+       * money (`cardAway`). */
+      var walkOnly = !!claimingLate && !cardAway;
+      var pastWalk = !!(opts && ((opts.emptyNow && opts.lazy) || opts._pastWalk));
+      if (claimAway && !(opts && opts.remember === false) && !(pastWalk && walkOnly)) {
         var self = this, args = arguments;
         return homeFirst(function () { return FoxyWallet.connect.apply(self, args); });
       }
@@ -262,6 +295,101 @@
       if (bad) return Promise.reject(new Error(bad));
       if (!window.CashuTS) {
         return Promise.reject(new Error('cashu-ts.js did not load. It must sit in this same folder.'));
+      }
+      /* Lands at once and asks the mint behind it (`opts.lazy`): a person's switch, and a till's visit.
+       *
+       * With the mint's keysets on file the wallet is built from them, as an offline launch builds it, and is the
+       * wallet from now: `mintUrl` moves, the mint is saved as this phone's unless `remember` is false, and this
+       * resolves { pending: true } with the pile's balance readable. The mint is then connected to for real in the
+       * background (`_confirm`), and when it answers that wallet takes over, the sweeps a connect runs run, and the
+       * page hears it (`onMintConnected`). Until then what needs the live mint is refused in the words for it
+       * (`need`) or waits for it (`routeSoon`), and what is local goes on (02-dleq-lock-holds-imports.js,
+       * `mintPending`). A mint that does not answer leaves the phone where it switched to, from the keys on file,
+       * which is the offline state, and the app connects again for real when it can (`connectForRealOnceOnline`).
+       *
+       * With no keysets on file nothing can be built: a lazy connect is then the connect it always was, waited for,
+       * unless the switch asks to land anyway (`opts.emptyNow`, SWITCH MINT's), and then the phone is at that mint
+       * with no wallet, making nothing, until the keys come; a mint that does not answer then puts back the mint it
+       * was on (there is no offline state to leave it in). With no route the lazy connect is the offline one. */
+      if (opts && opts.lazy && !opts._confirm) {
+        var lazyKeys = mintCacheFor(u);
+        if (lazyKeys && typeof window.CashuTS.Wallet.prototype.loadMintFromCache !== 'function') lazyKeys = null;
+        /* Keys this launch could not write down are older than what the mint last said (`mintCacheUnkept`): the live
+         * path, waited for, with the reason said. */
+        var unkept = !!mintCacheUnkept[u];
+        if (unkept) lazyKeys = null;
+        var plain = Object.assign({}, opts);
+        delete plain.lazy;
+        delete plain.emptyNow;
+        // its own building and its confirmation are the person's switch too, and do not wait behind a walk either
+        if (opts.emptyNow) plain._pastWalk = true;
+        if (!routeOpen() || unkept || (!lazyKeys && !opts.emptyNow)) {
+          // every fall-through says why, as the page's line for the switch does (`lazyWaitWhy`)
+          console.log('[foxy] switch: ' + hostOf(u) + ' waits for the mint: ' + (lazyWaitWhy(u) || 'no keys on file'));
+          return FoxyWallet.connect(u, null, null, plain);
+        }
+        var nameOf = function () { return u.replace(/^https?:\/\//, ''); };
+        // already here and answered for real: nothing to switch, and nothing to ask again
+        if (wallet && !wallet.foxyFromCache && canonicalMint(mintUrl || '') === u && !mintPendingNow()) {
+          if (plain.remember !== false) save(K.mint, u);
+          return Promise.resolve({ id: u, name: nameOf(), balanceSats: sumProofs(proofs()), pending: false });
+        }
+        var gen = ++mintPendingGen;
+        var c = /** @type {any} */ ({ url: u, gen: gen, w: null, since: Date.now(), noKeys: !lazyKeys,
+                                     visit: plain.remember === false, before: wallet, beforeUrl: mintUrl });
+        var adopted = lazyKeys
+          ? FoxyWallet.connect(u, null, null, Object.assign({}, plain, { fromCache: true }))
+          : Promise.resolve(null);
+        return adopted.then(function () {
+          // another switch was made while this one was being built: that one is the phone's
+          if (gen !== mintPendingGen) return { id: u, name: nameOf(), balanceSats: 0, pending: true, superseded: true };
+          if (lazyKeys) {
+            c.w = wallet;
+          } else {
+            // what was in hand is let go, and the old mint's ready circuit with it
+            if (mintPending) mintPendingSettle(mintPending, false, '', { superseded: true });
+            wallet = null;
+            mintUrl = u;
+            dropSpare();
+          }
+          mintPending = c;
+          mintPendingLast = null;
+          console.log('[foxy] switch: on ' + hostOf(u) + ' at once, '
+            + (lazyKeys ? 'from the keys on file' : 'with no keys on file, so nothing is made there yet')
+            + '; asking it behind the screen');
+          // behind the answer, so the page has drawn the switch before anything it hears of the mint
+          setTimeout(function () {
+            if (mintPending !== c) return;
+            var failed = function (why) {
+              if (mintPending !== c) return;
+              if (c.noKeys && !wallet && canonicalMint(mintUrl || '') === u) {
+                wallet = c.before || null;
+                mintUrl = c.before ? c.beforeUrl : mintUrl;
+                mintPendingSettle(c, false, why, { back: !!c.before });
+                return;
+              }
+              mintPendingFail(c, why);
+            };
+            if (!routeOpen()) {
+              var off = '';
+              try { assertRoute(); } catch (eR) { off = (eR && eR.message) || String(eR); }
+              failed(off || 'no route');
+              return;
+            }
+            FoxyWallet.connect(u, null, null, Object.assign({}, plain, { _confirm: c })).then(function (r) {
+              if (r && r.stale) return;
+              // a route that went while it was asked: rebuilt from the keys on file again, which is not an answer
+              if (mintPending === c && !c.failed && mintPendingNow()) failed('the mint did not answer');
+            }, function (e) {
+              failed(FoxyWallet.reason ? FoxyWallet.reason(e) : ((e && e.message) || String(e)));
+            });
+          }, 0);
+          return { id: u, name: nameOf(), balanceSats: sumProofs(proofs()), pending: true, noKeys: !lazyKeys, gen: gen };
+        }, function (e) {
+          // its building was overtaken by a later switch, which refused it (`foxyMovedOn`): that one is the phone's
+          if (gen !== mintPendingGen) return { id: u, name: nameOf(), balanceSats: 0, pending: true, superseded: true };
+          throw e;
+        });
       }
       /* Offline and a cache for this mint: connect from it. Offline and none:
        * the refusal assertRoute would have thrown anyway. */
@@ -284,6 +412,8 @@
        * taken one a minute before. A connect
        * that fails changes nothing. */
       var before = wallet, beforeUrl = mintUrl;
+      // switches made from here on (`mintPendingGen`): one that lands elsewhere first is the person's last word
+      var gen0 = mintPendingGen;
 
       // deterministic secrets, so the seed alone can rebuild everything
       return connectSeed().then(function (seed) {
@@ -319,8 +449,25 @@
         ? Promise.resolve().then(function () { w.loadMintFromCache(cached.info, cached.keys); })
         : withTimeout(loadMintOnOne(w, !!(opts && opts.sessionInfo)), 30000, hostOf(u));
       return ready.then(function () {
+        /* A lazy switch's own confirmation (`_confirm`), arriving after the phone had gone elsewhere: let go, and
+         * the wallet in hand stays. */
+        if (opts && opts._confirm && (mintPending !== opts._confirm || !mintPendingNow())) {
+          console.log('[foxy] switch: ' + hostOf(u) + ' answered after the phone had moved on; let go');
+          return { id: u, name: u.replace(/^https?:\/\//, ''), balanceSats: sumProofs(proofs()), stale: true };
+        }
+        /* Any other connect that was under way when the person switched elsewhere: it does not take the phone back.
+         * Refused rather than answered, so whatever asked for it (a card's visit, a till's) does not go on as though it
+         * were at its mint (review, p1). */
+        if (!(opts && opts._confirm) && mintPendingGen !== gen0 && canonicalMint(mintUrl || '') !== u) {
+          var mv = /** @type {any} */ (new Error('The phone moved to ' + hostOf(mintUrl) + ' while ' + hostOf(u) + ' was being connected to.'));
+          mv.foxyMovedOn = true;
+          mv.unsent = true;
+          throw mv;
+        }
         wallet = w;
         mintUrl = u;
+        // a switch still waiting on its mint hears that this connect has landed (`mintPendingReplaced`)
+        mintPendingReplaced(w, u, !!cached);
         // the circuit kept ready was for the mint before this one
         dropSpare();
         warmSpareSoon();
@@ -452,6 +599,8 @@
       }).catch(function (e) {
         // what the mint said about itself is not trusted past a connect that failed: the next one asks (`INFO_TTL_MS`)
         if (!cached) forgetMintInfo(u);
+        // a connect overtaken by a switch, or whose wallet has since been replaced, puts nothing back over the one in hand
+        if ((e && e.foxyMovedOn) || (wallet !== before && wallet !== w)) throw e;
         wallet = before || null;
         if (before) {
           mintUrl = beforeUrl;

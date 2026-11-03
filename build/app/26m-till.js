@@ -749,9 +749,12 @@
     /* Nor any screen the till has none of: a card's (LOAD and SEND are on it), SEND's, the menu's. Whatever reached one, a road
      * this file has not heard of, it is the till's SET AMOUNT before the next frame (and SET AMOUNT only for a receive: a
      * card's amounts are typed on it too, 26f-flashcard.js `fcAmount`). A keeper's receive paid by a card at
-     * another mint shows the charge first (26f-flashcard.js, `fcXmBegin`), and that is the one more a keeper's till has. */
+     * another mint shows the charge first (26f-flashcard.js, `fcXmBegin`), and that is the one more a keeper's till has.
+     * And in either role a card paying in its other currency (dollars for a bitcoin invoice) shows the total the holder
+     * agrees to first (`fcOtherAgree`, `fcOuConfirm`): the payer pays the fee and sees it. Thrown out, no card could pay a
+     * till across currencies (review, card-in-till); its TAP CARD and its back return to the till's receive screen. */
     const kept = this.TILL_SCREENS.indexOf(s.screen) >= 0 && (s.screen !== 'amount' || s.flow === 'receive');
-    if (!kept && !(s.till.role === 'keeper' && s.screen === 'fcXmConfirm')) {
+    if (!kept && !(s.till.role === 'keeper' && s.screen === 'fcXmConfirm') && s.screen !== 'fcOuConfirm') {
       console.log('[foxy] till: ' + s.screen + ' is not a screen the till has; back to its SET AMOUNT');
       this.setState(this.homeState());
       return;

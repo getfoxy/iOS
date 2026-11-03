@@ -322,46 +322,34 @@
   // Clear a list, on two taps. A single tap arms it and says so; a second
   // within four seconds does it. Neither touches money — history is a local
   // record the mint does not keep, and contacts are just saved names.
+  /* History asks twice, with cards and not a toast (2026-11-03): ARE YOU SURE?, then ARE YOU TRIPLE SURE?, each with YES, DELETE
+   * and KEEP IT, and only the second YES deletes (`clearHistoryNow`). It is the only record of these payments there is: the mint
+   * keeps none. Contacts keep the two taps. */
   askClear(which) {
     const W = window.FoxyWallet;
     if (!W) return;
+    if (which === 'history') {
+      this._armed = null;
+      this.blockedCard('clearHistoryAsk', {
+        tone: 'ask', title: 'ARE YOU SURE?',
+        reason: 'This deletes the history on this phone. Your money stays where it is.',
+        retry: 'YES, DELETE',
+        go: () => this.blockedCard('clearHistoryAgain', {
+          tone: 'ask', title: 'ARE YOU TRIPLE SURE?',
+          reason: 'The mint keeps no record of your payments, so once this history is gone nothing can bring it back.',
+          retry: 'YES, DELETE',
+          go: () => this.clearHistoryNow(),
+          shut: { label: 'KEEP IT' },
+        }),
+        shut: { label: 'KEEP IT' },
+      });
+      return;
+    }
     const now = Date.now();
     if (this._armed === which && now - (this._armedAt || 0) < 4000) {
       this._armed = null;
-      if (which === 'history') {
-        const clear = (forgetToken) => {
-          W.clearHistory({ forgetToken });
-          this.loadHistory();
-          this.toast('History cleared');
-        };
-        /* A sent token nobody has claimed is money in a string. Clearing
-         * history keeps its text (`clearHistory`), and says so first. */
-        if (!W.tokensNotClaimed) { clear(false); return; }
-        W.tokensNotClaimed().then(list => {
-          if (!list.length) { clear(true); return; }
-          /* Each unit summed on its own, never added together: '1,200 sats
-           * and $ 3.00'. A dollar token's `sats` is null; its cents are in
-           * `amount` under unit 'usd'. */
-          const by = {};
-          list.forEach(t => {
-            const u = String((t && t.unit) || 'sat');
-            const n = u === 'sat' ? (Number(t.sats != null ? t.sats : t.amount) || 0) : (Number(t.amount) || 0);
-            by[u] = (by[u] || 0) + n;
-          });
-          const figures = Object.keys(by).sort((a, b) => (a === 'usd' ? -1 : b === 'usd' ? 1 : 0))
-            .map(u => (u === 'sat' ? this.group(by[u]) + ' sats' : this.unitMoney(by[u], u))).join(' and ');
-          this.blockedCard('unclaimedTokens', {
-            tone: 'warn',
-            title: 'UNCLAIMED ECASH',
-            reason: (list.length === 1 ? 'A token you sent' : list.length + ' tokens you sent') + ', '
-              + figures + ', ' + (list.length === 1 ? 'has' : 'have') + ' not been claimed. '
-              + 'Clearing history keeps ' + (list.length === 1 ? 'it' : 'them') + ' on this phone, to hand over or take back.',
-            chip: 'The rest of history is cleared.',
-            retry: 'CLEAR HISTORY',
-            go: () => clear(true),
-          });
-        }).catch(() => clear(false));
-      } else {
+      if (which === 'history') this.clearHistoryNow();
+      else {
         W.clearContacts();
         // history would otherwise write every past payee straight back
         this._contactsCleared = true;
@@ -373,4 +361,42 @@
     this._armed = which;
     this._armedAt = now;
     this.toast('Tap again to clear ' + which);
+  }
+
+  /* History cleared, once both cards have said yes (`askClear`). */
+  clearHistoryNow() {
+    const W = window.FoxyWallet;
+    if (!W) return;
+    const clear = (forgetToken) => {
+      W.clearHistory({ forgetToken });
+      this.loadHistory();
+      this.toast('History cleared');
+    };
+    /* A sent token nobody has claimed is money in a string. Clearing
+     * history keeps its text (`clearHistory`), and says so first. */
+    if (!W.tokensNotClaimed) { clear(false); return; }
+    W.tokensNotClaimed().then(list => {
+      if (!list.length) { clear(true); return; }
+      /* Each unit summed on its own, never added together: '1,200 sats
+       * and $ 3.00'. A dollar token's `sats` is null; its cents are in
+       * `amount` under unit 'usd'. */
+      const by = {};
+      list.forEach(t => {
+        const u = String((t && t.unit) || 'sat');
+        const n = u === 'sat' ? (Number(t.sats != null ? t.sats : t.amount) || 0) : (Number(t.amount) || 0);
+        by[u] = (by[u] || 0) + n;
+      });
+      const figures = Object.keys(by).sort((a, b) => (a === 'usd' ? -1 : b === 'usd' ? 1 : 0))
+        .map(u => (u === 'sat' ? this.group(by[u]) + ' sats' : this.unitMoney(by[u], u))).join(' and ');
+      this.blockedCard('unclaimedTokens', {
+        tone: 'warn',
+        title: 'UNCLAIMED ECASH',
+        reason: (list.length === 1 ? 'A token you sent' : list.length + ' tokens you sent') + ', '
+          + figures + ', ' + (list.length === 1 ? 'has' : 'have') + ' not been claimed. '
+          + 'Clearing history keeps ' + (list.length === 1 ? 'it' : 'them') + ' on this phone, to hand over or take back.',
+        chip: 'The rest of history is cleared.',
+        retry: 'CLEAR HISTORY',
+        go: () => clear(true),
+      });
+    }).catch(() => clear(false));
   }

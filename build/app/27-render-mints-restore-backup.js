@@ -9,7 +9,7 @@
     return {
       isSwitchMint: sc === 'switchMint',
       // adding a mint belongs to switching, not to picking one to move between
-      mintPickers: !s.trStep && !s.fcPick && !s.tillPick,
+      mintPickers: !s.trStep && !s.fcPick && !s.tillPick && !s.wdPick,
       /* The same list does three jobs: switching, and the two steps of a
        * transfer between your own mints. */
       /* And a fourth, for a card: which mint it moves to (26f-flashcard.js).
@@ -17,12 +17,15 @@
        * list and cleared by every other way in. */
       /* And the till's two (26m-till.js): every mint it takes, ticked, then NEXT (`tillPick` 'set'); then which of those is
        * the default (`tillPick` 'default'). */
-      mintTitle: s.tillPick === 'default' ? 'DEFAULT MINT'
+      // and a card's WITHDRAW TO (26n-card-withdraw-to.js, `wdPick`): where all of it lands, the cheapest first
+      mintTitle: s.wdPick ? 'WITHDRAW TO'
+        : s.tillPick === 'default' ? 'DEFAULT MINT'
         : s.tillPick ? 'TILL AT WHICH MINTS?'
         : s.fcPick ? 'TO WHICH MINT?'
         : s.trStep === 'from' ? 'FROM WHICH MINT?'
         : s.trStep === 'to' ? 'TO WHICH MINT?' : 'SWITCH MINT',
-      mintNowLine: s.tillPick === 'default' ? 'Payments from mints you did not pick are moved here. Invoices are made here.'
+      mintNowLine: s.wdPick ? (this.fcWdLine ? this.fcWdLine() : '')
+        : s.tillPick === 'default' ? 'Payments from mints you did not pick are moved here. Invoices are made here.'
         : s.tillPick ? 'Pick every mint this till takes. Payments from other mints cross into the default, the payer paying the fee.'
         : s.fcPick ? 'This card is at ' + this.mintNameOf(s.fc && s.fc.mint) + '.'
         : s.trStep === 'from' ? 'Move money between the mints you use.'
@@ -73,14 +76,16 @@
           if (s.tillPick === 'default') return ordered.filter(m => this.tillTicked(m.url)).map(m => row(m, false));
           return ordered.map(m => row(m, this.tillTicked(m.url)));
         }
+        if (s.wdPick) return this.fcWdRows ? this.fcWdRows(row) : [];
         if (s.fcPick) {
           // every mint but the one the card is at
           const at = String((s.fc && s.fc.mint) || '').replace(/\/+$/, '');
           return all.filter(m => m.url.replace(/\/+$/, '') !== at).map(m => row(m, false));
         }
         if (s.trStep === 'from') {
-          // only mints with something at them can be moved from
-          return all.filter(m => this.mintPile(m.url).sats > 0).map(m => row(m, false));
+          // only mints with something at them can be moved from (dollars too: a mint holding only dollars is one to move from)
+          return all.filter(m => this.mintPile(m.url).sats > 0 || (this.mintPile(m.url).units || []).some(b => b && b.unit === 'usd' && b.amount > 0))
+            .map(m => row(m, false));
         }
         if (s.trStep === 'to') {
           const from = String(s.trFrom || '').replace(/\/+$/, '');

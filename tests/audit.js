@@ -32,7 +32,7 @@ function method(sig) {
   if (at < 0) throw new Error('missing ' + sig);
   return block(at + 3);
 }
-const methods = new Function('return {' + ['histAudit() {', 'txTotalOut(t) {', 'heldNote() {', 'heldBlocks(shortBy) {', 'arrivingBucket(unit) {'].map(method).join(',') + '}')();
+const methods = new Function('return {' + ['histAudit() {', 'txTotalOut(t) {', 'txTotalUnit(t) {', 'heldNote() {', 'heldBlocks(shortBy) {', 'arrivingBucket(unit) {'].map(method).join(',') + '}')();
 
 global.window = { FoxyWallet: { heldSats: () => 0 } };
 const quiet = console.log;

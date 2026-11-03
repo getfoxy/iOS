@@ -624,4 +624,91 @@ final class TapPlaceTests: XCTestCase {
         XCTAssertEqual(TapWriteFailure.after(question: false, payment: false, changeKept: true), .nothingMore,
                        "the word that change was kept is the last on its link anyway")
     }
+
+    /// A phone in range subscribes, writes one byte and leaves. The byte took the
+    /// place; then the clock, which asked for nothing half-written, never let go,
+    /// and the leaving cleared the byte and kept the place, so the receiver
+    /// stayed off the air and every payer after it was ignored. Each step of that
+    /// gives the place back now.
+    func testOneByteAndThenGoneGivesThePlaceBack() {
+        XCTAssertTrue(TapPlace.taken(by: a, holder: nil, listening: true, linked: false, early: false), "the byte takes the place")
+        var arriving = TapProtocol.Bytes()
+        XCTAssertEqual(arriving.add(Data([0x01])), .more, "one byte is a message half-written")
+        XCTAssertFalse(arriving.buffer.isEmpty)
+        // the clock, with that byte in hand: let go
+        XCTAssertTrue(TapPlace.givenBackByClock(linked: false), "the clock lets a half-written handshake go")
+        XCTAssertFalse(TapPlace.givenBackByClock(linked: true), "a link that was made is not the handshake clock's")
+        // the phone leaving with that byte in hand, nothing having reached the page: let go
+        XCTAssertTrue(TapPlace.givenBackByLeaving(paymentHeard: false, resultSent: false, changeOwed: false))
+        XCTAssertFalse(TapPlace.givenBackByLeaving(paymentHeard: true, resultSent: false, changeOwed: false),
+                       "a payment the page has is the page's to finish")
+        XCTAssertFalse(TapPlace.givenBackByLeaving(paymentHeard: true, resultSent: true, changeOwed: true))
+        XCTAssertFalse(TapPlace.givenBackByLeaving(paymentHeard: false, resultSent: true, changeOwed: false))
+        // bytes that will not read, before the link: let go as for a stop
+        var junk = TapProtocol.Bytes()
+        XCTAssertEqual(junk.add(Data([0xff, 0xff, 0x00])), .bad)
+        XCTAssertTrue(TapPlace.givenBackByBadBytes(linked: false))
+        XCTAssertFalse(TapPlace.givenBackByBadBytes(linked: true))
+    }
+
+    /// And the receiver asks these rules, not the buffer: the clock no longer
+    /// waits for an empty one, and every way a handshake comes to nothing puts
+    /// it back on the air.
+    func testTheReceiverGivesThePlaceBackByTheseRules() throws {
+        let source = try String(contentsOf: repoRoot().appendingPathComponent("Foxy/Bluetooth/TapLink.swift"), encoding: .utf8)
+        XCTAssertFalse(source.contains("self.arriving.buffer.isEmpty else { return }"), "the clock waits for an empty buffer again")
+        for rule in ["TapPlace.givenBackByClock(", "TapPlace.givenBackByLeaving(", "TapPlace.givenBackByBadBytes("] {
+            XCTAssertTrue(source.contains(rule), rule)
+        }
+    }
+}
+
+/// The payer's outgoing pieces, each marked with whether it is the question
+/// "what became of it" (M12).
+final class TapOutboxTests: XCTestCase {
+    /// Foxy comes back to the front with the last pieces of a payment still to
+    /// go, and asks its question behind them. The pieces go, the question's does
+    /// not: that failure is the question's, and the payment is not lost. It was
+    /// judged the payment's, because the question was marked only when nothing
+    /// was queued ahead of it.
+    func testAQuestionBehindAPaymentFailsAsTheQuestion() {
+        var out = TapOutbox()
+        out.add(Data(repeating: 1, count: 50), size: 20)              // the payment's last 50 bytes: three pieces
+        out.add(Data(repeating: 2, count: 30), size: 20, question: true)
+        XCTAssertEqual(out.count, 5)
+        XCTAssertTrue(out.questionWaiting)
+        for _ in 0..<3 {
+            XCTAssertNotNil(out.take())
+            XCTAssertFalse(out.questionInFlight, "a payment piece is not the question")
+            out.written()
+        }
+        XCTAssertNotNil(out.take())
+        XCTAssertTrue(out.questionInFlight, "the question is out once one of its own pieces is")
+        // that write fails: it is judged as the question's
+        out.drop()
+        XCTAssertEqual(TapWriteFailure.after(question: out.questionInFlight, payment: true, changeKept: false), .waitForAnswer,
+                       "a question that did not go gave up a payment the receiver holds")
+        XCTAssertTrue(out.isEmpty)
+        XCTAssertFalse(out.questionWaiting)
+    }
+
+    func testAPaymentPieceThatFailsIsStillThePayments() {
+        var out = TapOutbox()
+        out.add(Data(repeating: 1, count: 25), size: 20)
+        out.add(Data(repeating: 2, count: 10), size: 20, question: true)
+        XCTAssertNotNil(out.take())
+        XCTAssertFalse(out.questionInFlight)
+        out.drop()
+        XCTAssertEqual(TapWriteFailure.after(question: out.questionInFlight, payment: true, changeKept: false), .paymentLost)
+    }
+
+    func testPiecesComeOutInOrderAndWhole() {
+        var out = TapOutbox()
+        let frame = Data((0..<45).map { UInt8($0) })
+        out.add(frame, size: 20)
+        var back = Data()
+        while let piece = out.take() { back.append(piece); out.written() }
+        XCTAssertEqual(back, frame)
+        XCTAssertNil(out.take())
+    }
 }

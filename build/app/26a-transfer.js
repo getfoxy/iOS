@@ -20,8 +20,15 @@
     this._trWas = window.FoxyWallet.mintUrl || '';
     this.setState(p => ({
       screen: 'switchMint', stack: p.stack.concat([p.screen]),
-      trStep: 'from', trFrom: '', trTo: '', trSats: 0, trPlan: null, trFee: null, trErr: '', fcPick: false,
+      trStep: 'from', trFrom: '', trTo: '', trUnit: 'sat', trSats: 0, trPlan: null, trFee: null, trErr: '', fcPick: false, wdPick: false, tillPick: false,
     }));
+  }
+
+  /* What this phone holds at a mint, in each unit: { sat, usd } (cents for dollars). */
+  trHeldAt(url) {
+    const pile = this.mintPile(url);
+    const usd = (pile.units || []).find((b) => b && b.unit === 'usd');
+    return { sat: Math.max(0, Math.round(Number(pile.sats) || 0)), usd: Math.max(0, Math.round(Number(usd && usd.amount) || 0)) };
   }
 
   /* A mint tapped on the list while a transfer is being set up. */
@@ -35,27 +42,54 @@
      * the bug above. */
     if (!this.state.trStep) return;
     if (this.state.trStep === 'from') {
-      this.setState({ trFrom: mint, trStep: 'to' });
+      /* Which balance it leaves, asked when the mint holds both on this phone (2026-11-03: forge to minibits took sats
+       * with no question). The CURRENCY screen, in this flow's words, as a card asks which of its two (`fcPickUnit`);
+       * a mint holding only one is that one, asked nothing. */
+      const held = this.trHeldAt(mint);
+      if (held.sat > 0 && held.usd > 0 && this.fcPickUnit) {
+        this.fcPickUnit({
+          question: 'TRANSFER WHICH?',
+          foot: this.mintNameOf(mint) + ' holds dollars and bitcoin for you. The one you pick is what leaves; bitcoin lands at the other mint.',
+          bal: { usd: held.usd, sat: held.sat }, short: {}, why: '',
+        }, (u) => this.setState({ trFrom: mint, trUnit: u === 'usd' ? 'usd' : 'sat', trStep: 'to' }));
+        return;
+      }
+      this.setState({ trFrom: mint, trUnit: held.usd > 0 && !(held.sat > 0) ? 'usd' : 'sat', trStep: 'to' });
       return;
     }
+    const dollars = this.state.trUnit === 'usd';
     this.setState(p => ({
       trTo: mint, trStep: '',
       screen: 'amount', stack: p.stack.concat([p.screen]),
-      flow: 'transfer', asset: 'BITCOIN', unit: 'SATS', amount: '',
+      // a dollar transfer is typed in dollars; what lands is sats at the price, and the confirmation says both
+      flow: 'transfer', asset: dollars ? '' : 'BITCOIN', unit: dollars ? 'USD' : 'SATS', amount: '',
       note: '', noteDraft: '', recipient: '', recipientKind: '',
     }));
   }
 
-  /* What is at the mint the money leaves, for the keypad's line and its cap. */
+  /* What is at the mint the money leaves, for the keypad's line and its cap: sats, or cents on a dollar transfer. */
   trFromSats() {
-    return this.mintPile(this.state.trFrom).sats || 0;
+    const held = this.trHeldAt(this.state.trFrom);
+    return this.state.trUnit === 'usd' ? held.usd : held.sat;
+  }
+
+  /* The keypad's line: what is at the mint it leaves, in the balance it leaves. */
+  trFromText() {
+    const at = this.mintNameOf(this.state.trFrom) || 'that mint';
+    if (this.state.trUnit === 'usd') return 'From ' + at + ' \u00b7 ' + this.unitFigure(this.trFromSats(), 'usd') + ' there';
+    return 'From ' + at + ' \u00b7 \u20bf ' + this.group(this.trFromSats()) + ' there';
   }
 
   trNext() {
     const sats = this.amountInSats();
     const have = this.trFromSats();
     if (!(sats > 0)) { this.toast('Enter an amount first', true); return; }
-    if (sats > have) {
+    // in dollars the cap is the dollar pile, against the figure typed (or the sats typed, at the price)
+    const px = this.px ? this.px() : 0;
+    const typed = this.state.trUnit !== 'usd' ? sats
+      : this.state.unit === 'USD' ? Math.round((parseFloat(this.state.amount) || 0) * 100)
+      : (px ? Math.round(sats / 1e8 * px * 100) : 0);
+    if (typed > have) {
       this.toast('That is more than the ' + this.mintNameOf(this.state.trFrom) + ' balance.', true);
       return;
     }
@@ -88,7 +122,7 @@
     this.setState({ trQuoting: true, trErr: '', trFits: 0 });
     Promise.resolve()
       .then(() => (W.mintUrl === trTo ? null : W.connect(trTo)))
-      .then(() => W.transferQuote(trFrom, trSats))
+      .then(() => W.transferQuote(trFrom, trSats, this.state.trUnit === 'usd' ? { unit: 'usd' } : undefined))
       .then(plan => {
         this.setState({ trQuoting: false, trPlan: plan, trFee: plan.feeSats });
       })
@@ -121,7 +155,7 @@
     if (this.refuseSwitchWhileBusy()) return;
     const to = this.mintNameOf(this.state.trTo);
     this.setState({ trBusy: true });
-    this.showMelt('Moving your sats to ' + to + '…', 0, { sats: this.state.trSats, mint: to });
+    this.showMelt((plan.unit === 'usd' ? 'Moving your dollars to ' : 'Moving your sats to ') + to + '…', 0, { sats: this.state.trSats, mint: to });
     /* Back on the mint the money leaves: the quote was made while connected to
      * the destination, and moveRun pays from whichever wallet is connected —
      * run from the destination it found nothing to spend (seen in the
@@ -154,6 +188,7 @@
   /* The confirmation screen's contents (confirmSpec). */
   transferSpec() {
     const s = this.state;
+    if (s.trUnit === 'usd') return this.transferSpecUsd();
     const sats = s.trSats || 0;
     const fee = s.trFee;
     const rows = [
@@ -193,5 +228,46 @@
       ctaTone: 'go',
       ctaBusy: !!s.trBusy || fee == null,
       go: () => { if (fee != null && !s.trBusy) this.runTransfer(); },
+    };
+  }
+
+  /* A transfer from dollars: the sats that land, and the dollars that leave at the source's quote, both on the one
+   * screen; the fee is the mint's, in cents, inside what leaves. */
+  transferSpecUsd() {
+    const s = this.state;
+    const sats = s.trSats || 0;
+    const plan = s.trPlan;
+    const out = plan && plan.unit === 'usd' ? Math.round(Number(plan.gross) || 0) : null;
+    const fee = plan && plan.unit === 'usd' ? Math.max(0, Math.round(Number(plan.feeUnit) || 0)) : null;
+    const from = (this.mintNameOf(s.trFrom) || '').toUpperCase();
+    const rows = [
+      this.cfRow('LANDING AT', (this.mintNameOf(s.trTo) || '').toUpperCase()),
+      this.cfRow('LANDING', this.unitFigure(sats, 'sat'), { half: true }),
+      this.cfRow('LEAVING', s.trErr ? 'UNKNOWN' : out == null ? 'CHECKING\u2026' : 'UP TO ' + this.unitFigure(out, 'usd'), { half: true }),
+      this.cfRow('PAYING FROM', from + ' \u00b7 DOLLARS', { half: true }),
+      this.cfRow('FEE', s.trErr ? 'UNKNOWN' : fee == null ? 'CHECKING\u2026' : 'UP TO ' + this.unitFigure(fee, 'usd'),
+                 { half: true, sub2: 'You pay the mint\u2019s fees' }),
+    ];
+    if (s.trErr) {
+      return {
+        title: 'CONFIRMATION', amountLabel: 'MOVING',
+        amount: this.unitFigure(sats, 'sat'), amountSub: '', amountInk: '#FF5C5C', rows: rows,
+        warn: s.trErr, cta: 'TRY AGAIN', ctaTone: 'warn',
+        go: () => this.quoteTransfer(),
+        secondary: { label: 'CANCEL', go: () => this.trCancel() },
+      };
+    }
+    return {
+      title: 'CONFIRMATION',
+      amountLabel: 'MOVING',
+      amount: this.unitFigure(sats, 'sat'),
+      subtitle: out == null ? '' : 'Up to ' + this.unitFigure(out, 'usd') + ' leaves ' + (this.mintNameOf(s.trFrom) || 'the other mint'),
+      amountSub: out == null ? '' : this.unitFigure(out, 'usd'),
+      rows: rows,
+      secondary: { label: 'CANCEL', go: () => this.trCancel() },
+      cta: s.trBusy ? 'MOVING\u2026' : out == null ? 'CHECKING THE FEE\u2026' : 'MOVE ' + this.unitFigure(sats, 'sat'),
+      ctaTone: 'go',
+      ctaBusy: !!s.trBusy || out == null,
+      go: () => { if (out != null && !s.trBusy) this.runTransfer(); },
     };
   }

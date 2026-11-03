@@ -32,6 +32,9 @@ struct SeedEnvironment {
     var protection: () -> SeedVault.Protection = { SeedVault.protection }
     /// SeedVault.setProtection: nil when the seed is where the mode says.
     var setProtection: (_ mode: SeedVault.Protection) -> String? = { SeedVault.setProtection($0) }
+    /// CounterStore.moveAside, for a seed that has just been replaced. FoxyTests
+    /// stands in one that fails, which is the case `adopt` must survive.
+    var setCountersAside: (_ store: CounterStore) throws -> Void = { try $0.moveAside() }
 
     static let live = SeedEnvironment(
         savedSeed: { SeedVault.seedForSecrets() },
@@ -262,9 +265,17 @@ enum SeedActions {
     /// seedMigrate {words}, checked → migrated, same or different; "no migration
     /// here" only with the window closed and no seed saved. The words live in
     /// this request only. The counters are left alone.
-    static func migrate(_ phrase: String, env: SeedEnvironment) -> SeedReply {
+    ///
+    /// `confirmWrite` is asked before words are written, and only then: the
+    /// alert and Face ID or the passcode that seedAdopt asks (the bridge's). It
+    /// was the one way into the seed that asked nobody, so a script in the page,
+    /// in the window and with no seed saved, could make words it knew the
+    /// wallet's seed. A no is "Nothing was changed.", which leaves the window
+    /// open, so an old install's words can still be moved at the next launch.
+    static func migrate(_ phrase: String, env: SeedEnvironment, confirmWrite: () -> Bool) -> SeedReply {
         let outcome = decideMigration(phrase, windowOpen: env.migrationWindowOpen(), saved: env.savedSeed()) { words in
-            env.write(words, false, nil, { false })
+            guard confirmWrite() else { return "Nothing was changed." }
+            return env.write(words, false, nil, { false })
         }
         if outcome == .migrated { print("[foxy] seed migrate: the page's old words are now the saved seed") }
         if SeedMigrationWindow.closes(after: outcome) { env.closeMigrationWindow("seedMigrate answered") }
@@ -486,11 +497,30 @@ enum SeedActions {
     /// A page that had been got at can ask for a signature for any card whose key
     /// it knows, but the card gives a nonce only in the tap that holds it, and
     /// only that nonce is good for it.
+    ///
+    /// A new owner key must be a key (CardOwner.isOwnerKey), checked before the
+    /// seed is read. Which requests need the keeper's yes first is the bridge's
+    /// (CardOwner.matches, CardOwner.signsUnasked).
+    ///
+    /// A record (set-card) is signed only when the key its money goes back to is
+    /// this phone's own: the lock key this seed derives at the index the request
+    /// names (P2PK). Any other key, none, or no index is CardOwner.declined: a
+    /// record pointing a card's leftover money at a key the page chose is not
+    /// signed, whatever its mint and unit.
     static func cardOwnerSign(_ request: CardOwner.SignRequest, env: SeedEnvironment) -> SeedReply {
         // the bridge checks every shape first; here too, so a request built another way reads no seed
         guard request.isWellFormed else { return .refuse("bad request") }
+        guard request.label != .setOwner || CardOwner.isOwnerKey(request.value) else { return .refuse("bad request") }
+        if request.label == .setCard, request.refundIndex == nil { return .refuse(CardOwner.declined) }
         do {
             let seed = try readSavedSeed(env)
+            if request.label == .setCard, let index = request.refundIndex {
+                let mine = try P2PK.publicKeys(seed: seed, start: index, count: 1).first
+                guard let mine, Array(request.value[1..<34]) == mine else {
+                    print("[foxy] card: a record whose refund key is not this phone's was not signed")
+                    return .refuse(CardOwner.declined)
+                }
+            }
             let sig = try CardOwner.signature(for: request, seed: seed)
             return .answer(json(["sig": NUT13.hex(sig)]))
         } catch {
@@ -544,17 +574,31 @@ enum SeedActions {
         if declined { return .refuse("Nothing was changed.") }
         if let written { return .refuse(written) }
         env.closeMigrationWindow("typed words were adopted")
+        /* The old seed's counters must not count on under the new one. Set aside
+         * is how they go; when that fails they are deleted instead, counter
+         * file and lock-key index both. Left where they were, the new seed's
+         * next ecash took the old seed's high counters, and a restore from the
+         * new words, which scans from zero, never reached them. Only when they
+         * can be neither set aside nor deleted is this refused, and then nothing
+         * more is done with them. */
+        var deleted = false
         do {
-            try env.counters.moveAside()
+            try env.setCountersAside(env.counters)
         } catch {
-            return .refuse("the seed was replaced, but its counters could not be set aside")
+            guard env.counters.discard() else {
+                print("[foxy] seed: replaced by typed words; the old counters could be neither set aside nor deleted")
+                return .refuse("the seed was replaced, but its old counters could be neither set aside nor deleted")
+            }
+            deleted = true
         }
         do {
             _ = try env.counters.raise(served)
         } catch {
             return .refuse("the seed was replaced, but its counters could not be raised")
         }
-        print("[foxy] seed: replaced by typed words; the old counters set aside, the new ones raised to what was served")
+        print(deleted
+              ? "[foxy] seed: replaced by typed words; the old counters could not be set aside, so they were deleted, and the new ones raised to what was served"
+              : "[foxy] seed: replaced by typed words; the old counters set aside, the new ones raised to what was served")
         return .answer(json(["adopted": true]))
     }
 

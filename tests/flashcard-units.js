@@ -504,7 +504,7 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
     ok(fc.v123 && fc.cents && fc.bal && fc.bal.usd === 500 && fc.bal.sat === 3000 && holder.fcTwoUnits(fc), 'the card\u2019s screen knows it holds both, and each balance');
     const v = vals(holder);
     ok(v.fcPillRows.length === 2 && v.fcPillRows[0].big === '5.00' && v.fcPillRows[1].big === '3,000', 'two pills: dollars, then bitcoin', JSON.stringify(v.fcPillRows.map((x) => x.big)));
-    ok(/^PER SECOND LIMIT \$3\.33/.test(v.fcLimitLine) && /both currencies$/.test(limitsSub(v)), 'the ceiling once, in dollars, for both: $10.00 a payment, $3.33 a second', v.fcLimitLine + ' / ' + limitsSub(v));
+    ok(/^PER SECOND LIMIT \$10\b/.test(v.fcLimitLine) && /both currencies$/.test(limitsSub(v)), 'the ceiling once, in dollars, for both: $10.00 a payment, $10 a second (one second of it, software 1.25)', v.fcLimitLine + ' / ' + limitsSub(v));
     ok(v.fcButtons.some((x) => x.label === 'SWAP' && (x.dim === '1') === !holder.offlineNow()), 'SWAP is in the bottom row, and not greyed for being of one currency');
     holder.fcWithdraw();
     ok(holder.state.screen === 'currency' && holder.state.currencyFlow === 'card' && holder.state.curCard && holder.state.curCard.question === 'WITHDRAW WHICH?'
@@ -964,12 +964,12 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       ok(!cardUp(a) && speed(a) && speed(a).chosen === '$5' && speed(a).alt === 'SKIP', name + ': NEXT opens MAX SPEND PER SECOND, in dollars, SKIP under NEXT', JSON.stringify(speed(a)));
       speed(a).other();
       a.setState({ amount: '10.00' });
-      ok(a.state.flow === 'cardSuTap' && a.fcSuAmountLine() === 'It will take 13 seconds to pay $120.00.', name + ': its figure, SET AMOUNT for another rate, its seconds under the figure', a.fcSuAmountLine());
+      ok(a.state.flow === 'cardSuTap' && a.fcSuAmountLine() === 'It will take 9 seconds to pay $40.00.', name + ': its figure, SET AMOUNT for another rate, its seconds under the figure', a.fcSuAmountLine());
       c.tap();
       a.fcAmountNext();
       await until('the card to be set up', () => !!c.state.owner && a.state.fc && a.state.fc.key === c.key && a.state.fc.ownedHere === true && !(a._fcTaps > 0));
       await uiSettle();
-      ok(c.state.noPinLimit === 200 && c.state.tapLimit === 3000, name + ': NEXT wrote them to the card in the one tap, $2.00 and $10.00 a second ($30.00) in cents', JSON.stringify([c.state.noPinLimit, c.state.tapLimit]));
+      ok(c.state.noPinLimit === 200 && c.state.tapLimit === 1000, name + ': NEXT wrote them to the card in the one tap, $2.00 and $10.00 a second ($10.00) in cents', JSON.stringify([c.state.noPinLimit, c.state.tapLimit]));
       // one currency chosen: one pill from the moment set-up ends, the ceiling said with no "both", and ADD FUNDS asks nothing
       const v1 = vals(a);
       ok(v1.fcPillRows.length === 1 && v1.fcPillRows[0].big === (i === 0 ? '0.00' : '0') && !/both currencies/.test(limitsSub(v1)),

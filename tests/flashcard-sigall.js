@@ -702,7 +702,7 @@ async function world(feePpk, sats, make) {
     // (a limit of $0.50 on a payment, kept in dollars, as the rate screen sends one: its sats at the price, and the dollars)
     holder.fcLimitConfirm(500, 0.5);
     ok(holder.state.screen === 'fcLimitConfirm' && holder.state.fcLimit.sats === 500 && holder.state.fcLimit.usd === 0.5 && /kept at this many dollars/.test(holder.fcLimitSpec().warn)
-       && holder.fcLimitSpec().amount === '$0.17 / sec',
+       && holder.fcLimitSpec().amount === '$0.50 / sec',
        'a limit in dollars is confirmed as the rate it makes, in dollars that the phone will keep the card to', holder.fcLimitSpec().warn);
     holder.fcLimitSpec().go();
     await until('the limit to be set', () => holder.toasts.some((t) => /Per second limit set/.test(t)));

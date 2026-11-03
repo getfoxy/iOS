@@ -81,9 +81,10 @@
     return two(d.getHours()) + ':' + two(d.getMinutes()) + ':' + two(d.getSeconds());
   }
 
-  flText() {
-    const lines = this.state.flLines || [];
-    const view = this.state.flView;
+  flText() { return this.flTextOf(this.state.flLines || [], this.state.flView); }
+
+  /* `lines` newest first, as the screen holds them; `view` names the heading. */
+  flTextOf(lines, view) {
     const head = 'Foxy ' + (view === 'bad' ? 'errors' : view === 'net' ? 'connection diary' : 'log') + ', '
       + lines.length + ' line' + (lines.length === 1 ? '' : 's')
       + ', newest first. Tokens, invoices, payment requests, onion addresses and '
@@ -141,5 +142,36 @@
         });
       },
       shut: { label: 'KEEP IT' },
+    });
+  }
+
+  /* A shake, anywhere the receive screen has not claimed it (the native side
+   * decides: FoxyBridge+Tap.swift `shaken`), asks whether to copy the whole
+   * log — the LOGS screen's COPY ALL without the walk to it, for someone
+   * holding a phone that has just done something odd. Asked, never done on the
+   * shake alone: a phone jostled in a pocket must not fill the clipboard. Not
+   * under the lock: the log names mint hosts and amounts, and a locked phone
+   * shows nothing of its holder's. Device-only and short-lived like every
+   * copy Foxy makes (copySecret). */
+  shakenForLogs() {
+    const W = window.FoxyWallet;
+    if (this._pinLocked) { console.log('[foxy] shaken under the lock; the logs stay'); return; }
+    if (!W || !W.fieldLog) return;
+    this.blockedCard('shakeLogs', {
+      tone: 'ask',
+      title: 'COPY YOUR LOGS?',
+      reason: 'Everything Foxy has been doing goes to the clipboard, on this phone only, '
+        + 'for two minutes. Tokens, invoices and keys are already left out; mint hosts '
+        + 'and amounts are not.',
+      retry: 'COPY',
+      go: () => {
+        W.fieldLog(false).then(lines => {
+          const newest = (lines || []).slice().reverse();
+          if (!newest.length) { this.toast('There is nothing to copy yet.', true); return; }
+          if (this.copySecret(this.flTextOf(newest, 'all'))) this.toast('Your logs are on the clipboard for two minutes');
+          else this.toast('Could not copy', true);
+        }, () => this.toast('Could not read the log', true));
+      },
+      shut: { label: 'NOT NOW' },
     });
   }

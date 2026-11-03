@@ -436,6 +436,16 @@
         try { FoxyWallet._onTurned(!!on); } catch (e) { console.warn('[foxy] turned listener:', e && e.message); }
       }
     },
+    /* The phone shaken anywhere but the armed receive screen (shakeSense), from
+     * the native side: the page asks whether to copy the logs. */
+    /** @type {?function(): void} */
+    _onShaken: null,
+    onShaken: function (fn) { FoxyWallet._onShaken = fn; },
+    _shaken: function () {
+      if (typeof FoxyWallet._onShaken === 'function') {
+        try { FoxyWallet._onShaken(); } catch (e) { console.warn('[foxy] shaken listener:', e && e.message); }
+      }
+    },
     /** @type {Array<function(any): void>} */
     _tapListeners: [],
     _tap: function (ev) {

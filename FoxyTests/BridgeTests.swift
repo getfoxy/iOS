@@ -1,4 +1,5 @@
 import XCTest
+import WebKit
 @testable import Foxy
 
 /// The page-to-native boundary: which messages run what, and the checks on what
@@ -18,7 +19,7 @@ final class BridgeTests: XCTestCase {
 
     func testTheTableHoldsExactlyTheDocumentedActions() throws {
         let documented = try documentedActions()
-        XCTAssertEqual(documented.count, 79, "THREAT-MODEL.md §1 lists \(documented.sorted())")
+        XCTAssertEqual(documented.count, 80, "THREAT-MODEL.md §1 lists \(documented.sorted())")
         XCTAssertEqual(Set(FoxyBridge.handlers.keys), documented)
     }
 
@@ -146,5 +147,155 @@ final class BridgeTests: XCTestCase {
             XCTAssertFalse(FoxyBridge.movesMoney(method: "POST", path: path), path)
         }
         XCTAssertFalse(FoxyBridge.movesMoney(method: "GET", path: "/v1/swap"))
+    }
+}
+
+/// Where the system paste button may go: over one of the page's own paste
+/// buttons, as a script in a world of the bridge's own finds the page, and
+/// nowhere else (PasteAffordance). A rectangle in the lower two-thirds was all
+/// that was checked, and that is where the confirm buttons are.
+final class PasteAffordanceTests: XCTestCase {
+    private let page = """
+    <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>body{margin:0} div{position:absolute;left:20px;width:300px;height:60px}</style></head><body>
+    <div id="paste" data-foxy-paste="1" style="top:500px"><span>PASTE</span></div>
+    <div id="home" data-foxy-paste="1" aria-label="PASTE" style="top:420px;width:80px;height:82px"></div>
+    <div id="send" style="top:600px">SEND 21 SATS</div>
+    <div id="lure" data-foxy-paste="1" style="top:680px">CONFIRM</div>
+    <div id="faint" data-foxy-paste="1" style="top:340px;opacity:0.1">PASTE</div>
+    <script>
+      // a page script that tries to make the bridge's check see a paste button everywhere
+      Element.prototype.getBoundingClientRect = function () { return { left: 20, top: 600, width: 300, height: 60 }; };
+      document.elementFromPoint = function () { return document.getElementById('paste'); };
+    </script></body></html>
+    """
+
+    /// On screen, as the app's is: a web view in no window lays nothing out, and has nothing at any point.
+    private var window: UIWindow?
+
+    override func tearDown() {
+        window?.isHidden = true
+        window = nil
+        super.tearDown()
+    }
+
+    private func loaded() throws -> WKWebView {
+        let frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let web = WKWebView(frame: frame)
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: frame)
+        window.frame = frame
+        window.addSubview(web)
+        window.isHidden = false
+        self.window = window
+        web.loadHTMLString(page, baseURL: nil)
+        let ready = expectation(description: "the page is up")
+        func poll() {
+            // this page's, not the blank one that is up before it
+            web.evaluateJavaScript("document.readyState === 'complete' && !!document.getElementById('send')") { state, _ in
+                if (state as? Bool) == true { ready.fulfill() } else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: poll) }
+            }
+        }
+        poll()
+        wait(for: [ready], timeout: 10)
+        return web
+    }
+
+    private func check(_ rect: CGRect, in web: WKWebView) -> Bool {
+        var answer: Bool?
+        let done = expectation(description: "checked")
+        PasteAffordance.check(rect, in: web) { answer = $0; done.fulfill() }
+        wait(for: [done], timeout: 10)
+        return answer ?? false
+    }
+
+    func testOnlyThePagesPasteButtonsTakeTheControl() throws {
+        let web = try loaded()
+        XCTAssertTrue(check(CGRect(x: 20, y: 500, width: 300, height: 60), in: web), "the send screen's PASTE")
+        XCTAssertTrue(check(CGRect(x: 21, y: 421, width: 79, height: 81), in: web), "the home screen's PASTE, as the page rounds it")
+        XCTAssertFalse(check(CGRect(x: 20, y: 600, width: 300, height: 60), in: web),
+                       "a confirm button, even with the page's own functions saying otherwise")
+        XCTAssertFalse(check(CGRect(x: 20, y: 680, width: 300, height: 60), in: web), "marked, but its label is not PASTE")
+        XCTAssertFalse(check(CGRect(x: 20, y: 340, width: 300, height: 60), in: web), "a paste button that cannot be seen")
+        // and that one was found, and turned away for being faint, not for not being there
+        var faint: [String: Any]?
+        let read = expectation(description: "read")
+        web.evaluateJavaScript(PasteAffordance.script(for: CGRect(x: 20, y: 340, width: 300, height: 60)), in: nil, in: .defaultClient) {
+            if case .success(let answer) = $0 { faint = answer as? [String: Any] }
+            read.fulfill()
+        }
+        wait(for: [read], timeout: 10)
+        XCTAssertEqual(faint?["found"] as? Bool, true)
+        XCTAssertEqual(faint?["shown"] as? Bool, false)
+        XCTAssertFalse(check(CGRect(x: 20, y: 500, width: 300, height: 140), in: web), "a rectangle bigger than the button")
+        XCTAssertFalse(check(CGRect(x: 20, y: 300, width: 300, height: 60), in: web), "nothing there at all")
+    }
+
+    func testAnAnswerIsReadStrictly() {
+        let rect = CGRect(x: 20, y: 500, width: 300, height: 60)
+        let good: [String: Any] = ["found": true, "word": true, "shown": true, "x": 20, "y": 500, "w": 300, "h": 60]
+        XCTAssertTrue(PasteAffordance.accepts(good, rect: rect))
+        for (key, value) in [("found", false), ("word", false), ("shown", false)] as [(String, Any)] {
+            var bad = good
+            bad[key] = value
+            XCTAssertFalse(PasteAffordance.accepts(bad, rect: rect), key)
+        }
+        var off = good
+        off["y"] = 503
+        XCTAssertFalse(PasteAffordance.accepts(off, rect: rect), "three points off")
+        XCTAssertFalse(PasteAffordance.accepts(nil, rect: rect))
+        XCTAssertFalse(PasteAffordance.accepts("yes", rect: rect))
+    }
+}
+
+/// The keeper's yeses before a card session, as the bridge holds them: each is
+/// for the next session to begin, ends with it or after ninety seconds, and the
+/// card's own answers in a session are what a signature with no yes is held to.
+final class CardApprovalTests: XCTestCase {
+    private func approval(_ body: [String: Any], at: TimeInterval = Date().timeIntervalSince1970) throws -> CardOwner.Approval {
+        try XCTUnwrap(CardOwner.approval(body, at: at))
+    }
+
+    func testAYesIsForTheNextSessionAndEndsWithIt() throws {
+        let bridge = FoxyBridge()
+        bridge.cardApprovals.append((try approval(["label": "reset", "value": ""]), nil))
+        bridge.cardSessionBegan()
+        XCTAssertEqual(bridge.cardApprovals.first?.session, bridge.cardSession, "bound to the session that began after it")
+        bridge.cardSessionEnded()
+        XCTAssertTrue(bridge.cardApprovals.isEmpty, "a session that ended takes its yes with it")
+        // one given while a session is open is for the next one, not that one
+        bridge.cardSessionBegan()
+        bridge.cardApprovals.append((try approval(["label": "reset", "value": ""]), nil))
+        bridge.cardSessionBegan()
+        XCTAssertEqual(bridge.cardApprovals.count, 1)
+        XCTAssertEqual(bridge.cardApprovals.first?.session, bridge.cardSession)
+        // and none lasts past ninety seconds
+        bridge.cardApprovals = [(try approval(["label": "reset", "value": ""], at: Date().timeIntervalSince1970 - 91), nil)]
+        bridge.cardSessionBegan()
+        XCTAssertTrue(bridge.cardApprovals.isEmpty)
+    }
+
+    func testTheCardsOwnAnswersAreKeptForTheSessionOnly() {
+        let bridge = FoxyBridge()
+        bridge.cardSessionBegan()
+        var info = [UInt8](repeating: 0, count: 51)
+        info[16] = 1
+        info[12...15] = [0, 0, 0x03, 0xE8]
+        bridge.cardSaw(Data([0xB0, 0x01, 0x03, 0x00, 0x00]), Data(info + [0x90, 0x00]))
+        XCTAssertEqual(bridge.cardSeen.limits?[.day], 1000)
+        XCTAssertFalse(bridge.cardSeen.unowned)
+        // a refusal says nothing of the card
+        bridge.cardSaw(Data([0xB0, 0x01, 0x03, 0x00, 0x00]), Data([UInt8](repeating: 0, count: 51) + [0x69, 0x85]))
+        XCTAssertEqual(bridge.cardSeen.limits?[.day], 1000)
+        let mint = Array("https://mint.example.com".utf8)
+        var record = [UInt8](repeating: 0, count: 106)
+        record[2] = 0x01
+        record[105] = UInt8(mint.count)
+        record += mint
+        bridge.cardSaw(Data([0xB0, 0x16, 0x00, 0x00, 0x00]), Data(record + [0x90, 0x00]))
+        XCTAssertEqual(bridge.cardSeen.mint, mint)
+        XCTAssertEqual(bridge.cardSeen.unit, 0x01)
+        bridge.cardSessionEnded()
+        XCTAssertEqual(bridge.cardSeen, CardOwner.Seen(), "forgotten when the session ends")
     }
 }

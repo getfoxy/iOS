@@ -177,6 +177,8 @@ class Component extends DCLogic {
       trStep: '', trFrom: '', trTo: '',
       // nor a card's question of which mint to move to (26f-flashcard.js), nor the till's of which mint to run at (26m-till.js)
       fcPick: false, tillPick: false, tillSet: [],
+      // nor a card's WITHDRAW TO (26n-card-withdraw-to.js)
+      wdPick: false,
     }, extra || {}));
   }
   back() {

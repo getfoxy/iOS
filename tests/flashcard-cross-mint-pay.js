@@ -620,6 +620,28 @@ function booksGood(name, ...pages) {
     booksGood('the card’s own fee more than shown', H, R);
   }
 
+  /* ---- 15: the card's mint's fee quote, on a circuit opened as the quote began (2026-11-02) ------------------------
+   * The quote waits on that mint being loaded; its circuit is built meanwhile (`quoteRoad`, tests/circuit-warm.js). */
+  {
+    const { H, R, till } = await world();
+    const q = await bitcoinReceive(till, R, 500);
+    const seen = [];
+    const fate0 = R.fate;
+    R.fate = (m) => { const u = new URL(m.url); seen.push({ m: m.method, u: bare(u.origin) + u.pathname, c: m.circuit || '' }); return fate0(m); };
+    R.W._spareAfterMs = 1e9;   // nothing opened behind it: the circuits here are the quote's own
+    R.W._spareOff = false;
+    const x = await R.W.cardCrossQuote(MINT, q.bolt11, 'sat');
+    const at = seen.findIndex((r) => r.m === 'GET' && r.u === bare(MINT) + '/v1/keysets' && r.c);
+    const melt = seen.find((r) => r.m === 'POST' && r.u === bare(MINT) + '/v1/melt/quote/bolt11');
+    ok(at >= 0 && !!melt && melt.c === seen[at].c && seen.indexOf(melt) > at && x.amount === 500,
+       'a card at another mint: its mint’s fee quote rides the circuit opened there as the quote began',
+       JSON.stringify(seen.map((r) => r.m + ' ' + r.u.replace(/^https:\/\//, '') + (r.c ? ' @' + r.c.slice(0, 4) : ''))));
+    ok(bare(R.W.mintUrl) === MINT2 && !R.W.pendingMelts().length, 'and the phone is still at its own mint, nothing held');
+    R.W._spareOff = true;
+    R.fate = fate0;
+    booksGood('a card’s fee quote on its own circuit', H, R);
+  }
+
   console.log('\n' + passed + ' passed, ' + failed + ' failed' + (until.failed ? ', ' + until.failed + ' waits timed out' : ''));
   process.exit(failed || until.failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

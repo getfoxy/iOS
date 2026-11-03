@@ -1062,7 +1062,7 @@ function nativePhone(opts) {
     /* The phone's own clock, in milliseconds: the real one unless a test sets `clockMs`. */
     clockMs: () => Date.now(),
     page: null,
-    hooks: { enter: null, show: null, adopt: null, wipe: null, refuse: null, unlock: null },
+    hooks: { enter: null, show: null, adopt: null, wipe: null, refuse: null, unlock: null, cardApprove: null },
     toSeed: null, generate: null, wordlist: null, derive: null, validate: null,
     /* seedMigrate's one-time window (SeedMigrationWindow.swift): open as on an
      * install that had page storage before this launch (o.migration false:
@@ -1404,10 +1404,21 @@ function nativePhone(opts) {
         'reset': value.length === 0 || (value.length === 1 && value[0] <= 7),
       }[m.label];
       if (!shaped) return no(SAYS.bad);
+      // a record's refund key, only where it is this phone's own: derived again at the lock-key index the page names
+      if (m.label === 'set-card' && !(Number.isInteger(m.refundIndex) && m.refundIndex >= 0)) return no('Nothing was changed on the card.');
       if (!words()) return no(SAYS.noSeed);
       if (!unlock('cardOwnerSign', 'read')) return no(SAYS.unreadable);
+      if (m.label === 'set-card' && lockPubs(words(), m.refundIndex, 1)[0] !== value.subarray(1, 34).toString('hex')) return no('Nothing was changed on the card.');
       const message = Buffer.concat([Buffer.from('FoxyCard/' + m.label, 'ascii'), Buffer.from(m.nonce, 'hex'), value]);
       return ok({ sig: p256Sign(cardOwnerScalar(seedNow(), key), message) });
+    },
+    /* handleCardOwnerApprove: the keeper's yes before an owner's command, in the phone's own alert. Yes unless a test's hook
+     * says no (`phone.hooks.cardApprove`); which yes a signature needs is the Swift's to hold (CardOwner.matches, FoxyTests). */
+    cardOwnerApprove(m) {
+      if (typeof m.label !== 'string' || !CARD_LABELS.includes(m.label) || m.label === 'load') return no(SAYS.bad);
+      phone.cardApprovals = (phone.cardApprovals || []).concat([m]);
+      const yes = phone.hooks.cardApprove ? phone.hooks.cardApprove(m) : true;
+      return yes ? ok({ approved: true }) : no('Nothing was changed on the card.');
     },
     // handleSeedShow, SeedScreens: one screen at a time, and none within 10 s of a cancelled Face ID
     seedShow(m) {

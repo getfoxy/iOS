@@ -891,6 +891,8 @@
   function noteClaimTrouble(quoteId, e) {
     // not trouble: the phone was on another mint, and nothing was asked (`_claimOnce`)
     if (e && e.foxyElsewhere) return;
+    // nor: the mint this phone has just switched to has not answered yet, and nothing was asked (`mintPending`)
+    if (e && e.foxyConnecting) return;
     var bad = badSignatures(e);
     var now = Date.now();
     var hit = /** @type {any} */ (null);          // set inside the loop below
@@ -1367,10 +1369,42 @@
     }
   }
 
-  function createQuote(w, amount, memo, lock) {
-    return (lock
-      ? w.createLockedMintQuote(amount, lock.pubkey, memo || undefined)
-      : w.createMintQuoteBolt11(amount, memo)).then(function (q) {
+  /* Asked again on another circuit when the first has said nothing for three seconds at a mint that is answering, five
+   * otherwise (`askedAgain`), as a fee quote is: a mint quote commits to nothing, and the one nobody pays expires at the mint.
+   * The invoice that answers first is the one used. A card's TRANSFER waited 17.5 s on one circuit for a Minibits invoice
+   * (2026-11-03), where the fee quote beside it had been asked again at 3 s.
+   *
+   * Each asking after the first carries a NUT-20 key of its own, as an invoice's askings do (08c-units.js, `askQuote`): two
+   * askings with one key are joined at the mint. The caller's `lock` is the object it will file with the quote, so where a later
+   * asking is the one that answers, that object is given the answering asking's key, in place, before this resolves: the key on
+   * file is always the key the quote was made with. `once`: the caller asks again itself (`askQuote`), and this asks once. */
+  function createQuote(w, amount, memo, lock, once) {
+    var host = '';
+    try { host = hostOf(mintOf(w)); } catch (eH) { host = ''; }
+    var ask = function (via, key) {
+      return key
+        ? via.createLockedMintQuote(amount, key.pubkey, memo || undefined)
+        : via.createMintQuoteBolt11(amount, memo);
+    };
+    var asked;
+    if (once || FoxyWallet._invoiceAgainOff) {
+      asked = ask(w, lock).then(function (q) { return { q: q, key: lock }; });
+    } else {
+      var askings = 0;
+      asked = askedAgain(w, 'the invoice at ' + (host || 'the mint'), function (via) {
+        askings += 1;
+        var key = lock;
+        if (lock && askings > 1) key = quoteLock(via) || quoteLock(w) || lock;
+        return ask(via, key).then(function (q) { return { q: q, key: key }; });
+      }, undefined, 25000).then(function (won) { return won.got; });
+    }
+    return asked.then(function (made) {
+      if (lock && made.key && made.key !== lock) {
+        lock.privkey = made.key.privkey;
+        lock.pubkey = made.key.pubkey;
+      }
+      return made.q;
+    }).then(function (q) {
       /* The invoice names the mint's node (05-paying-this-mint.js) — but only
        * a sat invoice. A mint with a dollar balance can have its dollar
        * invoices made by somebody else's node (Forge's come from Flash's node,

@@ -617,3 +617,77 @@ final class NativeSeedTests: XCTestCase {
         XCTAssertEqual(queue.waitingCount, 0)
     }
 }
+
+/// The install marker: written, and read back, before anything from a previous
+/// installation is removed (WebHostController.forgetSeedIfReinstalled).
+///
+/// A first write that failed - a full phone - used to be swallowed, and the
+/// next launch took the wallet in use for a reinstall and deleted its seed.
+final class InstallMarkerTests: XCTestCase {
+    /// A disk in memory that can refuse the write, or take it and keep nothing.
+    final class StandInDisk: WebHostController.InstallDisk {
+        var files: Set<String> = []
+        var failWrite = false
+        var dropWrite = false
+        var writes: [(String, Data.WritingOptions)] = []
+        func fileExists(atPath path: String) -> Bool { files.contains(path) }
+        func createDirectory(at url: URL) throws {}
+        func write(_ data: Data, to url: URL, options: Data.WritingOptions) throws {
+            if failWrite { throw CocoaError(.fileWriteOutOfSpace) }
+            writes.append((url.path, options))
+            if !dropWrite { files.insert(url.path) }
+        }
+    }
+
+    private let support = URL(fileURLWithPath: "/stand-in/Application Support")
+    private var marker: String { support.appendingPathComponent("foxy.install").path }
+
+    func testAMarkerThatCannotBeWrittenRemovesNothingAndIsTriedAgain() {
+        let disk = StandInDisk()
+        disk.failWrite = true
+        var forgotten = 0
+        let first = WebHostController.forgetSeedIfReinstalled(disk: disk, support: support) { forgotten += 1 }
+        guard case .markerNotWritten = first else { return XCTFail("\(first)") }
+        XCTAssertEqual(forgotten, 0, "a seed was removed although no marker could be written")
+
+        // the next launch, with room again: the marker goes down, and only then is anything removed
+        disk.failWrite = false
+        let second = WebHostController.forgetSeedIfReinstalled(disk: disk, support: support) { forgotten += 1 }
+        XCTAssertEqual(second, .firstLaunch)
+        XCTAssertEqual(forgotten, 1)
+        // and every launch after it is an ordinary one
+        XCTAssertEqual(WebHostController.forgetSeedIfReinstalled(disk: disk, support: support) { forgotten += 1 }, .marked)
+        XCTAssertEqual(forgotten, 1)
+    }
+
+    func testAWriteThatLeavesNoMarkerRemovesNothing() {
+        let disk = StandInDisk()
+        disk.dropWrite = true
+        var forgotten = 0
+        let check = WebHostController.forgetSeedIfReinstalled(disk: disk, support: support) { forgotten += 1 }
+        XCTAssertEqual(check, .markerNotWritten("not there after writing"))
+        XCTAssertEqual(forgotten, 0, "the marker was not read back before the seed went")
+    }
+
+    func testTheMarkerIsReadableFromTheFirstUnlockAndWrittenBeforeTheSeedGoes() throws {
+        let disk = StandInDisk()
+        var markedWhenForgotten = false
+        let check = WebHostController.forgetSeedIfReinstalled(disk: disk, support: support) {
+            markedWhenForgotten = disk.files.contains(self.marker)
+        }
+        XCTAssertEqual(check, .firstLaunch)
+        XCTAssertTrue(markedWhenForgotten, "the old seed went before the marker was on disk")
+        let options = try XCTUnwrap(disk.writes.first?.1)
+        XCTAssertEqual(options.intersection(.fileProtectionMask), .completeFileProtectionUntilFirstUserAuthentication,
+                       "the marker holds no secret and must be readable before the phone is unlocked again")
+    }
+
+    func testAnInstallationWithAMarkerIsLeftAlone() {
+        let disk = StandInDisk()
+        disk.files.insert(marker)
+        var forgotten = 0
+        XCTAssertEqual(WebHostController.forgetSeedIfReinstalled(disk: disk, support: support) { forgotten += 1 }, .marked)
+        XCTAssertEqual(forgotten, 0)
+        XCTAssertTrue(disk.writes.isEmpty)
+    }
+}

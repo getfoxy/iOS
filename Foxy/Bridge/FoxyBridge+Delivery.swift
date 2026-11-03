@@ -382,7 +382,7 @@ extension FoxyBridge {
             }
             if let error {
                 let ns = error as NSError
-                print("[foxy] net: POST \(host) · \(ms) ms · \(NetDiary.failure(ns))")
+                print("[foxy] net: POST \(LogRedaction.host(host)) · \(ms) ms · \(NetDiary.failure(ns))")
                 // sent, perhaps, and the answer never came: the token's own claim watch decides
                 let maybeSent = ns.domain == NSURLErrorDomain
                     && (ns.code == NSURLErrorTimedOut || ns.code == NSURLErrorNetworkConnectionLost)
@@ -397,11 +397,11 @@ extension FoxyBridge {
             // the address as asked and as answered, without the spellings URLSession may tidy
             let place = { (u: URL) -> String in "\((u.host ?? "").lowercased())|\(u.path.isEmpty ? "/" : u.path)|\(u.query ?? "")" }
             if let landed = http?.url, place(landed) != place(url) {
-                print("[foxy] net: POST \(host) · \(ms) ms · \(code), redirected: not taken")
+                print("[foxy] net: POST \(LogRedaction.host(host)) · \(ms) ms · \(code), redirected: not taken")
                 self?.resolve(id: id, text: "redirected \(code)\n" + answer, error: nil)
                 return
             }
-            print("[foxy] net: POST \(host) · \(ms) ms · \(code)")
+            print("[foxy] net: POST \(LogRedaction.host(host)) · \(ms) ms · \(code)")
             self?.resolve(id: id, text: "\(code)\n" + answer, error: nil)
         }
         // no route, or Foxy being put away: nothing left

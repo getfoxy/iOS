@@ -57,6 +57,8 @@ const TOKENS = {
   'reasons': /biometricReason/,
   'kinds': /case "sent"/,
   'rect limits': /let sane =/,
+  // and over one of the page's own paste buttons, asked in a content world the page's scripts cannot change
+  'paste button': /PasteAffordance\.check\(/,
   // payment requests paid over Tor (FoxyBridge+Delivery.swift)
   'onion inbox': /OnionInbox \{/,
   'onion only': /OnionPost\.send/,

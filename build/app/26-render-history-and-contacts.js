@@ -199,7 +199,7 @@
          * does not change price with bitcoin. */
         amtText: ofCard
           ? (unfinished(t) ? '' : dirOf(t) === 'in' ? '+' : '−') + (usdCard ? this.unitFigure(t.amount, 'usd') : this.money(t.sats, this.txFiat(t, t.sats)).main)
-          : (t.dir === 'in' ? '+' : '−') + (t.unit ? this.unitMoney(t.amount, t.unit) : t.usd != null ? '$ ' + t.usd.toFixed(2) : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).main),
+          : (t.dir === 'in' ? '+' : '−') + (t.unit ? this.unitMoney(this.txTotalUnit(t), t.unit) : t.usd != null ? '$ ' + t.usd.toFixed(2) : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).main),
         amtSub: ofCard ? (usdCard ? '' : this.money(t.sats, this.txFiat(t, t.sats)).sub)
           : t.unit ? this.unitLabel(t.unit) + ' ecash' : t.usd != null ? 'Cash' : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).sub,
         // dollars at today's price, and the sats that actually add up
@@ -298,7 +298,7 @@
        * two numbers that do not visibly relate. */
       txSentLabel: tx.dir === 'in' ? 'RECEIVED' : 'SENT',
       txSent: (tx.dir === 'in' ? '+' : '\u2212') + (tx.unit ? this.unitMoney(tx.amount, tx.unit) : this.money(tx.sats, this.txFiat(tx, tx.sats)).main),
-      txTotal: (tx.dir === 'in' ? '+' : '\u2212') + (tx.unit ? this.unitMoney(tx.amount, tx.unit) : this.money(this.txTotalOut(tx), this.txFiat(tx, this.txTotalOut(tx))).main),
+      txTotal: (tx.dir === 'in' ? '+' : '\u2212') + (tx.unit ? this.unitMoney(this.txTotalUnit(tx), tx.unit) : this.money(this.txTotalOut(tx), this.txFiat(tx, this.txTotalOut(tx))).main),
       txTotalAlt: (tx.unit === 'usd' && two) ? 'DOLLARS'
         : tx.unit ? this.unitLabel(tx.unit) + ' ecash' : this.money(this.txTotalOut(tx), this.txFiat(tx, this.txTotalOut(tx))).sub,
       /* Which mint carried this. The screen said LIGHTNING and never said

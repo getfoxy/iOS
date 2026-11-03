@@ -655,9 +655,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     x.finish();
     const y = explainer(holder);
     ok(y.done && y.all === ['How tap limit works', 'Any payment request over your limit requires you to tap and hold your card longer.', 'EXAMPLE LIMIT', '$10',
-                            '$0.01 \u2013 $10.00', '~1\u20134 SEC TAP', '$10.01 \u2013 $20.00', '~7 SEC TAP', '$20.01 \u2013 $30.00', '~9 SEC TAP', '$30.01 \u2013 $40.00', '~10 SEC TAP',
+                            '$0.01 \u2013 $10.00', '~1\u20134 SEC TAP', '$10.01 \u2013 $20.00', '~3 SEC TAP', '$20.01 \u2013 $30.00', '~6 SEC TAP', '$30.01 \u2013 $40.00', '~9 SEC TAP',
                             'And so on\u2026', 'CANCEL', 'CONTINUE'].join(' | '),
-       'played out, it is the rule as a list: the ten-dollar example, four tiers with the seconds the screen reaches on this card (seven askings, then three), and so on, then CANCEL and CONTINUE', y.all);
+       'played out, it is the rule as a list: the ten-dollar example, four tiers with the seconds a card before 1.25 holds for (3 s \u00d7 (N \u2212 1)), and so on, then CANCEL and CONTINUE', y.all);
     y.press('CANCEL');
     ok(!explainer(holder) && holder.state.screen === 'flashcard' && holder._fcLimitDone === null, 'CANCEL takes it down and changes nothing');
     // played through once on this phone, it opens on the list from then on
@@ -677,7 +677,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   {
     const cf = holder.fcLimitSpec();
     ok(cf.amountLabel === 'YOU ARE APPLYING A PER TAP LIMIT OF:' && cf.amount === '\u20bf 300' && cf.cta === 'CONFIRM' && cf.secondary.label === 'CANCEL'
-       && cf.warn === 'This card will pay up to this straight away, change or no change. Over it, the card has to be held about 7 seconds, and 2 seconds more for every limit\u2019s worth beyond that. Only this phone, or a phone restored from its seed phrase, can change or remove it.',
+       && cf.warn === 'This card will pay up to this straight away, change or no change. Over it, the card has to be held about 3 seconds, and 3 seconds more for every limit\u2019s worth beyond that. Only this phone, or a phone restored from its seed phrase, can change or remove it.',
        'the confirmation says the amount and what it means', JSON.stringify([cf.amountLabel, cf.amount]));
   }
   c.tap();
@@ -2467,15 +2467,15 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       explainer(owner).finish();
       const y = explainer(owner);
       ok(y.done && y.all === ['How tap limit works', 'Any payment request over your limit requires you to tap and hold your card longer.', 'EXAMPLE LIMIT', '$10',
-                              '$0.01 \u2013 $10.00', '~1\u20134 SEC TAP', '$10.01 \u2013 $20.00', '~9 SEC TAP', '$20.01 \u2013 $30.00', '~11 SEC TAP', '$30.01 \u2013 $40.00', '~13 SEC TAP',
+                              '$0.01 \u2013 $10.00', '~1\u20134 SEC TAP', '$10.01 \u2013 $20.00', '~3 SEC TAP', '$20.01 \u2013 $30.00', '~6 SEC TAP', '$30.01 \u2013 $40.00', '~9 SEC TAP',
                               'And so on\u2026', 'CANCEL', 'CONTINUE'].join(' | '),
-         'HOW TAP LIMIT WORKS for a card of 1.18: ~1\u20134 within the limit, then ~9, ~11 and ~13, what the screen reaches at ten askings, fourteen and eighteen', y.all);
+         'HOW TAP LIMIT WORKS for a card of 1.18: ~1\u20134 within the limit, then ~3, ~6 and ~9, about three seconds a limit (a card before 1.25)', y.all);
       y.press('CONTINUE');
-      // (no price here: the rate is typed in sats, a limit of three seconds of it)
+      // (no price here: the rate is typed in sats, a limit of one second of it)
       ok(owner.state.screen === 'amount' && owner.state.flow === 'cardLimit' && owner.fcLimitQuestion() === 'What is the most this card should pay each second?', 'with no price, CONTINUE asks the rate on SET AMOUNT, in sats');
       keyIn(owner, 2000);
-      ok(owner.state.fcLimit.sats === 6000 && /held about 9 seconds, and 2 seconds more for every ₿ 6,000 beyond that\./.test(owner.fcLimitSpec().warn) && owner.fcLimitSpec().amount === '₿2,000 / sec',
-         'and its confirmation says the rate, and about 9 seconds over the limit it makes', owner.fcLimitSpec().amount + ' | ' + owner.fcLimitSpec().warn);
+      ok(owner.state.fcLimit.sats === 2000 && /held about 3 seconds, and 3 seconds more for every ₿ 2,000 beyond that\./.test(owner.fcLimitSpec().warn) && owner.fcLimitSpec().amount === '₿2,000 / sec',
+         'and its confirmation says the rate, and the hold over the limit it makes on a card before 1.25 (3 s \u00d7 (N \u2212 1))', owner.fcLimitSpec().amount + ' | ' + owner.fcLimitSpec().warn);
       owner.fcLimitSpec().secondary.go();
     }
 
@@ -3153,16 +3153,16 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   {
     const a = appOn(H, { screen: 'flashcard', stack: ['home'] });
     a.price = 60000;
-    ok(a.FC_SPEED_SECS === 3 && a.fcSpeedLimit(5, 'usd') === 1500 && a.fcSpeedLimit(5, 'sat') === Math.round(15 / 60000 * 1e8) && a.fcSpeedLimit(50, 'usd') === 15000,
-       'a rate R a second is a limit L of 3R: $5 a second is $15.00 (1,500 cents, or its sats at the price)');
-    ok(a.fcSpeedText(1500, 'usd', 0) === '$5' && a.fcSpeedText(Math.round(15 / 60000 * 1e8), 'sat', 0) === '$5' && a.fcSpeedText(99999, 'sat', 15) === '$5'
-       && a.fcSpeedText(2000, 'usd', 0) === '$6.67' && a.fcSpeedText(15000, 'usd', 0) === '$50',
-       'and a limit L is said as L / 3 a second: the chip where it is one (by the dollars it was set at, where it was), the figure where not',
-       [a.fcSpeedText(1500, 'usd', 0), a.fcSpeedText(2000, 'usd', 0)].join());
+    ok(a.FC_SPEED_SECS === 1 && a.fcSpeedLimit(5, 'usd') === 500 && a.fcSpeedLimit(5, 'sat') === Math.round(5 / 60000 * 1e8) && a.fcSpeedLimit(50, 'usd') === 5000,
+       'a rate R a second is a limit L of R, one second of it (software 1.25): $5 a second is $5.00 (500 cents, or its sats at the price)');
+    ok(a.fcSpeedText(500, 'usd', 0) === '$5' && a.fcSpeedText(Math.round(5 / 60000 * 1e8), 'sat', 0) === '$5' && a.fcSpeedText(99999, 'sat', 5) === '$5'
+       && a.fcSpeedText(667, 'usd', 0) === '$6.67' && a.fcSpeedText(5000, 'usd', 0) === '$50',
+       'and a limit L is said as L a second: the chip where it is one (by the dollars it was set at, where it was), the figure where not',
+       [a.fcSpeedText(500, 'usd', 0), a.fcSpeedText(667, 'usd', 0)].join());
     ok(a.FC_SPEED_CHIPS.join() === '1,2,5,10,25,50' && a.FC_SPEED_CHIPS.every((r) => a.fcSpeedText(a.fcSpeedLimit(r, 'sat'), 'sat', 0) === '$' + r && a.fcSpeedText(a.fcSpeedLimit(r, 'usd'), 'usd', 0) === '$' + r),
        'every chip comes back as itself, both ways, in cents and in sats');
     a.price = 0;
-    ok(a.fcSpeedText(300, 'sat', 0) === '\u20bf100' && !a.fcSpeedChoosable('sat') && a.fcSpeedChoosable('usd'),
+    ok(a.fcSpeedText(100, 'sat', 0) === '\u20bf100' && !a.fcSpeedChoosable('sat') && a.fcSpeedChoosable('usd'),
        'with no price a bitcoin card’s is said in sats, and typed rather than chosen; a dollar card’s is chosen all the same');
     // the welcome, on the card's screen: a new card, a set-up cut short, and none for a card that is not this phone's to set up
     a.setState({ fc: { key: 'k1', setUp: false, pin: 'none', hasRecord: false } });
@@ -3262,6 +3262,165 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(went === 2 && H.W.cardName('another-card') === '' && H.W.cardName('k9') === '', 'a name typed for one card is never given to another');
     H.W.cardSetName(stranger, ''); H.W.cardSetName(known, '');
   }
+  /* ---- 2026-11-03: a card's unit rows are its own mint's, not the connected one's ------------------------------------------
+   * A card of 1.23 moved to minibits (bitcoin only) still lists dollars in its table, and its screen showed a $0.00 dollar row
+   * at a mint with no dollars. The rows are the card's table less what its own mint does not issue (`fcUnitsAt`, from the keys
+   * on file: `mintUnits` of the card's mint). */
+  {
+    const H = await funded({}, 0);
+    const a = appOn(H);
+    const units = { 'https://minibits.test': ['sat'], 'https://forge.test': ['sat', 'usd'], 'https://new.test': [] };
+    const asked = [];
+    a.fcW = () => ({
+      cardUnits: (c) => ['usd', 'sat'].filter((u) => c.units && c.units[u]).map((u) => ({ unit: u })),
+      mintUnits: (m) => { asked.push(m); return units[m] || []; },
+    });
+    const card = (mint, usd, sat) => ({ record: { mint }, units: { usd: { balance: usd }, sat: { balance: sat } } });
+    ok(JSON.stringify(a.fcUnitsAt(card('https://minibits.test', 0, 3645))) === '["sat"]' && asked.slice(-1)[0] === 'https://minibits.test',
+       'a card of two currencies at a mint of bitcoin alone has one row, asked of the card\u2019s own mint', JSON.stringify(a.fcUnitsAt(card('https://minibits.test', 0, 3645))));
+    ok(JSON.stringify(a.fcUnitsAt(card('https://forge.test', 0, 100))) === '["usd","sat"]', 'at a mint that issues both, both rows', JSON.stringify(a.fcUnitsAt(card('https://forge.test', 0, 100))));
+    ok(JSON.stringify(a.fcUnitsAt(card('https://minibits.test', 250, 100))) === '["usd","sat"]', 'a currency the card holds money in keeps its row wherever it is',
+       JSON.stringify(a.fcUnitsAt(card('https://minibits.test', 250, 100))));
+    ok(JSON.stringify(a.fcUnitsAt(card('https://new.test', 0, 100))) === '["usd","sat"]', 'and a mint this phone knows nothing of takes nothing away', JSON.stringify(a.fcUnitsAt(card('https://new.test', 0, 100))));
+    ok(!a.fcTwoUnits({ units: a.fcUnitsAt(card('https://minibits.test', 0, 3645)) }), 'so the card\u2019s screen there has no dollar pill and no SWAP');
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'build', 'app', '26f-flashcard.js'), 'utf8');
+    ok(/\n      units: this\.fcUnitsAt\(card\),\n/.test(src), 'and the card\u2019s screen takes its rows from there (`fcShow`)', 'fcShow');
+  }
+
+  /* ---- 2026-11-03: WITHDRAW, ALL OF IT, with other mints on the phone: WITHDRAW TO, the cheapest first --------------------
+   * Lifted out of build/app (26n-card-withdraw-to.js, the list's rows from 27-render-mints-restore-backup.js, the PIN's door
+   * from 26f-flashcard.js) and run against a stand-in wallet whose quotes come back late and in any order. */
+  {
+    const fs = require('fs'), path = require('path');
+    const lift = (file, sigs) => {
+      const text = fs.readFileSync(path.join(__dirname, '..', 'build', 'app', file), 'utf8');
+      return sigs.map((sig) => {
+        const at = text.indexOf('\n  ' + sig);
+        if (at < 0) throw new Error('no method ' + sig);
+        let i = text.indexOf('{', at + 3 + sig.length - 1), depth = 0;
+        for (; i < text.length; i++) { if (text[i] === '{') depth++; else if (text[i] === '}') { depth--; if (depth === 0) break; } }
+        return text.slice(at + 3, i + 1);
+      });
+    };
+    const body = lift('26n-card-withdraw-to.js', ['fcWdToAsk(go) {', 'fcWdLand(n, unit) {', 'fcWdQuote(to, run) {', 'fcWdLine() {', 'fcWdRows(row) {',
+      'fcWdPick(url) {', 'fcWdCross(got, unit) {'])
+      .concat(lift('26f-flashcard.js', ['fcWithdrawPin(sats, asked) {']))
+      .concat(lift('27-render-mints-restore-backup.js', ['renderMints(c) {']))
+      .concat(lift('01-ui-basics.js', ['goSwitchMint(extra) {']));
+    const CARD = 'https://forge.test', MB = 'https://minibits.test', MAC = 'https://macadamia.test';
+    const phone = (mints, o) => {
+      const opts = o || {};
+      const asked = [], runs = [], connects = [], later = {};
+      global.window = { FoxyWallet: {
+        mintUrl: CARD,
+        transferQuote: (from, sats, q) => {
+          asked.push({ from, sats, q });
+          const fee = (opts.fees || {})[q.to];
+          if (q.quoteOnly) return new Promise((res, rej) => { later[q.to] = () => (fee == null ? rej(new Error(q.to + ' is not answering')) : res({ feeSats: fee, feeUnit: fee, moving: sats })); });
+          return Promise.resolve({ to: q.to, from, moving: sats, net: sats, feeSats: fee || 0, unit: q.unit });
+        },
+        moveRun: (plan, stage, how) => { runs.push({ plan, how }); window.FoxyWallet.mintUrl = plan.to; return Promise.resolve({ sats: plan.moving, mint: plan.to }); },
+        connect: (u) => { connects.push(u); window.FoxyWallet.mintUrl = u; return Promise.resolve({}); },
+        reason: (e) => String((e && e.message) || e),
+      } };
+      const a = new Function('return {' + body.join(',\n') + '}')();
+      Object.assign(a, {
+        asked, runs, connects, later, toasts: [], pins: [],
+        state: { screen: 'amount', stack: ['home', 'flashcard'], flow: 'cardWd', fc: { key: 'k1', mint: CARD, balance: opts.held || 3000, unit: opts.unit || 'sat' } },
+        setState(x) { Object.assign(this.state, typeof x === 'function' ? x(this.state) : x); },
+        toast(m) { this.toasts.push(m); }, offlineNow: () => false,
+        fcW: () => window.FoxyWallet, fcUnit() { return this.state.fc.unit === 'usd' ? 'usd' : 'sat'; },
+        fcHeld: (fc) => fc.balance, fcBoth: (n) => String(n), fcPrice: (n) => String(n),
+        fcPinOr(o, then) { this.pins.push(o); this.pinThen = then; },
+        fcLeaveAmount() {}, fcWithdrawRun(sats, pin) { this.ran = { sats, pin }; },
+        tillMints: () => mints.map((u) => ({ url: u, name: u.replace('https://', ''), host: u.replace('https://', '') })),
+        allMints: () => mints.map((u) => ({ url: u, name: u.replace('https://', ''), host: u.replace('https://', '') })),
+        mintNameOf: (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\.test$/, ''),
+        unitFigure: (n, u) => (u === 'usd' ? '$ ' + (n / 100).toFixed(2) : '\u20bf ' + n),
+        px: () => 100000, group: (n) => String(n),
+        mintPile: () => ({ sats: 0, units: [], text: '', ink: '' }), mintDownText: () => '', mintReachable: () => true,
+        onMint: (u) => u === CARD, mintHost: () => 'forge.test', otherUnitsLine: () => '',
+        showMelt(l) { this.melt = l; }, hideMelt() { this.melt = ''; }, refreshBalance() {}, loadHistory() {},
+        tillSetNow: () => [],
+      });
+      return a;
+    };
+    const list = (a) => a.renderMints({ s: a.state, sc: a.state.screen });
+    // one mint on the phone: nothing asked
+    {
+      const a = phone([CARD]);
+      a.fcWithdrawPin(0);
+      ok(a.pins.length === 1 && a.state.screen === 'amount' && !a.state.wdPick && a.asked.length === 0, 'WITHDRAW TO: a phone with one mint is asked nothing; ALL OF IT goes to the PIN', JSON.stringify(a.state.screen));
+    }
+    // three: the list, the card's mint first at NO FEE, the others asked what the crossing costs
+    {
+      const a = phone([CARD, MB, MAC], { fees: { [MB]: 42, [MAC]: 7 } });
+      a.fcWithdrawPin(0);
+      await settle();
+      let v = list(a);
+      ok(a.state.screen === 'switchMint' && a.state.wdPick && v.mintTitle === 'WITHDRAW TO' && a.pins.length === 0 && !v.mintPickers,
+         'ALL OF IT with other mints on the phone: the SWITCH MINT list, WITHDRAW TO, before the PIN and before anything comes off', JSON.stringify({ sc: a.state.screen, t: v.mintTitle }));
+      ok(a.asked.length === 2 && a.asked.every((x) => x.from === CARD && x.q.quoteOnly && x.sats === 3000) && a.asked.map((x) => x.q.to).sort().join() === [MAC, MB].sort().join(),
+         'each other mint is asked what the crossing costs, from the card\u2019s mint, for what the card holds; nothing paid', JSON.stringify(a.asked));
+      ok(v.mintRows[0].host === 'forge.test' && v.mintRows[0].text === 'NO FEE' && v.mintRows.slice(1).every((r) => r.text === 'CALCULATING\u2026'),
+         'the card\u2019s own mint first at NO FEE, the others CALCULATING\u2026', v.mintRows.map((r) => r.host + ' ' + r.text).join(' / '));
+      a.later[MB]();
+      await settle();
+      v = list(a);
+      ok(v.mintRows.map((r) => r.host).join() === 'forge.test,minibits.test,macadamia.test' && v.mintRows[1].text === 'FEE ABOUT \u20bf 42',
+         'an answer lands on its row', v.mintRows.map((r) => r.host + ' ' + r.text).join(' / '));
+      a.later[MAC]();
+      await settle();
+      v = list(a);
+      ok(v.mintRows.map((r) => r.host).join() === 'forge.test,macadamia.test,minibits.test' && v.mintRows[1].text === 'FEE ABOUT \u20bf 7',
+         'and the cheapest goes first once both have answered', v.mintRows.map((r) => r.host + ' ' + r.text).join(' / '));
+      v.mintRows[1].tap();
+      ok(a.state.screen === 'amount' && !a.state.wdPick && a.pins.length === 1 && a._fcWdTo === MAC, 'a mint picked: off the list, and on to the PIN', JSON.stringify({ sc: a.state.screen, to: a._fcWdTo }));
+      a.pinThen('1234');
+      ok(a.ran && a.ran.sats === 0 && a.ran.pin === '1234', 'the withdrawal runs as before, into this phone at the card\u2019s mint', JSON.stringify(a.ran));
+      a.fcWdCross(3000, 'sat');
+      await settle();
+      const run = a.runs[0];
+      ok(a.asked.length === 3 && a.asked[2].sats === 2993 && a.asked[2].q.to === MAC && !a.asked[2].q.quoteOnly && run && run.how && run.how.visit === true,
+         'what came off crosses to it: quoted for what is in hand less the fee, and moved as a visit', JSON.stringify({ q: a.asked[2], how: run && run.how }));
+      ok(a.connects.slice(-1)[0] === CARD && a.toasts.some((t) => /Moved \u20bf 2993 to macadamia/.test(t)) && !a.melt,
+         'then the phone comes back to the card\u2019s mint, and says what moved', JSON.stringify({ c: a.connects, t: a.toasts }));
+    }
+    // the card's own mint picked, a mint that cannot be reached, a row still asking, a typed amount
+    {
+      const a = phone([CARD, MB, MAC], { fees: { [MB]: 5 } });
+      a.fcWithdrawPin(0);
+      await settle();
+      list(a).mintRows[1].tap();
+      ok(a.toasts.some((t) => /Still asking/.test(t)) && a.state.wdPick, 'a row still being asked says so when tapped, and is not taken', JSON.stringify(a.toasts));
+      a.later[MAC]();
+      a.later[MB]();
+      await settle();
+      const v = list(a);
+      ok(v.mintRows[2].host === 'macadamia.test' && v.mintRows[2].text === 'NOT AVAILABLE' && v.mintRows[2].dim === '0.4', 'one that did not answer is last, greyed, NOT AVAILABLE',
+         v.mintRows.map((r) => r.host + ' ' + r.text).join(' / '));
+      v.mintRows[2].tap();
+      ok(a.state.wdPick && a.toasts.some((t) => /not answering/.test(t)), 'and tapping it says why and takes nothing', JSON.stringify(a.toasts));
+      list(a).mintRows[0].tap();
+      ok(!a.state.wdPick && a._fcWdTo === '' && a.pins.length === 1, 'the card\u2019s own mint: on to the PIN, nothing to cross', a._fcWdTo);
+      a.fcWdCross(3000, 'sat');
+      ok(a.runs.length === 0 && a.asked.length === 2, 'and nothing crosses after it', JSON.stringify(a.runs));
+      const b = phone([CARD, MB]);
+      b.fcWithdrawPin(500);
+      ok(b.pins.length === 1 && !b.state.wdPick && b.asked.length === 0, 'a typed amount lands at the card\u2019s mint, asked nothing', JSON.stringify(b.state.wdPick));
+    }
+    // a dollar card: the quotes in dollars, for what the dollars come to in sats at the phone's price
+    {
+      const a = phone([CARD, MB], { unit: 'usd', held: 500, fees: { [MB]: 3 } });
+      a.fcWithdrawPin(0);
+      await settle();
+      ok(a.asked.length === 1 && a.asked[0].q.unit === 'usd' && a.asked[0].sats === 5000, 'a dollar card\u2019s crossing is quoted from its dollars, for the sats $5.00 comes to', JSON.stringify(a.asked));
+      a.later[MB]();
+      await settle();
+      ok(list(a).mintRows[1].text === 'FEE ABOUT $ 0.03 \u00b7 AS BITCOIN', 'its fee in dollars, and that it lands as bitcoin', list(a).mintRows[1].text);
+    }
+  }
+
   console.log('\n' + (failed ? failed + ' flashcard-screens check(s) failed' : 'all flashcard-screens checks pass'));
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.log('THREW ' + ((e && e.stack) || e)); process.exit(1); });

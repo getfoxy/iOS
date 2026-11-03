@@ -868,6 +868,45 @@ async function run() {
     noBooks(p, 'a crossing left paid and unclaimed on purpose');
   }
 
+  /* ---- the near mint's circuit, built while the far mint makes the invoice (2026-11-02) ------------------
+   *
+   * A crossing's fee quote is of the far mint's invoice, so it waits for it; its circuit no longer does
+   * (`quoteRoad`; tests/circuit-warm.js has the timing). Here: which circuit each question went on, for a
+   * transfer and for a sweep, and that a far mint refusing the invoice leaves nothing taken at the near one. */
+  {
+    const p = page();
+    await fund(p, HOME, 2000);
+    const W = p.W;
+    await settle();
+    W._spareAfterMs = 1e9;   // no spare opened behind a job: the circuits below are the quotes' own
+    W._spareOff = false;
+    const seen = [];
+    const note = (m) => { const u = new URL(m.url); const r = { m: m.method, u: canon(u.origin) + u.pathname, c: m.circuit || '' }; seen.push(r); return r; };
+    const first = (m, u) => seen.findIndex((r) => r.m === m && r.u === u);
+    p.fate = (m) => { note(m); return ''; };
+    await W.transferQuote(HOME, 300, { to: THEIR, land: true });
+    let road = seen[first('GET', HOME + '/v1/keysets')];
+    let melt = seen[first('POST', HOME + '/v1/melt/quote/bolt11')];
+    ok(!!road && !!road.c && !!melt && melt.c === road.c && first('GET', HOME + '/v1/keysets') < first('POST', THEIR + '/v1/mint/quote/bolt11'),
+       'a transfer’s fee quote rides the circuit opened at the near mint before the far mint was asked for the invoice',
+       JSON.stringify(seen.map((r) => r.m + ' ' + r.u.replace(/^https:\/\//, '') + (r.c ? ' @' + r.c.slice(0, 4) : ''))));
+    seen.length = 0;
+    await W.sweepQuote(THEIR, 500);
+    road = seen[first('GET', THEIR + '/v1/keysets')];
+    melt = seen[first('POST', THEIR + '/v1/melt/quote/bolt11')];
+    ok(!!road && !!road.c && !!melt && melt.c === road.c && first('GET', THEIR + '/v1/keysets') < first('POST', HOME + '/v1/mint/quote/bolt11'),
+       'and a sweep’s, at the token’s mint, while this one makes the invoice',
+       JSON.stringify(seen.map((r) => r.m + ' ' + r.u.replace(/^https:\/\//, '') + (r.c ? ' @' + r.c.slice(0, 4) : ''))));
+    // the far mint will not make the invoice: the near mint was asked its keysets, and nothing else
+    seen.length = 0;
+    const had = W.balanceAt(HOME), notes0 = notes(p).length;
+    p.fate = (m) => { const r = note(m); return (r.m === 'POST' && r.u === THEIR + '/v1/mint/quote/bolt11') ? 'refuse' : ''; };
+    const e = await W.transferQuote(HOME, 300, { to: THEIR, land: true }).then(() => null, (x) => x);
+    ok(!!e && W.balanceAt(HOME) === had && notes(p).length === notes0 && !seen.some((r) => r.m === 'POST' && r.u.indexOf(HOME) === 0),
+       'a far mint that refuses the invoice: nothing posted at the near mint, nothing held, no note', e ? String(e.message).slice(0, 60) : 'it went through');
+    p.fate = null;
+  }
+
   console.log(failed ? '\n' + failed + ' crossing check(s) failed' : '\nall crossing checks pass');
   process.exit(failed ? 1 : 0);
 }

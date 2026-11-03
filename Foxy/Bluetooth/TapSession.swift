@@ -485,10 +485,19 @@ final class TapSession {
     /// outright, so a payer who had handed over 1,203 sats for a 13-sat payment
     /// — all it had was one payment it had been given — never got its 1,190
     /// back, and was told the other phone had gone. Six locked pieces are more than 2,048 bytes.
+    ///
+    /// Whole blocks up to eleven, as one part of a payment is, and no further.
+    /// Twelve blocks is the payer's whole limit for one message
+    /// (TapProtocol.maxPayment), and sealing adds a few bytes to it, so change
+    /// of 45,053 bytes or more padded to 49,152 and was refused at the payer as
+    /// a message that would not read: sent, and never kept. Change that large is
+    /// refused here instead, before it takes a place in the count, and stays
+    /// on this screen as a code.
     func sealChange(_ text: String) -> Data? {
         guard role == .receiver, let k = keys else { return nil }
         let body = Data(text.utf8)
-        guard let padded = TapCrypto.pad(body, to: TapCrypto.changeSize) ?? TapCrypto.padPayment(body) else {
+        let blocks = body.count <= TapCrypto.partBody ? TapCrypto.padPayment(body) : nil
+        guard let padded = TapCrypto.pad(body, to: TapCrypto.changeSize) ?? blocks else {
             note("the change is too big to hand over (\(body.count) bytes)")
             return nil
         }

@@ -350,6 +350,12 @@
     _topUp: null,
     /** @param {function(any): void} fn */
     onCaughtUp: function (fn) { FoxyWallet._onCaughtUp = fn; },
+    /* A mint switched to at once (`switchTo`, a lazy `connect`) has answered, or has not:
+     * { url, ok, why, back, noKeys, ms }. `back`: a switch with no keys on file went back to the mint it was on. */
+    /** @type {?function(any): void} */
+    _onMintConnected: null,
+    /** @param {function(any): void} fn */
+    onMintConnected: function (fn) { FoxyWallet._onMintConnected = fn; },
     onTrustLost: function (fn) { FoxyWallet._onTrustLost = fn; },
 
     /* A paid invoice whose claim failed: { quote, amount, mint, unclaimed }. */
@@ -435,6 +441,11 @@
      * warmed was a road it did not take. It is the circuit kept ready that is
      * opened now, and the invoice takes that one (`warmSpare`, `needNow`). */
     warmMint: function () { return warmSpare(); },
+    /* The same for a screen that will ask a mint something within seconds (`warmRoad`): the connected mint's, or
+     * `url`'s, at most once a minute a mint, never offline, before Tor is up, or under a switch still to answer. */
+    warm: function (url) { return warmRoad(url); },
+    /* For the tests: the circuit kept for the next quote at `url`, '' where there is none. */
+    _farRoad: function (url) { var at = canonicalMint(String(url || '')); return farRoadReady(at) ? farRoads[at].label : ''; },
     /* For the tests: a mint host's recent answer times, newest last, and the
      * wait before asking it again (`askAgainWait`; `least` as statesOf's six
      * seconds, `first` for the first asking again). */

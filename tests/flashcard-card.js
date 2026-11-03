@@ -139,8 +139,8 @@ function makeCard(opts) {
    *        (6985), with the holder's say (the owner's grant, or with no owner the history held for: 6982), and refuses it with no PIN (6A80);
    *        RESET_CARD with P1 = 1 and P2 = an opening's number gives that opening up (the owner's proof over "FoxyCard/reset", the nonce and
    *        the number; with no owner the number alone under the PIN and the hold), writing bit 4 (0x10) of the tap's log flags. */
-  const PIN_FIRST = PROOFS && (o.software === 21 || o.software === 22 || o.software === 23 || o.software === 24);
-  const GUESTS = PIN_FIRST && (o.software === 22 || o.software === 23 || o.software === 24);
+  const PIN_FIRST = PROOFS && (o.software === 21 || o.software === 22 || o.software === 23 || o.software === 24 || o.software === 25);
+  const GUESTS = PIN_FIRST && (o.software === 22 || o.software === 23 || o.software === 24 || o.software === 25);
   /* 1.23 (`UNITS`, asked for by name: `software: 23`), dollars and sats on one card at its one mint (the card repository's
    * docs/FOXY-CARD-KEYSETS.md, held to applet/src/main/java/me/flashapp/cashu/CashuApplet.java and UnitsTest.java):
    *   - the book: a table of six entries (a keyset's eight bytes and a state byte: 40 in use, 80 the mark, bit 0 the unit code), the
@@ -161,14 +161,20 @@ function makeCard(opts) {
    *     the head) and P1 = 3 (each receipt and its unit); a log entry's bit 5 (20) the other unit, a tap of both units two entries;
    *   - the reclaim (entries nothing on the card names, let go) at CLEAR_SPENT, at a load that finds the table full, and at SET_CARD,
    *     which takes a unit of 00 or 01 only (6A80) and lets drafted openings go first. */
-  const UNITS = PIN_FIRST && (o.software === 23 || o.software === 24);
+  const UNITS = PIN_FIRST && (o.software === 23 || o.software === 24 || o.software === 25);
   /* 1.24 (`CLAIM_FULL`, asked for by name: `software: 24`): 1.23, and a card with no owner is claimed (SET_OWNER under the PIN, the
    * same six askings) with pieces on it as well as empty; only change owed to it refuses the claim (6A8D at every asking, nothing
    * counted). SET_CARD still wants nothing unspent and nothing owed, and no payment follows a claim in its tap (6985), as in 1.21. */
-  const CLAIM_FULL = UNITS && o.software === 24;
+  const CLAIM_FULL = UNITS && (o.software === 24 || o.software === 25);
+  /* 1.25 (`FLOOR`, `software: 25`): 1.24, and the wait made a second a limit. Every payment answers "not yet" FLOOR_WAITS times
+   * before it signs, less two for every three outputs of change it makes (the change counts toward the floor only), and each
+   * limit's worth past the first adds WAIT_MORE_25 more; a second payment in the tap is at least two limits' worth, and with the
+   * owner's grant it waits the floor alone. The most there is: FLOOR_WAITS + WAIT_MORE_25 × 254 (511). */
+  const FLOOR = CLAIM_FULL && o.software === 25;
+  const FLOOR_WAITS = 3, WAIT_MORE_25 = 2;
   // the askings a claim and a history are held for (the applet's CLAIM_ASKINGS and HISTORY_ASKINGS)
   const CLAIM_ASKINGS = 6, HISTORY_ASKINGS = 10;
-  const VERSION = CLAIM_FULL ? 24 : UNITS ? 23 : GUESTS ? 22 : PIN_FIRST ? 21 : FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? (HEADERS ? (NOPIN ? (RESET ? (FOUR ? (TAG ? (PROOFS ? 20 : 19) : 18) : 17) : 16) : 15) : 14) : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
+  const VERSION = FLOOR ? 25 : CLAIM_FULL ? 24 : UNITS ? 23 : GUESTS ? 22 : PIN_FIRST ? 21 : FORMAT === 4 ? (WIDE ? (MANY ? (SEALED ? (DESIGN ? (OWN_CHANGE ? (SHAPED ? (COSTED ? (HEADERS ? (NOPIN ? (RESET ? (FOUR ? (TAG ? (PROOFS ? 20 : 19) : 18) : 17) : 16) : 15) : 14) : 13) : 12) : o.software === 10 ? 10 : 11) : 9) : 8) : 7) : 6) : 3;
   /* The least work a block header must show (the applet's FLOOR_BITS, 0x17087BC0: four times the target of the blocks of 1.15's
    * time, a quarter of their work), as `bits`. A test that
    * has to make headers of its own takes a cheap one (`floorBits`: 0x207fffff, whose target is about 2^255, takes two tries
@@ -211,6 +217,8 @@ function makeCard(opts) {
     /* 1.16: the no-PIN allowance (sats a day signed for without the PIN; 0 is none) and what has been signed for without it in the current
      * day window, which is the one the daily limit's counts in (`windowStart`, `now`). Where the applet keeps them at 201 and 205. */
     noPinLimit: 0, noPinSpent: 0,
+    // 1.25: when the no-PIN window began (the card's clock at its first payment without the PIN), 0 for none
+    noPinStart: 0,
     // the limit on one tap, which to the card is TAP seconds of that clock: the limit, when this tap began, what it has signed for in it
     tapLimit: 0, tapStart: 0, tapSpent: 0,
     /* The card's own log (the applet's cardLog): counts that only go up, the run of over-limit refusals in hand, and a
@@ -432,6 +440,13 @@ function makeCard(opts) {
    * tap) is at least one limit's worth over, WAIT_OVER, with a limit or none; and a sum that wrapped waits the most there is,
    * with no change taken off it. */
   const waitsFor = (sum, carry, made, second) => {
+    if (FLOOR) {
+      const floor = Math.max(0, FLOOR_WAITS - Math.floor(2 * made / 3));
+      if (carry) return FLOOR_WAITS + WAIT_MORE_25 * (UNITS_MOST - 1);
+      let units = s.tapLimit === 0 ? 1 : (sum <= s.tapLimit + Math.floor(s.tapLimit / 32) ? 1 : Math.min(UNITS_MOST, Math.ceil(sum / s.tapLimit)));
+      if (second && units <= 1) units = 2;
+      return floor + WAIT_MORE_25 * (units - 1);
+    }
     if (SHAPED) {
       let waits;
       if (s.tapLimit === 0) {
@@ -556,15 +571,17 @@ function makeCard(opts) {
           // 1.16: the allowance and what is spent of it, to anybody (a till needs them to know whether to ask for the PIN); before it, zeros
           // 1.19: P1 = 2 is those forty-two bytes and then the NFC tag's state, to anyone; P1 = 1 and 0 are what they were, whatever it is, and any other P1 is the thirty bytes
           // (1.22: and to the PIN of a card with no owner, in a tap that read its history)
-          + ((p1 === 1 || (TAG && p1 === 2) || (UNITS && p1 === 3)) ? u32(QUICK && !s.grant && !(GUESTS && !s.owner && s.verified && s.tapRead) ? 0 : s.tapLimit) + (NOPIN ? u32(s.noPinLimit) + u32(s.noPinSpent) : PACED ? '0000000000000000' : u32(s.tapStart) + u32(s.tapSpent)) : '')
-          + (TAG && (p1 === 2 || (UNITS && p1 === 3)) ? (s.tagOff ? '01' : '00') : '')
+          + ((p1 === 1 || (TAG && p1 === 2) || (UNITS && (p1 === 3 || (FLOOR && p1 === 4)))) ? u32(QUICK && !s.grant && !(GUESTS && !s.owner && s.verified && s.tapRead) ? 0 : s.tapLimit) + (NOPIN ? u32(s.noPinLimit) + u32(s.noPinSpent) : PACED ? '0000000000000000' : u32(s.tapStart) + u32(s.tapSpent)) : '')
+          + (TAG && (p1 === 2 || (UNITS && (p1 === 3 || (FLOOR && p1 === 4)))) ? (s.tagOff ? '01' : '00') : '')
           /* 1.23, P1 = 3: the book's format (01, 00 with none), the rate (to whom the limit on one payment is said, zeros to anyone else),
            * the entries in use, those without the mark, and the last payment's unit: 51 bytes */
-          + (UNITS && p1 === 3 ? (s.book ? '01' : '00')
+          + (UNITS && (p1 === 3 || (FLOOR && p1 === 4)) ? (s.book ? '01' : '00')
             + u32((s.grant || (!s.owner && s.verified && s.tapRead)) ? s.rate : 0)
             + ('0' + (s.book ? s.book.table.filter((x) => (x.state & 0x40) !== 0).length : 0).toString(16)).slice(-2)
             + ('0' + (s.book ? s.book.table.filter((x) => (x.state & 0x40) !== 0 && (x.state & 0x80) === 0).length : 0).toString(16)).slice(-2)
-            + ('0' + (s.book ? s.book.last : 0).toString(16)).slice(-2) : '') + '9000';
+            + ('0' + (s.book ? s.book.last : 0).toString(16)).slice(-2) : '')
+          // 1.25, P1 = 4: P1 3's 51 bytes and when the no-PIN window began (bytes 51 to 54, zeros for none): 55 bytes
+          + (FLOOR && p1 === 4 ? u32(s.noPinStart) : '') + '9000';
       }
       case 0x10: return pub + '9000';
       case 0x11: {
@@ -866,9 +883,13 @@ function makeCard(opts) {
              * over a limit, not a tamper). Asked before the limits, so that a reader with no PIN writes nothing in the log. */
             if (s.pinState !== 0 && !s.verified) {
               // (1.21 and on: the allowance's count is renewed by the PIN, not by the day: ALLOWANCE_RENEWS_ON_PIN)
+              // (1.25: the allowance's own window, 24 hours from its first payment without the PIN by the header clock; over, it counts from nothing)
+              if (FLOOR && s.noPinStart && s.now >= s.noPinStart + DAY) { s.noPinSpent = 0; s.noPinStart = 0; }
               const counted = (!PIN_FIRST && s.now >= s.windowStart + DAY) ? 0 : s.noPinSpent;
               // (1.21: a payment counts as the whole of its pieces, change and all)
-              if (s.pinState !== 1 || s.noPinLimit === 0 || counted + (PIN_FIRST ? cents.total : cents.net) > s.noPinLimit) { s.all = null; return '6a94'; }
+              if (s.pinState !== 1 || s.noPinLimit === 0) { s.all = null; return '6a94'; }
+              // (1.25: an allowance used up for this window is 6A9E: the same payment goes with the PIN)
+              if (counted + (PIN_FIRST ? cents.total : cents.net) > s.noPinLimit) { s.all = null; return FLOOR ? '6a9e' : '6a94'; }
               pay.noPin = true;
             }
           }
@@ -898,6 +919,8 @@ function makeCard(opts) {
         // (1.23: the counts in cents; the log, its counts and the receipt in the payment's own unit, and say it)
         if (s.record.limit !== 0) s.spent = s.spent + cents.net;
         if (NOPIN && pay.noPin) s.noPinSpent = stop(s.noPinSpent + (PIN_FIRST ? cents.total : cents.net));
+        // 1.25: the window begins at the first payment without the PIN
+        if (FLOOR && pay.noPin && !s.noPinStart) s.noPinStart = s.now;
         pay.list.forEach((i) => { s.slots[i].status = 2; });
         // a payment in this time in the field: the next one in it is slowed, unless the owner's grant is in its tap (1.13)
         s.tapPaid = true;
@@ -1222,14 +1245,14 @@ function makeCard(opts) {
           if (!pinOnly) return '6700';
           if (hex(pinOnly) !== s.pin) return failPin();
           s.tries = 3; s.verified = true;
-          // 1.21: the PIN given fills the no-PIN allowance again
-          if (PIN_FIRST) s.noPinSpent = 0;
+          // 1.21: the PIN given fills the no-PIN allowance again (not from 1.25: VERIFY_PIN no longer renews it)
+          if (PIN_FIRST && !FLOOR) s.noPinSpent = 0;
           return '9000';
         }
         if (data.length < 4 || data.length > 8) return '6700';
         if (hex(data) !== s.pin) return failPin();
         s.tries = 3; s.verified = true;
-        if (PIN_FIRST) s.noPinSpent = 0;
+        if (PIN_FIRST && !FLOOR) s.noPinSpent = 0;
         return '9000';
       }
       case 0x41: {
@@ -1330,6 +1353,8 @@ function makeCard(opts) {
         if (got.sw) return got.sw;
         if (got.value.length !== 0) return '6700';
         s.grant = true;
+        // 1.25: a good proof from the owner's phone ends the no-PIN window
+        if (FLOOR) { s.noPinSpent = 0; s.noPinStart = 0; }
         return '9000';
       }
       case 0x50: {

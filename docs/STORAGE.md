@@ -288,7 +288,7 @@ the next connect or resume files the proofs once a write lands. `MONEY.md`,
 
 | what | where | in backups | at rest |
 |---|---|---|---|
-| the install marker | `Application Support/foxy.install` | **included**, on purpose | `completeFileProtection` |
+| the install marker | `Application Support/foxy.install` | **included**, on purpose | `completeUntilFirstUserAuthentication` (it holds no secret) |
 | Tor's state | `Application Support/tor` | excluded | directory mode 0700 |
 | the NUT-13 counters: per keyset the next counter, `{keysetId: next}`, one entry per derivation path (a `00` keyset's under the first id stored for its index), 256 keysets at most | `Application Support/foxy-counters.json` | excluded, set again after every write | `completeUntilFirstUserAuthentication` |
 | the counters of a seed replaced or wiped, kept for manual recovery; nothing reads them | `Application Support/foxy-counters.replaced.<unix time>.json` | excluded | as above |
@@ -398,11 +398,19 @@ them. The PIN gates the app; it encrypts nothing.
 ## Backups, reinstall and restore
 
 Keychain items outlive app deletion. At launch, before the page is loaded,
-`forgetSeedIfReinstalled()` looks for the install marker. With no marker, both
+`forgetSeedIfReinstalled()` looks for the install marker. With no marker, the
+marker is written first and read back; only once it is on disk are both
 seed items (`foxy.seed.v2`, behind Face ID, and the older `foxy.seed.v1`) with
 the note `foxy.seed.v2.held`, the approved hosts (`foxy.hosts.approved`, `foxy.hosts.carried`) and the Orbot key
-(`foxy.orbot.token`) are deleted, and the marker is written. Deleting reads
-nothing, so it asks for no Face ID.
+(`foxy.orbot.token`) deleted. Deleting reads nothing, so it asks for no Face ID.
+
+A marker that cannot be written, or is not there when it is looked for again,
+deletes nothing: the keychain is left as it is, the log says so, and the next
+launch looks again. The seed used to be deleted first and the marker written
+after, with any error swallowed; a first write that failed (a full phone) left
+no marker, and the next launch deleted the seed of a wallet in use. The
+marker holds no secret, so it is written readable from the first unlock after
+a restart (`completeUntilFirstUserAuthentication`).
 
 - **A reinstall** removes the marker with the app, so the old seed is removed.
   Restore with the old words brings the balance back.

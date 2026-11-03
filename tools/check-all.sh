@@ -84,6 +84,7 @@ check "p2pk round trip" 1 node tests/p2pk-round-trip.js
 check "offline accept" 1 node tests/offline-accept.js
 check "net of fee"     1 node tests/net-of-fee.js
 check "offline connect" 1 node tests/offline-connect.js
+check "switch instant" 1 node tests/switch-instant.js
 check "offline both"   1 node tests/offline-both.js
 check "change leg"     1 node tests/change-leg.js
 check "spend offline"  1 node tests/spend-offline.js
@@ -105,6 +106,7 @@ check "offline ui"     1 node tests/offline-ui.js
 check "locked send lost" 1 node tests/locked-send-lost.js
 check "store full"     1 node tests/store-full.js
 check "crossings"      1 node tests/crossings.js
+check "circuit warm"   1 node tests/circuit-warm.js
 check "away claim"     1 node tests/away-claim.js
 check "carry cards"    1 node tests/carry-cards.js
 check "offline hostile" 1 node tests/offline-hostile.js
@@ -150,6 +152,7 @@ check "flashcard in dollars, screens" 1 node tests/flashcard-usd-ui.js
 check "flashcard of two units (1.23)" 1 node tests/flashcard-units.js
 check "switch guard"   1 node tests/switch-guard.js
 check "transfer quote"  1 node tests/transfer-quote.js
+check "transfer dollars" 1 node tests/transfer-dollars.js
 check "on-chain flow"  1 node tests/onchain-flow.js
 check "on-chain faults"  1 node tests/onchain-faults.js
 check "on-chain watch"  1 node tests/onchain-watch.js

@@ -1,4 +1,5 @@
 import UIKit
+import WebKit
 
 // MARK: - system paste button
 
@@ -133,6 +134,72 @@ final class PasteHost: UIView {
                 if self.pastedOnce { return }
                 self.pastedOnce = true
                 self.onText(text as String)
+            }
+        }
+    }
+}
+
+// MARK: - where the paste button may go
+
+/// The page's paste buttons, which are the only places the system paste button
+/// is put: an element marked `data-foxy-paste="1"`, the home screen's PASTE and
+/// the send screen's, whose label says PASTE.
+///
+/// The page says where it wants the button, and the bridge used to take any
+/// rectangle in the lower two-thirds of the screen, which is where the confirm
+/// buttons are too: a script in the page could have parked it over one and
+/// turned a tap meant for it into a clipboard read with no prompt. Now the
+/// place is checked against the page itself, by a script in a world of its own
+/// (WKContentWorld.defaultClient), where the page's own scripts cannot change
+/// what the browser's functions answer: what is drawn at the middle of that
+/// rectangle must be one of the registered paste buttons, shown, its label
+/// PASTE, and its box the rectangle asked for. Anything else is refused.
+enum PasteAffordance {
+    /// The mark each paste button carries, and its value.
+    static let mark = "data-foxy-paste"
+    static let registered = "1"
+    /// The word on every one of them.
+    static let word = "PASTE"
+    /// How far, in points, the box may be from the rectangle asked for: the
+    /// page rounds what it measures.
+    static let slack: CGFloat = 2
+
+    /// What the check runs in the page, for the rectangle asked for.
+    static func script(for rect: CGRect) -> String {
+        let x = Double(rect.midX), y = Double(rect.midY)
+        return """
+        (function () {
+          var at = document.elementFromPoint(\(x), \(y));
+          var b = at && at.closest('[\(mark)="\(registered)"]');
+          if (!b) return { found: false };
+          var r = b.getBoundingClientRect();
+          var s = window.getComputedStyle(b);
+          var words = ((b.getAttribute('aria-label') || '') + ' ' + (b.innerText || '')).toUpperCase();
+          return { found: true, x: r.left, y: r.top, w: r.width, h: r.height,
+                   word: words.indexOf('\(word)') >= 0,
+                   shown: s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) >= 0.5 };
+        })()
+        """
+    }
+
+    /// Whether the page's answer is a registered paste button at `rect`.
+    static func accepts(_ answer: Any?, rect: CGRect) -> Bool {
+        guard let a = answer as? [String: Any], a["found"] as? Bool == true,
+              a["word"] as? Bool == true, a["shown"] as? Bool == true,
+              let x = (a["x"] as? NSNumber)?.doubleValue, let y = (a["y"] as? NSNumber)?.doubleValue,
+              let w = (a["w"] as? NSNumber)?.doubleValue, let h = (a["h"] as? NSNumber)?.doubleValue else { return false }
+        let box = CGRect(x: x, y: y, width: w, height: h)
+        return abs(box.minX - rect.minX) <= slack && abs(box.minY - rect.minY) <= slack
+            && abs(box.width - rect.width) <= slack && abs(box.height - rect.height) <= slack
+    }
+
+    /// Ask the page, in a world of its own, whether `rect` is one of its paste
+    /// buttons. `done` on the main queue; no answer is a no.
+    static func check(_ rect: CGRect, in webView: WKWebView, _ done: @escaping (Bool) -> Void) {
+        webView.evaluateJavaScript(script(for: rect), in: nil, in: .defaultClient) { result in
+            switch result {
+            case .success(let answer): done(accepts(answer, rect: rect))
+            case .failure: done(false)
             }
         }
     }

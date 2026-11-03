@@ -178,9 +178,22 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
     static let replaceSeedMessage = "Only replace it with words you wrote down yourself. Whoever gave you these words can take everything this wallet receives."
     static let deleteSeedTitle = "Delete this wallet's seed?"
     static let deleteSeedMessage = "The twelve words are removed from this iPhone, with everything else Foxy holds. Only a written copy of them can bring the money back."
+    /// And seedMigrate's, before words an older Foxy kept in its page are saved
+    /// as the seed, where no seed is saved yet; then Face ID or the passcode.
+    static let migrateSeedTitle = "Save this wallet's seed?"
+    static let migrateSeedMessage = "An older Foxy on this iPhone kept this wallet's words in the app. Save them only if you made this wallet yourself. Whoever gave you a wallet's words can take everything it receives."
 
     /// A seed write or delete is under way. Main queue.
     private var seedChanging = false
+    /// A card command is waiting for the keeper's yes (handleCardOwnerApprove). Main queue.
+    var cardOwnerAsking = false
+    /// The keeper's yeses given before a card session, each bound to the session
+    /// it is for once that begins (NativeSeedBridge.swift). Main queue.
+    var cardApprovals: [(approval: CardOwner.Approval, session: Int?)] = []
+    /// Which card session this is, whether it is open, and what its card said.
+    var cardSession = 0
+    var cardSessionOpen = false
+    var cardSeen = CardOwner.Seen()
 
     /// A yes or no to deleting or replacing the seed, from an alert iOS draws,
     /// in the one queue every native question waits in (NativePrompts). No,
@@ -448,6 +461,7 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         // fixed list of labels (NativeSeedBridge.swift)
         "cardOwnerKey": FoxyBridge.handleCardOwnerKey,
         "cardOwnerSign": FoxyBridge.handleCardOwnerSign,
+        "cardOwnerApprove": FoxyBridge.handleCardOwnerApprove,
         // A shake of the phone presses TAP (TAP-TO-PAY.md)
         "shakeStart": FoxyBridge.handleShakeStart,
         "shakeStop": FoxyBridge.handleShakeStop,
@@ -1177,8 +1191,8 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
     /// consent. The trade-off is that it must look like Apple's button, so the
     /// page's own paste button ends up hidden underneath it. That is a deliberate
     /// decision: the designed button stays, the system control
-    /// sits over it nearly invisible, and the rectangle checks below keep it
-    /// from being parked anywhere else.
+    /// sits over it nearly invisible, and the checks below keep it from being
+    /// parked anywhere but over one of the page's paste buttons.
     private func startPasteControl(id: String, body: [String: Any]) {
         guard let presenter, let webView else {
             resolve(id: id, text: "", error: "Nothing to attach the button to.")
@@ -1209,6 +1223,28 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
             resolve(id: id, text: "", error: "That is not a place a paste button goes.")
             return
         }
+        /* And only over one of the page's own paste buttons (PasteAffordance):
+         * what is drawn there, asked in a world the page's scripts cannot
+         * touch. The lower two-thirds held the confirm buttons too, and a
+         * rectangle there was all that was checked. */
+        PasteAffordance.check(rect, in: webView) { [weak self] isPaste in
+            guard let self else { return }
+            guard isPaste else {
+                print("[foxy] paste control refused at \(rect): no paste button of the page's is there")
+                // a control already over that place that is no longer a paste button goes too
+                if let host = self.pasteHost, host.frame == rect, !Self.pastePromptExpected {
+                    host.removeFromSuperview()
+                    self.pasteHost = nil
+                }
+                self.resolve(id: id, text: "", error: "That is not a place a paste button goes.")
+                return
+            }
+            self.placePasteControl(id: id, rect: rect, on: presenter, over: webView)
+        }
+    }
+
+    /// The control at `rect`, which the checks above have passed.
+    private func placePasteControl(id: String, rect: CGRect, on presenter: UIViewController, over webView: WKWebView) {
 
         /* A control already sitting at this rectangle is left alone.
          *
@@ -1564,7 +1600,7 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
             if let error {
                 let e = error as NSError
                 if e.domain == NSURLErrorDomain, e.code == NSURLErrorBadURL, triesLeft > 0 {
-                    print("[foxy] mint request to", url.host ?? "?",
+                    print("[foxy] mint request to", LogRedaction.host(url.host),
                           "never left (the proxy refused the stream); asking again")
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                         self.sendMintRequest(id: id, mreq, sent: sent, triesLeft: triesLeft - 1)

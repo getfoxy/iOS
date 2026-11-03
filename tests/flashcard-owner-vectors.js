@@ -82,9 +82,22 @@ const N = BigInt('0x' + V.n);
      * digits, or three zeros for none, after a mint of 77 bytes at the most. A record with no design clears the card's, so the
      * one a card is moved with carries it, and a fake that refused it, or signed more than native does, would say nothing of a phone. */
     {
-      const record = (mint, after, timeKey) => '01' + c.cardKey + (timeKey || '00'.repeat(65)) + ('0' + mint.toString(16)).slice(-2) + '6d'.repeat(mint) + after;
+      /* With this phone's own refund key, its lock key at index 0, and that index: the one kind of record native signs
+       * (SeedActions.cardOwnerSign). Another key, or no index, is "Nothing was changed on the card.", whatever else the record says. */
+      const lock = await Promise.resolve(phone.answer(null, { action: 'p2pkPubkeys', start: 0, count: 1 }));
+      const mine = JSON.parse(lock[0]).pubkeys[0];
+      const recordWith = (refund, mint, after, timeKey) => '01' + refund + (timeKey || '00'.repeat(65)) + ('0' + mint.toString(16)).slice(-2) + '6d'.repeat(mint) + after;
+      const record = (mint, after, timeKey) => recordWith(mine, mint, after, timeKey);
       const code = (text) => Buffer.from(text, 'latin1').toString('hex');
-      const answer = (value) => Promise.resolve(phone.answer(null, { action: 'cardOwnerSign', key: c.cardKey, label: 'set-card', nonce: s.nonce, value }));
+      const answer = (value, more) => Promise.resolve(phone.answer(null, Object.assign({ action: 'cardOwnerSign', key: c.cardKey, label: 'set-card', nonce: s.nonce, value, refundIndex: 0 }, more || {})));
+      {
+        const theirs = await answer(recordWith(c.cardKey, 24, code('FX1')));
+        const unindexed = await answer(record(24, code('FX1')), { refundIndex: undefined });
+        const elsewhere = await answer(record(24, code('FX1')), { refundIndex: 1 });
+        const no = 'Nothing was changed on the card.';
+        ok([theirs, unindexed, elsewhere].every((r) => r && r[0] === null && r[1] === no),
+          'a record is signed only with this phone’s own refund key, at the index it was taken at', [theirs, unindexed, elsewhere].map((r) => r && r[1]).join(' | '));
+      }
       const signed = [['a design', record(24, code('FX1'))], ['a design of digits', record(24, code('007'))], ['a design after a time key', record(24, code('EL1'), '04' + '33'.repeat(64))],
                       ['three zeros', record(24, '000000')], ['a design after a mint of 1', record(1, code('FX1'))], ['a design after a mint of 77', record(77, code('FX1'))],
                       ['three zeros after a mint of 77', record(77, '000000')]];

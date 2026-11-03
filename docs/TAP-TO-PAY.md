@@ -24,7 +24,10 @@ failed hand-over costs the time it took to try and nothing else.
    payment; the QR stays up, and the TAP button lights to say the phone is on
    the air. Pressing TAP brings the TAP HERE card over the QR, or a fresh
    number after a payment. A shake presses it too, but only when the screen has
-   not armed itself (*Shake*).
+   not armed itself (*Shake*). Anywhere else a shake asks COPY YOUR LOGS?
+   instead, and a yes puts the LOGS screen's whole log on the clipboard,
+   device-only, for two minutes; nothing happens on the shake alone, and
+   nothing under the lock (`shakenForLogs`, 26c-field-log.js).
 
    **The screen is the whole of it** (it used to be the press). The rule that
    matters is older than either: whoever advertises is findable, so **nothing
@@ -46,7 +49,12 @@ failed hand-over costs the time it took to try and nothing else.
    `TapPlace`). A subscribe used to take the place for five seconds, so
    anything in range could hold a till off the air by subscribing, saying
    nothing, and doing it again. A phone that begins the handshake and stops is
-   let go after three seconds (`TapLink.handshakeWait`). Anything in range can
+   let go after three seconds (`TapLink.handshakeWait`), whatever it left
+   half-written, and so is one that leaves before the handshake ends with
+   nothing of it having reached the page, or sends bytes that will not read:
+   the place goes and the receiver is back on the air (`TapPlace.givenBack…`).
+   A phone that wrote one byte and stayed, or wrote one and left, used to keep
+   the place, and the receiver ignored every payer after it. Anything in range can
    still begin a handshake, as it can jam the radio; what it can no longer do
    is hold the place by listening.
 
@@ -465,7 +473,10 @@ Bluetooth link itself stays up. Six things follow from that.
   given counter on. The receiver resends those frames byte for byte (the same
   ciphertext under the same counter, so nothing is sealed twice): the result,
   and the change if it has not been confirmed. The payer then waits six
-  seconds, not the forty a phone that never left is given.
+  seconds, not the forty a phone that never left is given. The question is
+  marked as the question piece by piece, behind whatever was still going out,
+  so a write of one of its pieces that fails is the question failing, and the
+  payment is never given up as lost because the question did not go.
 - **Change is given back only when the payer says so (M8).** The receiver's
   page is answered on M8, or told after seven seconds that it was not handed
   over; the change then goes on the payment's history entry as a code, and the

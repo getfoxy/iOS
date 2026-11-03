@@ -1537,6 +1537,23 @@ const eq = (got, want, what) =>
     return done ? 'one asking failing ended it while the other was still out' : null;
   });
 
+  await test('a crossing\u2019s invoice the far mint is slow to give is asked for again, with a key of its own, and the key filed is the answering one\u2019s', async () => {
+    /* 2026-11-03: a card's TRANSFER waited 17.5 s on one circuit for a Minibits invoice; the fee quote beside it was asked
+     * again at 3 s. Every invoice a crossing asks for (`createQuote`) is asked again now, each asking after the first with a
+     * NUT-20 key of its own, and the lock the caller files is the key of the asking that answered. */
+    const { ctx, seen } = await slowCtx({ hang: 1, nut20: true });
+    ctx.window.CashuTS.Wallet.prototype.createMeltQuoteBolt11 = function (req) {
+      seen.quotes += 1;
+      return Promise.resolve({ quote: 'melt' + seen.quotes, amount: Number(/lnbc(\d+)n/.exec(req)[1]) / 10, fee_reserve: 0, request: req });
+    };
+    const plan = await ctx.W.transferQuote('https://m.test', 8, { to: 'https://n.test', quoteOnly: true });
+    if (seen.invoices !== 2) return 'the far mint was asked ' + seen.invoices + ' time(s)';
+    if (!plan || !plan.mintQuote || plan.mintQuote.quote !== 'inv2') return 'the invoice is not the one that answered: ' + JSON.stringify(plan && plan.mintQuote);
+    if (seen.keys[0] === seen.keys[1]) return 'both askings carried the same key, which joins them at the mint';
+    const lock = plan.mintQuote.foxyLock;
+    return lock && lock.pubkey === seen.keys[1] && !!lock.privkey ? null : 'the key filed with it is not the key the answering quote was asked with: ' + JSON.stringify(lock);
+  });
+
   await test('a fee quote the mint is slow to give is asked for again', async () => {
     const { ctx, seen } = await slowCtx({ hang: 1 });
     const fee = await ctx.W.quoteFee('lnbc80n1test');

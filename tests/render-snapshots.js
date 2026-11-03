@@ -301,11 +301,11 @@ function representative(logic) {
     LOST('f909', { amount: 1200, sats: 1200, date: NOW_S + 3 * 3600 - 600, first: NOW_S + 3 * 3600 - 600 }),
     LOST('35d8', { date: NOW_S - 86400, first: NOW_S - 86400, due: true }),
   ] }) }));
-  const PACED = { unit: 'usd', pinFirst: true, noPinKnown: true, tap: { known: true, paced: true, limited: true, limit: 1500 }, noPin: { known: true, set: true, limit: 10000, left: 10000 } };
+  const PACED = { unit: 'usd', pinFirst: true, noPinKnown: true, tap: { known: true, paced: true, limited: true, limit: 500 }, noPin: { known: true, set: true, limit: 10000, left: 10000 } };
   add('fcLimits, CARD LIMITS: $5 per sec, $100 per tap', at('fcLimits', { fc: FC(PACED) }, { wallet: CARDS() }));
   add('fcLimits, CARD LIMITS: none set, a card with no PIN', at('fcLimits', { fc: FC({ pinSet: false, tap: { known: true, paced: true, limited: false } }) }, { wallet: CARDS() }));
   add('fcLimits, CARD LIMITS: a card that refuses past its limit', at('fcLimits', { fc: FC({ tap: { known: true, paced: false, limited: true, limit: 2000 } }) }, { wallet: CARDS() }));
-  add('fcLimitConfirm, a per second limit, to be confirmed', at('fcLimitConfirm', { fc: FC(PACED), fcLimit: { sats: 1500 } }, { wallet: CARDS(), before: (a) => { a._fcLimitTap = true; a._fcLimitNoPin = false; } }));
+  add('fcLimitConfirm, a per second limit, to be confirmed', at('fcLimitConfirm', { fc: FC(PACED), fcLimit: { sats: 500 } }, { wallet: CARDS(), before: (a) => { a._fcLimitTap = true; a._fcLimitNoPin = false; } }));
   add('fcLimitConfirm, a per second limit removed', at('fcLimitConfirm', { fc: FC(PACED), fcLimit: { sats: 0 } }, { wallet: CARDS(), before: (a) => { a._fcLimitTap = true; a._fcLimitNoPin = false; } }));
   // paying from a card: the owner's confirmation, the price under the amount and NETWORK FROM ARRIVES FEE two by two
   add('sendConfirm, from a card, an invoice with its fee', at('sendConfirm', { flow: 'send', amount: '', unit: 'SATS', recipient: 'lnbc2100n1stub', recipientKind: 'invoice', quotedFee: 12, quotedAmt: 2100,
@@ -1055,7 +1055,11 @@ function cards() {
   add('card: this iPhone has no passcode', (a) => a.passcodeNotice(), { wallet: { phoneHasPasscode: () => false } });
   add('card: ecash set aside', (a) => a.offerQuarantine());
   add('card: ecash set aside, no mint known', (a) => a.offerQuarantine(), { wallet: { quarantinedUnknown: () => 5000 } });
-  add('card: unclaimed ecash before clearing history', async (a) => { a.askClear('history'); a.askClear('history'); await wait(20); });
+  // (clearing history asks twice, with cards, 14-reconcile-seed-restore.js `askClear`: the unclaimed-ecash card comes after both YESes, `clearHistoryNow`)
+  add('card: unclaimed ecash before clearing history', async (a) => { a.clearHistoryNow(); await wait(20); });
+  const yes = (a) => { const b = Array.from(a._blockedEl.querySelectorAll('div')).find((d) => d.textContent === 'YES, DELETE' && !d.children.length); if (b) b.click(); };
+  add('card: clear history, are you sure', (a) => a.askClear('history'));
+  add('card: clear history, are you triple sure', (a) => { a.askClear('history'); yes(a); });
   add('price error bar', (a) => a.showPriceError());
   add('sheet: type a mint', (a) => a.typeMint());
   add('sheet: a note', (a) => a.noteSheet('dinner', () => {}));
@@ -1105,7 +1109,7 @@ function cards() {
   add('card: set per tap limit on a card of 1.12, the warning', (a) => { a._fcCard = { info: { format: 4, shaped: false } }; a.fcLimitAsk(() => {}, true); });
   // the card that makes its own change is shown the rule played out; recorded as it stands once it has played
   add('card: how tap limit works, played out', (a) => { a.fcLimitAsk(() => {}, true); a._fcExplainer.finish(); });
-  add('card: how tap limit works, for a card before 1.17, played out', (a) => { a._fcCard = { info: { waitOver: 7 } }; a.fcLimitAsk(() => {}, true); a._fcExplainer.finish(); });
+  add('card: how tap limit works, for a card before 1.17, played out', (a) => { a._fcCard = { info: { waitOver: 7, version: '1.16' } }; a.fcLimitAsk(() => {}, true); a._fcExplainer.finish(); });
   // RESET CARD (software 1.17): the warning, with and without money on the card, and the PIN of a locked one
   add('card: reset, the warning', (a) => { a.state.fc = { resetKnown: true, owner: true, ownedHere: true, balance: 0 }; a.fcReset(); });
   add('card: reset, the warning with money on the card', (a) => { a._fcCard = {}; a.state.fc = { resetKnown: true, owner: true, ownedHere: true, balance: 2048, mint: MINT }; a.fcReset(); },

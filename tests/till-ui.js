@@ -42,6 +42,8 @@
  *      where; a cashier on a code for both receives in its main (sats for a code from before codes said one), its pair locked
  *      to the keeper; 18d the payer of a pair pays the request it holds (`tapPickOfTwo`); 18e a card at a till in both is asked
  *      in either currency, and one at another mint of the till is taken there
+ *   19 the road to the mint opened ahead (the wallet's `warm`): as the till opens, at each PAID back to SET AMOUNT, at SEND's
+ *      keypad reaching an amount (once), at a receive's amount screen and at a card's screen
  *
  * The real page, rendered in jsdom by build/foxy-render.js, as tests/default-currency-settings.js renders it. Run
  * `python3 tools/pack-index.py` first: this reads build/foxy-app.js. */
@@ -127,7 +129,7 @@ const requestAt = (mints, sats) => new REAL_CTX.window.CashuTS.PaymentRequest([]
 function stubWallet(o) {
   const opt = Object.assign({ pin: '', face: false, faceSays: 'yes' }, o || {});
   const calls = { requests: [], invoices: [], joins: [], leaves: 0, listens: 0, delivers: 0, taken: [], scans: 0, primes: 0,
-    biometric: [], pays: 0, passMakes: 0, passUnits: [], passOpts: [], keeperOpens: [], keeperCloses: 0, received: [] };
+    biometric: [], pays: 0, passMakes: 0, passUnits: [], passOpts: [], keeperOpens: [], keeperCloses: 0, received: [], warms: 0 };
   const W = {
     connected: true,
     mintUrl: MINT,
@@ -179,6 +181,8 @@ function stubWallet(o) {
         sats: unit === 'sat' ? amount : 0, mint: W.mintUrl, expiresIn: 600, expiresAt: null });
     },
     watch: () => () => {},
+    // the road to the mint opened ahead of a screen's question (03-seed-counters-logs.js `warmRoad`): counted
+    warm() { calls.warms += 1; return Promise.resolve(true); },
     defaultRail: () => opt.rail || 'LIGHTNING',
     lastToken: () => ({}),
     clearLastToken() {},
@@ -368,13 +372,30 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     await fresh(W, { open0: true, menuSettingsOpen: false });
     const labels = () => V().menuItems.map((m) => m.label);
     let l = labels();
-    ok(l.indexOf('POINT OF SALE') === l.indexOf('HISTORY') + 1 && l.indexOf('CASHIER CODE') < 0 && l.indexOf('RESTORE LOST CARD') < 0,
-      'SETTINGS shut: POINT OF SALE right after HISTORY, in the menu itself, and no CASHIER CODE row (that is the till’s own screen’s); RESTORE LOST CARD is SETTINGS’', l.join(', '));
+    ok(l.indexOf('TOOLS') > l.indexOf('HISTORY') && l.indexOf('TOOLS') < l.indexOf('SETTINGS') && l.indexOf('POINT OF SALE') < 0 && l.indexOf('SPLIT A BILL') < 0 && l.indexOf('CONTACTS') < 0 && l.indexOf('CASHIER CODE') < 0 && l.indexOf('RESTORE LOST CARD') < 0,
+      'TOOLS shut: a drop-down between HISTORY and SETTINGS holding POINT OF SALE, SPLIT A BILL and CONTACTS; no CASHIER CODE row (that is the till’s own screen’s); RESTORE LOST CARD is SETTINGS’', l.join(', '));
+    V().menuItems.find((m) => m.label === 'TOOLS').tap(); await settle();
+    l = labels();
+    ok(l.indexOf('POINT OF SALE') === l.indexOf('TOOLS') + 1 && l.indexOf('SPLIT A BILL') === l.indexOf('TOOLS') + 2 && l.indexOf('CONTACTS') === l.indexOf('TOOLS') + 3 && A.state.open0 === true,
+      'TOOLS open: POINT OF SALE, SPLIT A BILL, CONTACTS under it, indented, and the drawer stays', l.join(', '));
+    ok(V().menuItems.find((m) => m.label === 'POINT OF SALE').indent === '10px', 'indented as SETTINGS rows are');
     A.setState({ menuSettingsOpen: true }); await settle();
     l = labels();
-    ok(l.indexOf('POINT OF SALE') === l.indexOf('HISTORY') + 1 && l.indexOf('POINT OF SALE') < l.indexOf('SETTINGS') && l.indexOf('RESTORE LOST CARD') > l.indexOf('SETTINGS') && l.indexOf('RESTORE') === l.indexOf('RESTORE LOST CARD') + 1,
-      'SETTINGS open: the till rows stay above, and RESTORE LOST CARD sits under SETTINGS before RESTORE', l.join(', '));
-    ok(V().menuItems.find((m) => m.label === 'POINT OF SALE').indent === '0px' && V().menuItems.find((m) => m.label === 'RESTORE LOST CARD').indent === '10px', 'the till rows unindented, RESTORE LOST CARD indented as SETTINGS rows are');
+    ok(l.indexOf('RESTORE LOST CARD') > l.indexOf('SETTINGS') && l.indexOf('RESTORE') === l.indexOf('RESTORE LOST CARD') + 1 && V().menuItems.find((m) => m.label === 'RESTORE LOST CARD').indent === '10px',
+      'SETTINGS open: RESTORE LOST CARD sits under SETTINGS before RESTORE, indented');
+    // SETTINGS opening scrolls the drawer to its end, where its rows unfold (19-update-keypad-balance.js `syncMenuScroll`)
+    {
+      const drawer = w.document.querySelector('[data-menu-drawer]');
+      const scrolled = [];
+      if (drawer) drawer.scrollTo = (o) => scrolled.push(o && o.top);
+      A.setState({ menuSettingsOpen: false }); await settle();
+      A.setState({ menuSettingsOpen: true }); await settle(); await settle();
+      ok(!!drawer && scrolled.length >= 1, 'opening SETTINGS scrolls the drawer to its end', JSON.stringify([!!drawer, scrolled]));
+      A.setState({ menuToolsOpen: false }); await settle();
+      const n = scrolled.length;
+      A.setState({ menuToolsOpen: true }); await settle();
+      ok(scrolled.length === n, 'opening TOOLS does not', String(scrolled.length - n));
+    }
     ok(/POINT OF SALE/.test(textOf(w)) && !/CASHIER CODE/.test(textOf(w)), 'and drawn in the drawer, with no CASHIER CODE row anywhere in it');
     V().menuItems.find((m) => m.label === 'POINT OF SALE').tap();
     await settle();
@@ -792,6 +813,14 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     A.setState({ screen: 'fcXmConfirm', stack: ['amount', 'confirm'] }); await settle();
     eq(A.state.screen, 'fcXmConfirm', 'a keeper: the charge for a card at another mint stays');
     A.setState(A.homeState()); await settle();
+    /* A card paying in its other currency (dollars for this till's sats) shows the total the holder agrees to first
+     * (26f-flashcard.js `fcOtherAgree`): it stays, and its back is the till's receive screen, the till still open. */
+    A.setState({ amount: '1000', unit: 'SATS', screen: 'confirm', stack: ['amount'] }); await settle();
+    A.setState((p) => ({ screen: 'fcOuConfirm', stack: p.stack.concat(['confirm']), fcOu: null })); await settle();
+    eq(A.state.screen, 'fcOuConfirm', 'a keeper: a card’s total in its other currency stays on screen');
+    A.back(); await settle();
+    ok(A.state.screen === 'confirm' && !!A.state.till, 'and back from it is the till’s receive screen, not home', JSON.stringify([A.state.screen, !!A.state.till]));
+    A.setState(A.homeState()); await settle();
     // the keeper's receive screen has CARD; the cashier's has not, and the button does nothing there
     A.setState({ amount: '1000', unit: 'SATS', screen: 'confirm', stack: ['amount'] }); await settle();
     eq(V().recvCardShown, true, 'a keeper’s receive: CARD, the card paying the request');
@@ -806,6 +835,9 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     A.fcPayBegin = wasBegin;
     A.setState({ screen: 'fcXmConfirm', stack: ['amount', 'confirm'] }); await settle();
     ok(tillAmount(), 'a cashier: no card’s charge screen either');
+    A.setState({ screen: 'fcOuConfirm', stack: ['amount', 'confirm'], fcOu: null }); await settle();
+    eq(A.state.screen, 'fcOuConfirm', 'a cashier: a card’s total in its other currency is not thrown out by the till');
+    A.setState(A.homeState()); await settle();
     A.closeReceive(); await settle();
   }
 
@@ -1532,6 +1564,37 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     A.setState({ fcXm: null, screen: 'confirm', stack: ['amount'] }); await settle();
     A.closeReceive(); await settle();
     A.tillEnd(); await settle();
+  }
+
+  // ---- 19. the road to the mint, opened as a screen that will ask it something opens ----------------------------------
+  {
+    const W = stubWallet({ pin: '2468' });
+    await fresh(W);
+    let n = W.calls.warms;
+    await keeperTill(W);
+    ok(tillAmount() && W.calls.warms === n + 1, 'opening the till: the road to the mint is opened for the first invoice', String(W.calls.warms - n));
+    n = W.calls.warms;
+    A.setState({ screen: 'paid', stack: [], recv: { live: 'in' }, recvResolved: true }); await settle(); V().dismissPaid(); await wait(560); await settle();
+    ok(tillAmount() && W.calls.warms === n + 1, 'PAID back to SET AMOUNT: opened again for the next customer’s invoice (the wallet holds it to once a minute)',
+       String(W.calls.warms - n));
+    A.tillEnd(); await settle();
+    await fresh(W);
+    n = W.calls.warms;
+    A.setState({ screen: 'amount', flow: 'send', stack: ['home'], amount: '', unit: 'USD' }); await settle();
+    ok(W.calls.warms === n, 'SEND’s keypad with nothing typed: nothing opened yet', String(W.calls.warms - n));
+    A.press('5'); await settle();
+    ok(W.calls.warms === n + 1, 'the keypad reaching an amount: the road is opened for the fee quote after NEXT', String(W.calls.warms - n));
+    A.press('0'); await settle();
+    ok(W.calls.warms === n + 1, 'and typing on asks nothing more', String(W.calls.warms - n));
+    await fresh(W);
+    n = W.calls.warms;
+    A.setState({ screen: 'amount', flow: 'receive', stack: ['home'], amount: '', unit: 'USD' }); await settle();
+    ok(W.calls.warms === n + 1, 'a receive’s amount screen, outside the till, as before', String(W.calls.warms - n));
+    await fresh(W);
+    n = W.calls.warms;
+    A.setState({ screen: 'flashcard', stack: ['home'] }); await settle();
+    ok(W.calls.warms === n + 1, 'a card’s screen: opened for the load or the claim after it', String(W.calls.warms - n));
+    await fresh(W);
   }
 
   const errs = errors.filter((e) => !/never resolved|Not implemented/.test(e));

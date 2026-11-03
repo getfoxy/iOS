@@ -292,6 +292,41 @@ final class TapSessionTests: XCTestCase {
         XCTAssertEqual(back, big)
     }
 
+    /// Change is sealed only in a size the payer's radio will take whole.
+    ///
+    /// Eleven blocks is the most: change one byte longer padded to twelve, which
+    /// with its sealing is past the payer's limit for one message, and the payer
+    /// threw it away as a message that would not read while the receiver
+    /// believed it sent. At eleven blocks it arrives, framed as the radio frames
+    /// it, through the payer's own assembler; one byte more is refused before it
+    /// is sealed, so it takes no place in the count and the next message on the
+    /// link still opens.
+    func testChangeAtTheElevenBlockBoundary() throws {
+        let service = TapCrypto.newService()
+        let payer = TapSession(role: .payer, service: service)
+        let receiver = TapSession(role: .receiver, service: service)
+        let m2 = hand(payer.begin(), to: receiver)
+        let m3 = hand(m2, to: payer)
+        _ = hand(m3, to: receiver)
+
+        let most = "cashuB" + String(repeating: "z", count: TapCrypto.partBody - 6)
+        XCTAssertEqual(most.utf8.count, TapCrypto.partBody)
+        let m7 = try XCTUnwrap(receiver.sealChange(most), "change of eleven blocks was refused")
+        XCTAssertLessThanOrEqual(m7.count, TapProtocol.maxPayment, "sealed past what the payer takes")
+        // across as the link frames it: two bytes of length, then the message
+        var assembler = TapProtocol.Bytes()
+        let framed = Data([UInt8(m7.count >> 8), UInt8(m7.count & 0xff)]) + m7
+        guard case .done(let arrived) = assembler.add(framed) else { return XCTFail("the payer's radio refused the change") }
+        guard case .change(let back) = payer.received(arrived) else { return XCTFail("no change") }
+        XCTAssertEqual(back, most)
+
+        // one byte more would pad to twelve blocks: refused, and the link still carries the next message
+        XCTAssertNil(receiver.sealChange(most + "z"), "change past eleven blocks was sealed")
+        XCTAssertNil(receiver.sealChange(String(repeating: "q", count: 49_148)), "the largest twelve-block change was sealed")
+        let m6 = try XCTUnwrap(receiver.sealResult("{\"ok\":true}"))
+        guard case .result = payer.received(m6) else { return XCTFail("a refused change moved the count") }
+    }
+
     /// The promise is the whole protection: a payer that reveals a key it did
     /// not promise is someone who waited to see the receiver's and then chose.
     func testAKeyThatWasNotPromisedIsRefused() {

@@ -468,6 +468,9 @@ async function run() {
   await wait(30);
   const left = await C.W.tillLeave();
   ok(left.left === true && C.W.mintUrl === HOME, 'leaving takes the cashier home', C.W.mintUrl);
+  /* Home lands at once now (`connect`'s `lazy`), so the send the leave started is still trying the relay that is down:
+   * let it end, as the walk home used to give it time to, before the relay comes back. */
+  await wait(30);
   ok(C.W.tillCashier() === null && C.store('foxy.till.home', null) === null, 'with no till and no home row left');
   const unsent = C.store('foxy.till.outbox', []).filter((r) => !r.sentAt);
   ok(unsent.length === 1 && unsent[0].hash === 'till-' + req5.id, 'what was not sent is still in the outbox');

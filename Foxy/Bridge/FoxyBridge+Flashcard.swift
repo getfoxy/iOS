@@ -38,10 +38,13 @@ extension FoxyBridge {
             let link = CardReader()
             self.cardLink = link
             self.cardSelected = false
+            // the keeper's yeses given since the last session are for this one (handleCardOwnerApprove)
+            self.cardSessionBegan()
             link.onGone = { [weak self, weak link] in
                 guard let self, let link, self.cardLink === link else { return }
                 self.cardLink = nil
                 self.cardSelected = false
+                self.cardSessionEnded()
             }
             // what the sheet shows, shown on this screen too: only while this is the session in hand
             link.onProgress = { [weak self, weak link] stage, text in
@@ -87,6 +90,8 @@ extension FoxyBridge {
                 }
                 // chosen, or chosen again and refused: either way it is what the card last said
                 if choosing, let link, self.cardLink === link { self.cardSelected = CardGate.succeeded(answer) }
+                // what the card said of its limits and its record, for what the owner key will sign unasked
+                if let link, self.cardLink === link { self.cardSaw(apdu, answer) }
                 self.resolve(id: id, text: CardGate.hex(answer), error: nil)
             }
         }
@@ -104,6 +109,8 @@ extension FoxyBridge {
                 return
             }
             self.cardSelected = false
+            // perhaps another card: what the last one said is not this one's
+            self.cardSeen = CardOwner.Seen()
             link.again(text: text.isEmpty ? "Hold the card here again" : text) { [weak self, weak link] why in
                 guard let self else { return }
                 if let why {
@@ -138,6 +145,7 @@ extension FoxyBridge {
             link?.end(error: error, text: text)
             self.cardLink = nil
             self.cardSelected = false
+            self.cardSessionEnded()
             self.resolve(id: id, text: "ok", error: nil)
         }
     }
