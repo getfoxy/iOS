@@ -132,7 +132,7 @@
     // (setting up a Flashcard: what the card will hold, `fcUnitAsk`; nothing of this phone's own choice is written for it)
     const cardFlow = s.currencyFlow === 'card';
     /* (a card of software 1.23 asked which of its currencies, 26f-flashcard.js `fcPickUnit`: its own question, its own balances, and a
-     * currency that cannot do what is asked greyed with why: `curCard` { question, foot, bal, short }) */
+     * currency that cannot do what is asked greyed with why: `curCard` { question, foot, bal, short, mark }) */
     const cc = cardFlow ? (s.curCard || null) : null;
     const flow = s.currencyFlow === 'receive' ? 'receive' : 'send';
     const current = pick ? (this.walletNow('send') || 'sat') : '';
@@ -178,6 +178,8 @@
     }
     const cards = (sc === 'currency' || pick) ? units.map(u => {
       const tag = u === 'both' ? '' : whyNot(u);
+      // (a card's question may mark a currency it still offers, `curCard.mark`: said where a greyed one says why, and not greyed)
+      const mark = (!tag && cc && cc.mark && cc.mark[u]) || '';
       const look = Object.assign({}, LOOK[u], tag ? LOOK.grey : {});
       const chosen = pick && u === current && !tag;
       return Object.assign(look, {
@@ -194,7 +196,7 @@
         markShown: !setUp, balShown: !setUp && !receiving,
         symOne: !(setUp && u === 'both'), symTwo: setUp && u === 'both',
         nameShadow: (setUp && u === 'both') ? '0 2px 8px rgba(0,0,0,.45),0 0 2px rgba(0,0,0,.5)' : 'none',
-        tag: tag, tagShown: !!tag,
+        tag: tag || mark, tagShown: !!(tag || mark),
         shadow: tag ? 'none' : SHADOW,
         outline: chosen ? '3px solid rgba(255,255,255,.9)' : 'none',
         cursor: tag ? 'default' : 'pointer',
@@ -240,7 +242,8 @@
       curNextSh: pfOn ? 'inset 0 2px 0 rgba(255,255,255,.4),inset 0 -4px 0 rgba(0,0,0,.16),0 12px 24px rgba(var(--acc-rgb),.34)' : 'none',
       curGap: setUp ? '14px' : three ? '12px' : '16px',
       // (the set-up's tiles stand alone, with nothing under them)
-      curFootShown: !setUp,
+      // (PAY FROM has no line under its tiles either: the keeper, 2026-11-06)
+      curFootShown: !setUp && !pf,
       curTilesOnly: setUp,
       curFoot: pf ? (this.pfFoot ? this.pfFoot() : '')
         : pick

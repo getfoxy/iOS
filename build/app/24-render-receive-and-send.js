@@ -58,7 +58,10 @@
        * nothing of the keeper's (26m-till.js). */
       recvCardShown: !(this.tillRole && this.tillRole() === 'cashier') && (!usdIn || (!!s.invoice && !s.invoiceIsAddress) || !this.offlineNow()
         || !!(window.FoxyWallet && window.FoxyWallet.cardOffline && window.FoxyWallet.cardOffline())),
-      recvClockShown: usdIn && !cashu && !!s.invoice && !!s.recvExpiresAt,
+      /* The code's life is not shown: the mint sets it (a dollar code at Forge lives a minute) and the screen asks for
+       * a new one in place when it lapses (12-receive.js `recvRequote`), so there is nothing for the person to do about
+       * it. `recvClock` stays for the tests and the log. */
+      recvClockShown: false,
       recvClock: 'NEW CODE IN ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0'),
       /* COPY and SHARE wait for the code. Until the rail on screen has
        * something real behind its QR — the invoice, the request, the address —

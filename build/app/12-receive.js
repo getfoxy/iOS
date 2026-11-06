@@ -601,7 +601,7 @@
        * reach for it. */
       const off = !!o.off;
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:flex-start;gap:14px;padding:14px 18px;border-radius:20px;'
+      row.style.cssText = 'display:flex;align-items:center;gap:14px;padding:14px 18px;border-radius:20px;'
         + 'cursor:' + (off ? 'default' : 'pointer') + ';opacity:' + (off ? '0.45' : '1') + ';'
         + 'background:' + (on ? 'rgba(242,128,46,.14)' : '#1C1C1E') + ';border:1.5px solid ' + (on ? '#F2802E' : 'rgba(255,255,255,.1)');
       /* A block, not a column of flex items: the pill below sits in the
@@ -610,7 +610,7 @@
       const text = document.createElement('div');
       text.style.cssText = 'flex:1;min-width:0';
       const name = document.createElement('div');
-      name.style.cssText = 'font-size:18px;font-weight:800;color:#F5F1EC;margin-bottom:3px';
+      name.style.cssText = 'font-size:18px;font-weight:800;color:#F5F1EC;margin-bottom:' + (o.sub ? '3px' : '0') + ';line-height:30px';
       name.textContent = o.label;
       text.appendChild(name);
       let sub = null;
@@ -648,8 +648,9 @@
             draw();
           });
         }
-        // last in the description's flow, so it lands on its last line
-        (sub || text).appendChild(pill);
+        // last in the description's flow, so it lands on its last line; with no description, beside the name
+        if (!sub) pill.style.cssText += 'float:none;display:inline-block;vertical-align:middle;margin:0 0 0 12px';
+        (sub || name).appendChild(pill);
       }
       if (off && o.offWhy) {
         const why = document.createElement('div');
@@ -658,12 +659,15 @@
         text.appendChild(why);
       }
       row.appendChild(text);
+      /* Every row carries a ring at its end, so each reads as a choice: hollow on the ones not chosen, filled in the
+       * accent with a tick on the one this screen is on. */
+      const ring = document.createElement('div');
+      ring.style.cssText = 'flex:none;width:30px;height:30px;border-radius:50%;box-sizing:border-box;display:flex;align-items:center;justify-content:center;'
+        + (on ? 'background:#F2802E;border:2px solid #F2802E' : 'background:transparent;border:2px solid rgba(255,255,255,.3)');
       if (on) {
-        const tick = document.createElement('div');
-        tick.style.cssText = 'flex:none;font-size:20px;font-weight:800;color:#F2802E;line-height:1.2';
-        tick.textContent = '\u2713';
-        row.appendChild(tick);
+        ring.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0B0B0C" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"></path></svg>';
       }
+      row.appendChild(ring);
       // a greyed row is not a control: the sheet stays open and nothing happens
       row.addEventListener('click', () => { if (off) return; close(); if (!on && o.tap) o.tap(); });
       card.appendChild(row);
@@ -678,12 +682,12 @@
   /* LIGHTNING, CASHU, and ON-CHAIN where the mint does it (26b-onchain.js). */
   chooseRail(current, pick) {
     const rails = [
-      { rail: 'LIGHTNING', sub: 'Any Lightning wallet pays the invoice.' },
-      { rail: 'CASHU', sub: 'A Cashu wallet answers with a token for this amount. Tap SCAN to take it.' },
+      { rail: 'LIGHTNING' },
+      { rail: 'CASHU' },
     ];
     // (not in the till, either role: a till takes Lightning and Cashu only, and at a cashier's an address's deposit would be minted here: `openReceiveNow`)
     if (this.ocCan('receive') && !(this.state && this.state.till)) {
-      rails.push({ rail: 'ON-CHAIN', sub: 'An ordinary Bitcoin payment to an address this mint watches.' });
+      rails.push({ rail: 'ON-CHAIN' });
     }
     const W = window.FoxyWallet;
     this.chooseFrom('NETWORK', () => rails.map(o => {
@@ -698,7 +702,7 @@
       const usd = !!(this.walletNow && this.walletNow('receive') === 'usd');
       const notDollars = usd && o.rail === 'ON-CHAIN' ? 'On chain is bitcoin only.' : '';
       const row = {
-        label: o.rail, sub: o.sub, on: o.rail === current,
+        label: o.rail, on: o.rail === current,
         off: barred, offWhy: barred ? this.ocFloorShort() : '',
         isDefault: !!(W && W.defaultRail && W.defaultRail() === o.rail),
         // a network this amount cannot use is not one to start every receive on
@@ -1087,8 +1091,6 @@
     const now = this.walletNow('receive') || 'sat';
     this.chooseFrom('WALLET', () => ['usd', 'sat'].map(u => ({
       label: this.unitWord(u),
-      sub: 'Holds ' + this.unitFigure(this.unitBalance(u), u) + '. ' + (u === 'usd'
-        ? 'Asked in dollars, exactly.' : 'Asked in bitcoin.'),
       on: u === now,
       tap: () => this.recvSwitchWallet(u),
     })));

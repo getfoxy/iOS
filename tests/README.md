@@ -140,6 +140,12 @@ question asked first, with nothing crossing the link; and **`amount-entry.js`**,
 the ADD FUNDS keypad (`cardLoadFits`, which is `cardPrepare`'s own cut and
 check; the line under the figure; NEXT).
 
+**`card-headers.js`** holds one header on every screen with a round back button, SET AMOUNT's: the
+title in the top row with the button, then the divider, then the subtitle (NAME CARD, with no CARD
+NAME label, the card's PIN pad, CARD LIMITS, RESTORE CARD, MAX PER SECOND, and the app's screens that
+drew the title under the buttons); WELCOME TO YOUR FOXY CARD; and the welcome's card on its turntable,
+turning by itself, turned by a finger, and only by hand where less motion is asked for.
+
 **`flashcard-mend.js`** holds the change a till bound to a key that is not the mint's (card
 software 1.22), against the model taught LOAD_CHANGE and RESET_CARD's let-go: LOAD_CHANGE under the
 bound key from anyone, another key refused 6A80 with no PIN, 6982 with no grant or hold, 6985 in a
@@ -236,7 +242,7 @@ arrival (`CardTapDelivery.swift`, `Arrival`) and asks the page about it until ho
 is first reached. It drives the first run (the launch, the mint's notice, the
 question of what to hold, the lock, a page loaded again) with a new card in reach,
 and checks that each step is kept, that the card's screen and WELCOME TO YOUR
-CASHU CARD are the first thing after home, once, and that an arrival after home
+FOXY CARD are the first thing after home, once, and that an arrival after home
 was reached is left to be the tap it always was.
 
 **`two-balances.js`** holds the wallet's half of a mint with two balances,

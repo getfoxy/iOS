@@ -615,13 +615,17 @@
           + (this.priceAgo() ? this.priceAgo().toLowerCase() : 'from a moment ago') + '.'
         : '',
       priceWarnShown: (sendHeld || this.keypadStale()) ? '1' : '0',
-      /* A card's set-up names its two amounts (the design): NO PIN AMOUNT? and, typed rather than chosen, MAX SPEND PER SECOND
-       * (26j-card-wheel.js), as LIMITS does for the rate of a card that waits for its limit. */
+      /* A card's set-up names its amounts (the design): NO PIN AMOUNT (one payment), 24HR LIMIT (the card's allowance) and, typed
+       * rather than chosen, MAX PER SECOND (26j-card-wheel.js), as LIMITS does for the two without the PIN and for the rate of a card
+       * that waits for its limit. */
       // the till's own screen is named for what it is (either role)
       amountTitle: tillHere ? 'POS MODE'
-        : s.flow === 'cardSuNoPin' ? 'NO PIN AMOUNT?'
+        : (s.flow === 'cardSuNoPinTx' || s.flow === 'cardLimitTx') ? 'NO PIN AMOUNT'
+        // (by the card's software: NO PIN LIMIT on 1.21 to 1.24, whose allowance the PIN fills again, 26j-card-wheel.js `fcSuDayWords`)
+        : s.flow === 'cardSuNoPin' ? (this.fcSuDayWords ? this.fcSuDayWords().title : '24HR LIMIT')
+        : (s.flow === 'cardLimit' && this._fcLimitNoPin && s.fc && s.fc.noPinDay) ? '24HR LIMIT'
         : s.flow === 'tillTip' ? 'TIP'
-        : (s.flow === 'cardSuTap' || (s.flow === 'cardLimit' && this._fcLimitTap && this.fcPacedNow && this.fcPacedNow())) ? 'MAX SPEND PER SECOND'
+        : (s.flow === 'cardSuTap' || (s.flow === 'cardLimit' && this._fcLimitTap && this.fcPacedNow && this.fcPacedNow())) ? 'MAX PER SECOND'
         : 'SET AMOUNT',
       amountSubtitle: s.flow === 'onchain'
         ? 'How much to send on chain?'
@@ -633,9 +637,11 @@
         : s.flow === 'cardSend' ? 'How much to put on the card?'
         : s.flow === 'cardWd' ? 'How much to withdraw?'
         : s.flow === 'cardLimit' ? (this.fcLimitQuestion ? this.fcLimitQuestion() : 'What would you like the daily limit to be?')
-        // a card's set-up (26j-card-wheel.js): LIMITS' own questions for the two
-        // (the set-up's no-PIN figure is the card's 24-hour total without the PIN, software 1.25, written to the allowance)
-        : s.flow === 'cardSuNoPin' ? 'What\u2019s the most this card should pay in 24 hours without asking you for a PIN?'
+        // a card's set-up (26j-card-wheel.js): LIMITS' own questions for the three
+        // (one payment without the PIN: this phone's own rule, NO PIN AMOUNT; and from CARD LIMITS too)
+        : (s.flow === 'cardSuNoPinTx' || s.flow === 'cardLimitTx') ? 'What is the most this card should pay in one transaction without asking for your PIN?'
+        // (the set-up's 24HR LIMIT is the card's 24-hour total without the PIN, software 1.25, written to the allowance)
+        : s.flow === 'cardSuNoPin' ? (this.fcSuDayWords ? this.fcSuDayWords().question : 'What is the most this card should pay in 24 hours without asking for your PIN?')
         : s.flow === 'cardSuTap' ? 'What is the most this card should pay each second?'
         : s.flow === 'receive' ? 'How much to receive?'
         : s.flow === 'swap' ? 'How much to swap?'
@@ -667,19 +673,20 @@
       /* And a swap's: the whole of the balance it leaves (26i-swap.js). */
       /* And a card's set-up's two amounts: SKIP, for none (26j-card-wheel.js, `fcSuSkip`). */
       /* And BANK ACCOUNT's, where it went straight to the address kept: CHANGE EXCHANGE, back to the list (26q-bank.js). */
-      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit' || s.flow === 'swap' || s.flow === 'tillCap' || s.flow === 'cardSuNoPin' || s.flow === 'cardSuTap'
+      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit' || s.flow === 'cardLimitTx' || s.flow === 'swap' || s.flow === 'tillCap' || s.flow === 'cardSuNoPinTx' || s.flow === 'cardSuNoPin' || s.flow === 'cardSuTap'
         || (this.bankShortHere && this.bankShortHere()),
       // (a card of software 1.23: all of the currency chosen, `fcUnit`)
       amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice(s.fc ? (this.fcHeld ? this.fcHeld(s.fc, this.fcUnit()) : s.fc.balance || 0) : 0, this.fcUnit ? this.fcUnit() : s.fc && s.fc.unit) + ')'
-        : s.flow === 'cardLimit' ? 'NO LIMIT'
-        : (s.flow === 'cardSuNoPin' || s.flow === 'cardSuTap') ? 'SKIP'
+        : (s.flow === 'cardLimit' || s.flow === 'cardLimitTx') ? 'NO LIMIT'
+        : (s.flow === 'cardSuNoPinTx' || s.flow === 'cardSuNoPin' || s.flow === 'cardSuTap') ? 'SKIP'
         : s.flow === 'swap' ? 'ALL OF IT (' + this.unitFigure(this.swapHave ? this.swapHave(this.swapUnits().from) : this.unitBalance(this.swapUnits().from), this.swapUnits().from) + ')'
         : s.flow === 'tillCap' && this.tillCapDefaultLabel ? this.tillCapDefaultLabel()
         : (this.bankShortHere && this.bankShortHere()) ? 'CHANGE EXCHANGE' : '',
       amtAltTap: () => {
         if (this.state.flow === 'cardWd') this.fcWithdrawPin(0);
         else if (this.state.flow === 'cardLimit') this.fcLimitConfirm(0);
-        else if (this.state.flow === 'cardSuNoPin' || this.state.flow === 'cardSuTap') this.fcSuSkip();
+        else if (this.state.flow === 'cardLimitTx') this.fcLimitTxNext(0, 0);
+        else if (this.state.flow === 'cardSuNoPinTx' || this.state.flow === 'cardSuNoPin' || this.state.flow === 'cardSuTap') this.fcSuSkip();
         else if (this.state.flow === 'swap') this.swapNext(true);
         else if (this.state.flow === 'tillCap') this.tillCapSet(0);
         else if ((this.bankShortHere && this.bankShortHere())) this.bankChange();
@@ -819,11 +826,11 @@
       nextAnim: (val > 0 && !sendOver) ? 'shineLoopFur 3.4s cubic-bezier(.32,0,.28,1) 3s infinite' : 'none',
       amountInk: sendOver ? '#FF5C5C' : 'var(--acc)',
       sendOverShown: sendOver ? '1' : '0',
-      /* The room under the amount holds its two warnings; where neither shows (a card's NO PIN AMOUNT? with a fresh price), most of it goes, and the
+      /* The room under the amount holds its two warnings; where neither shows (a card's NO PIN AMOUNT with a fresh price), most of it goes, and the
        * space is shared above the amount and below its sats line, so the two sit in the middle of the area between the rule and the swap. */
-      amtRoom: s.flow === 'cardSuNoPin' && !this.keypadStale() ? '23px' : '78px',
-      amtRoomBottom: s.flow === 'cardSuNoPin' && !this.keypadStale() ? 'auto' : '0',
-      keysTop: s.flow === 'cardSuNoPin' && !this.keypadStale() ? '0' : 'auto',
+      amtRoom: /^cardSuNoPin(Tx)?$/.test(String(s.flow)) && !this.keypadStale() ? '23px' : '78px',
+      amtRoomBottom: /^cardSuNoPin(Tx)?$/.test(String(s.flow)) && !this.keypadStale() ? 'auto' : '0',
+      keysTop: /^cardSuNoPin(Tx)?$/.test(String(s.flow)) && !this.keypadStale() ? '0' : 'auto',
       sendOverLabel: sendHeld ? 'PENDING WITH THE MINT' : 'MORE THAN YOUR BALANCE',
       // withdrawing from a card, the ceiling is the card's and the line says so; and paying from one (`fcOutMode`)
       ...((s.flow === 'cardWd' || ((s.flow === 'send' || s.flow === 'onchain') && this.fcOutMode && this.fcOutMode())) ? { sendOverLabel: 'MORE THAN THE CARD HOLDS' } : {}),

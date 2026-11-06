@@ -80,6 +80,23 @@ async function world(pin, o) {
        'with an allowance it asks only when the payment is more than is left of it: the whole payment, never a part');
     ok(W.cardNeedsPin({ info: Object.assign({}, W.cardParse.info(longInfo(500, 0, 1000, 900, true)), { pin: 'blocked' }), noPin: day(longInfo(500, 0, 1000, 900, true)) }, 1) === true, 'a blocked card asks (and the card refuses the PIN: it is blocked)');
     ok(W.cardNeedsPin({ info: W.cardParse.info(longInfo(500, 0, 1000, 900, true).replace(/^0110/, '010f')) }, 1) === true, 'a card of 1.15 asks for its PIN for everything');
+
+    /* NO PIN AMOUNT: this phone's own rule on one payment (the card has no such figure): within the allowance and over the rule, the
+     * PIN is asked all the same; kept on this phone only, in the row of the card's dollars, and none is no rule. */
+    const keyed = (np, pin) => Object.assign(card(np, pin), { key: 'nopin-tx-card', record: { unit: 'sat' } });
+    ok(W.cardNoPinTx('nopin-tx-card') === null && W.cardNeedsPin(keyed({ limit: 500, spent: 0 }, true), 400) === false, 'no NO PIN AMOUNT kept: the allowance alone decides');
+    W.cardSetNoPinTx('nopin-tx-card', 100, 'sat', 0);
+    ok(JSON.stringify(W.cardNoPinTx('nopin-tx-card')) === JSON.stringify({ n: 100, unit: 'sat', usd: 0 }), 'a NO PIN AMOUNT of 100 is kept on this phone', JSON.stringify(W.cardNoPinTx('nopin-tx-card')));
+    ok(W.cardNeedsPin(keyed({ limit: 500, spent: 0 }, true), 100) === false && W.cardNeedsPin(keyed({ limit: 500, spent: 0 }, true), 101) === true,
+       'a payment of up to 100 goes without the PIN; one of 101, inside the allowance of 500, asks for it');
+    ok(W.cardNeedsPin(keyed({ limit: 0, spent: 0 }, false), 50000) === false, 'and a card with no PIN has none to ask for, whatever the rule');
+    ok(W.cardNeedsPin(keyed({ limit: 500, spent: 450 }, true), 80) === true, 'the allowance still counts: 80 is under the rule, and over the 50 left');
+    W.cardSetNoPinTx('nopin-tx-card', 300, 'usd', 0);
+    W.cardSetNoPinTx('nopin-tx-card', 0, 'sat', 0);
+    ok(W.cardNoPinTx('nopin-tx-card') === null && W.cardNeedsPin(keyed({ limit: 500, spent: 0 }, true), 400) === false, 'set to none, it is gone');
+    W.cardSetNoPinTx('nopin-tx-card', 300, 'usd', 0);
+    ok(W.cardNeedsPin(keyed({ limit: 500, spent: 0 }, true), 1) === true, 'a rule in dollars, a payment in sats and no price to weigh them at: the PIN is asked');
+    W.cardSetNoPinTx('nopin-tx-card', 0, 'sat', 0);
   }
 
   /* ---- 2: the card's own rules, as the model has them (the bytes) ----------------------------------------------------- */
@@ -299,18 +316,36 @@ async function world(pin, o) {
     const early = await R.W.cardPay(card, { sats: 300 }).then(() => null, (e) => e);
     ok(early && early.card === 'pin-needed' && early.early === true && early.set === true && early.left === 200 && count(card, '22') === 0,
        'a payment of 300 is more than the 200 left: pin-needed before the card is asked, saying what is left', early && JSON.stringify([early.card, early.need, early.left]));
-    // never split: the card has 200 left, and 150 + 150 are two payments, each its own
+    // NO PIN AMOUNT on the phone that reads the card: 120 is within what is left, and over the 100 this phone keeps for it
+    R.W.cardSetNoPinTx(seen.key, 100, 'sat', 0);
+    ok(!H.W.cardNoPinTx(seen.key), 'NO PIN AMOUNT is kept on the phone that set it, and the card is told nothing of it');
     card.tap();
-    const part = await R.W.cardPay(card, { sats: 150 });
-    ok(part.sats === 150 && card.state.noPinSpent === 450, 'a smaller payment of 150 is within what is left, and counts');
+    card.sent.length = 0;
+    const ruled = await R.W.cardPay(card, { sats: 120 }).then(() => null, (e) => e);
+    ok(ruled && ruled.card === 'pin-needed' && ruled.early === true && ruled.limitReached === false && count(card, '22') === 0 && card.state.noPinSpent === 300,
+       'a payment of 120, within the 200 left and over this phone’s 100: pin-needed before the card is asked, not LIMIT REACHED', ruled && JSON.stringify([ruled.card, ruled.early, ruled.limitReached]));
+    card.tap();
+    const ruledPin = await R.W.cardPay(card, { sats: 120, pin: '1234' });
+    ok(ruledPin.sats === 120 && card.state.noPinSpent === 300, 'with the PIN it goes, and counts nothing against the allowance');
+    // another phone, a till, has no such rule: with R's still set, it is paid 120 with no PIN, under the card's allowance alone
+    card.tap();
+    card.sent.length = 0;
+    const till = await H.W.cardPay(card, { sats: 120 });
+    ok(till.sats === 120 && count(card, '40') === 0 && card.state.noPinSpent === 420 && !!R.W.cardNoPinTx(seen.key),
+       'a phone without the rule (a till) is paid 120 with no PIN while the other phone keeps its 100: the card itself does not know it', 'spent ' + card.state.noPinSpent);
+    R.W.cardSetNoPinTx(seen.key, 0, 'sat', 0);
+    // never split: what is left (80, after the till’s 120) takes a smaller payment of its own
+    card.tap();
+    const part = await R.W.cardPay(card, { sats: 50 });
+    ok(part.sats === 50 && card.state.noPinSpent === 470, 'a smaller payment of 50 is within what is left, and counts');
     // the PIN for the whole payment: a payment over the allowance with the PIN is as it ever was, and counts nothing against it
     card.tap();
     const big = await R.W.cardPay(card, { sats: 600, pin: '1234' });
-    ok(big.sats === 600 && card.state.noPinSpent === 450 && (await bal(R)) === 1050, 'with the PIN a payment of 600 goes, and only what was signed for with no PIN counts against the allowance', 'spent ' + card.state.noPinSpent);
+    ok(big.sats === 600 && card.state.noPinSpent === 470 && (await bal(R)) === 1070, 'with the PIN a payment of 600 goes, and only what was signed for with no PIN counts against the allowance', 'spent ' + card.state.noPinSpent);
     card.tap();
     const mine = await H.W.cardLook(card, { mine: true });
     const marks = mine.log.last.map((x) => x.noPin);
-    ok(marks.slice(0, 3).join() === 'false,true,true', 'the log marks the taps made with no PIN, newest first', marks.join());
+    ok(marks.slice(0, 5).join() === 'false,true,true,false,true', 'the log marks the taps made with no PIN, newest first', marks.join());
     await settle();
   }
 
@@ -610,8 +645,13 @@ async function world(pin, o) {
     ok(/if \(e && e\.card === 'pin-needed' && !pin\) \{\s*const ask = \(\) => this\.fcPayAsk\([^)]*\);\s*if \(e\.limitReached\) \{ this\.fcLimitReached\(ask\); return; \}/.test(src),
        'a card\u2019s payment that reaches the limit says so first and then asks the PIN, signing the same payment with it', 'fcPayRun');
     const amount = fs.readFileSync(path.join(__dirname, '..', 'build', 'app', '23-render-home-and-amount.js'), 'utf8');
-    ok(amount.indexOf("s.flow === 'cardSuNoPin' ? 'What\\u2019s the most this card should pay in 24 hours without asking you for a PIN?'") >= 0,
-       'the set-up asks for the 24-hour figure in the owner\u2019s words', 'amountSubtitle');
+    const wheel = fs.readFileSync(path.join(__dirname, '..', 'build', 'app', '26j-card-wheel.js'), 'utf8');
+    ok(amount.indexOf("s.flow === 'cardSuNoPin' ? (this.fcSuDayWords ? this.fcSuDayWords().question") >= 0
+       && wheel.indexOf("question: 'What is the most this card should pay in 24 hours without asking for your PIN?'") >= 0
+       && wheel.indexOf("question: 'What is the most this card should pay by tap alone before it asks for its PIN?'") >= 0,
+       'the set-up asks for the 24-hour figure in the keeper\u2019s words, on 24HR LIMIT', 'amountSubtitle');
+    ok(amount.indexOf("? 'What is the most this card should pay in one transaction without asking for your PIN?'") >= 0,
+       'and before it, NO PIN AMOUNT, the most for one payment', 'amountSubtitle');
     ok(/noPinDay[\s\S]{0,400}Entering the PIN does not start the 24 hours over: they end after 24 hours, or when the card is next held to this phone/.test(src),
        'the NO PIN LIMIT explainer says the owner\u2019s phone ends the 24 hours and the PIN alone does not', 'fcLimitAsk');
   }

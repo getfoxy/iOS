@@ -551,6 +551,8 @@ function fakeMint(w, opts) {
         4: { methods: methods({ options: { confirmations: CHAIN.confirmations } }), disabled: false },
         5: { methods: methods(), disabled: false },
         7: { supported: true }, 8: { supported: true }, 9: { supported: true } };
+      // o.nut07 === false: a mint that does not say it answers which pieces are spent (NUT-07)
+      if (o.nut07 === false) delete nuts[7];
       // an on-chain quote is locked to a key of the wallet's (NUT-20), so a mint
       // that does one does the other
       if (o.onchain) nuts[20] = { supported: true };

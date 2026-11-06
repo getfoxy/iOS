@@ -149,6 +149,7 @@ function appOn(ctx, start, o) {
   // as the app's own (01-ui-basics.js): a card's set-up asking an amount goes a step back in it; back off the card's screen leaves the card behind
   a.back = () => {
     if (a.fcSuAmountBack && a.fcSuAmountBack()) return;
+    if (a.fcLimitTxBack && a.fcLimitTxBack()) return;
     if (a.fcNameBack && a.fcNameBack()) return;
     const st = a.state.stack;
     if (a.state.screen === 'flashcard' && (st.length ? st[st.length - 1] : 'home') !== 'flashcard' && st.slice(0, -1).indexOf('flashcard') < 0) a._fcCard = null;
@@ -207,10 +208,14 @@ const click = (el) => el.dispatchEvent(new (el.ownerDocument.defaultView.Event)(
 function pad(a) {
   const root = a._pinEl;
   if (!root || !root.parentNode) return null;
-  const kids = Array.from(root.children);
+  const part = (k) => root.querySelector('[data-pin-' + k + ']');
   const find = (text) => leaves(root).filter((d) => d.textContent === text)[0];
   return {
-    title: kids[0].textContent, sub: kids[1].textContent, note: kids[3].textContent, figure: kids[2].textContent,
+    title: part('title').textContent, sub: part('sub').textContent, note: part('note').textContent, figure: part('dots').textContent,
+    // the header's order, top to bottom: the title, the divider (a card's pad), the subtitle, the dots
+    order: Array.from(root.querySelectorAll('[data-pin-title],[data-pin-rule],[data-pin-sub],[data-pin-dots]')).map((d) => ['title', 'rule', 'sub', 'dots'].filter((k) => d.hasAttribute('data-pin-' + k))[0]).join(),
+    // whether the title sits in one row with the round back button, as on SET AMOUNT
+    titleInRow: (() => { const t = part('title'); const b = root.querySelector('[data-pin-back]'); return !!(t && b && t.parentNode !== root && t.parentNode.style.minHeight === '52px' && b.style.top === '56px' && root.style.paddingTop === '56px'); })(),
     // what its button says, and whether it can be pressed yet
     cta: root.querySelector('[data-pin-cta]').textContent,
     ready: root.querySelector('[data-pin-cta]').getAttribute('data-pin-ready') === '1',
@@ -287,9 +292,9 @@ const settle = async () => { for (let i = 0; i < 300; i++) await tick(); };
 const keyIn = (a, sats) => { a.state.amount = String(sats); a.state.unit = 'SATS'; a.fcAmountNext(); };
 
 /* The card screens of the designs (26j-card-wheel.js, `renderCardScreens`), as a person sees them; each null when it is not up.
- *   welcome   WELCOME TO YOUR CASHU CARD: its line, and SET UP CARD and CANCEL by their labels;
+ *   welcome   WELCOME TO YOUR FOXY CARD: its line, and SET UP CARD and CANCEL by their labels;
  *   limits    CARD LIMITS: its rows ("LABEL | sub | value | unit"), and a row pressed by its label, or CLOSE;
- *   speed     MAX SPEND PER SECOND: the figure, the chips and the one chosen, a chip picked by its dollars, NEXT, the figure, back, and the
+ *   speed     MAX PER SECOND: the figure, the chips and the one chosen, a chip picked by its dollars, NEXT, the figure, back, and the
  *             plain button under NEXT (`alt`: SKIP in the set-up, NO LIMIT on LIMITS) pressed by `skip()`. */
 const screens = (a) => a.renderCardScreens({ s: a.state, sc: a.state.screen });
 function welcome(a) {

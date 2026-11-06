@@ -242,8 +242,8 @@ const uri = (sats) => 'bitcoin:' + ADDRESS + '?amount=' + (sats / 1e8).toFixed(8
     again.goFlashcard();
     await until('the card to be read', () => !!again.state.fc && again.state.fc.key === c.key && again.state.fc.check !== 'asking');
     await settle();
-    const said = JSON.stringify(vals(again)).indexOf('₿32 is waiting to go onto this card') >= 0;
-    ok(said, 'the Flashcard screen says it too: ₿32 is waiting to go onto this card');
+    const said = again.fcHistNotes(again.state.fc).some((n) => n.kind === 'owed' && n.name === '₿32 is waiting to go onto this card') && vals(again).fcMenuRingInk === '#F7931A';
+    ok(said, 'the card’s HISTORY says it too, with the menu turning amber: ₿32 is waiting to go onto this card');
     // confirmed on chain meanwhile: the payment is done, and the 32 still the card's
     H.mint.onchainConfirm(quote);
     await H.W.onchainFollow(quote);

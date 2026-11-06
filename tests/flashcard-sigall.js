@@ -698,7 +698,7 @@ async function world(feePpk, sats, make) {
     ok(uiExplainer(holder) && !uiCard(holder) && uiExplainer(holder).title === 'How tap limit works', 'and PER SECOND LIMIT opens HOW TAP LIMIT WORKS, the rule played out', uiExplainer(holder) && uiExplainer(holder).title);
     uiExplainer(holder).finish();
     uiExplainer(holder).press('CONTINUE');
-    ok(holder.state.screen === 'fcSpeed' && holder.state.fcSpeed.unit === 'sat', 'then MAX SPEND PER SECOND, for a bitcoin card at a price');
+    ok(holder.state.screen === 'fcSpeed' && holder.state.fcSpeed.unit === 'sat', 'then MAX PER SECOND, for a bitcoin card at a price');
     // (a limit of $0.50 on a payment, kept in dollars, as the rate screen sends one: its sats at the price, and the dollars)
     holder.fcLimitConfirm(500, 0.5);
     ok(holder.state.screen === 'fcLimitConfirm' && holder.state.fcLimit.sats === 500 && holder.state.fcLimit.usd === 0.5 && /kept at this many dollars/.test(holder.fcLimitSpec().warn)

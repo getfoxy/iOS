@@ -555,7 +555,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     }
     eq(A.tapOffering(), { inv: W.rec.invoices[0].inv.bolt11, req: '', waiting: false },
       'the dollar invoice goes on the air (its request in dollars beside it is tests/usd-tap-screens.js)');
-    ok(v.recvClockShown && /^NEW CODE IN 0:0\d$/.test(v.recvClock), 'the code’s minute counted down under it (' + v.recvClock + ')');
+    ok(!v.recvClockShown && /^NEW CODE IN 0:0\d$/.test(v.recvClock), 'the code’s minute counted but not shown: a new code comes in place by itself (' + v.recvClock + ')');
     const t = textOf(w);
     ok(/RECEIVE INVOICE/.test(t) && /WALLET/.test(t) && /USD/.test(t) && />CARD</.test(w.document.getElementById('dc-root').innerHTML), 'the page draws it, CARD with it');
     // the networks a dollar invoice cannot use are greyed

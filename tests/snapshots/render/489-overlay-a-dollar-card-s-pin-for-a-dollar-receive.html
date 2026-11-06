@@ -520,10 +520,14 @@
 </div>
 </div>
 <!-- on document.body -->
-<div style="position: fixed; inset: 0px; z-index: 2147483647; background: var(--bg,#050505); display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 118px 26px 26px; box-sizing: border-box; font-family: SatSymbol, Sora, system-ui, sans-serif; animation: foxyIn .16s ease;">
-<div style="font-size: 26px; font-weight: 800; letter-spacing: -0.02em; color: var(--ink,#F5F1EC); text-align: center;">CARD PIN</div>
-<div style="margin-top: 10px; font-size: 17px; font-weight: 500; line-height: 1.4; color: rgba(245, 241, 236, 0.6); text-align: center; text-wrap: pretty;">To pay $ 4.75. The card’s owner types its PIN here.</div>
-<div style="display: flex; gap: 14px; margin-top: 38px; height: 18px; align-items: center;">
+<div style="position: fixed; inset: 0px; z-index: 2147483647; background: var(--bg,#050505); display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 56px 26px 26px; box-sizing: border-box; font-family: SatSymbol, Sora, system-ui, sans-serif; animation: foxyIn .16s ease;">
+<div style="flex: 0 0 auto; align-self: stretch; min-height: 52px; display: flex; align-items: center; justify-content: center; padding: 0px 60px; box-sizing: border-box;">
+<div style="min-width: 0px; font-size: 22px; font-weight: 800; letter-spacing: -0.022em; line-height: 1.25; color: var(--ink,#F5F1EC); text-align: center; text-wrap: balance;" data-pin-title="1">CARD PIN</div>
+</div>
+<div style="flex: 0 0 auto; align-self: stretch; height: 1px; margin: 16px -2px 0px; background: rgba(var(--ink-rgb,245,241,236),.1);" data-pin-rule="1">
+</div>
+<div style="flex: 0 0 auto; align-self: stretch; padding: 14px 0px 8px; font-size: 22px; font-weight: 600; letter-spacing: -0.005em; line-height: 1.3; color: var(--ink,#F5F1EC); text-align: center; text-wrap: pretty;" data-pin-sub="1">To pay $ 4.75. The card’s owner types its PIN here.</div>
+<div style="display: flex; gap: 14px; margin-top: 30px; height: 18px; align-items: center;" data-pin-dots="1">
 <div style="width: 14px; height: 14px; border-radius: 50%; background: transparent; border: 2px solid rgba(245, 241, 236, 0.28);">
 </div>
 <div style="width: 14px; height: 14px; border-radius: 50%; background: transparent; border: 2px solid rgba(245, 241, 236, 0.28);">
@@ -533,7 +537,7 @@
 <div style="width: 14px; height: 14px; border-radius: 50%; background: transparent; border: 2px solid rgba(245, 241, 236, 0.28);">
 </div>
 </div>
-<div style="margin-top: 18px; min-height: 22px; font-size: 16px; font-weight: 700; color: rgb(255, 92, 92); text-align: center;">
+<div style="margin-top: 18px; min-height: 22px; font-size: 16px; font-weight: 700; color: rgb(255, 92, 92); text-align: center;" data-pin-note="1">
 </div>
 <div style="margin-top: auto; display: grid; grid-template-columns: repeat(3,1fr); width: 100%; max-width: 336px; touch-action: manipulation; -webkit-user-select: none; user-select: none;">
 <div style="height: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer;">

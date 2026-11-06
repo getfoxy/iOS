@@ -10,7 +10,7 @@
  * half second until the page answers shown or over. The first run goes on exactly
  * as it does without one (the launch, the notices, what to hold), and the moment
  * home is first reached the card is asked for, as CARD on home asks for it: the
- * phone's sheet, and a new card read is WELCOME TO YOUR CASHU CARD. Then it is
+ * phone's sheet, and a new card read is WELCOME TO YOUR FOXY CARD. Then it is
  * gone, and a card is a tap again.
  *
  * The page's side, 26f-flashcard.js (`arrived`, `arrivalHomeNow`, `arrivalWatch`),
@@ -82,7 +82,7 @@ async function firstRun(o) {
        'bootWallet puts _arrived on the wallet once the lock is decided, beside _cardTapped, and starts watching for home');
   }
 
-  /* ---- the card's address before the set-up: kept through it, WELCOME TO YOUR CASHU CARD the first thing after home ---- */
+  /* ---- the card's address before the set-up: kept through it, WELCOME TO YOUR FOXY CARD the first thing after home ---- */
   {
     const r = await firstRun();
     const { app, ctx, ask } = r;
@@ -105,7 +105,7 @@ async function firstRun(o) {
     ok(/^begin: Tap behind the phone\.$/.test(ctx.sheet[0] || ''), 'asking for the card with the phone’s own sheet, as CARD on home does', ctx.sheet[0]);
     await settle();
     const w = welcome(app);
-    ok(!!w && w.buttons === 'SET UP CARD,CANCEL', 'the new card read: WELCOME TO YOUR CASHU CARD, SET UP CARD and CANCEL', JSON.stringify(w));
+    ok(!!w && w.buttons === 'SET UP CARD,CANCEL', 'the new card read: WELCOME TO YOUR FOXY CARD, SET UP CARD and CANCEL', JSON.stringify(w));
     ok(ask() === 'over' && !app._arrival, 'cleared once shown: the phone is told the first run is over, and a card is a tap again');
     const sheets = ctx.sheet.length;
     await sleep(40);
@@ -126,7 +126,7 @@ async function firstRun(o) {
     await sleep(60);
     ok(ask() === 'shown' && app.state.screen === 'flashcard', 'answered: home, then the card');
     await settle();
-    ok(!!welcome(app), 'WELCOME TO YOUR CASHU CARD');
+    ok(!!welcome(app), 'WELCOME TO YOUR FOXY CARD');
   }
 
   /* ---- the page loaded again during the set-up: the phone asks the new page, which keeps it and shows it once ---- */

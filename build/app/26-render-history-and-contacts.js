@@ -231,6 +231,10 @@
       })),
     })).filter(g => g.items.length);
     const tabLook = (u) => this.segLook(u === tab, u === 'usd' ? 'frost' : 'fur');
+    /* A card's own list opens with what its screen does not say (26f-flashcard.js, `fcHistNotes`): what the mint says is already
+     * spent, in red; money waiting to go onto a card, in amber, which a press puts on; how fresh the mint's word is and the card's
+     * limits, in grey. Rows of this list's own kind, above the payments. */
+    const notes = (ofCard && s.fc && s.fc.key === ofCard && typeof this.fcHistNotes === 'function') ? this.fcHistNotes(s.fc) : [];
     return {
       historyEmptySub: ofCard ? 'Nothing has been done with this card on this phone yet.'
         : s.fresh ? 'Your transactions will show up here.' : 'No transactions match this filter.',
@@ -256,12 +260,14 @@
       filterIn: () => this.setState({ histFilter: 'in' }),
       filterOut: () => this.setState({ histFilter: 'out' }),
       historyGroups: histGroups,
+      histNotes: notes,
       histTabsShown: two,
       histTabs: two ? ['usd', 'sat'].map(u => Object.assign(tabLook(u), {
         label: this.unitWord(u), sym: u === 'usd' ? '$' : '\u20bf',
         tap: () => this.setState({ histUnit: u }),
       })) : [],
-      historyEmpty: histGroups.length === 0,
+      // (a card's list with rows of its own at the top is not empty: NOTHING TO SEE YET! is not said under them)
+      historyEmpty: histGroups.length === 0 && notes.length === 0,
       histAuditShown: !!auditTitle && hf === 'all' && !ofCard,
       histAuditTitle: auditTitle,
       histAuditBody: auditBody,

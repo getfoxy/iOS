@@ -597,7 +597,9 @@ async function forge(ctx, card, o) {
       app.fcRead();
       await until('the card to be read and its pieces checked', () => !!app.state.fc && app.state.fc.check !== 'asking' && app.state.fc.real !== 'asking');
       const v = vals(app);
-      return { text: v.fcVerified, ink: v.fcVerifiedInk, face: v.fcCheck, fc: app.state.fc };
+      // how fresh the mint's word is, and what it says is spent, are rows of the card's HISTORY now (26f-flashcard.js, `fcHistNotes`)
+      const w = app.fcVerifiedWords(app.state.fc);
+      return { text: w[0], ink: w[1], face: app.fcSpentWords(app.state.fc) || v.fcCheck, fc: app.state.fc };
     };
     const good = (await loaded(O, 300)).card;
 
@@ -619,9 +621,9 @@ async function forge(ctx, card, o) {
       const seen = await fresh.W.cardLook(good, { real: true });
       app.setState({ screen: 'flashcard', fc: null });
       app.fcShow(seen);
-      const wait = vals(app).fcVerified;
+      const wait = app.fcVerifiedWords(app.state.fc)[0];
       await until('the proofs and the mint', () => app.state.fc.check !== 'asking' && app.state.fc.real !== 'asking');
-      ok(wait === 'Verifying\u2026' && VERIFIED_AT.test(vals(app).fcVerified), 'until then it says Verifying…', wait + ' > ' + vals(app).fcVerified);
+      ok(wait === 'Verifying\u2026' && VERIFIED_AT.test(app.fcVerifiedWords(app.state.fc)[0]), 'until then it says Verifying…', wait + ' > ' + app.fcVerifiedWords(app.state.fc)[0]);
     }
 
     // red: a made-up piece with a made-up proof
@@ -709,14 +711,14 @@ async function forge(ctx, card, o) {
       c.tap();
       const short = await O.W.cardLook(c, { short: true, mine: true });
       own.fcShow(short);
-      ok(short.bare === true && vals(own).fcVerified === was && own.state.fc.real === 'ok', 'after a read of the short kind (the one that follows a write) a verified card is still verified', vals(own).fcVerified);
+      ok(short.bare === true && own.fcVerifiedWords(own.state.fc)[0] === was && own.state.fc.real === 'ok', 'after a read of the short kind (the one that follows a write) a verified card is still verified', own.fcVerifiedWords(own.state.fc)[0]);
       const lost = (await loaded(O, 100, undefined, true)).card;
       V.nfc = lost;
       a = await read(other, V, lost);
       lost.tap();
       const short2 = await V.W.cardLook(lost, { short: true });
       other.fcShow(short2);
-      ok(a.ink === AMBER && vals(other).fcVerified === 'Not Verified' && vals(other).fcVerifiedInk === AMBER && other.state.fc.real === 'unproven', 'and an amber card is still amber after one', vals(other).fcVerified);
+      ok(a.ink === AMBER && other.fcVerifiedWords(other.state.fc)[0] === 'Not Verified' && other.fcVerifiedWords(other.state.fc)[1] === AMBER && other.state.fc.real === 'unproven', 'and an amber card is still amber after one', other.fcVerifiedWords(other.state.fc)[0]);
       // a short read that comes while the proofs are still being worked out does not leave them asking for ever: the newest whole read is heard
       const busy = (await loaded(O, 100)).card;
       V.nfc = busy;

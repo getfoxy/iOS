@@ -48,7 +48,7 @@
  *      is read, a card of one currency still refusing the other; the card's SEND asks the way to pay first and the currency only on
  *      the confirmation, where both could pay
  *   19 ADD FUNDS as the owner pressed it on the card's screen of a 1.23 card of both: the PIN pad before any card sheet, then one tap
- *      that writes; and money left waiting for the card (the line on its screen, TAP CARD on NOT PAID) the same: PIN, then one tap,
+ *      that writes; and money left waiting for the card (the row in its HISTORY, TAP CARD on NOT PAID) the same: PIN, then one tap,
  *      never a tap refused for want of the PIN and a second one after the pad
  *
  * Every page ends with its books per unit off by 0. */
@@ -504,8 +504,8 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
     ok(fc.v123 && fc.cents && fc.bal && fc.bal.usd === 500 && fc.bal.sat === 3000 && holder.fcTwoUnits(fc), 'the card\u2019s screen knows it holds both, and each balance');
     const v = vals(holder);
     ok(v.fcPillRows.length === 2 && v.fcPillRows[0].big === '5.00' && v.fcPillRows[1].big === '3,000', 'two pills: dollars, then bitcoin', JSON.stringify(v.fcPillRows.map((x) => x.big)));
-    ok(/^PER SECOND LIMIT \$10\b/.test(v.fcLimitLine) && /both currencies$/.test(limitsSub(v)), 'the ceiling once, in dollars, for both: $10.00 a payment, $10 a second (one second of it, software 1.25)', v.fcLimitLine + ' / ' + limitsSub(v));
-    ok(v.fcButtons.some((x) => x.label === 'SWAP' && (x.dim === '1') === !holder.offlineNow()), 'SWAP is in the bottom row, and not greyed for being of one currency');
+    ok(/^PER SECOND LIMIT \$10\b/.test(holder.fcLimitWords(fc)) && /both currencies$/.test(limitsSub(v)), 'the ceiling once, in dollars, for both: $10.00 a payment, $10 a second (one second of it, software 1.25)', holder.fcLimitWords(fc) + ' / ' + limitsSub(v));
+    ok(v.fcMenuItems.some((x) => x.label === 'SWAP') && v.fcButtons === undefined, 'SWAP is in the card’s menu, not on its screen');
     holder.fcWithdraw();
     ok(holder.state.screen === 'currency' && holder.state.currencyFlow === 'card' && holder.state.curCard && holder.state.curCard.question === 'WITHDRAW WHICH?'
        && holder.state.curCard.bal.usd === 500, 'WITHDRAW asks which currency first, with what the card holds of each');
@@ -934,7 +934,8 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
     const setUpAs = async (a, c, i) => {
       await toCurrency(a, c);
       cur(a).curCards[i].tap();
-      // SKIP on both amounts (26j-card-wheel.js, `fcSuSkip`): NO PIN AMOUNT? on SET AMOUNT, then MAX SPEND PER SECOND (or the rate typed)
+      // SKIP on every amount (26j-card-wheel.js, `fcSuSkip`): NO PIN AMOUNT and 24HR LIMIT on SET AMOUNT, then MAX PER SECOND (or the rate typed)
+      a.fcSuSkip();
       a.fcSuSkip();
       c.tap();
       if (speed(a)) speed(a).skip(); else a.fcSuSkip();
@@ -950,18 +951,21 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       await toCurrency(a, c);
       cur(a).curCards[i].tap();
       const unitNow = a.fcTypedUnit();
-      ok(!cardUp(a) && a.state.screen === 'amount' && a.state.flow === 'cardSuNoPin' && a.state.unit === 'USD' && a.state.amount === '20.00' && a.state.amountDefault === true && unitNow === (i === 0 ? 'usd' : 'sat'),
-         name + ': the currency opens SET AMOUNT for the no-PIN amount, no question first, $20.00 filled in as the default, in dollars, for ' + (i === 0 ? 'cents' : 'sats'), JSON.stringify([a.state.flow, a.state.unit, unitNow]));
-      // the round back button off NO PIN AMOUNT? is CURRENCY again (the step before), not the start of the set-up
+      ok(!cardUp(a) && a.state.screen === 'amount' && a.state.flow === 'cardSuNoPinTx' && a.state.unit === 'USD' && a.state.amount === '5.00' && a.state.amountDefault === true && unitNow === (i === 0 ? 'usd' : 'sat'),
+         name + ': the currency opens NO PIN AMOUNT on SET AMOUNT, no question first, $5.00 filled in as the default, in dollars, for ' + (i === 0 ? 'cents' : 'sats'), JSON.stringify([a.state.flow, a.state.unit, unitNow]));
+      // the round back button off NO PIN AMOUNT is CURRENCY again (the step before), not the start of the set-up
       a.back();
       ok(a.state.screen === 'currency' && a.state.currencyFlow === 'card' && !!a._fcSu && a._fcSu.unit === '' && !cardUp(a) && a.state.stack.slice(-1)[0] === 'flashcard',
-         name + ': back off NO PIN AMOUNT? is the CURRENCY question again, the set-up still open, over the card’s screen', JSON.stringify([a.state.screen, a.state.currencyFlow, a.state.stack]));
+         name + ': back off NO PIN AMOUNT is the CURRENCY question again, the set-up still open, over the card’s screen', JSON.stringify([a.state.screen, a.state.currencyFlow, a.state.stack]));
       cur(a).curCards[i].tap();
-      ok(a.state.screen === 'amount' && a.state.flow === 'cardSuNoPin' && a.state.amount === '20.00' && a.fcTypedUnit() === (i === 0 ? 'usd' : 'sat'),
-         name + ': chosen again, NO PIN AMOUNT? again with its default', JSON.stringify([a.state.screen, a.state.flow, a.state.amount]));
+      ok(a.state.screen === 'amount' && a.state.flow === 'cardSuNoPinTx' && a.state.amount === '5.00' && a.fcTypedUnit() === (i === 0 ? 'usd' : 'sat'),
+         name + ': chosen again, NO PIN AMOUNT again with its default', JSON.stringify([a.state.screen, a.state.flow, a.state.amount]));
+      a.setState({ amount: '1.00', amountDefault: false });
+      a.fcAmountNext();
+      ok(a.state.screen === 'amount' && a.state.flow === 'cardSuNoPin' && a.fcTypedUnit() === (i === 0 ? 'usd' : 'sat'), name + ': NEXT is 24HR LIMIT, in the same unit', a.state.flow);
       a.setState({ amount: '2.00' });
       a.fcAmountNext();
-      ok(!cardUp(a) && speed(a) && speed(a).chosen === '$5' && speed(a).alt === 'SKIP', name + ': NEXT opens MAX SPEND PER SECOND, in dollars, SKIP under NEXT', JSON.stringify(speed(a)));
+      ok(!cardUp(a) && speed(a) && speed(a).chosen === '$5' && speed(a).alt === 'SKIP', name + ': NEXT opens MAX PER SECOND, in dollars, SKIP under NEXT', JSON.stringify(speed(a)));
       speed(a).other();
       a.setState({ amount: '10.00' });
       ok(a.state.flow === 'cardSuTap' && a.fcSuAmountLine() === 'It will take 9 seconds to pay $40.00.', name + ': its figure, SET AMOUNT for another rate, its seconds under the figure', a.fcSuAmountLine());
@@ -970,6 +974,8 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       await until('the card to be set up', () => !!c.state.owner && a.state.fc && a.state.fc.key === c.key && a.state.fc.ownedHere === true && !(a._fcTaps > 0));
       await uiSettle();
       ok(c.state.noPinLimit === 200 && c.state.tapLimit === 1000, name + ': NEXT wrote them to the card in the one tap, $2.00 and $10.00 a second ($10.00) in cents', JSON.stringify([c.state.noPinLimit, c.state.tapLimit]));
+      const tx = a.fcW().cardNoPinTx(c.key);
+      ok(!!tx && (i === 0 ? tx.unit === 'usd' && tx.n === 100 : tx.unit === 'sat' && tx.usd === 1), name + ': and $1.00 for one payment, NO PIN AMOUNT, kept on this phone', JSON.stringify(tx));
       // one currency chosen: one pill from the moment set-up ends, the ceiling said with no "both", and ADD FUNDS asks nothing
       const v1 = vals(a);
       ok(v1.fcPillRows.length === 1 && v1.fcPillRows[0].big === (i === 0 ? '0.00' : '0') && !/both currencies/.test(limitsSub(v1)),
@@ -996,6 +1002,7 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
          'BOTH split between dollars’ frost and bitcoin’s fur, its badge $ and ₿; nothing under the tiles', b.bg);
       b.tap();
       a.fcSuSkip();
+      a.fcSuSkip();
       c.tap();
       speed(a).skip();
       await until('the card to be set up', () => !!c.state.owner && a.state.fc && a.state.fc.key === c.key && a.state.fc.ownedHere === true && !(a._fcTaps > 0));
@@ -1010,20 +1017,45 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       ok(vb.fcPillRows.length === 2 && vb.fcPillRows[0].big === '0.00' && vb.fcPillRows[0].small === '\u20bf 0'
          && vb.fcPillRows[1].big === '0' && vb.fcPillRows[1].small === '$0.00 USD',
          'BOTH: two pills at once, $0.00 with \u20bf 0 under and \u20bf 0 with $0.00 under', JSON.stringify(vb.fcPillRows.map((x) => [x.big, x.small])));
-      const swapB = vb.fcButtons.find((x) => x.label === 'SWAP');
+      const swapB = vb.fcMenuItems.find((x) => x.label === 'SWAP');
       a.toasts.length = 0;
       swapB.tap();
-      ok(swapB.dim === '0.38' && a.state.screen === 'flashcard' && a.toasts[0] === 'Put money on the card to swap.',
+      ok(a.state.screen === 'flashcard' && a.toasts[0] === 'Put money on the card to swap.',
          'SWAP is offered, greyed, and says why while the card holds nothing', JSON.stringify([swapB.dim, a.toasts]));
       a.fcAdd();
-      ok(a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'ADD WHICH TO THE CARD?' && !a.state.curBoth,
-         'ADD FUNDS on it asks which currency, with no BOTH among them', a.state.screen);
-      a.currencyPick('sat');
-      ok(a.state.screen === 'amount' && a.state.flow === 'cardAdd' && a.fcUnit() === 'sat', 'bitcoin chosen: SET AMOUNT in bitcoin');
+      ok(a.state.screen === 'amount' && a.state.flow === 'cardAdd' && !a.state.curCard && a.fcTypedUnit() === 'sat',
+         'DEPOSIT on it asks the amount first, with no currency asked yet', a.state.screen);
+      /* The keypad while the amount comes first (`renderContext`): NEXT is not greyed by a room check in the wrong unit (the card's
+       * room is asked after the choice, in its currency), nor by the bitcoin balance alone where no invoice can be asked for (the till
+       * open): it is capped by the larger of the two balances, as home's SEND at a mint with two is. */
+      {
+        Object.assign(a, new Function('return {' + liftFrom('21-render-values.js', 'renderContext() {') + '}')());
+        const keep = { fits: a.fcLoadFits, dep: a.fcDepCan, have: a.have, usd: a.state.balUsdCents };
+        const asked = [];
+        // a card with room for 5,000 of whatever it is asked about: $20 in cents fits, $20 read as 20,000 sats would not
+        a.fcLoadFits = (n) => { asked.push(n); return n <= 5000 ? { ok: true } : { ok: false, why: 'THE CARD IS FULL' }; };
+        a.state.balUsdCents = 20000;
+        a.have = 50000;
+        a.setState({ amount: '20.00', unit: 'USD' });
+        let k = a.renderContext();
+        ok(!k.sendOver && !k.roomOver && asked.length === 0, '$20 typed first: NEXT is not greyed, and the card’s room is not asked in the wrong unit', JSON.stringify({ over: k.sendOver, room: k.roomOver, asked }));
+        a.fcDepCan = () => false;
+        a.setState({ amount: '150.00', unit: 'USD' });
+        k = a.renderContext();
+        ok(!k.sendOver && Math.round(k.sendCapUsd) === 200, '$150 typed with $200 in dollars and $50 in bitcoin, no invoice possible: capped at the larger, NEXT not greyed',
+           JSON.stringify({ cap: k.sendCapUsd, over: k.sendOver }));
+        a.setState({ amount: '250.00', unit: 'USD' });
+        ok(a.renderContext().sendOver === true, 'and $250, more than either holds, is over');
+        a.fcLoadFits = keep.fits; a.fcDepCan = keep.dep; a.have = keep.have; a.state.balUsdCents = keep.usd;
+        a.setState({ amount: '', unit: 'USD' });
+      }
       a.setState({ amount: '2000', unit: 'SATS' });
       await a.refreshBalance();
+      // this phone holds sats and no dollars: the sats alone cover it, so nothing is asked
+      a.state.balUsdCents = 0;
       c.tap();
       a.fcAmountNext();
+      ok(a.state.screen !== 'currency' && a.fcUnit() === 'sat', 'only this phone’s bitcoin covers it: no question, on in bitcoin', a.state.screen);
       await until('the PIN pad', () => !!pad(a));
       pad(a).type('1234');
       await until('the sats to go on', () => !(a._fcTaps > 0) && a.state.fc && a.state.fc.bal && a.state.fc.bal.sat >= 2000);
@@ -1032,11 +1064,76 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       vb = vals(a);
       ok(vb.fcPillRows.length === 2 && vb.fcPillRows[0].big === '0.00' && vb.fcPillRows[1].big === a.group(a.state.fc.bal.sat),
          'still two pills: the dollars at nothing, the sats as they are', JSON.stringify(vb.fcPillRows.map((x) => x.big)));
-      const swapS = vb.fcButtons.find((x) => x.label === 'SWAP');
-      ok(swapS.dim === (a.offlineNow() ? '0.38' : '1'), 'and SWAP is not greyed once one side holds something: it swaps into the empty one', swapS.dim);
-      a.fcAdd();
-      ok(a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'ADD WHICH TO THE CARD?', 'and ADD FUNDS asks again the next time');
-      a.back();
+      const swapS = vb.fcMenuItems.find((x) => x.label === 'SWAP');
+      ok(!!swapS, 'and SWAP is in its menu once one side holds something: it swaps into the empty one');
+      /* DEPOSIT again, the amount first each time, and the question only where both of this phone's balances cover it (the keeper's
+       * rule: a currency without enough for it is not offered). What follows the choice is stood in for: it is the flow it always was. */
+      {
+        const went = [];
+        const addPin = a.fcAddPin;
+        a.fcAddPin = (n) => went.push([n, a.fcUnit()]);
+        const typed = (amount, unit, usdCents, sats) => {
+          a.fcAdd();
+          a.state.balUsdCents = usdCents;
+          a.have = sats;
+          a.setState({ amount, unit });
+          a.fcAmountNext();
+        };
+        // $1.00 is 1,000 sats at the price: both cover it
+        typed('1.00', 'USD', 5000, 5000);
+        ok(a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'ADD WHICH TO THE CARD?' && !a.state.curCard.short.usd && !a.state.curCard.short.sat
+           && !a.state.curBoth && went.length === 0, 'both balances cover $1.00: ADD WHICH TO THE CARD?, both offered, after the amount', JSON.stringify(a.state.curCard && a.state.curCard.short));
+        a.currencyPick('usd');
+        ok(a.state.screen === 'amount' && went.length === 0, 'and the keypad is given back first');
+        await uiSettle();
+        ok(went.length === 1 && went[0][0] === 100 && went[0][1] === 'usd', 'dollars chosen: on with 100 cents, as SET AMOUNT in dollars went on', JSON.stringify(went));
+        a.back();
+        // dollars short: not offered, and nothing asked
+        typed('1.00', 'USD', 50, 5000);
+        ok(a.state.screen === 'amount' && !a.state.curCard && went.length === 2 && went[1][0] === 1000 && went[1][1] === 'sat',
+           'this phone holds $0.50: dollars are not offered, and the 1,000 sats go on with nothing asked', JSON.stringify(went));
+        a.back();
+        // bitcoin short: the dollars, with nothing asked
+        typed('1.00', 'USD', 5000, 400);
+        ok(!a.state.curCard && went.length === 3 && went[2][0] === 100 && went[2][1] === 'usd', 'this phone holds ₿400: the dollars go on with nothing asked', JSON.stringify(went));
+        a.back();
+        /* neither covers, where the deposit can be asked for by invoice: which currency it is in, both offered and marked BY INVOICE,
+         * and the one chosen goes to the invoice as it always did (`fcDepOpen`) */
+        const deps = [];
+        const depOpen = a.fcDepOpen;
+        a.fcDepOpen = (n, u) => deps.push([n, u]);
+        typed('25.00', 'USD', 50, 400);
+        ok(a.fcDepCan() === true && a.state.screen === 'currency' && !a.state.curCard.short.usd && !a.state.curCard.short.sat
+           && a.state.curCard.mark.usd === 'BY INVOICE' && a.state.curCard.mark.sat === 'BY INVOICE'
+           && cur(a).curCards.map((x) => x.tag + (x.cursor === 'pointer' ? ' offered' : ' greyed')).join() === 'BY INVOICE offered,BY INVOICE offered',
+           'neither covers $25.00, and it can be asked for by invoice: both offered, each marked BY INVOICE', cur(a).curCards.map((x) => x.tag + ' ' + x.cursor).join());
+        cur(a).curCards[0].tap();
+        await uiSettle();
+        ok(deps.length === 1 && deps[0][0] === 2500 && deps[0][1] === 'usd' && went.length === 3, 'dollars chosen: the invoice for $25.00, as before', JSON.stringify(deps));
+        a.setState({ screen: 'amount', stack: a.state.stack, flow: 'cardAdd' });
+        a.back();
+        typed('25.00', 'USD', 50, 400);
+        cur(a).curCards[1].tap();
+        await uiSettle();
+        ok(deps.length === 2 && deps[1][0] === 25000 && deps[1][1] === 'sat', 'bitcoin chosen: the invoice for its sats', JSON.stringify(deps));
+        a.setState({ screen: 'amount', flow: 'cardAdd' });
+        a.back();
+        a.fcDepOpen = depOpen;
+        // neither covers, and no invoice can be asked for: the question with both greyed, saying why; back is the amount, still typed
+        const depCan = a.fcDepCan;
+        a.fcDepCan = () => false;
+        typed('100.00', 'USD', 50, 400);
+        ok(a.state.screen === 'currency' && a.state.curCard.short.usd === 'NOT ENOUGH ON THIS PHONE' && a.state.curCard.short.sat === 'NOT ENOUGH ON THIS PHONE' && went.length === 3,
+           'neither covers $100.00: the question with both greyed, NOT ENOUGH ON THIS PHONE, and nothing goes on', JSON.stringify(a.state.curCard && a.state.curCard.short));
+        a.toasts.length = 0;
+        cur(a).curCards[0].tap();
+        ok(a.toasts[0] === 'This phone holds less than that. Type a smaller amount.' && a.state.screen === 'currency' && went.length === 3, 'a greyed one says why when pressed', a.toasts[0]);
+        a.back();
+        ok(a.state.screen === 'amount' && a.state.amount === '100.00', 'and back is the amount, still typed');
+        a.fcDepCan = depCan;
+        a.fcAddPin = addPin;
+        a.back();
+      }
     }
 
     /* BOTH holding $10.00 and ₿0 (the owner's card): SWAP is offered, opens from dollars into bitcoin, and the two taps swap part of the
@@ -1058,9 +1155,9 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       let v = vals(a);
       ok(v.fcPillRows.length === 2 && v.fcPillRows[0].big === '10.00' && v.fcPillRows[1].big === '0' && a.state.fc.bal.sat === 0,
          'BOTH with $10.00 and ₿0: two pills', JSON.stringify(v.fcPillRows.map((x) => x.big)));
-      const sb = v.fcButtons.find((x) => x.label === 'SWAP');
+      const sb = v.fcMenuItems.find((x) => x.label === 'SWAP');
       a.toasts.length = 0;
-      ok(sb.dim === '1', 'SWAP is not greyed', sb.dim);
+      ok(!!sb, 'SWAP is in the card’s menu');
       sb.tap();
       ok(a.state.screen === 'swap' && a.state.swapFrom === 'usd' && a.state.swapTo === 'sat' && a.swapHave('usd') === 1000 && !a.toasts.length,
          'SWAP opens the swap screen from dollars into bitcoin, with the card’s $10.00 to swap', JSON.stringify([a.state.screen, a.state.swapFrom, a.toasts]));
@@ -1126,7 +1223,7 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       Object.assign(a, new Function('return {' + [['26i-swap.js', 'swapUnits() {'], ['26i-swap.js', 'swapComing(u) {'], ['26i-swap.js', 'swapHave(u) {']]
         .map(([f, sig]) => liftFrom(f, sig)).join(',\n') + '}')());
       a.swapProbe = () => {};
-      vals(a).fcButtons.find((x) => x.label === 'SWAP').tap();
+      vals(a).fcMenuItems.find((x) => x.label === 'SWAP').tap();
       await uiSettle();
       const q = await H.W.swapQuote('usd', 'sat', 300, a.swapComing('usd'));
       c.tap();
@@ -1170,6 +1267,7 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       const c = newCard(H, undefined, { format: 4, software: 23 });
       await toCurrency(a, c);
       cur(a).curCards[2].tap();
+      a.fcSuSkip();
       a.setState({ amount: '2.00' });
       a.fcAmountNext();
       c.tap();
@@ -1242,7 +1340,7 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       ok(a.state.fc.only === '' && H.W.cardHold(await (async () => { c.tap(); return H.W.cardLook(c, { mine: true, price: PRICE }); })()) === 'both',
          'holding dollars, it is read as a card of both', a.state.fc.only);
       a.fcAdd();
-      ok(a.state.screen === 'currency' && a.state.curCard && a.state.curCard.question === 'ADD WHICH TO THE CARD?', 'and ADD FUNDS asks which');
+      ok(a.state.screen === 'amount' && a.state.flow === 'cardAdd' && a._fcAddFirst === true, 'and DEPOSIT asks the amount, then which');
       a.back();
       await settle();
       booksGood('the set-up’s currency', H, R);
@@ -1267,7 +1365,7 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       a.fcSendSetUp(500, 'sat', null, null);
       pad(a).type('1234');
       pad(a).type('1234');
-      ok(a.state.screen === 'amount' && a.state.flow === 'cardSuNoPin' && !cardUp(a), 'a set-up for the card’s holder goes from the PIN to NO PIN AMOUNT?, no currency asked',
+      ok(a.state.screen === 'amount' && a.state.flow === 'cardSuNoPin' && !cardUp(a), 'a set-up for the card’s holder goes from the PIN to 24HR LIMIT, no currency and no NO PIN AMOUNT asked',
          a.state.screen + ' ' + a.state.flow);
       void c;
     }
@@ -1466,12 +1564,13 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
     a.fcTap = (...x) => { asked.push('tap'); return tap(...x); };
     a.fcAskPin = (...x) => { asked.push('pin'); return askPin(...x); };
     a.fcAdd();
-    ok(a.state.screen === 'currency', 'ADD FUNDS asks which', a.state.screen);
-    a.currencyPick('usd');
+    ok(a.state.screen === 'amount' && a.state.flow === 'cardAdd', 'DEPOSIT asks the amount first', a.state.screen);
     a.state.amount = '10.00';
     a.state.unit = 'USD';
     both.tap();
     a.fcAmountNext();
+    // which pays, where both of this phone's balances cover it: dollars
+    if (a.state.screen === 'currency') a.currencyPick('usd');
     await uiSettle();
     ok(asked[0] === 'pin' && !!pad(a) && /^ADD \$10\.00 TO CARD$/.test(pad(a).cta), 'NEXT: the PIN pad first, before the card is asked for', asked.join(' ') + ' | ' + (pad(a) && pad(a).cta));
     if (pad(a)) pad(a).type('1234');
@@ -1496,10 +1595,10 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       asked.length = 0;
       ok(a.state.screen === 'flashcard' && a.state.fc.ownedHere === true, press + ': on the card’s screen, the card known as this phone’s');
       both.tap();
-      if (press === 'the line on its screen') {
-        const note = (vals(a).fcNotes || [])[0];
-        ok(!!note && /waiting to go onto this card/.test(note.text), 'the card’s screen says it is waiting', note && note.text);
-        if (note) note.tap();
+      if (press === 'the row in its history') {
+        const note = a.fcHistNotes(a.state.fc).filter((n) => n.kind === 'owed')[0];
+        ok(!!note && /waiting to go onto this card/.test(note.name), 'the card’s HISTORY says it is waiting', note && note.name);
+        if (note) note.open();
       } else a.fcOutWrite();
       await uiSettle();
       ok(asked[0] === 'pin' && !!pad(a) && !(a._fcTaps > 0), press + ': the PIN pad first, no card asked for yet', asked.join(' '));
@@ -1508,7 +1607,7 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       await uiSettle();
       ok(asked.join(' ') === 'pin tap', press + ': and one tap puts it on', asked.join(' '));
     };
-    await waiting(250, 'the line on its screen');
+    await waiting(250, 'the row in its history');
     await waiting(150, 'TAP CARD on NOT PAID');
     ok(a.state.fc.bal.usd === 1400 && a.state.fc.ownedHere === true, 'all of it on the card, the card still this phone’s own', JSON.stringify(a.state.fc.bal) + ' ' + a.state.fc.ownedHere);
     await settle();

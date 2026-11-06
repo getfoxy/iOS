@@ -294,7 +294,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     ok(v.fcPillRows.length === 1 && v.fcPillRows[0].sym === '$' && v.fcPillRows[0].big === '20.00' && v.fcPillRows[0].ink === '#10161B'
        && v.fcPillRows[0].small === '₿ 25,000' && v.fcBalance === '$ 20.00',
        'one dollar pill, frost and dark ink: its cents big, their worth in sats under them at the price', JSON.stringify(v.fcPillRows[0] && { big: v.fcPillRows[0].big, small: v.fcPillRows[0].small }));
-    ok(!v.fcButtons.some((x) => x.label === 'SWAP') && v.fcButtons.length === 0, 'no SWAP, and no row at all: the card holds one currency', v.fcButtons.map((x) => x.label).join());
+    ok(v.fcButtons === undefined && !v.fcMenuItems.some((x) => x.label === 'SWAP'), 'no SWAP, and no row at all: the card holds one currency', v.fcMenuItems.map((x) => x.label).join());
     holder.price = 0;
     v = vals(holder);
     ok(v.fcPillRows[0].small === '' && v.fcPillRows[0].big === '20.00', 'with no price, nothing under the dollars');
@@ -305,7 +305,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     H.nfc = k;
     holder.fcRead();
     await until('the card read again', () => !!holder.state.fc && holder.state.fc.tap && holder.state.fc.tap.limited && holder.state.fc.limit === 5000);
-    const line = () => vals(holder).fcLimitLine;
+    const line = () => holder.fcLimitWords(holder.state.fc);
     // (its daily limit is not said: the card screens have none)
     const want = 'PER SECOND LIMIT $20.00 | NO PIN';
     ok(line() === want, 'its limit as the rate it makes, in dollars: $20.00 a payment is $20.00 a second (one second of it, 1.25), and nothing of its daily limit', line());
@@ -779,7 +779,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     ok(limits(holder) && limits(holder).rows[0] === 'PER SECOND LIMIT | How fast the card can pay | $20.00 | per sec', 'CARD LIMITS: PER SECOND LIMIT first, $20.00 a payment said as $20.00 a second', limits(holder) && limits(holder).rows.join(' / '));
     limits(holder).press('PER SECOND LIMIT');
     if (explainer(holder)) { explainer(holder).finish(); explainer(holder).press('CONTINUE'); } else card(holder).press('CONTINUE');
-    ok(speed(holder) && speed(holder).mode === 'limit' && speed(holder).chosen === '$5', 'CONTINUE opens MAX SPEND PER SECOND, at $5 a second', JSON.stringify(speed(holder)));
+    ok(speed(holder) && speed(holder).mode === 'limit' && speed(holder).chosen === '$5', 'CONTINUE opens MAX PER SECOND, at $5 a second', JSON.stringify(speed(holder)));
     speed(holder).other();
     ok(holder.state.screen === 'amount' && holder.state.flow === 'cardLimit' && holder.state.unit === 'USD' && holder.usdKeypad() === true
        && holder.fcLimitQuestion() === 'What is the most this card should pay each second?', 'its figure opens the dollar keypad, asking a figure a second', holder.fcLimitQuestion());
@@ -795,7 +795,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     holder.fcSetLimit();
     limits(holder).press('PER SECOND LIMIT');
     if (explainer(holder)) { explainer(holder).finish(); explainer(holder).press('CONTINUE'); } else card(holder).press('CONTINUE');
-    ok(speed(holder) && speed(holder).alt === 'NO LIMIT', 'MAX SPEND PER SECOND on LIMITS: NO LIMIT under NEXT', JSON.stringify(speed(holder)));
+    ok(speed(holder) && speed(holder).alt === 'NO LIMIT', 'MAX PER SECOND on LIMITS: NO LIMIT under NEXT', JSON.stringify(speed(holder)));
     speed(holder).skip();
     sp = holder.fcLimitSpec();
     ok(holder.state.screen === 'fcLimitConfirm' && holder.state.fcLimit.sats === 0 && sp.amount === 'NO LIMIT' && sp.amountLabel === 'YOU ARE REMOVING THIS CARD\u2019S PER SECOND LIMIT.',
@@ -815,8 +815,8 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     await settle();
     ok(asked[0].sats === 1000 && asked[0].usd === 0 && asked[0].tap === true && k.state.tapLimit === 1000 && holder.toasts.indexOf('Per second limit set.') >= 0,
        'the card’s limit on a payment is set to 1,000 cents, and no dollars are sent to keep it at', JSON.stringify(asked[0]));
-    ok(vals(holder).fcLimitLine === 'PER SECOND LIMIT $10 | NO PIN' && limits((holder.fcSetLimit(), holder)).rows[0] === 'PER SECOND LIMIT | How fast the card can pay | $10 | per sec',
-       'and read back as $10 a second, on its face and in CARD LIMITS', vals(holder).fcLimitLine);
+    ok(holder.fcLimitWords(holder.state.fc) === 'PER SECOND LIMIT $10 | NO PIN' && limits((holder.fcSetLimit(), holder)).rows[0] === 'PER SECOND LIMIT | How fast the card can pay | $10 | per sec',
+       'and read back as $10 a second, in its HISTORY and in CARD LIMITS', holder.fcLimitWords(holder.state.fc));
     limits(holder).press('CLOSE');
     H.W.cardSetLimit = real;
     k.tap();

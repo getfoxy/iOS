@@ -610,7 +610,11 @@
     const usdCard = !!(s.fc && fcU === 'usd');
     const cardHeld = s.fc ? (this.fcHeld ? this.fcHeld(s.fc, fcU) : Math.max(0, Math.round(Number(s.fc.balance) || 0))) : 0;
     const usdLoad = (s.flow === 'cardAdd' || s.flow === 'cardSend') && !!(this.fcTypedUnit && this.fcTypedUnit() === 'usd');
+    /* DEPOSIT on a card of both currencies, the amount typed before the currency (26f-flashcard.js `fcAddWhich`): capped by the larger
+     * of this phone's two balances, as a send at a mint with two is, and the card's room asked only once the currency is chosen. */
+    const addFirst = s.flow === 'cardAdd' && !!this._fcAddFirst;
     const sendCapUsd = !capped ? 0
+      : addFirst ? Math.max(usdCapUsd, btcAvailUsd || 0)
       : ((s.flow === 'cardWd' || cardOut) && usdCard) ? cardHeld / 100
       : usdLoad ? usdCapUsd
       : (s.flow === 'cardWd' || cardOut) ? cardHeld * this.satUsd()
@@ -629,7 +633,7 @@
      * take, and an enormous one is not cut into pieces on every key. FLASHCARD
      * on the send screen has no card on show and is capped by the balance
      * alone. */
-    const room = (s.flow === 'cardAdd' && sendEnteredUsd > 0)
+    const room = (s.flow === 'cardAdd' && !addFirst && sendEnteredUsd > 0)
       ? this.fcLoadFits(usdLoad ? Math.min(Math.round(sendEnteredUsd * 100), depAsk ? Infinity : Math.max(0, Math.round(Number(s.balUsdCents) || 0)))
         : Math.min(this.wantedSats(), depAsk ? Infinity : Math.floor(balLive.sats || 0))) : null;
     const roomOver = !!(room && !room.ok);

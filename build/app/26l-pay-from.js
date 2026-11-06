@@ -273,7 +273,12 @@
       return Object.assign(look, {
         key: e.key, sym: LOOK[e.unit === 'usd' ? 'usd' : 'sat'].sym, name: this.pfName(e.mint),
         unitLine: this.unitWord(e.unit) + ' · ' + this.unitFigure(e.have, e.unit),
-        cost: this.pfCostText(e), costShown: !short,
+        // the cost is not drawn on the tile (the keeper, 2026-11-06: no descriptions in a choice); CHEAPEST says which
+        cost: this.pfCostText(e), costShown: false,
+        // a ring at the end of every tile, so each reads as a choice
+        pickShown: true, pickOn: chosen,
+        pickEdge: chosen ? 'rgba(255,255,255,.95)' : 'rgba(var(--pill-ink-rgb),.45)',
+        pickBg: chosen ? 'rgba(255,255,255,.95)' : 'transparent',
         tag: short ? (e.tag || 'NOT ENOUGH') : '', tagShown: short,
         bestShown: e.key === best,
         outline: chosen ? '3px solid rgba(255,255,255,.9)' : 'none',

@@ -135,6 +135,8 @@ check "flashcard model" 1 node tests/flashcard-model.js
 check "flashcard clock" 1 node tests/flashcard-clock.js
 check "flashcard no pin" 1 node tests/flashcard-nopin.js
 check "flashcard reset" 1 node tests/flashcard-reset.js
+check "spent pieces on a card" 1 node tests/card-spent-on-card.js
+check "card notices in its history" 1 node tests/card-notice.js
 check "flashcard change" 1 node tests/flashcard-change.js
 check "flashcard owed change" 1 node tests/flashcard-owed.js
 check "flashcard setup" 1 node tests/flashcard-setup.js
@@ -146,6 +148,7 @@ check "flashcard one signature" 1 node tests/flashcard-sigall.js
 check "flashcard stale lift" 1 node tests/flashcard-stale-lift.js
 check "flashcard take back" 1 node tests/flashcard-takeback.js
 check "flashcard screens" 1 node tests/flashcard-screens.js
+check "card headers"    1 node tests/card-headers.js
 check "card cancel" 1 node tests/card-cancel.js
 check "flashcard send" 1 node tests/flashcard-send.js
 check "flashcard on chain" 1 node tests/flashcard-onchain.js

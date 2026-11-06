@@ -256,6 +256,18 @@ function messageViews() {
   add('inbox, no Cashu ID in use', at('inbox', { contacts: MSG_CONTACTS, stack: ['home'] }, { wallet: { cashuMsgOn: () => false, cashuMsgPayments: () => [] } }));
   // the menu with BACKUP ACCOUNT at the very top: money in the wallet, the words not checked
   add('home, the menu with BACKUP ACCOUNT', at('home', { open0: true }, { wallet: { backedUp: () => false } }));
+  /* A card's HISTORY opened from the card, with what its screen does not say at the top (26f-flashcard.js, `fcHistNotes`): the mint's
+   * word in red, money waiting for another card in amber, how fresh the mint's word is and its limit in grey; one payment under them. */
+  {
+    const KEY = '02' + 'a1'.repeat(30) + 'c3d4';
+    const fc = { key: KEY, balance: 1700, count: 12, room: 52, pin: 'set', locked: false, hasRecord: true, setUp: true, pinSet: true, limit: 0,
+      day: null, owner: true, ownedHere: true, mint: MINT, recoverable: true, mine: true, first: 4102444800, last: 4102444800,
+      check: { spent: 300 }, checkedAt: 4102358400000, tap: { known: true, limited: true, paced: true, limit: 3000, left: 3000, turns: 0 } };
+    add('history, a card\u2019s own, with the mint\u2019s word and money waiting at its top', at('history', {
+      stack: ['home', 'flashcard'], histCard: KEY, histFilter: 'all', fc, historyComplete: true,
+      history: [{ label: 'TODAY', items: [Object.assign({}, TX_OUT, { card: KEY, memo: 'to card', name: 'card' })] }],
+    }, { wallet: { cardSession: () => Promise.resolve(), cardsList: () => [], cardOwed: () => [{ id: 'o1', card: '03' + 'b2'.repeat(30) + '9f0e', sats: 255, kind: 'load', out: true }] } }));
+  }
   return v;
 }
 
@@ -333,20 +345,21 @@ function representative(logic) {
   add('fcLimitConfirm, a per tap limit, to be confirmed', at('fcLimitConfirm', { fc: FC(), fcLimit: { sats: 2000 } }, { wallet: CARDS(), before: (a) => { a._fcLimitTap = true; } }));
   add('amount, a card\u2019s limit for paying without its PIN, with NO LIMIT under NEXT', at('amount', { flow: 'cardLimit', amount: '10', unit: 'USD', fc: FC({ noPinKnown: true }) }, { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = true; } }));
   // a card's set-up asks its two amounts on the same keypad (26j-card-wheel.js), the max per tap with its seconds under the figure
-  add('amount, the set-up\u2019s no PIN amount, nothing typed yet, SKIP under NEXT', at('amount', { flow: 'cardSuNoPin', amount: '', unit: 'USD' }, { before: (a) => { a._fcSu = { unit: '' }; } }));
+  add('amount, the set-up\u2019s NO PIN AMOUNT, nothing typed yet, SKIP under NEXT', at('amount', { flow: 'cardSuNoPinTx', amount: '', unit: 'USD' }, { before: (a) => { a._fcSu = { unit: '' }; } }));
+  add('amount, the set-up\u2019s 24HR LIMIT, nothing typed yet, SKIP under NEXT', at('amount', { flow: 'cardSuNoPin', amount: '', unit: 'USD' }, { before: (a) => { a._fcSu = { unit: '' }; } }));
   add('amount, the set-up\u2019s max per tap, its seconds under the figure, SKIP under NEXT', at('amount', { flow: 'cardSuTap', amount: '10.00', unit: 'USD' }, { before: (a) => { a._fcSu = { unit: '' }; } }));
   add('amount, the set-up\u2019s max per tap on a dollar card', at('amount', { flow: 'cardSuTap', amount: '10.00', unit: 'USD' }, { before: (a) => { a._fcSu = { unit: 'usd' }; } }));
-  /* The owner's designs (26j-card-wheel.js): WELCOME TO YOUR CASHU CARD over a new card's screen and as SEND's own screen, MAX SPEND PER
+  /* The owner's designs (26j-card-wheel.js): WELCOME TO YOUR FOXY CARD over a new card's screen and as SEND's own screen, MAX PER
    * SECOND as the set-up and LIMITS ask it, CARD LIMITS with its rows, and a limit confirmed as the rate it makes */
   const NEWCARD = { setUp: false, pinSet: false, hasRecord: false, pin: 'none', owner: false, ownedHere: false, balance: 0, count: 0, mint: '', check: 'none', design: '' };
-  add('flashcard, a new card: WELCOME TO YOUR CASHU CARD', at('flashcard', { fc: FC(NEWCARD) }, { wallet: CARDS() }));
+  add('flashcard, a new card: WELCOME TO YOUR FOXY CARD', at('flashcard', { fc: FC(NEWCARD) }, { wallet: CARDS() }));
   add('flashcard, a set-up cut short: the welcome, saying so', at('flashcard', { fc: FC(Object.assign({}, NEWCARD, { pin: 'set', pinSet: true })) }, { wallet: CARDS() }));
   add('fcWelcome, a new card met by SEND > FLASHCARD', at('fcWelcome', { fcWelcome: { sats: 1500, unit: 'sat', alt: null, info: null }, flow: 'cardSend', amount: '1500', unit: 'SATS' }, { wallet: CARDS() }));
   add('fcName, NAME CARD in the set-up, empty, SKIP under NEXT', at('fcName', { fcNaming: { mode: 'su', key: '' }, fcNameDraft: '' }));
   add('fcName, NAME CARD with a name typed', at('fcName', { fcNaming: { mode: 'su', key: '' }, fcNameDraft: 'Lunch card' }));
   add('fcName, RENAME CARD with the name filled in', at('fcName', { fcNaming: { mode: 'rename', key: '' }, fcNameDraft: 'Lunch card' }));
-  add('fcSpeed, MAX SPEND PER SECOND, the set-up at $5, SKIP under NEXT', at('fcSpeed', { fcSpeed: { mode: 'su', unit: 'usd', r: 5 } }));
-  add('fcSpeed, MAX SPEND PER SECOND, LIMITS at $25, NO LIMIT under NEXT', at('fcSpeed', { fcSpeed: { mode: 'limit', unit: 'sat', r: 25 }, fc: FC({ tap: { known: true, paced: true, limited: false } }) }, { wallet: CARDS() }));
+  add('fcSpeed, MAX PER SECOND, the set-up at $5, SKIP under NEXT', at('fcSpeed', { fcSpeed: { mode: 'su', unit: 'usd', r: 5 } }));
+  add('fcSpeed, MAX PER SECOND, LIMITS at $25, NO LIMIT under NEXT', at('fcSpeed', { fcSpeed: { mode: 'limit', unit: 'sat', r: 25 }, fc: FC({ tap: { known: true, paced: true, limited: false } }) }, { wallet: CARDS() }));
   /* RESTORE CARD (home's RESTORE LOST CARD): a ready card on the fur, two locked ones (days, hours), and an empty one with nothing to
    * restore. Its dates are from now, with an hour's margin, so the words are the same on every run. */
   const NOW_S = Math.floor(Date.now() / 1000);
@@ -1261,7 +1274,7 @@ function cards() {
   add('card: set per tap limit, the warning', (a) => a.fcLimitAsk(() => {}));
   add('card: set no PIN limit, the warning', (a) => a.fcLimitAsk(() => {}, 'nopin'));
   /* A card's set-up from software 1.21 (26j-card-wheel.js): the PIN pad for a card set up for somebody else (its two amounts are SET AMOUNT
-   * and MAX SPEND PER SECOND, above, with no question first); then the card of a holder with no phone (1.22): TIE OWNERSHIP's warning. */
+   * and MAX PER SECOND, above, with no question first); then the card of a holder with no phone (1.22): TIE OWNERSHIP's warning. */
   add('overlay: CREATE A PIN, for a card set up for its holder', (a) => a.fcSetUpSteps({ other: true, unit: 'sat', run() {} }));
   add('card: connect to phone, straight to the card PIN', (a) => { a.state.fc = { balance: 0, count: 0 }; a.fcGuestTie(); });
   add('card: restore lost card, a phone that loaded none', (a) => a.fcRestoreLost(), { wallet: { cardSession: () => Promise.resolve(), cardsList: () => [] } });

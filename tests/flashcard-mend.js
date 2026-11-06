@@ -428,8 +428,8 @@ async function openingsOf(card) {
     await until('the card to be read', () => owner.state.fc && owner.state.fc.key === c.key);
     let v = vals(owner);
     const price = owner.fcPrice(bad.amount, 'sat');
-    ok(v.fcOwesLines.some((l) => /— NEEDS THE CARD’S PIN$/.test(l.text)) && v.fcChangeRows.map((r) => r.name).join() === 'FINISH THIS CHANGE (' + price + ')',
-       'the owner’s screen: CHANGE OWED … NEEDS THE CARD’S PIN, and one row, FINISH THIS CHANGE, with no GIVE UP', v.fcChangeRows.map((r) => r.name).join() + ' | ' + v.fcOwesLines.map((l) => l.text).join());
+    ok(owner.fcOwesWords(owner.state.fc).some((l) => /— NEEDS THE CARD’S PIN$/.test(l.text)) && v.fcChangeRows.map((r) => r.name).join() === 'FINISH THIS CHANGE (' + price + ')',
+       'the owner’s screen: CHANGE OWED … NEEDS THE CARD’S PIN, and one row, FINISH THIS CHANGE, with no GIVE UP', v.fcChangeRows.map((r) => r.name).join() + ' | ' + owner.fcOwesWords(owner.state.fc).map((l) => l.text).join());
     v.fcChangeRows[0].tap();
     ok(pad(owner) && pad(owner).title === 'CARD PIN' && pad(owner).cta === 'FINISH ' + price, 'FINISH THIS CHANGE asks for the card’s PIN on the card PIN pad, its button saying what it does', pad(owner) && pad(owner).cta);
     c.tap();
@@ -437,8 +437,8 @@ async function openingsOf(card) {
     await until('the change to be put on', () => c.balance() === WHOLE && owner.toasts.some((t) => /went onto the card/.test(t)));
     await settle();
     v = vals(owner);
-    ok(v.fcChangeRows.length === 0 && v.fcOwesLines.map((l) => l.text).join() === 'CHANGE OWED TO THIS CARD · ' + owner.fcBoth(bad.amount) + ' — FETCHED AND PUT ON',
-       'and one tap later the card is whole, the line says the change went on, and there is nothing more to do', String(c.balance()) + ' | ' + v.fcOwesLines.map((l) => l.text).join());
+    ok(v.fcChangeRows.length === 0 && owner.fcOwesWords(owner.state.fc).map((l) => l.text).join() === 'CHANGE OWED TO THIS CARD · ' + owner.fcBoth(bad.amount) + ' — FETCHED AND PUT ON',
+       'and one tap later the card is whole, the line says the change went on, and there is nothing more to do', String(c.balance()) + ' | ' + owner.fcOwesWords(owner.state.fc).map((l) => l.text).join());
 
     // stuck: the mint has no answer for the poisoned opening: GIVE UP THIS CHANGE for it, and for no other
     const s = await poisonedPayment(H, R, 22, { cut: true });
@@ -449,7 +449,7 @@ async function openingsOf(card) {
     await until('the stuck card to be read', () => owner.state.fc && owner.state.fc.key === s.c.key);
     v = vals(owner);
     const sp = owner.fcPrice(s.bad.amount, 'sat');
-    ok(v.fcChangeRows.map((r) => r.name).join() === 'GIVE UP THIS CHANGE (' + sp + ')' && v.fcOwesLines.every((l) => /NOT YET MADE BY THE TILL$/.test(l.text)),
+    ok(v.fcChangeRows.map((r) => r.name).join() === 'GIVE UP THIS CHANGE (' + sp + ')' && owner.fcOwesWords(owner.state.fc).every((l) => /NOT YET MADE BY THE TILL$/.test(l.text)),
        'an opening the mint has no answer for and a till’s key on it: GIVE UP THIS CHANGE for it alone; the honest ones the till owes have none', v.fcChangeRows.map((r) => r.name).join());
     v.fcChangeRows[0].tap();
     ok(cardUi(owner) && cardUi(owner).title === 'GIVE UP THIS CHANGE?' && /will be gone for good/.test(cardUi(owner).reason) && cardUi(owner).has('GIVE UP ' + sp) && !cardUi(owner).has('CANCEL'),
@@ -458,7 +458,7 @@ async function openingsOf(card) {
     cardUi(owner).press('GIVE UP ' + sp);
     await until('the opening to be given up', () => s.c.state.openings[s.bad.k].state === 'empty' && owner.toasts.indexOf('The change is given up.') >= 0);
     v = vals(owner);
-    ok(v.fcChangeRows.length === 0 && v.fcOwesLines.length > 0, 'and the row is gone with it, the change the till still owes still said', v.fcOwesLines.map((l) => l.text).join());
+    ok(v.fcChangeRows.length === 0 && owner.fcOwesWords(owner.state.fc).length > 0, 'and the row is gone with it, the change the till still owes still said', owner.fcOwesWords(owner.state.fc).map((l) => l.text).join());
     H.fate = null;
 
     // the card's own log: the tap it was given up in is a line of its own

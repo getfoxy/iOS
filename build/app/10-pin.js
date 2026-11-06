@@ -333,8 +333,8 @@
     // delete prompts (2147483600) and the Tor gate (2147483602) included.
     const root = el('position:fixed;inset:0;z-index:2147483647;background:var(--bg,#050505);'
       + 'display:flex;flex-direction:column;align-items:center;justify-content:flex-start;'
-      // under the back button's row, where there is one
-      + 'padding:' + (o.back ? '118px' : '76px') + ' 26px 26px;box-sizing:border-box;'
+      // the back button's row at the top, where there is one, with the title in it
+      + 'padding:' + (o.back ? '56px' : '76px') + ' 26px 26px;box-sizing:border-box;'
       /* No fade for the lock. It is a cover, drawn under the phone's own
        * cover before that comes off, and its fade-in showed the home screen
        * through it for a moment: the connection screen used to sit underneath
@@ -344,19 +344,42 @@
       + 'font-family:SatSymbol,Sora,system-ui,sans-serif'
       + (o.cover ? '' : ';animation:foxyIn .16s ease'));
 
-    const title = el('font-size:26px;font-weight:800;letter-spacing:-0.02em;'
-      + 'color:var(--ink,#F5F1EC);text-align:center', o.title || '');
-    const sub = el('margin-top:10px;font-size:17px;font-weight:500;line-height:1.4;'
-      + 'color:rgba(245,241,236,.6);text-align:center;text-wrap:pretty', o.subtitle || '');
-    root.appendChild(title);
-    root.appendChild(sub);
+    /* A card's pad (`o.back`) has the header every screen with a back button has, SET AMOUNT's: the title in the top row, in line
+     * with the round button, then the divider, then the subtitle under it. The lock's keeps its own, with no button. */
+    let title, sub;
+    if (o.back) {
+      // (52 high, in line with the button, and taller for a title that wraps to two lines)
+      const row = el('flex:none;align-self:stretch;min-height:52px;display:flex;align-items:center;justify-content:center;'
+        + 'padding:0 60px;box-sizing:border-box');
+      title = el('min-width:0;font-size:22px;font-weight:800;letter-spacing:-0.022em;line-height:1.25;'
+        + 'color:var(--ink,#F5F1EC);text-align:center;text-wrap:balance', o.title || '');
+      row.appendChild(title);
+      root.appendChild(row);
+      const rule = el('flex:none;align-self:stretch;height:1px;margin:16px -2px 0;background:rgba(var(--ink-rgb,245,241,236),.1)');
+      rule.setAttribute('data-pin-rule', '1');
+      root.appendChild(rule);
+      sub = el('flex:none;align-self:stretch;padding:14px 0 8px;font-size:22px;font-weight:600;letter-spacing:-0.005em;'
+        + 'line-height:1.3;color:var(--ink,#F5F1EC);text-align:center;text-wrap:pretty', o.subtitle || '');
+      root.appendChild(sub);
+    } else {
+      title = el('font-size:26px;font-weight:800;letter-spacing:-0.02em;'
+        + 'color:var(--ink,#F5F1EC);text-align:center', o.title || '');
+      sub = el('margin-top:10px;font-size:17px;font-weight:500;line-height:1.4;'
+        + 'color:rgba(245,241,236,.6);text-align:center;text-wrap:pretty', o.subtitle || '');
+      root.appendChild(title);
+      root.appendChild(sub);
+    }
+    title.setAttribute('data-pin-title', '1');
+    sub.setAttribute('data-pin-sub', '1');
 
     // the dots
-    const dots = el('display:flex;gap:14px;margin-top:38px;height:18px;align-items:center');
+    const dots = el('display:flex;gap:14px;margin-top:' + (o.back ? '30px' : '38px') + ';height:18px;align-items:center');
+    dots.setAttribute('data-pin-dots', '1');
     root.appendChild(dots);
 
     const note = el('margin-top:18px;min-height:22px;font-size:16px;font-weight:700;'
       + 'color:#FF5C5C;text-align:center', o.warn || '');
+    note.setAttribute('data-pin-note', '1');
     root.appendChild(note);
 
     let entry = '';

@@ -391,10 +391,19 @@ const amountVals = (o) => app.renderAmount(Object.assign(
 
 // ---- a card's set-up asks its amounts on this pad, in the design's words ----
 {
+  // NO PIN AMOUNT (one payment), then 24HR LIMIT (the card's allowance), in the keeper's words
+  reset({ screen: 'amount', flow: 'cardSuNoPinTx' });
+  const tx = amountVals();
+  ok(tx.amountTitle === 'NO PIN AMOUNT' && tx.amountSubtitle === 'What is the most this card should pay in one transaction without asking for your PIN?',
+     'the set-up\u2019s no PIN amount: NO PIN AMOUNT, the most for one payment', tx.amountTitle + ' | ' + tx.amountSubtitle);
+  ok(tx.amtAlt === true && tx.amtAltLabel === 'SKIP', 'SKIP under its NEXT', tx.amtAltLabel);
+  reset({ screen: 'amount', flow: 'cardLimitTx' });
+  ok(amountVals().amountTitle === 'NO PIN AMOUNT' && amountVals().amountSubtitle === tx.amountSubtitle && amountVals().amtAltLabel === 'NO LIMIT',
+     'and from CARD LIMITS the same screen, with NO LIMIT under NEXT', amountVals().amountTitle + ' | ' + amountVals().amtAltLabel);
   reset({ screen: 'amount', flow: 'cardSuNoPin' });
   const v = amountVals();
-  ok(v.amountTitle === 'NO PIN AMOUNT?' && v.amountSubtitle === 'What\u2019s the most this card should pay in 24 hours without asking you for a PIN?',
-     'the set-up\u2019s no PIN amount: NO PIN AMOUNT?, and its question', v.amountTitle + ' | ' + v.amountSubtitle);
+  ok(v.amountTitle === '24HR LIMIT' && v.amountSubtitle === 'What is the most this card should pay in 24 hours without asking for your PIN?',
+     'then 24HR LIMIT, the most in 24 hours', v.amountTitle + ' | ' + v.amountSubtitle);
   ok(v.nextBg === 'rgba(var(--ink-rgb),.14)' && v.nextFur === 'none,none,none' && amountVals({ val: 5 }).nextBg === 'var(--acc)',
      'NEXT is grey until an amount is typed, and the fur button once it is', v.nextBg);
   // SKIP under NEXT, for none: the set-up's own (26j-card-wheel.js, `fcSuSkip`)
@@ -403,11 +412,13 @@ const amountVals = (o) => app.renderAmount(Object.assign(
   ok(v.amtAlt === true && v.amtAltLabel === 'SKIP', 'SKIP under NEXT, a plain pill', JSON.stringify([v.amtAlt, v.amtAltLabel]));
   v.amtAltTap();
   reset({ screen: 'amount', flow: 'cardSuTap' });
-  ok(amountVals().amountTitle === 'MAX SPEND PER SECOND' && amountVals().amountSubtitle === 'What is the most this card should pay each second?',
-     'the rate typed rather than chosen: MAX SPEND PER SECOND, a figure a second', amountVals().amountTitle + ' | ' + amountVals().amountSubtitle);
+  ok(amountVals().amountTitle === 'MAX PER SECOND' && amountVals().amountSubtitle === 'What is the most this card should pay each second?',
+     'the rate typed rather than chosen: MAX PER SECOND, a figure a second', amountVals().amountTitle + ' | ' + amountVals().amountSubtitle);
   ok(amountVals().amtAlt === true && amountVals().amtAltLabel === 'SKIP', 'and SKIP under its NEXT too', amountVals().amtAltLabel);
   amountVals().amtAltTap();
-  ok(skipped.join() === 'cardSuNoPin,cardSuTap', 'SKIP is the set-up\u2019s skip on each', skipped.join());
+  reset({ screen: 'amount', flow: 'cardSuNoPinTx' });
+  amountVals().amtAltTap();
+  ok(skipped.join() === 'cardSuNoPin,cardSuTap,cardSuNoPinTx', 'SKIP is the set-up\u2019s skip on each', skipped.join());
   delete app.fcSuSkip;
   // a figure the screen put there itself (the set-up's $20.00, `amountDefault`): the first key starts from nothing, del clears it
   reset({ screen: 'amount', flow: 'cardSuNoPin', amount: '20.00', unit: 'USD', amountDefault: true });

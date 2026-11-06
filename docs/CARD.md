@@ -259,6 +259,24 @@ repository's `FOXY-CARD-SPEC.md` and `FOXY-CARD-DAILY-LIMIT.md`.
   early when no PIN is given, since it would waste a tap. A signature the card gave under the allowance and whose answer
   was lost is given again with no PIN; one it gave with the PIN is given again with it, and the call says `pin-needed`
   with `again: true` and keeps the signature asked for.
+- **NO PIN AMOUNT, this phone's own rule.** The card has no figure for one payment without the PIN: its allowance is a
+  total, over 24 hours on 1.25 (and refilled by the PIN on 1.21 to 1.24), and a payment within what is left of it is
+  signed whatever its size. So the set-up asks NO PIN AMOUNT (`What is the most this card should pay in one transaction
+  without asking for your PIN?`) before 24HR LIMIT, the allowance, and LIMITS' NO PIN LIMIT asks it too, and the figure is
+  kept on the phone that set it, never on the card: `cardSetNoPinTx(key, n, unit, usd)` (`n` cents or sats, 0 for
+  none), read with `cardNoPinTx(key)`, in the same stored row as the dollars of the card's limits. **It is not restored
+  from the seed phrase and it is gone when the card is reset**: a restored phone, like any other phone, asks nothing
+  above it, and the confirmation says so. A card set up for its holder from SEND is not asked it (it would be kept on
+  the paying phone, not where the card pays). A bitcoin card's rule typed in dollars is kept as those dollars and weighed
+  in sats at the price of the day (this phone's last, while fresh), at the sats it made when typed where there is none. `cardNeedsPin` then
+  says yes for a payment over it, so `cardPay` with no PIN rejects `pin-needed` early, before the card is asked for
+  anything (with `limitReached` false: it is this phone's rule, not the card's LIMIT REACHED), and the PIN is asked and
+  the card tapped again as for any payment over the allowance. A rule in dollars weighed against a payment in sats, or
+  the other way, is turned at the card's rate, and with none the PIN is asked. Another phone, a till among them, does not
+  know it: there the card pays up to what is left of its allowance with no PIN, as it always has. The card cannot hold
+  to it until its software has such a figure (the smallest change: a fourth four-byte figure in the owner's limit
+  command, the most one payment signed without the PIN may take off the card, checked at the signature beside the
+  allowance and refused as the allowance is, and given back in GET_INFO's long answer).
 - **The log.** A tap in which a payment was signed for under the allowance (a PIN set, none shown, the allowance
   covering it) is marked by the card, and `card.log.last[n].noPin` is true. A payment on a card that has no PIN is not
   marked: it has no PIN to be without.
@@ -281,8 +299,8 @@ repository's `FOXY-CARD-SPEC.md` and `FOXY-CARD-DAILY-LIMIT.md`.
     CARD'S NO PIN LIMIT.` with `Every payment will ask for the PIN.` One tap, no PIN, and the toast `No PIN limit set.` or
     `No PIN limit removed.` Typed in dollars, it is kept at them (`cardNoPinUsd`). Nothing about it is shown on a card with no
     PIN, which cannot have one.
-  - *The card's screen* says `NO PIN UP TO $10` in the limit line on the card's face when it is the only limit, and in a line of its
-    own under the balance, `NO PIN UP TO $10 · LEFT TODAY $4`, beside the daily limit's and the limit on one tap's.
+  - *The card's menu* says it under **LIMITS**: `No PIN up to $10.00 · $4.00 left today`. The card's screen says nothing of
+    limits; its HISTORY has a row for the limit on one tap.
   - *The log* says `no PIN` at the end of the line for a tap in which the card signed under the allowance.
   - *Every flow that asked a card for its PIN* asks a card that has none nothing: WITHDRAW, renewing, moving to another mint,
     adding funds from a phone that is not the owner's, and the recut that a per tap limit can need.
@@ -333,25 +351,34 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
 
 ### The screens
 
-- **The card's screen.** The title has two lines under it for a card of 1.15 and on: `Verified At 11:42am` and
-  `Block #970809` (above). For a card of 1.20 the first line also needs every piece on the card found real (*What
-  Verified says*, below). **HISTORY**, what has been done with this card on this phone, is the round button at the top
-  left, for any card with a record. The limit line is on the card's own face, at the bottom left of its picture: `NO LIMIT`,
-  `DAILY LIMIT $5` and so on, and for a card with no PIN a bar and `NO PIN`: `NO LIMIT | NO PIN`, `DAILY LIMIT $5 | NO PIN`.
-  A card with a badge (`Blocked`, `Locked`, `No PIN yet`, ...) has it above the line, at the same left edge. The old CLOCK
-  line is gone. The line sits where the design puts BEARER at the bottom right, with the margins BEARER has, mirrored: its
-  first letter about 8.5% of the card's width in from the left edge (BEARER's last letter is that far from the right), and the baseline of
-  its last line as far above the bottom as BEARER's is (7.0% of the width on FL1, 6.4% on FX1, 5.8% on EL1: measured from the
-  markup and from `img/card-fx1.png`). It is drawn as BEARER is, in each design: on FL1 in BEARER's own type (Sora, 2.86% of the card's
-  width, semi-bold, tracked 0.24 em, white at 42%); on FX1 in the picture's ink (a dark brown, `#1A0A04`) at the size, weight
-  and tracking that match the picture's lettering (2.5%, bold, 0.3 em); on EL1 in BEARER's grey (`#BDBDBD`, 2.5%, bold,
-  0.32 em), 7.7% in from the left. All of it is in percentages of the card's width
-  (`cqw`), so it holds at any width; a long line wraps, balanced, within 66% of the width and never reaches BEARER (the
-  space before the dot of `PER TAP $2.00 · DAILY $5.00` does not break, so a line never begins with it).
-  The row under ADD FUNDS and WITHDRAW is **RESET** (a card of 1.17 and on, for its owner), **CHANGE PIN** (**ADD PIN** on a
-  card with none) and **LIMITS**, drawn as the receive screen's NOTE, COPY, SCAN and CARD: a round button, its drawing, its
-  label under it. All three are the owner's; a card before 1.17 has the two it can offer. The card is drawn in the design it
-  names (`FL1` stays `FL1`, before and after set-up); a card that names none is drawn in, and given, this phone's own.
+- **The card's screen.** Its title is the card's name alone. Under it: the card's picture, in the design it names (`FL1`
+  stays `FL1`, before and after set-up; a card that names none is drawn in, and given, this phone's own), with its badge under
+  it where it has one (`Blocked`, `Locked`, `No PIN yet`, `Not finished`); the card's mint and its balance in home's pill (two
+  pills for a card of 1.23 that holds both); the warning box for what the card itself waits on (a tamper it marked, a renewal, a
+  backup to move, a transfer to finish); and **DEPOSIT** and **WITHDRAW**. **HOME** is the round button at the top left and the
+  card's menu (≡) the one at the top right: **HISTORY**, **RENAME CARD**, **LIMITS**, **CHANGE PIN** (**ADD PIN** on a card with
+  none), **TRANSFER**, **SWAP** (a card of two currencies only, where it was a button under DEPOSIT and WITHDRAW) and **RESET**,
+  each where the card and this phone allow it. **DEPOSIT** on a card of 1.23 that takes both currencies, at a mint with both, asks
+  the amount first (SET AMOUNT, in dollars or sats as any payment from either balance is typed) and then which balance pays,
+  offering only the ones this phone holds enough of (`fcAddWhich`): both cover it, `ADD WHICH TO THE CARD?` with both; one covers
+  it, that one with nothing asked; neither, where the deposit can be asked for by invoice, the same question with both offered and
+  marked `BY INVOICE`, the one chosen going on to the invoice as before (`fcDepOpen`); where it cannot, both greyed `NOT ENOUGH ON
+  THIS PHONE`, and back to the amount.
+  What follows the choice is as it was.
+- **The card's HISTORY.** What has been done with this card on this phone, and at its top, in that list's own rows, what the
+  card's screen does not say (`fcHistNotes`): what the mint says is already spent (`The mint says $ 0.25 is already spent`, red,
+  with `WITHDRAW ALL or RESET clears it off the card` under it); money waiting to go onto a card (`$ 2.55 is waiting to go onto
+  HHH`, amber; a press goes back to the card's screen and is the tap that puts it on from there, as the box on that screen was,
+  `fcHistWrite`); how fresh the mint's word is (`Verified At 8:06am`, `Not
+  Verified`, `Verifying…`, grey; *What Verified says*, below); and the card's limit (`Per second limit $30`, `Per tap limit`, `No
+  limit`, with `No PIN` for a card without one, grey; a card whose one limit is a daily one has no row); what it holds in pieces above its limit (`In pieces above the
+  limit`, grey) and the change it is owed with where that stands (`Change owed to this card`, grey; FINISH THIS CHANGE and GIVE UP
+  THIS CHANGE stay on the card's screen). A list with these rows and no payments does not say `NOTHING TO SEE YET!` under them. A
+  card with no record has no menu and so no HISTORY: money waiting for a card stays an amber line on its screen.
+- **The ring.** While the mint's word stands, the card's ≡ button turns a red ring (home's `foxyRing`) and HISTORY in its menu
+  has the same ring, a red label and a soft red glow (home's BACKUP row's `alertGlow`); while money waits to go onto a card the
+  same in amber (`#F7931A`, `warnGlow`); red over amber when both. Both stop when the state clears: WITHDRAW ALL or RESET has the
+  card let the spent pieces go, and the waiting money is written (`fcAlert`, `fcAlertLook`).
 - **RESET.** The first button of that row (a circular arrow), for the owner of a card of 1.17 and on (a locked
   card is offered it to any phone holding it: only the card can say whose it is; on another phone's unlocked card, and on
   an older card, it is not in the row, and a call that reaches it says `NOT THIS PHONE'S CARD` or `NOT ON THIS CARD`). It opens one warning:
@@ -466,9 +493,9 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
    which leaves the person at Home, and a renewal are still said by a card, **ON THE CARD**.)
 
 If the card leaves early, or the tap is cut short by Foxy being put away, the
-pieces wait on the phone. The card's screen shows a line in the warning colour, `₿500
-is waiting to go onto this card. Press here, then tap it.`, and the next tap
-writes them. Putting money on a card does not touch its limit. THE CARD IS FULL
+pieces wait on the phone. The card's HISTORY has an amber row at its top, `₿500
+is waiting to go onto this card` with `Press here, then tap it.` under it, the card's menu button
+turns amber, and the next tap writes them. Putting money on a card does not touch its limit. THE CARD IS FULL
 if it has no room for the load: take some money off it first.
 
 The keypad says so before the tap. The card on show was read a moment ago, so
@@ -1651,6 +1678,62 @@ holder's, and only that card can hold them. So:
 An answer that does not come, a mint that says it is too busy, and a mint that
 cannot be asked which pieces are good, are not refusals: the row and the swap record
 wait, and the payment is made when the wallet next asks.
+
+## Pieces the mint says are spent, still on a card
+
+A card lists what it has not signed for and counts it as money. The mint may have seen
+some of that spent all the same, and the card cannot tell:
+
+- **How it gets there.** A copy of the card paid with it; this phone took the card's
+  money back by its own key after the date (`cardTakeBack`) and the card turned up; or
+  a write put back a piece the card had already signed away. The last was this phone's
+  doing: a top-up cut short left its row owed with some of its pieces on the card, the
+  card paid with those, and the next write cleared the places that payment used
+  (`CLEAR_SPENT`) and loaded the same pieces again, spent. Now a row a write has begun
+  on is stamped `tried` (once it is known to fit the card: its mint, its unit, its
+  pieces), and before any later write the row's own mint is asked about its pieces,
+  whichever mint the phone is on (`cardOwedPrune`, `cardStatesAt`; as it already was for
+  rows found and filed): a row it has spent all of is struck off, one it has spent some
+  of keeps the rest only, and a `tried` row no mint has answered for in this tap or just
+  before is not written (it waits, owed: `unchecked`).
+- **What the screen says.** Once the mint has answered (`cardCheck`, which now also says
+  `spentIn`, by currency, and `left`), the balance is what the card can spend: what it
+  lists less what the mint says is spent. The spent figure is a red row at the top of the
+  card's HISTORY, and the card's menu button turns red until it is cleared. While the card still lists those pieces, RESET asks for the PIN
+  whatever the balance says, and WITHDRAW with nothing left says RESET clears it.
+- **Taking them off.** The card has no command that takes off a piece it has not signed
+  for, and signing is how it lets one go. So the holder's WITHDRAW ALL, and RESET, which
+  takes the money off first, ask the mint first (`cardSpentOnCard`: the screen's word
+  where it is under ten minutes old and covers every piece now on the card, else one
+  request with the card held). The pieces it has spent are never chosen; the rest is
+  taken off and swapped as ever, and the spent ones are then signed for apart, a
+  signature for each date's pieces as any taking-off is, over one output nobody holds
+  the key to (`cardBurnPlan`). That swap is never sent and nothing is written down for
+  it; the signature is checked and thrown away. The card marks those places spent as
+  it always does, its count of unspent pieces is true again, and `cardReset` no longer
+  answers `has-money`. A card all of whose pieces are spent signs for nothing else:
+  the taking-off resolves with `amount` 0 and no history line, and `spentOff` says what
+  the card let go of (in its unit; it is on any taking-off that let some go). Only
+  pieces the mint says are SPENT, which is for good; a piece it calls pending is left
+  on the card. The commands are those of a payment, the same size as any, under the
+  PIN and the limit lifted by the card's owner key; a typed amount (not all of it) leaves the spent
+  pieces on the card and chooses among the rest.
+- **Limits of the asking.** The card is held at most twelve seconds while the mint is
+  asked; no answer refuses the taking-off with nothing asked of the card. A mint whose
+  info does not list NUT-07 is not asked at all: the taking-off goes by the card's own
+  figure, as before, and the log says so. A signature had back from an earlier tap cut
+  short is swapped in even where the tap finds only spent pieces. A card taken away
+  while it lets the spent pieces go, after the money's own signatures, leaves all the
+  money in this phone: `partial` with `left` 0 and `spentLeft`, and words that say the
+  spent part is still on the card, for WITHDRAW ALL or RESET to clear.
+- **What the card's own log says.** The card writes its letting go as a payment, in its
+  log and its receipts, which no swap matches. This phone keeps the hash of each such
+  signature (`foxy.flashcard.letgo`, `cardSpentLetGo`), and the card's own log says how
+  many of the receipts kept were spent pieces let go, with no money moved; COPY RECEIPTS
+  marks them. The card counts them in its day as any signature, under the lifted limit.
+- **RESET's warning.** While the mint is still being asked, it says "What the mint says
+  is unspent on it comes off to this phone first." with no figure; the tap asks the
+  mint itself before anything moves.
 
 ## What Verified says (software 1.20)
 

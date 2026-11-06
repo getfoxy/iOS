@@ -282,13 +282,13 @@ const own = (c) => { try { return String(JSON.parse(c.storage.getItem('foxy.cash
     await settle();
     await until('the phone to be back where it was', () => String(U.W.mintUrl).replace(/\/+$/, '') === MINT2);
     ok(app.state.screen === 'flashcard' && !app.state.fcMove, 'LATER leaves the card’s screen, and the phone where it was');
-    ok(vals(app).fcNotes.filter((n) => /waiting to go onto this card/.test(n.text)).length === 1 && /waiting to go onto this card/.test(vals(app).fcNotes[0].text),
-       'with the line that says so, first of the card’s lines');
+    ok(app.fcHistNotes(app.state.fc).filter((n) => n.kind === 'owed' && /waiting to go onto this card/.test(n.name)).length === 1 && vals(app).fcMenuRingInk === '#F7931A',
+       'with the row that says so in the card’s HISTORY, and its menu turning amber');
     app.fcSwitchMint();
     ok(face(app) && face(app).title === 'PUT IT ON FIRST', 'and it is not moved again while that money waits');
     face(app).press('CANCEL');
     c.tap();
-    vals(app).fcNotes[0].tap();
+    app.fcHistNotes(app.state.fc).filter((n) => n.kind === 'owed')[0].open();
     ok(!pad(app) && !(face(app) && face(app).title === 'A DIFFERENT MINT'), 'pressed from another mint than the money’s, the line visits that mint for the tap: no switch, and no PIN from the phone that owns the card');
     await until('the money to be on the card', () => app.state.screen === 'paid' && app.state.paidSays === 'CARD MOVED');
     ok(c.balance() === 1980 && c.state.record.mint === MINT && U.W.cardOwed().length === 0, 'a tap finishes the move: the card is at that mint with its money', String(c.balance()));

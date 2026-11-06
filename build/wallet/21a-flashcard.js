@@ -1732,7 +1732,9 @@
      * list of pieces and a promise not to sign twice; a copy of it, or a card
      * whose money was taken back, lists pieces the mint has already seen
      * spent. Resolves { sats, spent }: what the card says it holds, and how
-     * much of that the mint says is gone. Rejects `other-mint`, `no-route`. */
+     * much of that the mint says is gone. Rejects `other-mint`, `no-route`.
+     * (Also `spentIn` { sat, usd }, the spent by currency, and `left`, what the card can spend in its record's currency. The card goes on
+     * counting a spent piece until it signs for it: its holder's WITHDRAW ALL and RESET have it let them go, `cardSpentOnCard`.) */
     /* What a card holds in pieces larger than its limit on one tap, as its owner read it: a till holds longer for those. */
     cardAboveLimit: function (card) { return cardAboveLimit(card); },
     /* What a card cut deep holds, in its record's currency, in pieces larger than `limit` (in `unit`, the record's where not named: cents for
@@ -1768,15 +1770,29 @@
       if (!routeOpen()) return Promise.reject(cardError('no-route', 'There is no connection to the mint.'));
       var proofs = card.pieces.map(function (x) { return cardProofOf(x, card.key, card.record.refundKey, cardFullId(w, x.keyset), card.info.format); });
       var asking = onCircuit(w, 'card:' + card.key.slice(-16));
+      // (a card of 1.23 that holds both: each piece's own unit, as its table says it, else the record's)
+      var ru = (card.record && card.record.unit === 'usd') ? 'usd' : 'sat';
       return withTimeout(Promise.resolve().then(function () { return asking.checkProofsStates(proofs); }), 30000, 'the mint\u2019s word on a card\u2019s pieces')
         .then(function (states) {
-          var spent = 0;
+          var spent = 0, spentIn = { sat: 0, usd: 0 }, gone = [];
           proofs.forEach(function (pr, i) {
             var st = (states && states[i]) || {};
-            if (String(st.state || st.State || '').toUpperCase() === 'SPENT') spent += satsOf(pr.amount);
+            if (String(st.state || st.State || '').toUpperCase() !== 'SPENT') return;
+            var x = card.pieces[i];
+            spent += satsOf(pr.amount);
+            spentIn[(x && (x.unit === 'usd' || x.unit === 'sat')) ? x.unit : ru] += satsOf(pr.amount);
+            if (x && x.nonce) gone.push(String(x.nonce));
           });
+          /* Kept for the holder's WITHDRAW ALL or RESET that follows (`cardSpentOnCard`), and stamped on the card's row where this phone can
+           * take it back: a piece the mint has spent is not money, here or in what the list of cards says it held. */
+          cardMintWordNote(card.key, proofs.map(function (pr) { return String(pr.secret); }),
+                           proofs.filter(function (pr, i) { var st = (states && states[i]) || {}; return String(st.state || st.State || '').toUpperCase() === 'SPENT'; })
+                             .map(function (pr) { return String(pr.secret); }));
+          if (gone.length && cardMine(card)) cardFiledSpent(card.key, gone);
           // every piece good: written down with the time, for a phone that later has no connection to ask again
-          return { sats: card.balance, spent: spent, at: spent > 0 ? 0 : cardCheckedNote(card) };
+          /* `spentIn`: the same by currency, for a card of 1.23 that holds both (what it holds in each, less that, is what it can spend);
+           * `left`: what the card can spend in its record's currency, which is what its screen says it holds once the mint has answered */
+          return { sats: card.balance, spent: spent, spentIn: spentIn, left: Math.max(0, card.balance - spentIn[ru]), at: spent > 0 ? 0 : cardCheckedNote(card) };
         }, function () { throw cardError('no-route', 'The mint did not answer.'); });
     },
 
@@ -1825,10 +1841,16 @@
     cardPaceUsd: function (key) { var r = cardPaceAll()[key]; return (r && r.usd > 0) ? r.usd : 0; },
     // and the no-PIN allowance's (software 1.16): the dollars it was set in, or 0
     cardNoPinUsd: function (key) { var r = cardPaceAll()[key]; return (r && r.noPinUsd > 0) ? r.noPinUsd : 0; },
+    /* NO PIN AMOUNT, this phone's own rule for a card (`cardNoPinTxNote`): { n, unit, usd } or null; set with `n` in `unit` ('usd'
+     * cents, or 'sat'), 0 for none. The card is told nothing of it. */
+    cardNoPinTx: function (key) { return cardNoPinTxOf(key); },
+    cardSetNoPinTx: function (key, n, unit, usd) { cardNoPinTxNote(key, n, unit, usd); },
     /* `over` (the sixth): the card's `info.waitOver`, the signatures for the first limit's worth over (7 to software 1.16, 10 from 1.17);
      * without it the answer is by the older rule. */
     cardWait: function (limit, sats, made, second, costed, over) { return cardWaitSeconds(cardWaitSigns(limit, sats, made, second, costed, over)); },
     /* The receipts this phone has read from its own card: [{ n, time, sats, hash, out }], oldest first (08a-flashcard.js). */
+    /* The hashes of what the card signed to let go of pieces the mint had spent (`cardLetGoNote`): its receipts with these hashes moved no money. */
+    cardSpentLetGo: function (key) { return cardLetGoOf(String(key || '')); },
     cardReceipts: function (key) { var r = cardReceiptsAll()[key]; return (r && Array.isArray(r.list)) ? r.list.slice() : []; },
     /* With no key, the cards held may hold different units, and sats and cents are never added together: the answer is the
      * first unit's, and `also` the rest, [{ unit, amount, sats, made }] a unit (as `cardTakeBack` answers). */
