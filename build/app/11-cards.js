@@ -38,11 +38,16 @@
       return d;
     };
 
+    /* A card with a field to type in stands on the keyboard (`--kb`, watchKeyboard in 15-paid-wake-keyboard.js),
+     * the field and its buttons above it; and scrolls, so a card taller than what the keyboard leaves keeps its top. */
     const root = el('position:fixed;inset:0;z-index:2147483400;background:rgba(0,0,0,.7);' +
-      'display:flex;flex-direction:column;justify-content:flex-end;' +
+      'display:flex;flex-direction:column;' +
+      (spec.field ? 'box-sizing:border-box;padding-bottom:var(--kb,0px);transition:padding-bottom .18s ease;overflow-y:auto;'
+        : 'justify-content:flex-end;') +
       'font-family:SatSymbol,Sora,system-ui,sans-serif;animation:foxyIn .16s ease');
 
-    const stage = el('position:relative;isolation:isolate');
+    // (with a field the root scrolls, and an overflow past flex-end could not be reached: the card is pushed down instead)
+    const stage = el('position:relative;isolation:isolate' + (spec.field ? ';margin-top:auto;flex:none' : ''));
     stage.appendChild(el('position:absolute;left:0;right:0;top:-290px;height:330px;' +
       'pointer-events:none;z-index:0;background:radial-gradient(ellipse 128% 100% at 50% 100%,' +
       'rgba(' + glowRgb + ',' + (ask ? '.30' : warn ? '.42' : '.38') + ') 0%,' +
@@ -88,6 +93,52 @@
       card.appendChild(chip);
     }
 
+    /* `spec.field`: a line of text to type, { value, placeholder, max }, for a card that asks for a word rather than a yes
+     * (NAME THIS CONTACT?, 26o-cashu-id.js). Its text goes to `spec.go`; the mint sheet's field, in the card's colours. */
+    let field = null;
+    if (spec.field) {
+      field = document.createElement('input');
+      field.type = 'text';
+      field.value = String(spec.field.value || '');
+      field.placeholder = String(spec.field.placeholder || '');
+      field.maxLength = Number(spec.field.max) > 0 ? Number(spec.field.max) : 40;
+      field.autocapitalize = 'words';
+      field.setAttribute('autocorrect', 'off');
+      field.spellcheck = false;
+      field.style.cssText = 'align-self:stretch;margin-top:18px;height:56px;border-radius:18px;background:#0B0B0C;'
+        + 'border:1.5px solid rgba(245,241,236,.18);box-sizing:border-box;padding:0 16px;color:#F5F1EC;'
+        + 'font-family:Sora,system-ui,sans-serif;font-size:19px;font-weight:600;outline:none';
+      card.appendChild(field);
+    }
+    const typed = () => (field ? field.value.trim() : undefined);
+
+    /* `spec.tick`: a box to tick, { label, on }, for an answer that can be kept for next time (a Cashu ID payment at
+     * another mint's "Always do this for <mint>", 26o-cashu-id.js). Whether it is ticked goes to every button's callback. */
+    let tickOn = !!(spec.tick && spec.tick.on);
+    if (spec.tick && spec.tick.label) {
+      const row = el('align-self:stretch;margin-top:18px;display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;'
+        + 'font-size:16px;font-weight:700;color:rgba(245,241,236,.72)');
+      row.setAttribute('role', 'checkbox');
+      row.setAttribute('data-tick', '');
+      const box = el('width:22px;height:22px;flex:0 0 22px;border-radius:7px;box-sizing:border-box;display:flex;align-items:center;'
+        + 'justify-content:center;font-size:15px;font-weight:900;line-height:1');
+      const text = el('');
+      text.textContent = spec.tick.label;
+      const draw = () => {
+        row.setAttribute('aria-checked', tickOn ? 'true' : 'false');
+        box.style.border = '2px solid ' + (tickOn ? accent : 'rgba(245,241,236,.35)');
+        box.style.background = tickOn ? accent : 'transparent';
+        box.style.color = '#141518';
+        box.textContent = tickOn ? '\u2713' : '';
+      };
+      draw();
+      row.appendChild(box);
+      row.appendChild(text);
+      row.addEventListener('click', () => { tickOn = !tickOn; draw(); });
+      card.appendChild(row);
+    }
+    const ticked = () => tickOn;
+
     const stack = el('align-self:stretch;display:flex;flex-direction:column;gap:12px;margin-top:22px');
 
     const close = () => {
@@ -107,16 +158,35 @@
     // a card can navigate somewhere or run something; some failures are worth
     // retrying in place rather than going back a screen to do it
     if (spec.retry && (spec.back || spec.go)) {
-      const go = el('height:60px;border-radius:30px;background:#F2802E;color:#fff;' +
+      /* `spec.retryOff`: the button is there and cannot be pressed now (a payment too small to bring home), drawn grey;
+       * `spec.retryNote`, a line under it: what it costs, or why it cannot be done. */
+      const go = el('height:60px;border-radius:30px;' + (spec.retryOff ? 'background:rgba(245,241,236,.10);color:rgba(245,241,236,.38);'
+        : 'background:#F2802E;color:#fff;') +
         'display:flex;align-items:center;justify-content:center;font-size:20px;' +
-        'font-weight:800;letter-spacing:0.02em;cursor:pointer');
+        'font-weight:800;letter-spacing:0.02em;cursor:' + (spec.retryOff ? 'default' : 'pointer'));
       go.textContent = spec.retry;
-      go.addEventListener('click', () => {
-        close();
-        if (spec.go) spec.go();
-        else this.setState({ screen: spec.back });
-      });
+      if (spec.retryOff) go.setAttribute('aria-disabled', 'true');
+      else {
+        go.addEventListener('click', () => {
+          const words = typed();
+          const kept = ticked();
+          close();
+          if (spec.go) spec.go(words, kept);
+          /* A screen named with no way of getting there: it is walked back to, so its own entry leaves the stack (else the
+           * back arrow's first press pops it and changes nothing). A screen not on the stack leaves it as it is. */
+          else this.setState((p) => {
+            const at = (p.stack || []).lastIndexOf(spec.back);
+            return at >= 0 ? { screen: spec.back, stack: p.stack.slice(0, at) } : { screen: spec.back };
+          });
+        });
+      }
       stack.appendChild(go);
+      if (spec.retryNote) {
+        const note = el('margin-top:-4px;font-size:15px;font-weight:600;line-height:1.35;text-align:center;white-space:pre-line;'
+          + 'color:rgba(245,241,236,' + (spec.retryOff ? '.5' : '.6') + ')');
+        note.textContent = spec.retryNote;
+        stack.appendChild(note);
+      }
     }
 
     /* With nothing to retry, CLOSE is the only thing to do — so it takes the
@@ -141,23 +211,27 @@
      * card still only closes it. */
     shut.textContent = (spec.shut && spec.shut.label) || 'CLOSE';
     shut.addEventListener('click', () => {
+      const kept = ticked();
       close();
-      if (spec.shut && spec.shut.tap) spec.shut.tap();
+      if (spec.shut && spec.shut.tap) spec.shut.tap(kept);
     });
-    stack.appendChild(shut);
 
     /* More choices of the same weight as `shut.pill`, one button each, between
      * it and the quiet one below (CHANGE CARD LIMITS' NO PIN LIMIT, the third
-     * limit): `spec.pills` is a list of `{ label, tap }`. */
-    (spec.pills || []).forEach((pill) => {
+     * limit): `spec.pills` is a list of `{ label, tap }`. `spec.pillsFirst`: a
+     * list to pick from, above the card's own CLOSE (SETTINGS > OTHER MINTS). */
+    const pills = (spec.pills || []).map((pill) => {
       const b = el('height:60px;border-radius:30px;border:2px solid #2A2A2A;background:#101010;' +
         'box-shadow:0 8px 18px rgba(0,0,0,.6);box-sizing:border-box;' +
         'display:flex;align-items:center;justify-content:center;font-size:20px;' +
         'font-weight:800;letter-spacing:0.02em;color:#F5F1EC;cursor:pointer');
       b.textContent = pill.label;
-      b.addEventListener('click', () => { close(); if (pill.tap) pill.tap(); });
-      stack.appendChild(b);
+      b.addEventListener('click', () => { const kept = ticked(); close(); if (pill.tap) pill.tap(kept); });
+      return b;
     });
+    if (spec.pillsFirst) pills.forEach((b) => stack.appendChild(b));
+    stack.appendChild(shut);
+    if (!spec.pillsFirst) pills.forEach((b) => stack.appendChild(b));
 
     /* A quieter third choice, for a card that can be turned off for good
      * (A LOT AT ONE MINT's "don't show this again"). */
@@ -165,7 +239,7 @@
       const also = el('height:44px;display:flex;align-items:center;justify-content:center;' +
         'font-size:16px;font-weight:700;color:rgba(245,241,236,.4);cursor:pointer');
       also.textContent = spec.also.label;
-      also.addEventListener('click', () => { close(); if (spec.also.tap) spec.also.tap(); });
+      also.addEventListener('click', () => { const kept = ticked(); close(); if (spec.also.tap) spec.also.tap(kept); });
       stack.appendChild(also);
     }
 
@@ -174,6 +248,7 @@
     root.appendChild(stage);
     root.addEventListener('click', (e) => { if (e.target === root) close(); });
     document.body.appendChild(root);
+    if (field) { const f = field; setTimeout(() => { try { f.focus(); } catch (e) {} }, 50); }
     this._blockedEl = root;
     /* So a card that is waiting on something other than a person can be taken
      * down when that thing arrives (the payer's PRICE SENT, below). Every other

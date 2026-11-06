@@ -190,7 +190,9 @@
      * left whole, the change, and what was too little to come back. The sat
      * names are not kept on such a row, so nothing that reads sats finds
      * cents there. */
-    [['grossSats', 'grossAmount'], ['changeSats', 'changeAmount'], ['dustSats', 'dustAmount']].forEach(function (pair) {
+    // (and a send whose swap did not add up: what went in and what came back, `swapCost`)
+    [['grossSats', 'grossAmount'], ['changeSats', 'changeAmount'], ['dustSats', 'dustAmount'],
+     ['swapInSats', 'swapInAmount'], ['swapOutSats', 'swapOutAmount']].forEach(function (pair) {
       if (!(pair[0] in out)) return;
       var v = out[pair[0]];
       delete out[pair[0]];
@@ -499,6 +501,8 @@
     var pending = load(K.quotes, []);
     var rec = /** @type {any} */ ({
       quote: q.quote, amount: amount, memo: memo || '', at: Date.now(),
+      // the quote's own amount, which is what its claim mints (`mintAmountOf`); `createQuote` refused one far from `amount`
+      quoted: quoteAmountOf(q) || undefined,
       unit: unitOf(unit) || 'sat',
       expiry: Number(q.expiry) || null,
       // which mint issued it: asking another mint about this quote is a

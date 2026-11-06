@@ -327,11 +327,29 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     ok(holder.state.screen === 'amount' && holder.state.flow === 'cardAdd' && holder.state.unit === 'USD' && holder.usdKeypad() === true,
        'ADD FUNDS: the dollar keypad, with no ₿ toggle (`usdKeypad`)', holder.state.unit);
     holder.state.amount = '300.00';
+    // with no connection, as it always was: the cap is this phone's dollars (with one, the rest is asked for by invoice, below)
+    holder.offline = true;
     const ctxV = holder.renderContext();
-    ok(ctxV.sendOver === true && ctxV.sendCapUsd === 200, 'its cap is this phone’s dollars: $300 is over the $200 it holds', JSON.stringify({ over: ctxV.sendOver, cap: ctxV.sendCapUsd }));
+    ok(ctxV.sendOver === true && ctxV.sendCapUsd === 200, 'with no connection its cap is this phone’s dollars: $300 is over the $200 it holds', JSON.stringify({ over: ctxV.sendOver, cap: ctxV.sendCapUsd }));
     holder.toasts.length = 0;
     holder.fcAmountNext();
     ok(holder.toasts.indexOf('You have $200.00.') >= 0 && holder.state.screen === 'amount', 'NEXT says what this phone holds, in dollars', holder.toasts.join(' | '));
+    holder.offline = false;
+    /* Online, DEPOSIT over what the phone holds (2026-11-04): RECEIVE's invoice for the whole $300.00, in dollars, the card behind it
+     * (26f-flashcard.js, `fcDepOpen`; the arrival and the second tap are tests/flashcard-screens.js's) */
+    const ctxD = holder.renderContext();
+    ok(ctxD.sendOver === false, 'online, $300 is not over: the rest can be asked for', JSON.stringify({ over: ctxD.sendOver }));
+    const asked = [];
+    const realOpen = holder.openReceive;
+    holder.openReceive = () => asked.push({ screen: holder.state.screen, flow: holder.state.flow, wallet: holder.state.wallet, amount: holder.state.amount, unit: holder.state.unit });
+    const depStack = holder.state.stack.slice();
+    holder.fcAmountNext();
+    ok(asked.length === 1 && asked[0].screen === 'confirm' && asked[0].flow === 'receive' && asked[0].wallet === 'usd' && asked[0].amount === '300.00' && asked[0].unit === 'USD'
+       && holder._fcDep && holder._fcDep.amount === 30000 && holder._fcDep.unit === 'usd',
+       'NEXT opens RECEIVE’s invoice for the whole $300.00, into dollars', JSON.stringify(asked));
+    holder._fcDep = null;
+    holder.openReceive = realOpen;
+    holder.setState({ screen: 'amount', stack: depStack, flow: 'cardAdd', amount: '300.00', unit: 'USD' });
     const usdBefore = usd(H), satBefore = sats(H), cardBefore = k.balance();
     holder.state.amount = '5.00';
     k.tap();

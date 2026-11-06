@@ -178,7 +178,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     holder.setState((p) => ({ screen: 'sendHow', stack: p.stack.concat([p.screen]), flow: 'send', sendFrom: '' }));
     update();
     const v = sendVals();
-    ok(!holder.fcOutMode() && rowsShown(v).join() === 'PASTE,SEND ECASH,CONTACTS,TYPE,ECASHCARD', 'home’s SEND is as it was: PASTE, SEND ECASH, CONTACTS, TYPE and FLASHCARD', rowsShown(v).join());
+    ok(!holder.fcOutMode() && rowsShown(v).join() === 'PASTE,SEND ECASH,CONTACTS,TYPE,ECASHCARD,BANK ACCOUNT', 'home’s SEND is as it was: PASTE, SEND ECASH, CONTACTS, TYPE, FLASHCARD and BANK ACCOUNT', rowsShown(v).join());
   }
 
   /* ---- 4: an invoice pasted in card mode, to the confirmation ------------------------------------------------- */
@@ -446,7 +446,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     ok(holder.state.sendFrom === '' && !holder.fcOutMode(), 'home from SEND MONEY ends card mode');
     holder.setState((p) => ({ screen: 'sendHow', stack: p.stack.concat([p.screen]), flow: 'send', sendFrom: '' }));
     update();
-    ok(rowsShown(sendVals()).join() === 'PASTE,SEND ECASH,CONTACTS,TYPE,ECASHCARD', 'and home’s SEND afterwards is this phone’s, with no WITHDRAW', rowsShown(sendVals()).join());
+    ok(rowsShown(sendVals()).join() === 'PASTE,SEND ECASH,CONTACTS,TYPE,ECASHCARD,BANK ACCOUNT', 'and home’s SEND afterwards is this phone’s, with no WITHDRAW', rowsShown(sendVals()).join());
     ok(c.balance() === before && H.W.cardOwed().length === 0 && H.W.cardTaken().length === 0 && outsHeld().length === 0, 'nothing came off the card');
   }
 

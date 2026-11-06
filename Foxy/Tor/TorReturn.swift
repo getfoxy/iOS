@@ -262,4 +262,199 @@ enum TorReturn {
     static func onDirectDeadline(relayLinksOpen: Int, extensions: Int) -> OnDeadline {
         relayLinksOpen > 0 && extensions < 2 ? .anotherCircuit : .restart
     }
+
+    // MARK: A circuit that is up and carries nothing
+
+    /// How many askings in a row, each on a fresh circuit and each left
+    /// unanswered, since a return from the background say Tor is not carrying
+    /// traffic, whatever its circuit-established says.
+    ///
+    /// A phone back after 44 s away had Tor's circuit up and a new SOCKS port,
+    /// and every request to the mint went unanswered for about 100 s, through
+    /// ten askings on other circuits, until Tor rebuilt on its own. Another
+    /// fresh circuit is no help then: it is built through the same guards.
+    static let rebuildAfterSilent = 3
+
+    /// After one request for new circuits, another waits at least this long,
+    /// across returns too.
+    static let rebuildCoolDown: TimeInterval = 60
+
+    /// The page's askings that went unanswered after a return, and the one
+    /// request for new circuits they may lead to (SIGNAL NEWNYM: Tor marks
+    /// every circuit it has as not for new requests and builds new ones). Never
+    /// a restart, never Tor's network off and on: that is `Restart`'s, the
+    /// second stage, when these were not enough.
+    ///
+    /// The count is the page's: consecutive askings on another circuit since
+    /// Foxy came back, back to none whenever any mint answers. Tor is asked at
+    /// most once per return, and not within `rebuildCoolDown` of the last time.
+    /// `signal` sends the command on the control link Tor already has, and
+    /// answers false at once when there is none (nothing is used up then);
+    /// its `done` says whether Tor took it. Main queue, as TorService.
+    final class Rebuild {
+        enum Answer: String {
+            /// Tor was asked for new circuits.
+            case sent = "rebuilding"
+            /// Fewer than `rebuildAfterSilent` in a row.
+            case tooFew = "counted"
+            /// No return from the background since launch, or the one asking already went on this return.
+            case notAfterReturn = "not after a return"
+            case doneThisReturn = "already asked on this return"
+            case coolingDown = "asked a moment ago"
+            /// Tor is not up, or has no control link to ask on.
+            case noLink = "no control link"
+        }
+
+        private let signal: (_ done: @escaping (_ took: Bool) -> Void) -> Bool
+        private var armed = false
+        private var askedThisReturn = false
+        private(set) var lastAsked: Date?
+        /// Says what Tor answered, for the log.
+        var told: ((_ took: Bool) -> Void)?
+
+        init(signal: @escaping (_ done: @escaping (_ took: Bool) -> Void) -> Bool) {
+            self.signal = signal
+        }
+
+        /// Foxy came back from the background with Tor parked: a return to count from.
+        func returned() {
+            armed = true
+            askedThisReturn = false
+        }
+
+        /// The page counted `silent` askings in a row that went unanswered since the return.
+        func silent(_ silent: Int, now: Date = Date()) -> Answer {
+            guard armed else { return .notAfterReturn }
+            guard !askedThisReturn else { return .doneThisReturn }
+            guard silent >= TorReturn.rebuildAfterSilent else { return .tooFew }
+            if let last = lastAsked, now.timeIntervalSince(last) < TorReturn.rebuildCoolDown { return .coolingDown }
+            let told = self.told
+            guard signal({ took in told?(took) }) else { return .noLink }
+            askedThisReturn = true
+            lastAsked = now
+            return .sent
+        }
+    }
+
+    // MARK: When new circuits were not enough
+
+    /// After the request for new circuits, how many more askings unanswered
+    /// lead to Tor's network off and on.
+    ///
+    /// New circuits are built through the guards Tor already holds, and SIGNAL
+    /// NEWNYM leaves those connections as they are. A phone whose guards were
+    /// going down, up and down again after a return was helped by nothing short
+    /// of closing every connection Tor had and opening them again.
+    static let restartAfterSilent = 3
+
+    /// Those askings all fall within this many seconds.
+    static let restartWithin: TimeInterval = 20
+
+    /// No network off and on within this long of the last, of any cause.
+    static let restartCoolDown: TimeInterval = 300
+
+    /// The second stage, after `Rebuild`: Tor's network off and on (TorService's
+    /// `nudge`), which closes every connection Tor has, guards included, and
+    /// connects again.
+    ///
+    /// Only after the request for new circuits on this return (`rebuilt`), only
+    /// when `restartAfterSilent` more askings have gone unanswered within
+    /// `restartWithin`, only while no host at all has answered since the return
+    /// (`answered`: a mint, the price source, an explorer, anything through the
+    /// route), at most once per return, never within `restartCoolDown` of the
+    /// last time Tor's network was switched off and on, and never while a
+    /// request that moves money is out (`moneyOut`): it waits for that, and the
+    /// next asking unanswered may do it. `nudge` switches the network and
+    /// answers false at once when there is no control link (nothing is used up
+    /// then). Main queue, as TorService.
+    final class Restart {
+        enum Answer: String {
+            /// Tor's network was switched off and on.
+            case sent = "restarting"
+            /// Fewer than `restartAfterSilent` since the new circuits, or not within `restartWithin`.
+            case tooFew = "counted after new circuits"
+            /// No request for new circuits yet on this return.
+            case notAfterRebuild = "no new circuits asked for on this return"
+            /// Some host answered since the return: Tor carries, and the silence is that host's.
+            case answered = "a host answered since the return"
+            case doneThisReturn = "already restarted on this return"
+            case coolingDown = "Tor's connections started again a moment ago"
+            /// A swap or a restore is out: it is not cut.
+            case moneyOut = "money in flight"
+            case noLink = "no control link"
+        }
+
+        private let nudge: () -> Bool
+        private var rebuiltAt: Date?
+        private var heard = false
+        private var doneThisReturn = false
+        private var times: [Date] = []
+
+        init(nudge: @escaping () -> Bool) {
+            self.nudge = nudge
+        }
+
+        /// Foxy came back from the background with Tor parked: everything starts over.
+        func returned() {
+            rebuiltAt = nil
+            heard = false
+            doneThisReturn = false
+            times = []
+        }
+
+        /// Tor was asked for new circuits on this return (`Rebuild` answered `.sent`).
+        func rebuilt(now: Date = Date()) {
+            rebuiltAt = now
+            times = []
+        }
+
+        /// A host answered through the route, whatever it said: Tor carries.
+        func answered() {
+            heard = true
+            times = []
+        }
+
+        /// Whether any host has answered since the return.
+        var hostAnswered: Bool { heard }
+
+        /// One more asking unanswered, told by the page after the new circuits.
+        /// `lastNudge`: when Tor's network was last switched off and on, for any reason.
+        func silent(now: Date = Date(), lastNudge: Date?, moneyOut: Bool) -> Answer {
+            guard let since = rebuiltAt, now >= since else { return .notAfterRebuild }
+            guard !doneThisReturn else { return .doneThisReturn }
+            guard !heard else { return .answered }
+            times.append(now)
+            times = times.filter { now.timeIntervalSince($0) <= TorReturn.restartWithin }
+            guard times.count >= TorReturn.restartAfterSilent else { return .tooFew }
+            if let last = lastNudge, now.timeIntervalSince(last) < TorReturn.restartCoolDown { return .coolingDown }
+            guard !moneyOut else { return .moneyOut }
+            guard nudge() else { return .noLink }
+            doneThisReturn = true
+            times = []
+            return .sent
+        }
+    }
+
+    // MARK: An onion asked for while Tor's link comes back
+
+    /// How long an .onion request waits for Tor that is on its way back.
+    static let onionWaitsForTor: TimeInterval = 10
+
+    /// A request to an .onion refused only because Tor was not up at that
+    /// moment is checked once more when Tor is back, rather than failed.
+    ///
+    /// iOS reclaimed Tor's control listener in the background; a new control
+    /// socket was open 4 s later, and the card clock's fetch from an onion in
+    /// between failed at once with "An .onion address needs Tor". `problem` is
+    /// the check (Route.urlProblem), `needsTor` its words for that one refusal,
+    /// `torComing` whether Tor is on its way up (not stopped, failed or
+    /// parked), and `wait` calls back when it is up or has had
+    /// `onionWaitsForTor`. Anything else is answered at once, as before.
+    static func onionWhenTorIsBack(problem: @escaping () -> String?, needsTor: String, torComing: () -> Bool,
+                                   wait: (_ then: @escaping () -> Void) -> Void,
+                                   done: @escaping (_ problem: String?) -> Void) {
+        let first = problem()
+        guard first == needsTor, torComing() else { done(first); return }
+        wait { done(problem()) }
+    }
 }

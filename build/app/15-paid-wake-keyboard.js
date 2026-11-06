@@ -151,6 +151,12 @@
       clearTimeout(this._arrivingT);
       this._arrivingT = setTimeout(() => { if (this.refreshBalance) this.refreshBalance(); }, 0);
     };
+    // a payment to this phone's Cashu ID taken in: read again, as any payment is (26o-cashu-id.js)
+    W._onCashuIdPaid = () => { if (this.refreshBalance) this.refreshBalance(); if (this.loadHistory) this.loadHistory(); };
+    // and one checked here while the mint swaps it, said as arriving (26o-cashu-id.js)
+    W._onCashuIdArriving = (v) => { if (this.cidArrivingSaid) this.cidArrivingSaid(v); };
+    // one at a mint this phone does not use, waiting for its receiver's answer (26o-cashu-id.js)
+    W._onCashuIdOffer = (v) => { if (this.loadHistory) this.loadHistory(); if (this.cidOfferCard) this.cidOfferCard(v); };
     // payments sent straight to this phone's requests, over Tor (12-receive.js)
     if (!this._requestPaidHooked && W.onRequestPaid) {
       this._requestPaidHooked = true;
@@ -337,23 +343,13 @@
         this.pinUnlocked().then(() => W && W.openSeedForVisit && W.openSeedForVisit());
         // then a private connection set up again, as at launch (06-wallet-boot-and-restore.js)
         this.setUpAfterReturn();
-        // a token still waiting to be redeemed is asked about again, after a wait
-        this.claimWatchResume();
-        /* A bill still being collected: its watchers were suspended with the
-         * app and give up after an hour, and a share paid with nobody
-         * watching lands at the mint unclaimed. resumeSplit settles what was
-         * missed and watches what is still owed. */
-        this.resumeSplit();
-        /* The one-time .onion a payment request names: the native side ended
-         * it as Foxy left (FoxyWebView.appEnteredBackground), so a request
-         * still on screen would otherwise name an address nobody answers. */
-        this.inboxWake();
-        /* On chain settles in blocks, so a return after any real time away is
-         * the likeliest moment for a deposit to have confirmed — and the timer
-         * that would have asked was suspended with the app. */
-        this.onchainAsk();
-        this.onchainWatchLater();
-        this.tidyChangeLater();
+        /* The rest may need the seed, and the seed sits behind Face ID: asked
+         * for while the lock's own face was being asked, it put up a second
+         * prompt that won, the lock's lost, and the lock asked for a face
+         * again. So with the lock up it all waits for the unlock, as the
+         * connection and its sweeps above do. With no lock it runs now. */
+        if (this._pinLocked) this.pinUnlocked().then(() => this.wakeWork()).catch(() => {});
+        else this.wakeWork();
         /* Coming back is arriving at the home screen too, and the launch cover
          * is up again over it while Tor comes back — so the ride waits for it
          * to come down rather than playing behind it. */
@@ -387,6 +383,30 @@
     window.addEventListener('pageshow', this._onWake);
   }
 
+  /* A return's work past the lock (`watchWake`): what was left waiting while Foxy was away, and the inboxes the phone
+   * closed as it went. Some of it reads the seed (a token redeemed, a share claimed, the Cashu ID's inbox). */
+  wakeWork() {
+    // the reminder after fifteen days away, asked once when the Cashu ID is in use (26o-remind.js)
+    if (this.remindMaybeAsk) this.remindMaybeAsk();
+    // a token still waiting to be redeemed is asked about again, after a wait
+    this.claimWatchResume();
+    /* A bill still being collected: its watchers were suspended with the
+     * app and give up after an hour, and a share paid with nobody
+     * watching lands at the mint unclaimed. resumeSplit settles what was
+     * missed and watches what is still owed. */
+    this.resumeSplit();
+    /* The one-time .onion a payment request names: the native side ended
+     * it as Foxy left (FoxyWebView.appEnteredBackground), so a request
+     * still on screen would otherwise name an address nobody answers. */
+    this.inboxWake();
+    /* On chain settles in blocks, so a return after any real time away is
+     * the likeliest moment for a deposit to have confirmed — and the timer
+     * that would have asked was suspended with the app. */
+    this.onchainAsk();
+    this.onchainWatchLater();
+    this.tidyChangeLater();
+  }
+
   /* A return's last step before the home screen: the balances, and the price
    * unless one is already on its way.
    *
@@ -404,7 +424,6 @@
     return Promise.all([pending ? null : balance]);
   }
 
-  // lift the note sheet clear of the keyboard
   /* Let iOS know a keyboard is wanted, before anything asks for one.
    *
    * The keyboard does not come up for a programmatic focus() until the web
@@ -455,16 +474,97 @@
     document.addEventListener('pointerdown', prime, true);
   }
 
+  /* The keyboard: one height, and everything typed into sits above it.
+   *
+   * The web view fills the screen and is not made smaller for the keyboard, so
+   * the page lifts itself: the frame every screen sits in is padded at the
+   * bottom by the keyboard's height (`kbInset`, renderShell), which carries a
+   * field and its button at the foot of a screen up with it, and `--kb` on the
+   * root carries the sheets laid over the app (the note sheet, a card with a
+   * field, the mint and memo sheets). A list above the field is shortened, not
+   * moved, so its last line stays where it was read.
+   *
+   * Two measurements, the larger kept. The phone's own, which iOS gives the app
+   * for every keyboard that comes, changes or goes (FoxyWebView.swift calls
+   * `__foxyKeyboard` with how much of the page it covers): counted only while a
+   * field of the page has the focus, so a keyboard raised for one of the
+   * phone's own prompts over the page leaves the page where it is. And the
+   * visual viewport's, from the page's full height rather than innerHeight,
+   * which this web view can shrink with the keyboard and so show nothing
+   * covered. With only the second, from innerHeight, a report of nothing left
+   * the field at the foot of a screen (the conversation's, with SEND) under the
+   * keyboard, and the page's own pull back to the top undid the scroll iOS had
+   * made to show it. */
   watchKeyboard() {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const apply = () => {
-      const gap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-      document.documentElement.style.setProperty('--kb', gap + 'px');
+    if (this._kbWatched) return;
+    this._kbWatched = true;
+    window.__foxyKeyboard = (h) => {
+      this._kbNative = Math.max(0, Math.round(Number(h) || 0));
+      this.kbMeasure();
     };
-    vv.addEventListener('resize', apply);
-    vv.addEventListener('scroll', apply);
-    apply();
+    const vv = window.visualViewport;
+    this._onVv = () => this.kbMeasure();
+    // iOS scrolls the document to show a field; the lift shows it, and the page stays put
+    this._onWinScroll = () => { if ((this._kbNow || 0) > 0 && window.scrollY) window.scrollTo(0, 0); };
+    this._onKbFocus = () => this.kbMeasure();
+    // a focus moving between two fields passes through none: measured once it has landed
+    this._onKbBlur = () => setTimeout(() => this.kbMeasure(), 0);
+    window.addEventListener('scroll', this._onWinScroll, { passive: true });
+    document.addEventListener('focusin', this._onKbFocus, true);
+    document.addEventListener('focusout', this._onKbBlur, true);
+    if (vv) {
+      vv.addEventListener('resize', this._onVv);
+      vv.addEventListener('scroll', this._onVv);
+    }
+    // nothing measured until something moves: a frame drawn with the keyboard up (render-snapshots.js) keeps it
+    this._kbNow = this.state.kbInset || 0;
+    document.documentElement.style.setProperty('--kb', this._kbNow + 'px');
+  }
+
+  unwatchKeyboard() {
+    if (!this._kbWatched) return;
+    this._kbWatched = false;
+    if (window.__foxyKeyboard) window.__foxyKeyboard = undefined;
+    const vv = window.visualViewport;
+    if (vv && this._onVv) { vv.removeEventListener('resize', this._onVv); vv.removeEventListener('scroll', this._onVv); }
+    window.removeEventListener('scroll', this._onWinScroll);
+    document.removeEventListener('focusin', this._onKbFocus, true);
+    document.removeEventListener('focusout', this._onKbBlur, true);
+  }
+
+  /* Whether a field of the page has the focus: a text input, a text area or editable text. The keyboard primer's
+   * field (armKeyboardPrimer) is hidden from reading and never counts. */
+  kbTyping() {
+    const el = /** @type {HTMLInputElement | null} */ (document.activeElement);
+    if (!el || el.getAttribute && el.getAttribute('aria-hidden') === 'true') return false;
+    if (el.isContentEditable) return true;
+    const tag = String(el.tagName || '').toUpperCase();
+    if (tag === 'TEXTAREA') return !el.readOnly;
+    if (tag !== 'INPUT') return false;
+    return !el.readOnly && !/^(button|checkbox|radio|submit|reset|range|color|file|hidden|image)$/i.test(String(el.type || 'text'));
+  }
+
+  /* How much of the page the keyboard covers now, in CSS pixels, and everything that follows it told. */
+  kbMeasure() {
+    const vv = window.visualViewport;
+    const root = document.documentElement;
+    let shellH = 0;
+    try { const sh = this.shellRef && this.shellRef.current; shellH = sh ? sh.getBoundingClientRect().height : 0; } catch (e) { shellH = 0; }
+    const full = Math.max(window.innerHeight || 0, (root && root.clientHeight) || 0, shellH || 0);
+    const seen = vv ? Math.max(0, Math.round(full - vv.height)) : 0;
+    const told = this.kbTyping() ? (this._kbNative || 0) : 0;
+    const kb = Math.max(seen, told);
+    if (kb > 0) {
+      if (window.scrollY || (vv && vv.offsetTop)) window.scrollTo(0, 0);
+      const se = document.scrollingElement;
+      if (se && se.scrollTop) se.scrollTop = 0;
+    }
+    if (kb === this._kbNow) return kb;
+    this._kbNow = kb;
+    if (root) root.style.setProperty('--kb', kb + 'px');
+    if (kb !== (this.state.kbInset || 0)) this.setState({ kbInset: kb });
+    try { window.dispatchEvent(new CustomEvent('foxykeyboard', { detail: kb })); } catch (e) {}
+    return kb;
   }
 
   // Animate to the balance LNbits actually holds.
@@ -582,7 +682,9 @@
      * 674–734). */
     const overlaid = covered || !!(typeof document !== 'undefined'
       && (document.getElementById('foxy-connecting') || document.getElementById('foxy-stage')));
-    const wantsPaste = wants || (sc === 'home' && !this._blockedEl && !this.state.open0 && !overlaid);
+    /* And BANK ACCOUNT's PASTE (26q-bank.js), a username or River's invoice, which its own screen reads (`bankPasted`). */
+    const wantsPaste = wants || (sc === 'home' && !this._blockedEl && !this.state.open0 && !overlaid)
+      || (sc === 'bankAsk' && !this._blockedEl && !overlaid);
 
     // A screen mid-slide is translated across the viewport, so measuring it now
     // would put the camera and the paste button wherever the animation happens
@@ -639,7 +741,7 @@
     if (pasteEl && (!this._pasteOn || this._pasteKey !== pasteKey)) {
       if (this._pasteOn) W.stopPasteButton();
       this._pasteKey = pasteKey;
-      this._pasteOn = W.startPasteButton(pasteEl, text => this.acceptTarget(text));
+      this._pasteOn = W.startPasteButton(pasteEl, text => (this.state.screen === 'bankAsk' ? this.bankPasted(text) : this.acceptTarget(text)));
     }
     if (!wants) return;
 

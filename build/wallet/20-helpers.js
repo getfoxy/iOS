@@ -31,6 +31,9 @@
     classify: function (text) {
       // a cashier code (08d-till.js), by its address alone: one that has ended is still named, and refused as one
       if (tillUrlShape(text)) return 'till';
+      /* a Cashu ID (08e-cashu-id.js), by its prefix: one mistyped or cut short is still named, and refused as one
+       * ("That is not a Cashu ID.") rather than as not a payment */
+      if (/^foxyid1[A-Za-z0-9_-]{8,200}$/i.test(String(text || '').trim())) return 'cashuid';
       var t = FoxyWallet.unwrap(text).replace(/^lightning:/i, '');
       if (/^ln(bc|tb|bcrt)\w{20,}$/i.test(t)) return 'invoice';
       if (/^lnurl1[02-9ac-hj-np-z]{10,}$/i.test(t)) return 'lnurl';
@@ -429,6 +432,13 @@
       piles().forEach(function (p) { add(p.mint, p.unit, sumProofs(proofs(p.mint, p.unit))); });
       var held = load(K.held, {}) || {};
       Object.keys(held).forEach(function (id) { var h = held[id]; if (h && h.mint) add(h.mint, h.unit, sumProofs(h.proofs || [])); });
+      /* And what a melt the mint has not settled holds (K.melting): the audit counts it as on its way (`meltingIn`), and its
+       * row, written when it lands, takes it out again. Left out, a history cleared while a payment was PENDING said DOES
+       * NOT ADD UP by that melt from the moment it landed, for good. A hold that names no mint is the connected one's. */
+      (load(K.melting, []) || []).forEach(function (e) {
+        var at = (e && e.mint) || mintUrl;
+        if (e && at) add(at, recordUnit(e), sumProofs(e.proofs || []));
+      });
       rows.forEach(function (e) {
         if (e.state === 'failed' || e.failed || e.atRisk) return;
         if (e.dir === 'in' && (e.changeRow || /^(tap|req)-change-/.test(String(e.hash || '')))) return;
@@ -479,7 +489,8 @@
       var meta = load('foxy.txmeta', {});
       Object.keys(meta).forEach(function (hash) {
         var t = meta[hash] && meta[hash].token;
-        if (typeof t === 'string' && t && !seen[t]) { seen[t] = true; out.push({ hash: hash, token: t }); }
+        // `card`: a load put onto a card (`to: 'card'`), kept for a lost card's take-back, not a token handed to anyone
+        if (typeof t === 'string' && t && !seen[t]) { seen[t] = true; out.push({ hash: hash, token: t, card: meta[hash].to === 'card' }); }
       });
       var last = load(K.outtok, null);
       if (last && last.token && !seen[last.token]) out.push({ hash: last.hash || null, token: last.token });
@@ -895,6 +906,10 @@
           openTill.tillPass = tillPass.id;
           openTill.tillTo = tillPass.to;
           openTill.tillExp = tillPass.exp;
+          /* The part of it that is a tip (`o.tillTip`, in its unit), on a code that offers tips: said to the
+           * keeper with the payment (08d-till.js `tillOutboxAdd`), never more than the request. */
+          var tipAsk = Math.round(Number(o.tillTip) || 0);
+          if (tipAsk > 0 && tillPass.tips === true) openTill.tillTip = n > 0 ? Math.min(tipAsk, n) : 0;
           saveOpenRequests();
         }
         return text;
@@ -1226,6 +1241,10 @@
       /* Not while a card's visit has this phone at the card's mint (08a-flashcard.js, `cardVisit`): the walk would set out from
        * there, and come back to it. Once the phone is home. */
       if (cardAway) return cardAway.finished.then(function () { return FoxyWallet.claimUnclaimed(opts); });
+      /* Nor while another visit has it somewhere (`visitTake`: a payment being brought home, a tap at a payer's
+       * mint): the walk set out from the payer's mint, and came home to it. */
+      var away = visitBusy();
+      if (away) return Promise.resolve(away).then(null, function () { return null; }).then(function () { return FoxyWallet.claimUnclaimed(opts); });
       // a card's payments kept with no route, put right first where a write between two of their steps did not land (08a-flashcard.js)
       try { cardKeptTidy(); } catch (eTidy) { console.warn('[foxy] card: kept payments could not be looked over:', (eTidy && eTidy.message) || eTidy); }
       var all = unclaimed(), ids = Object.keys(all);
@@ -2792,6 +2811,8 @@
               save(K.atRisk, all);
               try { FoxyWallet.tag(g.hash, { atRisk: false }); } catch (x) {}
             };
+            /** @type {any} */
+            var takenRow = null;
             if (spent.length) {
               /* Redeemed after the refusal. Out of the pile, and the entry is
                * the payment it turned out to be. */
@@ -2799,6 +2820,9 @@
               spent.forEach(function (pr) { gone[pr.secret] = true; });
               setProofs(proofs(here, gu).filter(function (pr) { return !(pr && gone[pr.secret]); }), here, w, gu);
               var took = sumProofs(spent);
+              /* Less a short refund that came for these pieces (`atRiskRefunded`, `afterRefusal`): what the receiver kept
+               * is what they took less what they sent back, and the refund is in the pile already. */
+              var back = Math.min(took, Math.max(0, Number(g.refund) || 0));
               try {
                 /* And change it was owed is not coming. The entry went on
                  * saying `owed`, which the history card counts as money still
@@ -2808,12 +2832,14 @@
                 var owedOn = (load(K.log, []) || []).some(function (e) {
                   return e && e.hash === g.hash && e.changeState === 'owed' && Number(e.changeSats) > 0;
                 });
-                amendTx(g.hash, amountFields(gu, took, Object.assign({ state: 'success', settled: true, highRisk: false, taken: true,
-                                                memo: 'ecash, taken after a refusal' },
+                amendTx(g.hash, amountFields(gu, took - back, Object.assign({ state: 'success', settled: true, highRisk: false, taken: true,
+                                                memo: back ? 'ecash, refused and partly returned' : 'ecash, taken after a refusal' },
+                                              back ? { refunded: true, refundedPart: back } : {},
                                               owedOn ? { changeState: 'never came' } : {})));
               } catch (x) {}
               console.warn('[foxy] ecash a phone refused has since been redeemed: ' + (gu === 'sat' ? took + ' sats' : moneyWords(took, gu)) + '; its entry says paid');
-              out.push(Object.assign({ state: 'taken', hash: g.hash }, inUnit(took)));
+              takenRow = Object.assign({ state: 'taken', hash: g.hash, recovered: 0 }, inUnit(took), back ? { refund: back } : {});
+              out.push(takenRow);
               if (!live.length) { entomb(took); return null; }
             }
             /* Unspent: swapped for fresh pieces, as a split of this phone's
@@ -2833,6 +2859,7 @@
               // a fee in sats where it always went; one in another unit on a row of its own (`meltBackFee`)
               if (fee > 0) meltBackFee(here, gu, fee);
               if (spent.length) entomb(sumProofs(spent)); else forget();
+              if (takenRow) takenRow.recovered = sumProofs(fresh || []);
               try { amendTx(g.hash, { highRisk: false, takenBack: true }); } catch (x) {}
               console.log('[foxy] ecash at risk is safe again: ' + (gu === 'sat' ? sumProofs(fresh || []) + ' sats' : moneyWords(sumProofs(fresh || []), gu))
                 + ' swapped for pieces nobody has seen');

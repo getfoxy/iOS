@@ -47,7 +47,6 @@
       }).catch(done);
     };
     if (this.props.startStatic) return;
-    this.watchKeyboard();
     this.watchWake();
     this.armKeyboardPrimer();
     // the gate lives outside the runtime, so it has to ask for a render
@@ -203,6 +202,9 @@
          * until this is there, and a request taken before the page knew whether
          * it was locked would be acted on past the lock. */
         W._cardTapped = () => this.cardTapped();
+        /* And what opened Foxy on its first run, kept for when home is first reached (26f-flashcard.js, `arrived`). */
+        W._arrived = (kind, code) => this.arrived(kind, code);
+        this.arrivalWatch();
         if (W.onCaughtUp) W.onCaughtUp((info) => {
           console.log('[foxy] small change: connected and caught up; checking the pool');
           this.refreshBalance();
@@ -383,7 +385,8 @@
        * return with none is as it was. */
       const cardKept = (() => { try { return !!(W.cardKeptWaiting && W.cardKeptWaiting().length && W.cardOnline && W.cardOnline()); } catch (e) { return false; } })();
       if (cardKept && W.claimUnclaimed) {
-        Promise.resolve(swept).then(() => W.claimUnclaimed())
+        // (after the connect for real of a wallet built from storage, if one is out: its sweeps claim them, `_realConnect`)
+        Promise.resolve(swept).then(() => this._realConnect).then(null, () => null).then(() => W.claimUnclaimed())
           .then((took) => { if (took) { this.refreshBalance(); this.loadHistory(); } }, () => {});
       }
       return Promise.race([
@@ -496,6 +499,21 @@
     const p = (W.privacy && W.privacy()) || {};
     if (!(p.tor === 'up' || p.unprotected)) return;
     if (p.network === 'none') return;
+    /* Not while a wallet built from storage is being connected for real (`connectForRealOnceOnline`, started in the
+     * same tick by the same route change). This claim's first visit is a connect to another mint, and the two
+     * connects raced: the last to finish set the wallet's globals, and a claim could swap against the wrong mint.
+     * That connect's own sweeps claim what is waiting and catch the crossings up; this asks again once it has
+     * landed or failed, which costs a payment taken on trust the length of a connect before it is swapped in
+     * (seconds over Tor; with the mint down, until its try fails). */
+    if (this._realConnect) {
+      if (!this._claimAfterConnect) {
+        this._claimAfterConnect = true;
+        const go = () => { this._claimAfterConnect = false; this.claimWhenRouteReturns(); };
+        this._realConnect.then(go, go);
+      }
+      return;
+    }
+    const work = [];
     // home, where a come-home after a crossing could not connect (`crossComeHome`)
     if (this.comeHomeOwed) this.comeHomeOwed();
     /* And what was left between two mints, which needs a route just as much:
@@ -503,25 +521,33 @@
     if (!this._crossingsOnRoute && W.crossingsWaiting && W.crossingsWaiting()) {
       this._crossingsOnRoute = true;
       console.log('[foxy] a route came back and something is waiting between two mints');
-      W.catchUpCrossings().then(() => {
+      work.push(W.catchUpCrossings().then(() => {
         this._crossingsOnRoute = false;
         this.refreshBalance(); this.loadHistory();
-      }, () => { this._crossingsOnRoute = false; });
+      }, () => { this._crossingsOnRoute = false; }));
     }
-    if (this._claimingOnRoute) return;
+    // what a later try of the real connect waits for (`connectForRealOnceOnline`)
+    const keep = () => {
+      if (!work.length) return;
+      const all = Promise.all(work).then(() => null, () => null);
+      this._routeWork = all;
+      all.then(() => { if (this._routeWork === all) this._routeWork = null; });
+    };
+    if (this._claimingOnRoute) { keep(); return; }
     const waiting = (() => {
       try { return (W.trustedWaiting && W.trustedWaiting().length) || W.unclaimedSats() > 0; }
       catch (e) { return false; }
     })();
-    if (!waiting) return;
+    if (!waiting) { keep(); return; }
     this._claimingOnRoute = true;
     console.log('[foxy] a route came back and something is waiting to be swapped in');
-    W.claimUnclaimed().then((took) => {
+    work.push(W.claimUnclaimed().then((took) => {
       this._claimingOnRoute = false;
       if (took) { this.refreshBalance(); this.loadHistory(); }
       // what it put in the pile for a dollars wallet is said by the wallet (`onConvertDue`); this is for what waited already
       if (this.convertOnReturn) this.convertOnReturn();
-    }, () => { this._claimingOnRoute = false; });
+    }, () => { this._claimingOnRoute = false; }));
+    keep();
   }
 
   /* A wallet built with no route was built from what the mint said last time:  /* A wallet built with no route was built from what the mint said last time:
@@ -556,7 +582,14 @@
         this._catchUpConnect = false;
         return;
       }
-      W.connect(url).then(() => {
+      /* One connect at a time. While this one is out, the claims a route starts wait for it
+       * (`claimWhenRouteReturns`), and a try after a failed one waits for those claims to be over: each of them
+       * visits the mint a payment is at, and whichever connect finished last set the wallet's globals. */
+      const going = Promise.resolve(this._routeWork).then(null, () => null).then(() => W.connect(url));
+      this._realConnect = going;
+      const over = () => { if (this._realConnect === going) this._realConnect = null; };
+      going.then(over, over);
+      going.then(() => {
         this.refreshBalance();
         this.loadHistory();
         this.offerQuarantine();

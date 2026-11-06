@@ -148,7 +148,8 @@ final class RouteTests: XCTestCase {
         let known = HostApprovals.builtIn.union(HostApprovals.explorers)
         XCTAssertEqual(HostApprovals.explorers.count, 4)
         XCTAssertEqual(HostApprovals.explorers.filter { $0.hasSuffix(".onion") }.count, 2, "two onions")
-        XCTAssertEqual(HostApprovals.explorers.filter { !$0.hasSuffix(".onion") }, ["mempool.space", "blockstream.info"], "and their two names")
+        // a Set's filter comes back in the set's own order, which changes run to run: compared as a set, or this check flaked
+        XCTAssertEqual(Set(HostApprovals.explorers.filter { !$0.hasSuffix(".onion") }), ["mempool.space", "blockstream.info"], "and their two names")
         for host in HostApprovals.explorers {
             XCTAssertTrue(HostApprovals.approves(host, approved: known, carried: []), host)
         }

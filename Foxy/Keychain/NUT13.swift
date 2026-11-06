@@ -831,3 +831,116 @@ enum CardOwner {
         return try withPrivateKey(seed: seed, cardKey: request.key) { Array(try $0.signature(for: signed).derRepresentation) }
     }
 }
+
+// MARK: The Cashu ID's curve steps (CashuID.swift)
+
+/// What a Cashu ID needs of the curve beyond a BIP-32 child, kept here with the
+/// rest of Foxy's curve so that one file touches libsecp256k1 for the seed: a
+/// point times a secret (the shared point d·E), NUT-28's blinding (P + r·G, and
+/// the negated point and key for a payer that blinded the other parity), a key's
+/// x-only public half (the delivery key's Nostr name), and a BIP-340 signature
+/// (NUT-11's witness, and the ID's binding of its delivery key).
+extension NUT13 {
+
+    /// ser33(k·P), P a compressed point (33 bytes). Throws `invalidKey` for a P that
+    /// is not on the curve or a k that is not a key.
+    static func multiply(point: [UInt8], by k: [UInt8], _ ctx: OpaquePointer) throws -> [UInt8] {
+        guard point.count == 33, k.count == 32 else { throw Failure.invalidKey }
+        var p = secp256k1_pubkey()
+        guard secp256k1_ec_pubkey_parse(ctx, &p, point, 33) == 1 else { throw Failure.invalidKey }
+        guard secp256k1_ec_pubkey_tweak_mul(ctx, &p, k) == 1 else { throw Failure.invalidKey }
+        var out = [UInt8](repeating: 0, count: 33)
+        var length = out.count
+        guard secp256k1_ec_pubkey_serialize(ctx, &out, &length, &p, UInt32(SECP256K1_EC_COMPRESSED)) == 1,
+              length == 33 else { throw Failure.platform }
+        return out
+    }
+
+    /// a + b mod n for two secret keys, where b is below n and above 0 and the sum is not 0.
+    static func addScalar(_ a: [UInt8], _ b: [UInt8], _ ctx: OpaquePointer) throws -> [UInt8] {
+        guard secp256k1_ec_seckey_verify(ctx, b) == 1 else { throw Failure.invalidKey }
+        var sum = a
+        guard secp256k1_ec_seckey_tweak_add(ctx, &sum, b) == 1 else { wipe(&sum); throw Failure.invalidKey }
+        return sum
+    }
+
+    /// Whether 32 bytes are a number above 0 and below n.
+    static func isScalar(_ bytes: [UInt8], _ ctx: OpaquePointer) -> Bool {
+        bytes.count == 32 && secp256k1_ec_seckey_verify(ctx, bytes) == 1
+    }
+
+    /// ser33(P + t·G), P a compressed point and t a number below n (NUT-28's P′).
+    static func addTweak(point: [UInt8], _ t: [UInt8], _ ctx: OpaquePointer) throws -> [UInt8] {
+        guard point.count == 33, t.count == 32 else { throw Failure.invalidKey }
+        var p = secp256k1_pubkey()
+        guard secp256k1_ec_pubkey_parse(ctx, &p, point, 33) == 1,
+              secp256k1_ec_pubkey_tweak_add(ctx, &p, t) == 1 else { throw Failure.invalidKey }
+        return try serialized(&p, ctx)
+    }
+
+    /// ser33(−P).
+    static func negated(point: [UInt8], _ ctx: OpaquePointer) throws -> [UInt8] {
+        guard point.count == 33 else { throw Failure.invalidKey }
+        var p = secp256k1_pubkey()
+        guard secp256k1_ec_pubkey_parse(ctx, &p, point, 33) == 1,
+              secp256k1_ec_pubkey_negate(ctx, &p) == 1 else { throw Failure.invalidKey }
+        return try serialized(&p, ctx)
+    }
+
+    /// n − k for a secret key k. The caller wipes it.
+    static func negated(scalar k: [UInt8], _ ctx: OpaquePointer) throws -> [UInt8] {
+        var out = k
+        guard secp256k1_ec_seckey_negate(ctx, &out) == 1 else { wipe(&out); throw Failure.invalidKey }
+        return out
+    }
+
+    private static func serialized(_ p: inout secp256k1_pubkey, _ ctx: OpaquePointer) throws -> [UInt8] {
+        var out = [UInt8](repeating: 0, count: 33)
+        var length = out.count
+        guard secp256k1_ec_pubkey_serialize(ctx, &out, &length, &p, UInt32(SECP256K1_EC_COMPRESSED)) == 1,
+              length == 33 else { throw Failure.platform }
+        return out
+    }
+
+    /// Whether 33 bytes are a compressed point on the curve.
+    static func isPoint(_ point: [UInt8], _ ctx: OpaquePointer) -> Bool {
+        guard point.count == 33 else { return false }
+        var p = secp256k1_pubkey()
+        return secp256k1_ec_pubkey_parse(ctx, &p, point, 33) == 1
+    }
+
+    /// The x-only public key of a secret key (BIP-340), 32 bytes.
+    static func xOnlyKey(_ key: [UInt8], _ ctx: OpaquePointer) throws -> [UInt8] {
+        var pair = secp256k1_keypair()
+        defer { withUnsafeMutableBytes(of: &pair) { _ = memset_s($0.baseAddress, $0.count, 0, $0.count) } }
+        guard secp256k1_keypair_create(ctx, &pair, key) == 1 else { throw Failure.invalidKey }
+        var xonly = secp256k1_xonly_pubkey()
+        guard secp256k1_keypair_xonly_pub(ctx, &xonly, nil, &pair) == 1 else { throw Failure.platform }
+        var out = [UInt8](repeating: 0, count: 32)
+        guard secp256k1_xonly_pubkey_serialize(ctx, &out, &xonly) == 1 else { throw Failure.platform }
+        return out
+    }
+
+    /// A BIP-340 signature by `key` over a 32-byte digest, checked before it is
+    /// answered: with fresh auxiliary randomness, or with `aux` where a signature
+    /// must come out the same each time (the Cashu ID's binding, all zeros).
+    static func schnorr(digest: [UInt8], key: [UInt8], _ ctx: OpaquePointer, aux fixed: [UInt8]? = nil) throws -> [UInt8] {
+        guard digest.count == 32 else { throw Failure.platform }
+        var pair = secp256k1_keypair()
+        defer { withUnsafeMutableBytes(of: &pair) { _ = memset_s($0.baseAddress, $0.count, 0, $0.count) } }
+        guard secp256k1_keypair_create(ctx, &pair, key) == 1 else { throw Failure.invalidKey }
+        var aux = [UInt8](repeating: 0, count: 32)
+        if let fixed {
+            guard fixed.count == 32 else { throw Failure.platform }
+            aux = fixed
+        } else {
+            guard SecRandomCopyBytes(kSecRandomDefault, aux.count, &aux) == errSecSuccess else { throw Failure.platform }
+        }
+        var signature = [UInt8](repeating: 0, count: 64)
+        guard secp256k1_schnorrsig_sign32(ctx, &signature, digest, &pair, aux) == 1 else { throw Failure.platform }
+        var xonly = secp256k1_xonly_pubkey()
+        guard secp256k1_keypair_xonly_pub(ctx, &xonly, nil, &pair) == 1,
+              secp256k1_schnorrsig_verify(ctx, signature, digest, 32, &xonly) == 1 else { throw Failure.platform }
+        return signature
+    }
+}

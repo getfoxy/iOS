@@ -391,7 +391,7 @@ async function run() {
    * collected while the phone is in a pocket. Read from the source: the wake
    * handler is a closure inside watchWake, not a method this file can lift. */
   {
-    const wake = method('watchWake() {');
+    const wake = method('watchWake() {') + method('wakeWork() {');
     check('coming back from the background watches the open shares again',
       /resumeSplit\(\)/.test(wake), 'watchWake does not resume the split');
     check('and re-opens the onion inbox the native side ended while away',

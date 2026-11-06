@@ -18,6 +18,7 @@ extension FoxyBridge {
         "restoreSecrets",
         "p2pkReserve", "p2pkPubkeys", "p2pkKey",
         "cardOwnerKey", "cardOwnerSign",
+        "cashuIdPublic", "cashuIdSign", "cashuIdTag", "cashuIdEphemeral", "cashuIdSignUnblinded",
         "seedShow", "seedEnter", "seedAdopt", "seedCandidateForget", "seedWipe",
         "seedProtection", "seedProtect",
     ]
@@ -148,6 +149,62 @@ extension FoxyBridge {
     static func p2pkKeyCheck(_ body: [String: Any]) -> NativeCheck<UInt64> {
         guard let index = counterValue(body["index"]), index <= P2PK.lastIndex else { return .refuse("bad request") }
         return .ok(index)
+    }
+
+    /// A compressed point as the page hands one over: 66 hex characters (either
+    /// case) for 33 bytes starting 02 or 03. Whether it is on the curve is the
+    /// seed's question, asked after.
+    static func pointText(_ value: Any?) -> [UInt8]? {
+        guard let text = value as? String, text.utf8.count == 66,
+              let bytes = try? NUT13.bytes(hex: text.lowercased()), CashuID.isPoint(bytes) else { return nil }
+        return bytes
+    }
+
+    /// cashuIdSign {pieces: [{secret, e}]}: 1 to 100 pieces, each a NUT-10 P2PK
+    /// secret of at most 1,024 characters that does not ask for SIG_ALL, with the
+    /// E it carried (`p2pk_e`) as a point. Whether each is locked to this ID's
+    /// blinding by its E is the seed's question (CashuID.sign), asked after.
+    static func cashuIdSignCheck(_ body: [String: Any]) -> NativeCheck<SeedActions.CashuIdSignRequest> {
+        guard let list = body["pieces"] as? [Any], !list.isEmpty, list.count <= CashuID.mostSecrets else {
+            return .refuse("bad request")
+        }
+        var pieces = [CashuID.Piece]()
+        for item in list {
+            guard let piece = item as? [String: Any], let secret = piece["secret"] as? String,
+                  CashuID.lockOf(secret) != nil, let e = pointText(piece["e"]) else { return .refuse("bad request") }
+            pieces.append(CashuID.Piece(secret: secret, e: e))
+        }
+        return .ok(SeedActions.CashuIdSignRequest(pieces: pieces))
+    }
+
+    /// cashuIdSignUnblinded {secrets}: 1 to 100 NUT-10 P2PK secrets of at most 1,024 characters that do not ask
+    /// for SIG_ALL. Whether each is locked to this ID as it is is the seed's question (CashuID.signUnblinded).
+    static func cashuIdSignUnblindedCheck(_ body: [String: Any]) -> NativeCheck<SeedActions.CashuIdSignUnblindedRequest> {
+        guard let list = body["secrets"] as? [Any], !list.isEmpty, list.count <= CashuID.mostSecrets else {
+            return .refuse("bad request")
+        }
+        var secrets = [String]()
+        for item in list {
+            guard let secret = item as? String, CashuID.lockOf(secret) != nil else { return .refuse("bad request") }
+            secrets.append(secret)
+        }
+        return .ok(SeedActions.CashuIdSignUnblindedRequest(secrets: secrets))
+    }
+
+    /// cashuIdTag {peer, e}: two points, the other wallet's ID and the E the tag is bound to.
+    static func cashuIdTagCheck(_ body: [String: Any]) -> NativeCheck<SeedActions.CashuIdTagRequest> {
+        guard let peer = pointText(body["peer"]), let e = pointText(body["e"]) else { return .refuse("bad request") }
+        return .ok(SeedActions.CashuIdTagRequest(peer: peer, e: e))
+    }
+
+    /// cashuIdEphemeral {to, index, locktime}: the receiver's ID as a point (not `id`,
+    /// which names the request itself), the
+    /// payment's index below 2^32 and its locktime, a whole number of seconds.
+    static func cashuIdEphemeralCheck(_ body: [String: Any]) -> NativeCheck<SeedActions.CashuIdEphemeralRequest> {
+        guard let id = pointText(body["to"]),
+              let index = exactInteger(body["index"]), index >= 0, index <= Int(UInt32.max),
+              let locktime = exactInteger(body["locktime"]), locktime >= 0 else { return .refuse("bad request") }
+        return .ok(SeedActions.CashuIdEphemeralRequest(id: id, index: UInt32(index), locktime: UInt64(locktime)))
     }
 
     /// cardOwnerKey {key}: a card's compressed public key, 66 hex characters (either
@@ -403,6 +460,48 @@ extension FoxyBridge {
         switch Self.p2pkKeyCheck(body) {
         case .refuse(let why): resolve(id: id, text: nil, error: why)
         case .ok(let index): onSeedQueue(id: id) { SeedActions.p2pkKey(index: index, env: $0) }
+        }
+    }
+
+    // MARK: The Cashu ID (CashuID.swift)
+
+    /// {} → {"id", "nostr", "sig"}: the ID's public key, its delivery key's, and the ID key's signature binding them.
+    func handleCashuIdPublic(id: String, body: [String: Any]) {
+        onSeedQueue(id: id) { SeedActions.cashuIdPublic($0) }
+    }
+
+    /// {pieces} → {"sigs"}: each piece's one-time key's signature, for secrets
+    /// locked to this ID's blinding by that piece's E alone. No key is answered.
+    func handleCashuIdSign(id: String, body: [String: Any]) {
+        switch Self.cashuIdSignCheck(body) {
+        case .refuse(let why): resolve(id: id, text: nil, error: why)
+        case .ok(let request): onSeedQueue(id: id) { SeedActions.cashuIdSign(pieces: request.pieces, env: $0) }
+        }
+    }
+
+    /// {secrets} → {"sigs"}: the ID key's own signatures, over secrets locked to the ID unblinded, for the one
+    /// delivery the receiver said TAKE IT ANYWAY to (CashuID.signUnblinded). No key is answered.
+    func handleCashuIdSignUnblinded(id: String, body: [String: Any]) {
+        switch Self.cashuIdSignUnblindedCheck(body) {
+        case .refuse(let why): resolve(id: id, text: nil, error: why)
+        case .ok(let request): onSeedQueue(id: id) { SeedActions.cashuIdSignUnblinded(secrets: request.secrets, env: $0) }
+        }
+    }
+
+    /// {peer, e} → {"tag"}: the payer's name on a delivery, proved (CashuID.tag).
+    func handleCashuIdTag(id: String, body: [String: Any]) {
+        switch Self.cashuIdTagCheck(body) {
+        case .refuse(let why): resolve(id: id, text: nil, error: why)
+        case .ok(let request): onSeedQueue(id: id) { SeedActions.cashuIdTag(peer: request.peer, e: request.e, env: $0) }
+        }
+    }
+
+    /// {to, index, locktime} → {"base"}: what a payment's throwaway keys come from (CashuID.payBase).
+    func handleCashuIdEphemeral(id: String, body: [String: Any]) {
+        switch Self.cashuIdEphemeralCheck(body) {
+        case .refuse(let why): resolve(id: id, text: nil, error: why)
+        case .ok(let request):
+            onSeedQueue(id: id) { SeedActions.cashuIdEphemeral(id: request.id, index: request.index, locktime: request.locktime, env: $0) }
         }
     }
 

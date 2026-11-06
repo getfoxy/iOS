@@ -382,6 +382,16 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
 
 1. The amount, on the app's own SET AMOUNT screen, dollars first and sats under
    them.
+
+   More than this phone holds in the card's currency, online and at this phone's
+   own mint: the app's receive invoice for the whole amount (RECEIVE's screen,
+   with its tap to pay), the card behind it. When the money has come in, the
+   card's screen and TAP THE CARD AGAIN ("₿5,000 came in on this phone. Tap the
+   card to put it on."): TAP CARD loads the amount typed by the steps below; LATER,
+   the card closed any other way, or two minutes with no tap leave it on this
+   phone, its history row titled "For the card · kept on this phone"
+   (`fcDepOpen`, `fcDepArrived`, `fcDepHold`). What the phone held before is not
+   touched. With no connection it says what this phone holds, as before.
 2. On the owner's phone no PIN is asked: the card is given the owner's proof and
    lets the money in for that tap. On any other phone, CARD PIN, and the button
    `ADD $2.00 TO CARD`.

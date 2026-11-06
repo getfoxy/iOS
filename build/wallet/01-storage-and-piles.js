@@ -336,8 +336,9 @@
    *   trimmable  what the trim at its tightest frees (`trimPlan`, what `trimStore` writes);
    *   sent       the text of tokens this phone sent that nobody is known to have claimed (kept by clearing history: it
    *              can be the only copy of money), and `sentTokens` the texts;
-   *   cardLoads  the text of loads put onto cards, kept until every piece is in the card's file (`cardLoadOnFile`): how a
-   *              lost card's money is taken back after its date; `cardTokens` the texts;
+   *   cardLoads  the text of loads put onto cards, kept until every piece is in the card's file (`cardLoadOnFile`) or the
+   *              mint says every piece is spent (`cardLoadsSpent`, after a connect): how a lost card's money is taken back
+   *              after its date; `cardTokens` the texts;
    *   money      the ecash and the records that bring it back; cards the cards' files; reserve; other the rest. */
   function storageReport() {
     var out = { total: 0, cap: storeCap(), reserve: reserveBytes(), clearable: 0, trimmable: 0, sent: 0, sentCount: 0,
@@ -571,7 +572,9 @@
    *     (`cardLoadOnFile`), which is what a lost card's take-back is rebuilt
    *     from (`cardRemember`, a must-write): its text becomes `kept`, shown as
    *     before and let go with the rest. Being on the card (`carded`) is not
-   *     enough, and a load whose pieces are on no file keeps its text.
+   *     enough, and a load whose pieces are on no file keeps its text here
+   *     (the sweep after a connect lets it go once the mint says every piece
+   *     is spent: `cardLoadsSpent`, 08a-flashcard.js).
    *     Any other token nobody has claimed (`token`) is never touched: it can
    *     be the only copy of money.
    *   foxy.cashu.audit (what each payment consumed and produced, read by the

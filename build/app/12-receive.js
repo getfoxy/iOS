@@ -105,7 +105,9 @@
     /* The key a request is kept under: a request in dollars has its unit on
      * the end, so 500 cents and 500 sats are never the same row. A sat
      * request's key is what it always was. */
-    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + (why) + '|$' + Math.round(Number(cents) || 0) + (unit === 'usd' ? '|usd' : '');
+    // (a cashier's with a tip on it is kept apart from one without: 26p-till-tips.js `tillTipKey`)
+    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + (why) + '|$' + Math.round(Number(cents) || 0) + (unit === 'usd' ? '|usd' : '')
+      + (this.tillTipKey ? this.tillTipKey() : '');
     this._creqs = this._creqs || {};
     const have = this._creqs[key];
     if (have && have.making) return '';
@@ -117,11 +119,13 @@
     // the person picked this balance for this receive: what is paid in it stays in it (08c-units.js, `convertDue`)
     const kept = why === 'receive' && this.recvPicked(inUsd ? 'usd' : 'sat');
     // `ways` is { onion, nostr }, either of which may be missing
+    // the part that is a tip, on a cashier's code that offers tips (26p-till-tips.js `tillTipOpt`)
+    const tipOpt = this.tillTipOpt ? this.tillTipOpt(inUsd ? Math.round(Number(sats) || 0) : (cents > 0 ? 0 : sats)) : {};
     const make = ways => {
       const text = inUsd
-        ? W.paymentRequest(Math.round(Number(sats) || 0), Object.assign({ deliverTo: ways, purpose: why, unit: 'usd', kept: kept }, tillOpts))
+        ? W.paymentRequest(Math.round(Number(sats) || 0), Object.assign({ deliverTo: ways, purpose: why, unit: 'usd', kept: kept }, tillOpts, tipOpt))
         : W.paymentRequest(cents > 0 ? 0 : sats,
-          Object.assign({ deliverTo: ways, purpose: why, usd: cents > 0 ? cents : 0, kept: kept }, tillOpts));
+          Object.assign({ deliverTo: ways, purpose: why, usd: cents > 0 ? cents : 0, kept: kept }, tillOpts, tipOpt));
       this._creqs[key] = { text: text, inbox: ways };
       this.setState({ creqMade: Date.now() });
       return text;
@@ -193,7 +197,8 @@
     if (!W || !W.paymentRequest) return Promise.resolve('');
     // (a cashier's till names its requests 'till', as `railRequest` keeps them)
     const why = (this.tillLockFor && this.tillLockFor()) ? 'till' : (purpose || 'receive');
-    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + why + '|$' + Math.round(Number(unit === 'usd' ? 0 : usdCents) || 0) + (unit === 'usd' ? '|usd' : '');
+    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + why + '|$' + Math.round(Number(unit === 'usd' ? 0 : usdCents) || 0) + (unit === 'usd' ? '|usd' : '')
+      + (this.tillTipKey ? this.tillTipKey() : '');
     const have = (this._creqs || {})[key];
     if (have && have.ready) return have.ready.then(t => t || '', () => '');
     /* No row and no promise: `railRequest` refused it outright. */
@@ -229,7 +234,8 @@
     // a share of a split names itself, which is how `forgetRequests` tells them apart
     // (and a till's is kept apart, so a request locked to a keeper is never handed out once the till is closed)
     const tillAt = (this.tillLockFor && this.tillLockFor()) ? '|till' : '';
-    const key = 'tap|' + W.mintUrl + '|' + n + (purpose ? '|' + purpose + '|' : '') + (inUsd ? '|usd' : '') + tillAt;
+    const key = 'tap|' + W.mintUrl + '|' + n + (purpose ? '|' + purpose + '|' : '') + (inUsd ? '|usd' : '') + tillAt
+      + (this.tillTipKey ? this.tillTipKey() : '');
     this._creqs = this._creqs || {};
     const have = this._creqs[key];
     if (have && have.text) return have.text;
@@ -241,7 +247,8 @@
     if (W.primeLocks && !tillLock) { try { W.primeLocks(); } catch (e) {} }
     const kept = !purpose && this.recvPicked(inUsd ? 'usd' : 'sat');
     const tillMints = this.tillMintsNow ? this.tillMintsNow() : [];
-    const till = Object.assign(tillLock ? { purpose: 'till', lockPub: tillLock } : {}, tillMints.length ? { mints: tillMints } : {});
+    const till = Object.assign(tillLock ? { purpose: 'till', lockPub: tillLock } : {}, tillMints.length ? { mints: tillMints } : {},
+      this.tillTipOpt ? this.tillTipOpt(n) : {});
     const text = inUsd ? W.paymentRequest(n, Object.assign({ purpose: purpose || 'receive', unit: 'usd', kept: kept }, till))
       : W.paymentRequest(n, Object.assign({ purpose: purpose || 'receive', kept: kept }, till));
     if (!text) return '';
@@ -280,7 +287,7 @@
     const tillMints = this.tillMintsNow ? this.tillMintsNow() : [];
     const opts = Object.assign({ purpose: tillLock ? 'till' : 'receive', kept: true, twin: String(first) },
       other === 'usd' ? { unit: 'usd' } : (usd > 0 ? { usd: usd } : {}),
-      tillLock ? { lockPub: tillLock } : {}, tillMints.length ? { mints: tillMints } : {});
+      tillLock ? { lockPub: tillLock } : {}, tillMints.length ? { mints: tillMints } : {}, this.tillTipOpt ? this.tillTipOpt(n) : {});
     const text = W.paymentRequest(n, opts);
     if (!text) return '';
     this._creqs[key] = { text: text };
@@ -297,7 +304,8 @@
     if (!W || !W.paymentRequest) return false;
     const unit = arguments[3];
     const why = (this.tillLockFor && this.tillLockFor()) ? 'till' : (purpose || 'receive');
-    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + why + '|$' + Math.round(Number(unit === 'usd' ? 0 : usdCents) || 0) + (unit === 'usd' ? '|usd' : '');
+    const key = W.mintUrl + '|' + (Number(sats) || 0) + '|' + why + '|$' + Math.round(Number(unit === 'usd' ? 0 : usdCents) || 0) + (unit === 'usd' ? '|usd' : '')
+      + (this.tillTipKey ? this.tillTipKey() : '');
     const have = (this._creqs || {})[key];
     return !!(have && have.making);
   }
@@ -363,6 +371,8 @@
     this.syncInbox();
     // and the till's inbox and outbox, which the phone closed with the rest (26m-till.js, `tillWake`)
     if (this.tillWake) this.tillWake();
+    // and the Cashu ID's, closed the same way (26o-cashu-id.js, `cidWake`)
+    if (this.cidWake) this.cidWake();
   }
 
   /* A request is for one payment, so one that has been answered is let go.
@@ -801,7 +811,8 @@
     /* A cashier's till: the ecash the mint signs for this invoice is locked to the keeper's key, and goes to the keeper
      * (26m-till.js, `tillLockFor`; the wallet's `invoice`). Asked as it always was otherwise. */
     const tillLock = this.tillLockFor ? this.tillLockFor() : '';
-    const attempt = (n, waits) => (tillLock ? W.invoice(sats, memo, { lockPub: tillLock }) : W.invoice(sats, memo)).catch(e => {
+    // (and the part of it that is a tip, on a cashier's code that offers tips: 26p-till-tips.js `tillTipOpt`)
+    const attempt = (n, waits) => (tillLock ? W.invoice(sats, memo, Object.assign({ lockPub: tillLock }, this.tillTipOpt ? this.tillTipOpt(sats) : {})) : W.invoice(sats, memo)).catch(e => {
       /* A mint switched to a moment ago that has not answered yet (`switchTo`): the invoice is its to make, so the
        * screen waits for it, as long as a connect waits, without spending a try; one that will not answer ends it. */
       if (e && e.foxyConnecting && waits < WAITS && W.routeSoon) {
@@ -867,6 +878,8 @@
           stack: p.stack.concat([p.screen]),
           recvResolved: true,
           recv: Object.assign({}, p.recv, { live: 'in' }),
+          // (its history row, for a till's tip: 26p-till-tips.js)
+          paidHash: String(inv.hash || ''),
         }));
         this.noteReceived();
         // The confirmation is already on screen; the history sweep must not
@@ -947,7 +960,7 @@
     const G = window.FoxyGate;
     // (a cashier's till: locked to the keeper's key, as `openReceiveNow` asks)
     const tillLock = this.tillLockFor ? this.tillLockFor() : '';
-    const attempt = (n, waits) => W.invoice(cents, memo, Object.assign({ unit: 'usd' }, tillLock ? { lockPub: tillLock } : {})).catch(e => {
+    const attempt = (n, waits) => W.invoice(cents, memo, Object.assign({ unit: 'usd' }, tillLock ? Object.assign({ lockPub: tillLock }, this.tillTipOpt ? this.tillTipOpt(cents) : {}) : {})).catch(e => {
       // a mint switched to that has not answered yet: waited for, as `openReceiveNow` waits
       if (e && e.foxyConnecting && waits < 3 && W.routeSoon) {
         return W.routeSoon(this.MINT_ANSWER_WAIT_MS).then(ok => { if (!ok) throw e; return attempt(n, waits + 1); });
@@ -999,7 +1012,7 @@
       const unit = (paid && paid.unit) || 'usd';
       this.setState(p => ({
         screen: 'paid', stack: p.stack.concat([p.screen]), recvResolved: true,
-        paidUnit: unit, paidAmount: paid && paid.amount != null ? paid.amount : p.recvAmount,
+        paidUnit: unit, paidAmount: paid && paid.amount != null ? paid.amount : p.recvAmount, paidHash: String(hash || ''),
         // claimed at the mint that made it, with the phone on another: NOW AT that mint (`openReceiveNow`)
         paidPlace: paid && paid.away && paid.mint
           ? { label: 'NOW AT', to: (this.mintNameOf && this.mintNameOf(paid.mint)) || String(paid.mint).replace(/^https?:\/\//, '') } : null,
@@ -1049,7 +1062,7 @@
     console.log('[foxy] receive: the dollar code ran out; asking for a new one');
     // (a cashier's till: the new code is locked to the keeper's key as the first was, `openUsdReceive`)
     const tillLock = this.tillLockFor ? this.tillLockFor() : '';
-    W.invoice(s.recvAmount, this._recvMemo || '', Object.assign({ unit: 'usd' }, tillLock ? { lockPub: tillLock } : {})).then(inv => {
+    W.invoice(s.recvAmount, this._recvMemo || '', Object.assign({ unit: 'usd' }, tillLock ? Object.assign({ lockPub: tillLock }, this.tillTipOpt ? this.tillTipOpt(s.recvAmount) : {}) : {})).then(inv => {
       this._requoting = false;
       if (mine !== this._invoiceRun || (this.state.screen !== 'confirm' && this.state.screen !== 'fcXmConfirm') || this.state.recvUnit !== 'usd') return;
       if (W.tag && this._recvMemo) W.tag(inv.hash, { note: this._recvMemo });
@@ -1131,6 +1144,8 @@
      * Outside it, a cashier code asks whether to work the keeper's till (`tillJoinAsk`). */
     if (this.state.till && this.tillAccept) return this.tillAccept(t, kind);
     if (kind === 'till') return this.tillJoinAsk ? this.tillJoinAsk(t) : false;
+    // another Foxy's Cashu ID: NAME THIS CONTACT? (26o-cashu-id.js)
+    if (kind === 'cashuid') return this.cidAddAsk ? this.cidAddAsk(t) : false;
     /* Paying from a card (SEND on the card's screen, 26f-flashcard.js): a card pays Lightning, an invoice or an address,
      * and a bitcoin address on chain where the mint pays on chain (`fcOutAddress`, which asks it first). A Cashu payment
      * request is said no to here, before anything moves, and the person is left where they were. */
@@ -1461,6 +1476,8 @@
       // what arrived or left in its own unit, read first by the paid screen: cents for dollars
       paidUnit: ev.unit || 'sat',
       paidAmount: ev.amount != null ? ev.amount : ev.sats,
+      // its history row, for a till's tip to be said on (26p-till-tips.js `tillTipPaid`)
+      paidHash: String(ev.hash || ''),
       /* Sats paid for dollars asked for, which are to be swapped into
        * dollars: the dollars asked and how old the payer's price was, for
        * the headline (`renderPaid`). Nothing on any other payment. */

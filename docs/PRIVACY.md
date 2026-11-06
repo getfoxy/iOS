@@ -26,7 +26,15 @@ User-Agent and no cookies.
   iOS shows an alert with the host's name, and Foxy contacts it only if you
   tap Allow. A mint receives the ecash requests your wallet makes, the
   Lightning invoices you ask it to pay, the invoices and bitcoin addresses it
-  creates for you to be paid, and the amounts involved.
+  creates for you to be paid, and the amounts involved. After Foxy connects
+  to a mint, and at most once an hour for that mint, it asks the mint whether
+  the pieces of card loads this iPhone still keeps the text of have been spent
+  (a NUT-07 state check, on a Tor circuit used for nothing else, at most 400
+  pieces a request). This is not the check of sent tokens that was taken out
+  because it showed a mint who paid whom: a card load is paid by this iPhone
+  to a card of its own, and the mint saw these same pieces made by this
+  iPhone. A load whose every piece the mint calls spent keeps only a copy for
+  showing, which is trimmed with the other copies.
 - **Lightning address and LNURL servers.** When you pay a Lightning address or
   an LNURL, Foxy asks that server for an invoice (after the same alert, the
   first time). The server receives the amount you are paying and any note you
@@ -42,8 +50,8 @@ User-Agent and no cookies.
 - **Nostr relays and onion addresses.** When you pay or are paid through a
   payment request, the payment travels to the other person through a Tor onion
   address or through Nostr relays. While Foxy shows a payment request, it runs
-  a temporary onion address of its own on your iPhone and listens on four
-  Nostr relays (relay.damus.io, nos.lol, relay.primal.net and
+  a temporary onion address of its own on your iPhone and listens on three
+  Nostr relays (relay.damus.io, relay.primal.net and
   relay.minibits.cash) under a key made for that one request. When you pay a
   request, Foxy delivers to the onion address or the relays the request names.
   Over Nostr the payment is encrypted to the receiver (NIP-44 inside NIP-59
@@ -81,7 +89,7 @@ Three exceptions leave Foxy's Tor:
   (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`). It is unreadable while the
   iPhone is locked, it stays out of iCloud Keychain, and it cannot be
   restored onto a different iPhone. A backup restored to the same iPhone can
-  bring it back. When you turn on FACE / FINGER LOCK, the seed moves to a
+  bring it back. When you turn on FACE ID LOCK, the seed moves to a
   keychain item that also needs Face ID, Touch ID or the device passcode for
   every read.
 - **Your wallet.** Your ecash, history, contacts, notes and settings are kept
@@ -112,12 +120,19 @@ Three exceptions leave Foxy's Tor:
   the same card. Spending needs the card itself, and its PIN where one is
   required. The card's own log opens only to its owner's phone. The web
   address in a card's tag is the same on every card.
-- **Face ID, Touch ID and the PIN.** FACE / FINGER LOCK uses iOS's own Face ID,
+- **Face ID, Touch ID and the PIN.** FACE ID LOCK uses iOS's own Face ID,
   Touch ID or passcode prompt, and Foxy receives only whether it succeeded. A
   Foxy PIN, if you set one, is stored as a salted hash.
 - **Notifications.** "Payment sent" and "Payment received" notifications are
   created on the iPhone itself and carry no amount. Foxy asks for permission
-  the first time one is due.
+  the first time one is due. With a Cashu ID in use, Foxy also sets a reminder
+  after 15 days away: if notifications are already allowed it is simply on,
+  otherwise Foxy asks once ("Foxy can remind you after 15 days away, so a
+  payment or message waiting for you is not missed."). The one notification,
+  "You have not opened Foxy in 15 days. A payment or message may be waiting for
+  you.", is set for 15 days after you last had Foxy
+  open and set again each time you open or leave it. It is made on the phone and
+  sent by nobody. REMIND ME AFTER 15 DAYS in SETTINGS turns it off.
 - **Clipboard.** When you copy a sensitive value, such as an ecash token, Foxy
   marks it local to this device so it stays off Universal Clipboard, and iOS
   removes it 120 seconds later. Foxy reads the clipboard when you paste.
@@ -125,7 +140,7 @@ Three exceptions leave Foxy's Tor:
   mirrored. iOS lets Foxy know when a screenshot is taken, so the app can tell
   you what the picture holds.
 - **Diagnostic log.** Foxy keeps a log of what it is doing, in memory, with
-  ecash tokens, invoices, payment requests, onion addresses, Nostr keys and
+  ecash tokens, invoices, payment requests, Lightning addresses, onion addresses, Nostr keys and
   long hexadecimal values replaced by a placeholder. Mint addresses and
   amounts stay in it. A shorter record of the connection is saved on the
   iPhone for the next launch, so a stuck start can be explained, and deleted
@@ -154,8 +169,8 @@ learn from each operation.
 |---|---|
 | Camera | Scanning QR codes, asked the first time you scan |
 | Bluetooth | Tap to pay, asked the first time an invoice screen opens or you tap TAP TO PAY |
-| Face ID | FACE / FINGER LOCK and the seed's protection, asked the first time Foxy uses Face ID |
-| Notifications | "Payment sent" and "Payment received", asked the first time one is due |
+| Face ID | FACE ID LOCK and the seed's protection, asked the first time Foxy uses Face ID |
+| Notifications | "Payment sent" and "Payment received", asked the first time one is due; and a reminder after 15 days away with a Cashu ID in use, on when notifications are already allowed, otherwise asked once; made on the phone, sent by nobody |
 | NFC tag reading | The Foxy Flashcard, limited to the Foxy card applet |
 
 These are all the permissions Foxy asks for. Foxy does not use location,

@@ -443,6 +443,8 @@ enum SeedVault {
 
     static func seedForSecrets() -> SecretsSeed {
         if let seed = kept() { return .found(seed) }
+        // A lock prompt in front of the person: its answer, not a second prompt.
+        if awaitLockAnswer(forScreen: false), let seed = kept() { return .found(seed) }
         let epoch = epochNow
         /* About to ask iOS, which means a prompt in front of somebody.
          *
@@ -484,6 +486,7 @@ enum SeedVault {
     }
 
     private static func context(_ reason: String, forScreen: Bool = false) -> LAContext {
+        awaitLockAnswer(forScreen: forScreen)
         if let approved = takeUnlock(forScreen: forScreen) { return approved }
         let ctx = LAContext()
         ctx.localizedReason = reason
@@ -504,6 +507,62 @@ enum SeedVault {
     static func unlockCovers(notedAt: Date, now: Date, forScreen: Bool) -> Bool {
         let age = now.timeIntervalSince(notedAt)
         return !forScreen && age >= 0 && age < unlockSeconds
+    }
+
+    // MARK: The lock's own prompt
+
+    /* Foxy's lock asks for a face as Foxy comes back (handleBiometric). The
+     * page's wake work could ask for the seed in the same few milliseconds,
+     * before the lock's approval was noted, and then the keychain put up its
+     * own Face ID: that one was answered, the lock's lost the race, and the
+     * lock screen stayed up for a second face (seen in a phone log). So while
+     * the lock is asking, a read that an unlock may cover waits for its
+     * answer — yes, no or cancel — and then reads with the approval if there
+     * is one, else asks as it always did. Never longer than `lockWaitSeconds`,
+     * never on the main queue, and never for the words screen, which always
+     * asks. */
+    static let lockWaitSeconds: TimeInterval = 60
+    private static var lockAsking: (token: Int, since: Date)?
+    private static var lockAskingCount = 0
+    private static let lockGate = NSCondition()
+
+    /// The lock's prompt is up. The token ends this prompt and no later one.
+    @discardableResult
+    static func lockPromptBegan(now: Date = Date()) -> Int {
+        lockGate.lock(); defer { lockGate.unlock() }
+        lockAskingCount += 1
+        lockAsking = (lockAskingCount, now)
+        return lockAskingCount
+    }
+
+    /// The lock's prompt was answered: yes (its approval already noted), no, or cancelled.
+    static func lockPromptAnswered(_ token: Int) {
+        lockGate.lock(); defer { lockGate.unlock() }
+        if lockAsking?.token == token { lockAsking = nil }
+        lockGate.broadcast()
+    }
+
+    /// The rule: a read other than the words screen waits while the lock has
+    /// been asking for less than `lockWaitSeconds`.
+    static func waitsForLock(askingSince: Date?, now: Date, forScreen: Bool) -> Bool {
+        guard let since = askingSince, !forScreen else { return false }
+        let age = now.timeIntervalSince(since)
+        return age >= 0 && age < lockWaitSeconds
+    }
+
+    /// Blocks until the lock's prompt is answered or out of time. Whether it waited.
+    @discardableResult
+    static func awaitLockAnswer(forScreen: Bool) -> Bool {
+        if Thread.isMainThread { return false }
+        lockGate.lock(); defer { lockGate.unlock() }
+        var waited = false
+        while let asking = lockAsking,
+              waitsForLock(askingSince: asking.since, now: Date(), forScreen: forScreen) {
+            if !waited { print("[foxy] seed: waiting for the lock's answer") }
+            waited = true
+            _ = lockGate.wait(until: asking.since.addingTimeInterval(lockWaitSeconds))
+        }
+        return waited
     }
 
     // MARK: What stands in front of the seed

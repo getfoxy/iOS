@@ -7,7 +7,7 @@
 // and agreeing to pay somebody at another mint. Both are a person looking at
 // figures and deciding, which is what this shell is for.
 // Kept as one plain array literal — a suite reads this line as JSON.
-const CONFIRM_SCREENS = ['depConfirm', 'sendConfirm', 'reqOffer', 'trConfirm', 'ocConfirm', 'priceConfirm', 'crossConfirm', 'fcMoveConfirm', 'fcLimitConfirm', 'swapConfirm', 'fcXmConfirm', 'fcXlConfirm', 'fcOuConfirm'];
+const CONFIRM_SCREENS = ['depConfirm', 'sendConfirm', 'reqOffer', 'trConfirm', 'ocConfirm', 'priceConfirm', 'crossConfirm', 'fcMoveConfirm', 'fcLimitConfirm', 'swapConfirm', 'fcXmConfirm', 'fcXlConfirm', 'fcOuConfirm', 'cidConfirm'];
 // how long a fetched price still counts when a refresh fails, and how long a
 // launch with no price waits before saying so (09-melt-paste-switch.js)
 const PRICE_STANDS_MS = 3 * 60 * 1000;
@@ -177,8 +177,10 @@ class Component extends DCLogic {
       trStep: '', trFrom: '', trTo: '',
       // nor a card's question of which mint to move to (26f-flashcard.js), nor the till's of which mint to run at (26m-till.js)
       fcPick: false, tillPick: false, tillSet: [],
-      // nor a card's WITHDRAW TO (26n-card-withdraw-to.js)
-      wdPick: false,
+      // nor a card's WITHDRAW TO (26n-card-withdraw-to.js), nor the till's lists of people and codes (26p-till-tips.js)
+      wdPick: false, tillList: false, tillListBackTo: false,
+      // nor SEND's BANK ACCOUNT (26q-bank.js)
+      bankPick: false,
     }, extra || {}));
   }
   back() {
@@ -201,7 +203,7 @@ class Component extends DCLogic {
      * a payment queued behind the trip home went out after the person had left (`makeTokenForRequest`). Not while it
      * is being paid, collected or crossed for: each of those ends it itself. A queued pass tells the other phone
      * itself, when it is dropped at landing. */
-    if (st.screen === 'reqOffer' && to !== 'reqOffer' && st.req && !st.reqBusy && !st.reqCollecting && !st.crossBusy) {
+    if (st.screen === 'reqOffer' && to !== 'reqOffer' && st.req && !st.reqBusy && !st.reqCollecting && !st.crossBusy && !st.reqSwapping) {
       const W = window.FoxyWallet;
       if (st.req.viaTap && this._payAfterHome !== st.req && W && W.tapQuote) {
         W.tapQuote(JSON.stringify({ gaveUp: 'The payer cancelled.' })).catch(() => {});
@@ -250,6 +252,8 @@ class Component extends DCLogic {
   sendToText() {
     const s = this.state;
     if (s.recipientKind === 'email') return (s.recipient || '').toUpperCase();
+    // an invoice River made for BANK ACCOUNT (26q-bank.js) says whose it is
+    if (this.bankNow && this.bankNow() === 'river') return 'YOUR RIVER ACCOUNT \u00b7 ' + this.shortId(s.recipient || '');
     // an invoice is 200-odd characters and filled the screen; five each end is
     // enough to recognise it against what was pasted
     return this.shortId(s.recipient || '');
@@ -290,6 +294,8 @@ class Component extends DCLogic {
     if (s.screen === 'fcOuConfirm') return this.fcOuSpec();
     // dollars into bitcoin or back, at this mint (26i-swap.js)
     if (s.screen === 'swapConfirm') return this.swapSpec();
+    // paying a contact's Cashu ID (26o-cashu-id.js)
+    if (s.screen === 'cidConfirm') return this.cidSpec();
     // sendConfirm
     const W = window.FoxyWallet;
     // paid from another mint than this phone's, chosen on PAY FROM: that mint's quote and its own confirmation (26l-pay-from.js)

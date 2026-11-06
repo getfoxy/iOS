@@ -54,7 +54,8 @@
  *
  * FAULTS use the vocabulary of tools/live/fault-proxy.js, so a failure here and
  * one against a real mint are described the same way: drop-after (the mint
- * acted, the answer never arrived), status (a refusal), delay-after, and
+ * acted, the answer never arrived), status (a 500: a lost answer since 2026-11-04,
+ * its inputs held until the mint is asked), delay-after, and
  * storage-full (the phone's store refuses a write, which must throw). A fault
  * path is matched by prefix, so /v1/melt covers the on-chain melt as well.
  *
@@ -232,6 +233,8 @@ function holdings(P) {
     if (/^foxy\.cashu\.proofs/.test(key)) add(key, P.read(key, '[]'));
   }
   P.read('foxy.cashu.melting', '[]').forEach((m) => add('a melt in flight', m && m.proofs));
+  // the inputs of a swap whose answer may be lost (a 5xx is one now), held until the mint says (`holdInputs`)
+  Object.values(P.read('foxy.cashu.held', '{}') || {}).forEach((h) => add('held after a lost answer', h && h.proofs));
   P.read('foxy.cashu.onchain.out', '[]').forEach((m) => add('an on-chain payout', m && m.proofs));
   P.read('foxy.cashu.quarantine', '[]').forEach((e) => add('quarantine', [e && e.proof ? e.proof : e]));
   P.W._sentTokens().forEach((e) => {

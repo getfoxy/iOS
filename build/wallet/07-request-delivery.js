@@ -685,6 +685,30 @@
     return encodeToken(tok.mint, keep, tok.unit || 'sat');
   }
 
+  /* Whether this phone has already swapped a waiting row's pieces into its pile.
+   *
+   * A claimed row is struck off the list with a write the store may refuse, and the money is in the pile by then
+   * (`dropUnclaimed`). Within the page that swapped it the row is left out of the balance as landed (`arrivingNow`),
+   * but that is memory: after a relaunch the row was back on the list and counted again beside the pile, the same
+   * payment twice until a later write happened to land. What this phone swaps in is noted by its pieces when it
+   * lands (`noteTaken`), and the pieces a row would be claimed with are the token's less any handed on
+   * (`withoutHandedOn`): when those are noted as taken, the row is the pile's. The decode is remembered by the token,
+   * since a balance is asked for many times a second; the next claim pass lets such a row go (the mint calls its
+   * pieces spent and `takenBefore` says by whom). */
+  var unclaimedPieces = {};
+  function rowSwappedIn(row) {
+    var text = row && typeof row.token === 'string' ? row.token : '';
+    if (!text) return false;
+    var list = unclaimedPieces[text];
+    if (list === undefined) {
+      try { list = (FoxyWallet.tokenInfo(text) || {}).proofs || []; } catch (e) { list = []; }
+      unclaimedPieces[text] = list;
+    }
+    var handed = handedList();
+    var rest = list.filter(function (pr) { return pr && handed.indexOf(String(pr.secret || '')) < 0; });
+    return rest.length > 0 && !!takenBefore(rest);
+  }
+
   /* The mint a waiting payment is at: written on the row, and read from the
    * token for a row kept before that was. Remembered by the token, since a
    * balance is asked for many times a second and a token does not change. */
@@ -726,6 +750,8 @@
       if (!row || recordUnit(row) !== want) continue;
       // a payment being swapped in is counted as arriving (`arrivingIn`), or is in the pile already: not here as well
       if (arrivingNow && arrivingNow[ids[i]]) continue;
+      // swapped in by this phone already, with its strike-off refused before a relaunch: the pile counts it
+      if (rowSwappedIn(row)) continue;
       var n = amountOfRecord(row);
       if (!(n > 0)) continue;
       if (here) {
@@ -746,7 +772,7 @@
    * comes back.
    *
    * Kept in sats, at the phone's last bitcoin price when the person set them
-   * (SETTINGS › OFFLINE, PER PAYER and OFFLINE, TOTAL). Never set, each is its
+   * (SETTINGS › OFFLINE LIMITS › PER PERSON and TOTAL). Never set, each is its
    * dollar default at the phone's last price, worked out when it is asked, so
    * the default follows the price until somebody picks a figure.
    *
@@ -1103,9 +1129,9 @@
    * proofs are in the pile, which inverts the rule above. A throw here would
    * turn a receive that worked into a failure — the claim's rejection answers
    * the payer 422 — for money the mint has already handed over. What a refused
-   * drop costs is a stale entry: `unclaimedSats` counts it twice until a write
-   * lands, and `claimUnclaimed` tries a token the mint has taken and drops it
-   * on "already spent". `save` rather than a bare try, so a store a newer Foxy
+   * drop costs is a stale row: `unclaimedSats` leaves it out once its pieces
+   * are in the pile (`rowSwappedIn`), and `claimUnclaimed` tries a token the
+   * mint has taken and drops it on "already spent". `save` rather than a bare try, so a store a newer Foxy
    * wrote is still left alone (storageNewer). */
   /* Secrets this phone has signed and given away.
    *
@@ -1115,10 +1141,27 @@
    * the same reason the unclaimed store is: a note that does not land would let
    * exactly that happen.
    *
-   * Bounded, because it grows for ever otherwise. Two hundred is far more than a
-   * phone hands on between swaps, and an entry that falls off the end names a
-   * proof the mint has long since marked spent — so a repeat is refused by the
-   * mint rather than here, which is a worse message but not a worse outcome. */
+   * Bounded as the in-flight lists are (`boundedRows`: 200 entries or 256 KB). It
+   * was cut to its last 200 on every write, oldest first, and the oldest are
+   * exactly the ones whose row may still name them: a piece handed on while its
+   * row could not be rewritten (`takeFromUnclaimed`) stays in that row's token,
+   * and once its secret fell off the end the phone offered it again and handed it
+   * to a second person.
+   *
+   *   holds money  a secret some row on the unclaimed list still names. Dropped,
+   *                this phone would offer that piece again (`lockedPieces`,
+   *                `lockedProofsFlat`) and claim it (`withoutHandedOn`). Never
+   *                let go here.
+   *   settled      a secret no waiting row names: the piece is off every row,
+   *                so nothing on this phone can offer it again. What is left is
+   *                the same ecash arriving a second time, and that is refused by
+   *                the mint rather than here, which is a worse message but not a
+   *                worse outcome. These go first, oldest first.
+   *
+   * A hand-on that would need more room than letting settled entries go can make
+   * is refused before anything is signed (`handedRoom`). An entry written once
+   * the token exists is never refused for room: it is written, over the bound if
+   * it has to be. */
   var HANDED = 'foxy.req.handedon';
 
   function handedList() {
@@ -1130,13 +1173,60 @@
     return handedList().indexOf(String(secret || '')) >= 0;
   }
 
+  // the secrets every row on the unclaimed list still names, read once for a whole pass over the handed-on list
+  function namedByRows() {
+    var named = {};
+    var all = unclaimed();
+    Object.keys(all).forEach(function (id) {
+      var row = all[id];
+      if (!row || typeof row.token !== 'string') return;
+      var tok = null;
+      try { tok = FoxyWallet.tokenInfo(row.token); } catch (e) { tok = null; }
+      ((tok && tok.proofs) || []).forEach(function (pr) { if (pr && pr.secret) named[String(pr.secret)] = true; });
+    });
+    return named;
+  }
+
+  var HANDED_SAY = function (n) {
+    return n + ' pieces of ecash this phone handed on are still on payments waiting to be claimed, and Foxy keeps the '
+      + 'only note that stops each going out twice. It will not hand on more until some of them have been claimed: '
+      + 'connect, let them finish, and try again.';
+  };
+
+  /* Room on the list for `count` more, or the refusal `boundedRows` gives (`inFlightFull`, `unsent`), before anything
+   * is signed. Asks only: nothing is written. */
+  function handedRoom(count) {
+    var n = Math.max(0, Math.round(Number(count) || 0));
+    if (!n) return;
+    var named = namedByRows();
+    var l = handedList().slice();
+    var room = {};
+    for (var i = 0; i < n; i++) { var k = '\u0000room-' + i; room[k] = true; l.push(k); }
+    boundedRows(l, true, function (sec) { return !room[sec] && !named[String(sec)]; }, true, 'pieces handed on', function () {
+      // (what is left once the settled ones are let go, less the room asked for)
+      return HANDED_SAY(l.filter(function (sec) { return !room[sec]; }).length);
+    });
+  }
+
+  // how many pieces the rows of a hand-on carry, for `handedRoom`
+  function piecesOfRows(rows) {
+    return (rows || []).reduce(function (n, row) {
+      var tok = null;
+      try { tok = FoxyWallet.tokenInfo(String((row && row.token) || '')); } catch (e) { tok = null; }
+      return n + (((tok && tok.proofs) || []).length);
+    }, 0);
+  }
+
   function rememberHandedOn(proofs) {
     var all = handedList();
     (proofs || []).forEach(function (pr) {
       var sec = String((pr && pr.secret) || '');
       if (sec && all.indexOf(sec) < 0) all.push(sec);
     });
-    mustSave(HANDED, all.slice(-200));
+    // the token is written by now: settled entries let go to make room, and nothing refused (`handedRoom` asked first)
+    var named = namedByRows();
+    all = boundedRows(all, false, function (sec) { return !named[String(sec)]; }, false, 'pieces handed on');
+    mustSave(HANDED, all);
   }
 
   /* The unclaimed row holding exactly this token, gone.
@@ -1746,7 +1836,7 @@
       if (!mine.length) return;
       var amt = sumProofs(mine);
       out.push({ hash: h, unit: u, amount: amt, sats: u === 'sat' ? amt : 0, at: Number(g.at) || 0, req: g.req || '',
-                 mint: g.mint, why: g.why || '', pieces: mine });
+                 mint: g.mint, why: g.why || '', pieces: mine, refund: Math.max(0, Number(g.refund) || 0) });
     });
     return out;
   }
@@ -1766,8 +1856,10 @@
    * pieces go into the pile again, flagged. Only plain pieces; a token with
    * ecash locked to this phone in it stays on its entry and is taken back
    * whole (`takeBackToken`). Resolves the sats flagged. */
+  /* `refund`: what a short refund already brought back (`refundArrived`), in the payment's unit. The group carries it, so
+   * that once the mint says which pieces the receiver spent the entry is what they took less what they sent back. */
   /** @returns {Promise<any>} */
-  function atRiskAdd(made, reqId, why) {
+  function atRiskAdd(made, reqId, why, refund) {
     return withProofs('atRisk', function () {
       var info = FoxyWallet.tokenInfo(made.token);
       var list = usableProofs((info && info.proofs) || []).map(function (pr) {
@@ -1783,6 +1875,7 @@
       all[made.hash] = { secrets: list.map(function (pr) { return pr.secret; }), unit: u, amount: sumProofs(list),
                          at: Date.now(), req: reqId || '', mint: at, why: String(why || '').slice(0, 200) };
       if (u === 'sat') all[made.hash].sats = sumProofs(list);
+      if (Number(refund) > 0) all[made.hash].refund = Math.round(Number(refund));
       // the flag first, and it must land: unflagged in the pile they would be ordinary money
       mustSave(K.atRisk, all);
       addOwnProofs(list, at, wallet, u === 'sat' ? undefined : u, true);
@@ -1810,12 +1903,29 @@
    * not counted, so the payment's entry becomes what it cost); 'row' when it
    * was taken in as a payment of its own (its row is counted, so the entry
    * stays the whole payment). */
+  /* `short`: the refund is well under what was paid. It is then not the whole answer, and nothing is struck on its word:
+   * the pieces stay in the pile, flagged, the refund is written on their group, and the mint is asked (`settleAtRisk`,
+   * check-state) which of them the receiver spent. Those come out and the entry becomes what they took less what came
+   * back; the rest are swapped back as a refusal's are. Resolves 'partial' then. A group already settled as taken
+   * (its pieces asked about and gone) is struck as before. */
   /** @returns {Promise<any>} */
-  function atRiskRefunded(hash, net, how) {
+  function atRiskRefunded(hash, net, how, short) {
     return withProofs('atRisk', function () {
       var all = atRiskAll();
       var g = all[hash];
       if (!g) return Promise.resolve(false);
+      // not said by the caller (a refund scanned as a code): short by the same measure `checkRefund` uses
+      var want = amountOfRecord(g);
+      if (short === undefined) short = Math.round(Number(net) || 0) < want - Math.max(6, Math.ceil(want / 100));
+      if (short && !g.taken && Array.isArray(g.secrets) && g.secrets.length) {
+        /* Taken as change (`how` 'change'), the refund has no row of its own, so the entry comes down by it once the
+         * mint has answered; taken as a row of its own ('row'), that row already counts it. */
+        if (how === 'change') g.refund = (Number(g.refund) || 0) + Math.max(0, Math.round(Number(net) || 0));
+        mustSave(K.atRisk, all);
+        try { FoxyWallet.tag(hash, { refundedPart: true }); } catch (e) {}
+        console.log('[foxy] part of a refused payment came back; the mint is asked which of its pieces were spent before any is struck');
+        return Promise.resolve('partial');
+      }
       var gone = {};
       (g.secrets || []).forEach(function (sec) { gone[String(sec)] = true; });
       var gu = recordUnit(g);
@@ -1902,6 +2012,13 @@
       FoxyWallet.tapChangeKept(true).catch(function () {});
       console.log('[foxy] a refused payment came back, locked to this phone: ' + moneyWords(chk.amount, refundUnit) + how
         + (chk.short ? ' — less than the ' + moneyWords(paid, refundUnit) + ' that was paid' : ''));
+      if (wait && chk.short) {
+        /* Short: not the whole answer. The entry is left to the at-risk path (`afterRefusal`), which asks the mint
+         * which of the original pieces were spent before it strikes any; the refund is carried there. */
+        try { FoxyWallet.tag(hash, { refundedPart: true, inflight: false }); } catch (x) {}
+        wait.done({ net: net, sats: chk.sats, unit: refundUnit, amount: chk.amount, short: true });
+        return;
+      }
       if (wait) {
         try {
           amendTx(hash, { settled: true, state: 'success', refunded: true, memo: 'ecash, refused and returned' });
@@ -1912,10 +2029,13 @@
         wait.done({ net: net, sats: chk.sats, unit: refundUnit, amount: chk.amount, short: chk.short });
         return;
       }
-      atRiskRefunded(hash, net, 'change').then(function () {
+      atRiskRefunded(hash, net, 'change', chk.short).then(function (how) {
         if (typeof FoxyWallet._onAtRisk === 'function') {
-          try { FoxyWallet._onAtRisk({ state: 'refunded', hash: hash, sats: refundUnit === 'sat' ? net : 0, unit: refundUnit, amount: net }); } catch (x) {}
+          try { FoxyWallet._onAtRisk({ state: 'refunded', hash: hash, sats: refundUnit === 'sat' ? net : 0, unit: refundUnit, amount: net,
+                                       short: how === 'partial' }); } catch (x) {}
         }
+        // short: the mint is asked now, with a route, which of the pieces were spent (and on every connection after)
+        if (how === 'partial' && routeOpen() && FoxyWallet.settleAtRisk) return FoxyWallet.settleAtRisk();
       }, function () {});
     };
     var no = function (why) {
@@ -1970,13 +2090,22 @@
     if (lockedProofs(list).length) return onEntry();
     var waited = (req && req.viaTap && req.id) ? waitRefund(req.id, made, paid, u) : Promise.resolve(null);
     return waited.then(function (back) {
-      if (back) {
-        e.foxyRefunded = Object.assign(inUnit(back.net), { short: !!back.short, paid: paid });
+      if (back && !back.short) {
+        e.foxyRefunded = Object.assign(inUnit(back.net), { short: false, paid: paid });
         throw e;
       }
-      return atRiskAdd(made, req && req.id, e && e.message).then(function (flagged) {
-        if (!(flagged > 0)) return onEntry();
+      /* A short refund is kept, and is not the whole answer: the original pieces go into the pile flagged as any
+       * refusal's do, and the mint says which were spent (`_settleAtRiskOnce`). Those are struck and the entry is what
+       * they took less the refund; the rest come back. It used to end the wait, with the pieces the receiver had not
+       * spent left for them to redeem whenever they liked. */
+      var part = back || null;
+      return atRiskAdd(made, req && req.id, e && e.message, part ? part.net : 0).then(function (flagged) {
+        if (!(flagged > 0)) {
+          if (part) { e.foxyRefunded = Object.assign(inUnit(part.net), { short: true, paid: paid }); throw e; }
+          return onEntry();
+        }
         e.foxyAtRisk = Object.assign(inUnit(flagged), { onEntry: false });
+        if (part) e.foxyRefunded = Object.assign(inUnit(part.net), { short: true, partial: true, paid: paid, recovered: 0 });
         /* With a route there is nothing to wait for: the pieces are swapped
          * now, while the person is still looking at the screen. They were
          * left for "the first connection", and a payer that already had one
@@ -1990,6 +2119,10 @@
             if (!r || r.hash !== made.hash) return;
             if (r.state === 'safe') { e.foxyAtRisk.safe = true; Object.assign(e.foxyAtRisk, inUnit(amountOfRecord(r))); }
             if (r.state === 'taken') { e.foxyAtRisk.taken = true; Object.assign(e.foxyAtRisk, inUnit(amountOfRecord(r))); }
+            // a short refund: what came back besides it, from the pieces the receiver did not spend
+            if (part && e.foxyRefunded) {
+              e.foxyRefunded.recovered = r.state === 'safe' ? amountOfRecord(r) : Math.max(0, Number(r.recovered) || 0);
+            }
           });
         }, function (x) {
           console.warn('[foxy] the refused pieces could not be swapped just now; on the next connection:', x && x.message);
@@ -2378,8 +2511,9 @@
     if (!(id in all)) return;
     delete all[id];
     if (!save(UNCLAIMED, all)) {
+      // counted once all the same: as landed in this page, and by its pieces noted as taken after a relaunch (`rowSwappedIn`)
       console.warn('[foxy] the claimed payment could not be struck off the unclaimed list;'
-        + ' it is counted twice until a write lands');
+        + ' it is counted in the pile alone, and the next claim pass lets the row go');
       return;
     }
     arrivingRowGone(id);
@@ -2566,6 +2700,9 @@
     ids.forEach(function (id) {
       // not a cashier code's: its row serves every payment by that code, and goes with the code (08d-till.js, `tillForget`)
       if (/^till-/.test(id)) return;
+      /* nor ANY WALLET's (08e-cashu-id.js, `cidAnyRequest`): its code may be paid again by a second payer, and that
+       * payment is found by the row rather than by a walk of the seed; the ID's inbox takes each delivery once (`cidSeenAdd`) */
+      if (/^cid-any-/.test(id)) return;
       if (want[lockPubOf(all[id])]) { delete all[id]; gone += 1; }
     });
     if (gone) save(LOCK_KEYS, all);

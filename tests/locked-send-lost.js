@@ -18,7 +18,7 @@
  * messages, not only counter ranges. This asks the question the fix exists for:
  * after the answer is lost, is the money still there?
  */
-const { loadReal, fakeMint, nativePhone, PHONE_WORDS } = require('./harness');
+const { loadReal, fakeMint, nativePhone, PHONE_WORDS, booksWrong } = require('./harness');
 
 const MINT = 'https://m.test';
 let failed = 0;
@@ -96,9 +96,17 @@ function page(state, o) {
   return ctx;
 }
 
+// the pile at the test's mint, and what this mint charges for spending `list` (its input fee, NUT-02: ppk per piece, rounded up)
+const pileOf = (c) => JSON.parse(c.storage.getItem('foxy.cashu.proofs.' + MINT) || '[]');
+const feeFor = (c, list) => Math.ceil((list.length * (Number(c.ppk) || 0)) / 1000);
+
 async function run() {
   const state = { drop: false, acted: false };
   const ctx = page(state);
+  /* A mint that charges for its inputs, so the fee has a figure the test can hold it to (as macadamia does: 100 ppk,
+   * a sat for up to ten pieces). */
+  ctx.ppk = 100;
+  ctx.mint.feeIs(ctx.ppk);
   const W = ctx.W;
   await W.connect(MINT, { remember: true });
 
@@ -116,6 +124,7 @@ async function run() {
 
   // ---- the answer is lost, after the mint has acted ------------------------
   state.drop = true;
+  const pileBefore = pileOf(ctx);
   let made = null, threw = null;
   try { made = await W.sendToken(21, { unit: 'sat', lockTo: req.lockTo }); }
   catch (e) { threw = e; }
@@ -129,8 +138,15 @@ async function run() {
   const info = made && W.tokenInfo(made.token);
   const sent = info ? info.proofs.reduce((a, p) => a + Number(p.amount), 0) : 0;
   ok(sent >= 21, 'the token holds what was asked for (' + sent + ' sats)');
-  ok(after + sent + (made ? made.fee || 0 : 0) >= before - 2,
-    'and nothing else went missing: ' + before + ' -> ' + after + ' held + ' + sent + ' in the token');
+  /* The fee held to what the mint charges for the inputs that went in, and not
+   * worked out as what is left over: a fee found by subtraction would take in a
+   * piece of change that went missing, and the sum below would still add up. */
+  const pileGone = pileBefore.filter((p) => !pileOf(ctx).some((q) => q.secret === p.secret));
+  const charged = feeFor(ctx, pileGone);
+  ok(!!made && made.fee === charged,
+    'the fee is what the mint charges for the ' + pileGone.length + ' piece(s) that went in (' + (made && made.fee) + ' of ' + charged + ')');
+  ok(after + sent + charged === before,
+    'and nothing else went missing: ' + before + ' -> ' + after + ' held + ' + sent + ' in the token + ' + charged + ' fee');
   /* And nothing is counted twice. The swap's inputs are spent, so they are
    * out of the pile; a pile that kept them passed the line above, which only
    * asks whether anything is missing. */
@@ -147,6 +163,59 @@ async function run() {
   const swaps = JSON.parse(ctx.storage.getItem('foxy.cashu.swaps') || '[]');
   ok(!swaps.length, 'no orphan swap record is left to block a restore ('
     + swaps.length + ')');
+
+  // ---- change that goes missing reads as missing, not as a fee -------------
+  {
+    /* A future mistake that drops a piece of change between the swap and the
+     * pile, made here by hand: the library's answer loses its smallest piece of
+     * change. The fee was what went in, less the token, less what was kept, so
+     * the missing piece was booked as fee and the books still added up. Now the
+     * fee is what the mint charges for those inputs, the mismatch is said, and
+     * the entry carries what went in and what came back; the payment itself
+     * goes through. */
+    const st = { drop: false, acted: false };
+    const c = page(st);
+    c.ppk = 100;
+    c.mint.feeIs(c.ppk);
+    await c.W.connect(MINT, { remember: true });
+    await c.W.claim((await c.W.invoice(400, '')).hash);
+    const before = await c.W.balanceSats();
+    await c.W.primeLocks();
+    const req = c.W.decodeRequest(c.W.paymentRequest(21, { purpose: 'receive' }));
+    const proto = c.window.CashuTS.Wallet.prototype;
+    const real = proto.send;
+    let lost = 0;
+    proto.send = function () {
+      return real.apply(this, arguments).then((r) => {
+        const fresh = (r.keep || []).filter((p) => !pileOf(c).some((q) => q.secret === p.secret));
+        const small = fresh.sort((a, b) => Number(a.amount) - Number(b.amount))[0];
+        if (small && !lost) { lost = Number(small.amount); r.keep = r.keep.filter((p) => p !== small); }
+        return r;
+      });
+    };
+    const said = [];
+    const warn = c.window.console.warn;
+    c.window.console.warn = function () { said.push(Array.from(arguments).join(' ')); return warn.apply(this, arguments); };
+    const pile0 = pileOf(c);
+    const made = await c.W.sendToken(21, { unit: 'sat', lockTo: req.lockTo }).catch((e) => ({ why: e.message }));
+    proto.send = real;
+    c.window.console.warn = warn;
+    const went = pile0.filter((p) => !pileOf(c).some((q) => q.secret === p.secret));
+    const charged = feeFor(c, went);
+    const entry = JSON.parse(c.storage.getItem('foxy.cashu.log') || '[]').filter((e) => e && e.hash === (made && made.hash))[0] || {};
+    ok(lost > 0 && !!(made && made.token), 'a payment whose change lost a piece of ' + lost + ' still goes through'
+      + (made && made.why ? ' — ' + made.why : ''));
+    ok(made.fee === charged && entry.feeSats === charged,
+      'its fee is what the mint charges for its inputs, not the lost change as well (' + made.fee + ', entry ' + entry.feeSats + ', charged ' + charged + ')');
+    const tokenSum = c.W.tokenInfo(made.token).proofs.reduce((a, p) => a + Number(p.amount), 0);
+    ok(entry.swapInSats === went.reduce((a, p) => a + Number(p.amount), 0) && entry.swapInSats - entry.swapOutSats === charged + lost,
+      'the entry says what went in and what came back (' + entry.swapInSats + ' in, ' + entry.swapOutSats + ' out)');
+    ok(said.some((l) => /fee/.test(l) && /charges/.test(l)), 'and the mismatch is said in the log');
+    ok((await c.W.balanceSats()) + tokenSum + charged === before - lost,
+      'the balance is short by the lost piece and no more (' + (await c.W.balanceSats()) + ' held, ' + tokenSum + ' sent, of ' + before + ')');
+    ok(booksWrong(c).length === 1, 'so the books check sees the missing piece instead of a fee that covers it');
+    c.booksOff = true;
+  }
 
   // ---- and again with nothing left over ------------------------------------
   {
@@ -355,6 +424,27 @@ async function run() {
     await W.recoverSwaps();
     ok(rowsOf(t.b).filter((e) => e.dir === 'out').length === 1 && !W.heldSats() && !swapsOf(t.b).length,
       'and with one again the payment is rebuilt');
+  }
+
+  {
+    /* Opened again at ANOTHER mint (2026-11-04). The hold was made only for the mint the phone connected to, so a
+     * locked send cut short at another mint left its pieces in that mint's pile, counted and spendable, while the
+     * mint had spent them. (The one fake mint answers both addresses; the wallet keeps a pile per address.) */
+    const OTHER = 'https://other.test';
+    const t = await killedMidSend(128, true);
+    const W = t.b.W;
+    await W.connect(OTHER, { remember: true });
+    const heldThere = Object.values(JSON.parse(t.b.storage.getItem('foxy.cashu.held') || '{}'))
+      .filter((h) => String(h.mint).replace(/\/+$/, '') === MINT).reduce((n, h) => n + h.proofs.reduce((x, pr) => x + Number(pr.amount), 0), 0);
+    ok(heldThere === 128 && W.balanceAt(MINT) === t.before - 128,
+      'opened at another mint, the pieces of the locked send cut short at the first are held there too ('
+      + heldThere + ' held, ' + W.balanceAt(MINT) + ' left spendable at ' + MINT + ')');
+    await W.recoverSwaps();
+    const out = rowsOf(t.b).filter((e) => e.dir === 'out');
+    ok(out.length === 1 && Number(out[0].sats) === 128 && !swapsOf(t.b).length && W.balanceAt(MINT) === t.before - 128
+       && JSON.stringify(JSON.parse(t.b.storage.getItem('foxy.cashu.held') || '{}')) === '{}',
+      'and asked from there, the payment is rebuilt and nothing is held any more (' + out.length + ' entry, '
+      + W.balanceAt(MINT) + ' at ' + MINT + ')');
   }
 
   console.log('');

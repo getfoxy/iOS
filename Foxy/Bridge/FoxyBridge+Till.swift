@@ -12,7 +12,7 @@ import Foundation
 /// with the code.
 ///
 /// `tillKeyMake {id}` makes the key and answers its nprofile; `tillKeyDrop {id}`
-/// throws it away. `tillInboxOpen {ids, since}` listens on up to four of them, each
+/// throws it away. `tillInboxOpen {ids, since}` listens on up to eight of them, each
 /// payment reaching the page as `FoxyWallet._tillArrived(id, body)`, and
 /// answers how many are listening. `tillInboxClose` ends them,
 /// as Foxy leaving the foreground does (`closeInboxForBackground`); the page
@@ -26,8 +26,10 @@ extension FoxyBridge {
     /// page's call unanswered for good. Whatever ends an inbox here also counts
     /// it as answered. Main queue only.
     final class TillInboxes {
-        /// The most codes a phone keeps live, and so the most listened on.
-        static let most = 4
+        /// The most codes a phone keeps, live or ended within the week a payment by one may
+        /// still arrive in, and so the most listened on: a keeper may have several cashiers
+        /// at once, each by a code of its own (the page's TILL_PASSES_MAX, 08d-till.js).
+        static let most = 8
 
         private(set) var open: [String: NostrInbox] = [:]
         private var pending = Set<String>()
@@ -105,7 +107,8 @@ extension FoxyBridge {
     /// not let ask the relays for every wrap they hold for a key.
     static func tillSince(_ value: Any?, now: Int) -> Int {
         let fallback = now - tillWindowDefault
-        guard let number = value as? NSNumber, !(value is Bool) else { return fallback }
+        // `value is Bool` is true of every NSNumber 0 or 1 from the page, so a boolean is told apart by its CF type, as `cashuIdSince` does
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return fallback }
         let seconds = number.doubleValue
         guard seconds.isFinite, seconds >= Double(now - tillWindow), seconds <= Double(now) else { return fallback }
         return Int(seconds)

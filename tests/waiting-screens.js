@@ -105,7 +105,11 @@ ok(/if \(s\.screen === 'sendDone'\) \{\s*this\._sendSlowT = setTimeout\(\(\) => 
 ok(/clearTimeout\(this\._sendSlowT\);\s*if \(s\.screen === 'sendDone'\)/.test(src), 'and clears it on every change of screen');
 ok(/sendSlowShown: sc === 'sendDone' && !!s\.sendSlow && \(sendPhase === 'in'\)/.test(src),
    'the notice shows only while it is still sending');
-ok(/\{\{ sendSlowShown \}\}[\s\S]{0,700}?Still waiting for their phone to answer\.[\s\S]{0,700}?STOP WAITING/.test(markup),
+ok(/Still waiting for their phone to answer\./.test(src) && /Still waiting for an earlier request to the mint/.test(src),
+   'and says what it waits for: the other phone, or an earlier request holding the proof lock');
+ok(/_sendBehindT = setTimeout\([\s\S]{0,300}?sendBehindOther\(\)[\s\S]{0,120}?sendSlow: true[\s\S]{0,30}?\}, 5000\)/.test(src),
+   'behind another job the notice comes after five seconds, not thirteen');
+ok(/\{\{ sendSlowShown \}\}[\s\S]{0,700}?\{\{ sendSlowText \}\}[\s\S]{0,700}?STOP WAITING/.test(markup),
    'with words and a STOP WAITING button on the screen');
 ok(/sendStopWaiting: \(\) => \{[\s\S]{0,1600}?screen: 'home', stack: \[\], sendSlow: false/.test(src),
    'which goes home and leaves the payment to finish behind');

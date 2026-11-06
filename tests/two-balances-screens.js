@@ -732,14 +732,16 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
   // ---- UNCLAIMED ECASH: each unit summed on its own --------------------------------------------
   {
     const W = twoWallet({ choice: { hold: 'both' } });
-    W.tokensNotClaimed = () => Promise.resolve([
-      { unit: 'usd', amount: 300, sats: null }, { unit: 'sat', amount: 1200, sats: 1200 }]);
+    // what clearing kept is read from the notes, not asked of the mint (14-reconcile-seed-restore.js `sayWhatClearingKept`)
+    W._sentTokens = () => [{ hash: 'a', token: 'cashuAusd' }, { hash: 'b', token: 'cashuAsat' }];
+    W.tokenInfo = (t) => (t === 'cashuAusd' ? { unit: 'usd', amount: 300, sats: null, proofs: [{}] }
+      : { unit: 'sat', amount: 1200, sats: 1200, proofs: [{}] });
     W.clearHistory = () => {};
     let card = null;
     const realCard = A.blockedCard;
     A.blockedCard = (kind, over) => { card = { kind, over }; };
     await fresh(W);
-    // clearing asks twice, ARE YOU SURE? and ARE YOU TRIPLE SURE? (14-reconcile-seed-restore.js): both YESes, then the tokens' card
+    // clearing asks twice, ARE YOU SURE? and ARE YOU TRIPLE SURE? (14-reconcile-seed-restore.js): the second YES clears, then the tokens' card says what was kept
     A.askClear('history');
     if (card && card.over && card.over.go) card.over.go();
     if (card && card.over && card.over.go) card.over.go();

@@ -219,6 +219,29 @@ const usdProof = (amount) => ({ ...proof(amount), id: USD_ID });
     return eq(c[USD_ID], 2, 'usd counter on the phone');
   });
 
+  await test('restore never walks a keyset in a unit Foxy cannot hold (msat, eur), and still walks sat and usd', async () => {
+    const MSAT_ID = '00aa00aa00aa0001', EUR_ID = '00bb00bb00bb0001';
+    const ctx = await wallet({
+      connect: false,
+      keysets: [
+        { id: SAT_ID, unit: 'sat', active: true },
+        { id: USD_ID, unit: 'usd', active: true },
+        { id: MSAT_ID, unit: 'msat', active: true },
+        { id: EUR_ID, unit: 'eur', active: true },
+      ],
+      restore: { [SAT_ID]: { 0: [8] }, [USD_ID]: { 0: [100] } },
+    });
+    const rows = await scan(ctx);
+    const row = rows.find((r) => r.state === 'done');
+    if (!row) return 'no finished row: ' + JSON.stringify(rows);
+    const asked = ctx.log.restored.filter((c) => c.id === MSAT_ID || c.id === EUR_ID);
+    if (asked.length) return asked.length + ' restore requests for units Foxy cannot hold';
+    if (ctx.log.built.some((b) => b.unit === 'msat' || b.unit === 'eur')) return 'built a wallet for a unit Foxy cannot hold';
+    if (row.partial) return 'marked partial with nothing failing';
+    if (!ctx.log.restored.some((c) => c.id === USD_ID)) return 'the usd keyset was not walked';
+    return eq(row.sats, 8, 'sats');
+  });
+
   await test('a usd proof the mint calls spent is left out of the scan', async () => {
     const ctx = await wallet({ connect: false, restore: { [USD_ID]: { 0: [100, 23] } } });
     // the stub numbers secrets in order: the second usd proof is 23

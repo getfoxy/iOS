@@ -26,6 +26,9 @@
  *   8  a tap at another mint: their mint first with no fee, this phone's own by
  *      the crossing asked while they decided; one source, on as before
  *   9  no route: nothing offered that crosses
+ *  13  short in the unit asked, with the other at hand at the same mint (2026-11-04): the other balance is a row, "From your
+ *      dollars at FORGE, fee about $ 0.02", quoted by the SWAP screen's swap, beside the crossings and cheapest first; chosen,
+ *      the swap and the payment go under one PAY; the reverse (a dollar request paid from sats); neither enough; one unit
  *
  * The methods are lifted out of build/foxy-app.js and run against a stand-in
  * wallet, as scan-cross-mint.js does.
@@ -61,6 +64,8 @@ const LIFTED = [
   'crossComeHome() {', 'startSendNow(to, o) {', 'toConfirm() {', 'requestSpec() {', 'requestHere(req) {', 'requestNeedsRoute(req) {',
   'makeTokenForRequest(go) {', 'ocCancel() {', 'cfRow(label, value, opt) {', 'unitWord(unit) {', 'unitFigure(amount, unit) {',
   'money(sats, fiatCents) {', 'usd(v) {', 'group(n) {', 'sendAsk() {',
+  'pfReqOpen(req, list, want, fig) {', 'pfSwapSource(req) {', 'pfSwapRate() {', 'pfSwapQuote(e) {', 'pfSwapCost(e, q) {', 'pfSwapFee(q, from) {',
+  'pfSwapText(e, q) {', 'pfReqSwap(req) {', 'pfSwapThenPay(req, src, go) {', 'swapRateOf(r) {',
 ];
 const lifted = new Function('return {' + LIFTED.map(method).join(',\n') + '}')();
 
@@ -75,7 +80,7 @@ const INV = 'lnbc20u1pexample';
 function phone(o) {
   const opts = o || {};
   const log = { connects: [], pays: [], toasts: [], cards: [], moves: [], quotes: [], transfers: [], ocQuotes: 0, sends: 0, crossCards: 0,
-    tapThere: 0, tapCross: [], gaveUp: 0, payRequests: [] };
+    tapThere: 0, tapCross: [], gaveUp: 0, payRequests: [], swapQuotes: [], swapRuns: [], melts: [] };
   const waiting = {};
   const answer = (key, make) => {
     const a = (opts.quotes || {})[key];
@@ -110,11 +115,32 @@ function phone(o) {
     transferQuote: (from, sats, x) => { log.transfers.push({ from, sats, to: x && x.to, land: !!(x && x.land), landing: x && x.landing });
       const a = (opts.transfers || {})[from];
       return a instanceof Error ? Promise.reject(a) : Promise.resolve({ from, to: x.to, net: sats, feeSats: a == null ? 3 : a }); },
-    sendShortfall: (sats) => { const have = W.balanceAt(W.mintUrl); return { need: sats, fee: 0, have, short: have < sats, why: have < sats ? 'Short here.' : '' }; },
+    sendShortfall: (sats, x) => {
+      const u = (x && x.unit) || 'sat';
+      const have = ((opts.piles || []).filter((p) => p.mint === W.mintUrl && p.unit === u)[0] || { amount: 0 }).amount;
+      return { need: sats, fee: 0, have, short: have < sats, why: have < sats ? 'Short here.' : '', unit: u };
+    },
+    // the SWAP screen's swap at this mint (16b-two-balances.js), at $ 80,000 a bitcoin with 1 % kept by the mint
+    mintRate: () => ({ usdPerBtc: 80000, at: Date.now() }),
+    swapQuote: (from, to, amount) => {
+      log.swapQuotes.push({ from, to, amount });
+      const get = from === 'usd' ? Math.floor(amount * 0.99 / 100 / 80000 * 1e8) : Math.floor(amount * 0.99 * 80000 / 1e8 * 100);
+      return Promise.resolve({ id: 'q' + log.swapQuotes.length, mint: W.mintUrl, from, to, total: amount, amount, fee: Math.ceil(amount / 100), get,
+        rate: { usdPerBtc: 80000 }, state: 'quoted', expiresAt: Date.now() + 60000 });
+    },
+    swapRun: (q) => {
+      log.swapRuns.push(q);
+      const pile = (u) => (opts.piles || []).filter((p) => p.mint === W.mintUrl && p.unit === u)[0];
+      if (opts.swapFails) return Promise.resolve({ id: q.id, state: 'failed' });
+      pile(q.from).amount -= q.total;
+      if (pile(q.to)) pile(q.to).amount += q.get; else opts.piles.push({ mint: W.mintUrl, unit: q.to, amount: q.get });
+      return Promise.resolve({ id: q.id, state: 'done', from: { unit: q.from, amount: q.total }, to: { unit: q.to, amount: q.get } });
+    },
     connect: (u, a, b, x) => { log.connects.push({ u, remember: !(x && x.remember === false) }); W.mintUrl = u; return Promise.resolve(); },
     pay: (to, onStage, x) => { log.pays.push({ at: W.mintUrl, to, unit: x && x.unit, quote: x && x.quote });
       return opts.payFails ? Promise.reject(new Error('no route found')) : Promise.resolve({ hash: 'h1', feeSats: 2, amount: 2000, fee: 2 }); },
-    payRequest: (req) => { log.payRequests.push({ at: W.mintUrl, sats: req.sats }); return Promise.resolve({ hash: 'h2', confirmed: true }); },
+    payRequest: (req) => { log.payRequests.push({ at: W.mintUrl, sats: req.sats, unit: req.unit, amount: req.amount,
+      held: (opts.piles || []).filter((p) => p.mint === W.mintUrl).map((p) => p.unit + ' ' + p.amount).join(', ') }); return Promise.resolve({ hash: 'h2', confirmed: true }); },
     pendingMelts: () => [],
     tag: () => {},
     tapQuote: (t) => { if (/gaveUp/.test(t)) log.gaveUp++; return Promise.resolve(); },
@@ -152,7 +178,7 @@ function phone(o) {
     crossMintCard() { log.crossCards++; return Promise.resolve(true); },
     crossMove(plan, theirs, mine, home) { log.moves.push({ net: plan.net, theirs, mine, home }); W.mintUrl = theirs; this._crossCameFrom = home && home !== mine ? home : mine; return Promise.resolve(); },
     crossFailed(e) { log.crossFailed = String(e && e.message); },
-    showMelt() {}, hideMelt() {}, needScanStage() {}, watchToken() {}, tidyChangeLater() {}, changeComesBack: () => false,
+    showMelt(t) { log.melts.push(String(t)); }, hideMelt() {}, needScanStage() {}, watchToken() {}, tidyChangeLater() {}, changeComesBack: () => false,
     requestDelivered(req) { this.setState({ reqBusy: false, req: null, sendPhase: 'settled' }); this.crossComeHome(); },
     saidToReceiver: (s) => s,
     tapPayFromThere() { log.tapThere++; },
@@ -411,6 +437,96 @@ async function run() {
     await m.crossMove({ net: 1000, moving: 1000, to: THIRD, from: AWAY }, THIRD, AWAY, HOME);
     ok('the crossing pays with the quote the plan holds and warms the far mint while the melt runs',
       runs.length === 1 && runs[0] && runs[0].visit === true && runs[0].quoted === true && runs[0].warm === true, JSON.stringify(runs));
+  }
+  console.log('13. short in the unit asked, with the other balance at the same mint (2026-11-04)');
+  {
+    const t = (good, name, detail) => ok(name, good, detail);
+    // the log's case: a request for sats at Forge, 3,190 sats there and $ 89.16 in dollars
+    const piles = () => [{ mint: HOME, unit: 'sat', amount: 3190 }, { mint: HOME, unit: 'usd', amount: 8916 }];
+    const req = { id: 'r13', mints: [HOME], sats: 5000, unit: 'sat', transports: ['nostr'], delivery: { kind: 'nostr', target: 'nprofile1x' } };
+    const a = phone({ two: true, piles: piles() });
+    a.setState({ screen: 'reqOffer', stack: ['home'], req: req, wallet: 'sat', balSats: 3190 });
+    t(a.pfRequest(req) === true, 'PAY FROM is opened, where it used to be NOT ENOUGH with $ 89.16 beside it');
+    await wait(5);
+    const q0 = a.log.swapQuotes[0] || {};
+    t(a.log.swapQuotes.length === 1 && q0.from === 'usd' && q0.to === 'sat' && q0.amount === 151,
+      'the swap is quoted as the SWAP screen quotes one: dollars into sats at this mint, sized for the 1,810 missing and a little over', JSON.stringify(a.log.swapQuotes));
+    const e = row(a, HOME, 'usd');
+    t(!!e && e.swap === true && e.ok === true && a.pfCostText(e) === 'From your dollars at FORGE, fee about $ 0.02',
+      'its row: "From your dollars at FORGE, fee about $ 0.02", the swap’s cost as SWAP counts it', e && a.pfCostText(e));
+    t(a.state.screen === 'reqOffer' && a.state.payMint === HOME && a.state.payUnit === 'usd',
+      'the one balance that can pay is chosen with nothing asked, and the offer is back', a.state.screen + ' ' + a.state.payUnit);
+    const spec = a.requestSpec();
+    const v = (l) => ((spec.rows || []).filter((x) => x.label === l)[0] || {}).value;
+    t(v('PAYING FROM') === 'FORGE · DOLLARS' && v('SWAP') === 'From your dollars at FORGE, fee about $ 0.02' && /^PAY /.test(spec.cta) && !spec.warn,
+      'the offer: PAYING FROM FORGE · DOLLARS, the swap’s row, and PAY, not NOT ENOUGH', JSON.stringify({ p: v('PAYING FROM'), s: v('SWAP'), cta: spec.cta, warn: spec.warn }));
+    a.makeTokenForRequest();
+    await wait(20);
+    const paid = a.log.payRequests[0] || {};
+    t(a.log.swapRuns.length === 1 && a.log.swapRuns[0] === a.pfFull(e.key) && a.log.melts.some((t) => /Swapping dollars into bitcoin/.test(t)),
+      'PAY: the quote shown is the swap run, under the swapping overlay', JSON.stringify(a.log.melts));
+    t(a.log.payRequests.length === 1 && paid.at === HOME && paid.sats === 5000 && /sat 5058/.test(paid.held),
+      'and the request is paid at Forge from the sats the swap brought, once, with no second scan or confirmation', JSON.stringify(a.log.payRequests));
+    t(a.log.toasts.length === 0 && a.log.cards.length === 0 && a.log.swapQuotes.length === 1, 'nothing else asked or said', JSON.stringify(a.log.toasts));
+
+    // the same, beside a crossing from another mint: cheapest first
+    const b = phone({ two: true, piles: piles().concat([{ mint: AWAY, unit: 'sat', amount: 9000 }]), transfers: { [AWAY]: 3 } });
+    b.setState({ screen: 'reqOffer', stack: ['home'], req: req, wallet: 'sat' });
+    b.pfRequest(req);
+    await wait(5);
+    t(b.state.screen === 'payFrom' && b.pfList().map((x) => x.key).join() === [AWAY + '|sat', HOME + '|usd'].join(),
+      'beside another mint’s sats by the crossing (3 sats), the swap (2 cents, 25 sats) is second', JSON.stringify(b.pfList().map((x) => x.key + ' ' + x.rank)));
+    b.pfTap(b.pfKey(HOME, 'usd'));
+    b.pfNext();
+    t(b.state.screen === 'reqOffer' && b.state.payUnit === 'usd' && b.pfReqCrossing(HOME) === null, 'and chosen, it is a swap and no crossing');
+
+    // the reverse: a request for dollars, short in dollars, with sats enough
+    const ureq = { id: 'r14', mints: [HOME], amount: 500, unit: 'usd', transports: ['nostr'], delivery: { kind: 'nostr', target: 'nprofile1x' } };
+    const c = phone({ two: true, piles: [{ mint: HOME, unit: 'sat', amount: 50000 }, { mint: HOME, unit: 'usd', amount: 100 }] });
+    c.setState({ screen: 'reqOffer', stack: ['home'], req: ureq, wallet: 'usd' });
+    t(c.pfRequest(ureq) === true, 'a request in dollars short in dollars: PAY FROM, from the sats');
+    await wait(5);
+    const ce = row(c, HOME, 'sat');
+    t(c.log.swapQuotes.length === 1 && c.log.swapQuotes[0].from === 'sat' && ce && c.pfCostText(ce) === 'From your sats at FORGE, fee about ₿ 52',
+      'its row: "From your sats at FORGE, fee about ₿ 52"', ce && c.pfCostText(ce));
+    const cs = c.requestSpec();
+    const cv = (l) => ((cs.rows || []).filter((x) => x.label === l)[0] || {}).value;
+    t(cv('PAYING FROM') === 'FORGE · BITCOIN' && /From your sats/.test(cv('SWAP')) && !cv('FROM') && /^PAY /.test(cs.cta),
+      'its offer says PAYING FROM FORGE · BITCOIN and the swap, and PAY', JSON.stringify({ p: cv('PAYING FROM'), cta: cs.cta }));
+    c.makeTokenForRequest();
+    await wait(20);
+    t(c.log.swapRuns.length === 1 && c.log.swapRuns[0].to === 'usd' && c.log.payRequests.length === 1 && c.log.payRequests[0].unit === 'usd' && /usd 505/.test(c.log.payRequests[0].held),
+      'PAY: sats into dollars, then the dollars paid', JSON.stringify(c.log.payRequests));
+
+    // neither enough: as today
+    const d = phone({ two: true, piles: [{ mint: HOME, unit: 'sat', amount: 3190 }, { mint: HOME, unit: 'usd', amount: 50 }] });
+    d.setState({ screen: 'reqOffer', stack: ['home'], req: req, wallet: 'sat', balSats: 3190 });
+    t(d.pfRequest(req) === false && !d.log.swapQuotes.length, 'neither balance enough: no PAY FROM and no swap asked');
+    const ds = d.requestSpec();
+    t(/NOT ENOUGH|CLOSE/.test(ds.cta) && !((ds.rows || []).some((x) => x.label === 'SWAP')), 'and the offer is short, as it always was', ds.cta);
+
+    // a mint with one unit: no such row
+    const f = phone({ two: false, piles: [{ mint: HOME, unit: 'sat', amount: 3190 }, { mint: HOME, unit: 'usd', amount: 8916 }] });
+    f.setState({ screen: 'reqOffer', stack: ['home'], req: req, wallet: 'sat', balSats: 3190 });
+    t(f.pfRequest(req) === false && !f.log.swapQuotes.length, 'a mint that issues one unit: no swap row');
+
+    // a swap the mint did not make: said, nothing paid, the offer stays
+    const g = phone({ two: true, swapFails: true, piles: piles() });
+    g.setState({ screen: 'reqOffer', stack: ['home'], req: req, wallet: 'sat' });
+    g.pfRequest(req);
+    await wait(5);
+    g.makeTokenForRequest();
+    await wait(20);
+    t(!g.log.payRequests.length && /did not make the swap/.test(g.log.toasts.join('|')) && g.state.screen === 'reqOffer' && !g.state.reqSwapping,
+      'a swap the mint did not make: said, nothing paid, and the offer still up', g.log.toasts.join('|'));
+
+    // and the quote does not cover the gap (the dollars would be spent and the sats still short): NOT ENOUGH, not offered
+    const h = phone({ two: true, piles: [{ mint: HOME, unit: 'sat', amount: 3190 }, { mint: HOME, unit: 'usd', amount: 140 }] });
+    h.setState({ screen: 'reqOffer', stack: ['home'], req: req, wallet: 'sat', balSats: 3190 });
+    h.pfRequest(req);
+    await wait(5);
+    t(row(h, HOME, 'usd').ok === false && row(h, HOME, 'usd').tag === 'NOT ENOUGH' && h.state.screen === 'reqOffer' && !h.state.payMint,
+      'enough on its face and not with the swap’s fee: NOT ENOUGH, and the offer as it was', JSON.stringify(row(h, HOME, 'usd')));
   }
   console.log('10. the choice is let go when the flow ends');
   {

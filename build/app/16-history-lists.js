@@ -8,10 +8,16 @@
         .localeCompare(String(b.name || b.handle), undefined, { sensitivity: 'base' }));
     return list.map(c => ({
       name: c.name || c.handle,
-      handle: c.handle,
+      // a Cashu ID is a hundred characters nobody reads: said as what it is (26o-cashu-id.js)
+      handle: c.cid ? 'CASHU ID' : c.handle,
       ini: String(c.name || c.handle).charAt(0).toUpperCase(),
       tint: c.tint || 'var(--acc)',
-      tap: () => this.setState(p => ({
+      // a Cashu ID's messages not read yet (26p-cashu-msg.js): '' with none, or with no ID in use
+      unread: c.cid ? this.cmUnreadOf(String(c.cid.id || '')) : '',
+      unreadSay: 'unread messages',
+      // a Cashu ID opens its own screen, its messages and PAY, from the menu's CONTACTS; from SEND it goes straight to
+      // the amount (`cidPayStart`), as an address does: the sender came to pay, not to read
+      tap: c.cid ? () => ((s.stack || []).slice(-1)[0] === 'sendHow' ? this.cidPayStart(c) : this.cidOpen(c)) : () => this.setState(p => ({
         screen: 'amount',
         stack: p.stack.concat([p.screen]),
         flow: 'send',
@@ -132,6 +138,12 @@
     return Math.round(Number(W && W.topUpFeeSats && W.topUpFeeSats()) || 0);
   }
 
+  /// What a melt the mint has not settled holds at this mint, in `unit` (W.meltingIn): for the audit only. 0 when none.
+  meltingIn(unit) {
+    const W = window.FoxyWallet;
+    try { return Math.max(0, Math.round(Number(W && W.meltingIn && W.meltingIn(unit)) || 0)); } catch (e) { return 0; }
+  }
+
   /// Sats a swap took after Foxy was put away, still to be collected (recoveringSats). 0 when none.
   recoveringSats() {
     const W = window.FoxyWallet;
@@ -238,17 +250,22 @@
     const fees = this.topUpFeeSats ? this.topUpFeeSats() : 0;
     // and money arriving whose entry is not written yet (it is written when it lands): in the balance, set aside
     run -= Math.max(0, arriving.amount - seen.arrivingSats);
-    const off = whole ? Math.round(run) + held + back + fees : 0;
+    /* And what a melt still with the mint holds: a payment, a swap's first leg, a card's payment. Out of the balance and
+     * on no row until the mint answers, so on its way, as money arriving is (`W.meltingIn`). The audit read "off by" the
+     * melt for as long as the mint took, and the ring went red for a payment that was only slow. */
+    const melting = this.meltingIn ? this.meltingIn('sat') : 0;
+    const off = whole ? Math.round(run) + held + back + fees + melting : 0;
     /* Said in the log when it changes, with what it was worked out from: a
      * card that says DOES NOT ADD UP and a diary that cannot say why is a
      * report nobody can act on. */
-    const sig = [balNow, off, dueChange, toShowCount, seen.in, seen.out, seen.skipped, arriving.amount].join('|');
+    const sig = [balNow, off, dueChange, toShowCount, seen.in, seen.out, seen.skipped, arriving.amount, melting].join('|');
     if (whole && sig !== this._auditSig) {
       this._auditSig = sig;
       console.log('[foxy] audit: balance ' + balNow + ', off by ' + off + '; ' + seen.in + ' in for ' + seen.inSats
         + ', ' + seen.out + ' out for ' + seen.outSats + ', ' + seen.skipped + ' not counted (' + seen.skippedSats
         + ' sats: pending, failed, at risk, a bill, another unit); arriving ' + arriving.amount + ' ('
-        + arriving.count + ' being swapped in, ' + seen.arriving + ' with an entry); change due here ' + dueChange
+        + arriving.count + ' being swapped in, ' + seen.arriving + ' with an entry); with the mint in a melt ' + melting
+        + '; change due here ' + dueChange
         + ', change to hand over ' + toShowSats);
       /* And when it does not add up, the rows it was worked out from, newest
        * first: which way, how much, the fee, and what kind of row. Amounts are
@@ -267,7 +284,7 @@
         for (let i = 0; i < rows.length; i += 20) console.log('[foxy] audit rows ' + i + ': ' + rows.slice(i, i + 20).join(' '));
       }
     }
-    return { balOf, balNow, run, whole, off, held, arriving: arriving.amount, dueChange, dueCount, toShow, toShowSats, toShowCount, flagged };
+    return { balOf, balNow, run, whole, off, held, melting, arriving: arriving.amount, dueChange, dueCount, toShow, toShowSats, toShowCount, flagged };
   }
 
   histAuditUsd() {
@@ -301,13 +318,16 @@
     let held = 0, back = 0;
     try { held = Math.round(Number(W0 && W0.heldIn && W0.heldIn('usd')) || 0); } catch (e) { held = 0; }
     try { back = Math.round(Number(W0 && W0.recoveringIn && W0.recoveringIn('usd')) || 0); } catch (e) { back = 0; }
-    const off = whole ? Math.round(run) - Math.max(0, arriving.amount - arrivingSeen) + held + back : 0;
-    const sig = [balNow, off, arriving.amount].join('|');
+    // and a melt still with the mint, in dollars, that no swap's held figure already names (`histAudit`, `W.meltingIn`)
+    const melting = this.meltingIn ? this.meltingIn('usd') : 0;
+    const off = whole ? Math.round(run) - Math.max(0, arriving.amount - arrivingSeen) + held + back + melting : 0;
+    const sig = [balNow, off, arriving.amount, melting].join('|');
     if (whole && sig !== this._auditSigUsd) {
       this._auditSigUsd = sig;
-      console.log('[foxy] audit (dollars): balance ' + balNow + ' cents, off by ' + off + '; arriving ' + arriving.amount + ' cents');
+      console.log('[foxy] audit (dollars): balance ' + balNow + ' cents, off by ' + off + '; arriving ' + arriving.amount + ' cents'
+        + '; with the mint in a melt ' + melting + ' cents');
     }
-    return { balOf, balNow, run, whole, off, held, back, arriving: arriving.amount, dueChange: 0, dueCount: 0, toShow: null, toShowSats: 0,
+    return { balOf, balNow, run, whole, off, held, back, melting, arriving: arriving.amount, dueChange: 0, dueCount: 0, toShow: null, toShowSats: 0,
       toShowCount: 0, flagged: new Map() };
   }
 
@@ -452,7 +472,9 @@
         const meta = W.tagsFor(t.hash) || {};
         /* The take-back of a lost card (RESTORE LOST CARD, `lost`) is in home's list, the one list it can be in, and says what it
          * was: "From card" alone read as a card tapped here. */
-        const who = t.lost ? (this.txCardName(t) ? 'Taken back from ' + this.txCardName(t) : 'Taken back from a lost card') : (meta.to || this.txWho(t));
+        // a payment to an exchange from SEND > BANK ACCOUNT (26q-bank.js): "To Strike", whatever its address or invoice
+        const who = t.lost ? (this.txCardName(t) ? 'Taken back from ' + this.txCardName(t) : 'Taken back from a lost card') : (meta.bank && this.bankName)
+          ? 'To ' + this.bankName(meta.bank) : (meta.to || this.txWho(t));
         buckets[key].push({
           name: who,
           /* The detail screen gets the whole address where there is one.
@@ -496,6 +518,12 @@
           tillSent: !!t.tillSent,
           // and a cashier's: the keeper's money, which this phone's books leave out (`histAudit`)
           forKeeper: !!t.forKeeper,
+          /* A till's tips (26p-till-tips.js): on a sale, the part that was a tip and those it could not be passed on to; on a
+           * payment out, whose tip it was. */
+          tillTip: Number(t.tillTip) > 0 ? Number(t.tillTip) : 0,
+          tillTipUnit: t.tillTipUnit === 'usd' ? 'usd' : 'sat',
+          tillTipFailed: Array.isArray(t.tillTipFailed) ? t.tillTipFailed.slice() : [],
+          tillTipTo: t.tillTipTo ? String(t.tillTipTo) : '',
           /* A token this wallet sent is pending (amber) until it is known to be
            * redeemed: its text is kept until then (forgetClaimedToken). */
           pending: !t.settled || (t.dir === 'out' && meta.to === 'ecash' && !!meta.token),
@@ -616,6 +644,14 @@
         });
       }
 
+      /* Payments to this phone’s Cashu ID at a mint it does not use, waiting for an answer (26o-cashu-id.js): listed
+       * where they arrived, pending, in no balance. */
+      (this.cidWaitingRows ? this.cidWaitingRows() : []).forEach(t => {
+        const d = new Date(t.atMs || Date.now());
+        const key = d.toDateString() === now.toDateString() ? 'TODAY' : d.toDateString() === yest.toDateString() ? 'YESTERDAY' : 'EARLIER';
+        buckets[key].unshift(t);
+      });
+
       const history = ['TODAY', 'YESTERDAY', 'EARLIER']
         .map(label => ({ label: label, items: buckets[label] }))
         .filter(g => g.items.length);
@@ -626,10 +662,11 @@
         tint: 'var(--acc)',
       }));
       // the book is the whole list now; remember() above has written to it
-      const merged = W.book().map((c, i) => ({
+      const merged = W.book().map((c, i) => Object.assign({
         name: c.name, handle: c.handle,
         tint: ['var(--acc)', '#5B45D0', '#0E9E93', '#D4409A', '#2E7CF6', '#E0602E'][i % 6],
-      }));
+      // a Cashu ID's two keys go with its name: they are how it is paid (26o-cashu-id.js)
+      }, c.cid ? { cid: c.cid } : {}));
 
       // Everything settled that has not been announced yet. Incoming ones queue
       // up and are shown one at a time, each waiting for its own dismissal, so

@@ -129,7 +129,8 @@ const requestAt = (mints, sats) => new REAL_CTX.window.CashuTS.PaymentRequest([]
 function stubWallet(o) {
   const opt = Object.assign({ pin: '', face: false, faceSays: 'yes' }, o || {});
   const calls = { requests: [], invoices: [], joins: [], leaves: 0, listens: 0, delivers: 0, taken: [], scans: 0, primes: 0,
-    biometric: [], pays: 0, passMakes: 0, passUnits: [], passOpts: [], keeperOpens: [], keeperCloses: 0, received: [], warms: 0 };
+    biometric: [], pays: 0, passMakes: 0, passUnits: [], passOpts: [], keeperOpens: [], keeperCloses: 0, received: [], warms: 0,
+    tipsSet: [], tipTaken: [], passEnds: [], cidAdds: [] };
   const W = {
     connected: true,
     mintUrl: MINT,
@@ -211,9 +212,48 @@ function stubWallet(o) {
       const live = W.passes.filter((x) => Number(x.exp) * 1000 > Date.now() && (!unit || x.unit === unit));
       // (and at the mints the keeper's till takes, the default first, where one is open: `tillKeeperOpen`)
       const set = W.keeper ? [W.keeper.def].concat(W.keeper.mints.filter((u) => u !== W.keeper.def)) : [W.mintUrl];
+      // (another code beside those live, for the list's ADD A CASHIER: `fresh`, with tips and a label of its own)
+      if (mo && mo.fresh) {
+        const n = W.passes.length;
+        const pf = passOf({ id: ('a' + String(n)).padEnd(16, '0').slice(0, 16), unit: unit || 'sat', mint: set[0], mints: set });
+        if (mo.tips && mo.tips.on) pf.tips = true;
+        W.passes.push(Object.assign({}, pf, { label: mo.label || '', tipsRow: mo.tips || null, made: Date.now() }));
+        return Promise.resolve({ text: codeOf(pf), id: pf.id, exp: pf.exp, mints: pf.mints, tips: !!pf.tips, label: mo.label || '' });
+      }
       const p = live.length ? live[live.length - 1] : passOf({ id: unit === 'usd' ? 'fedcba9876543211' : unit === 'both' ? 'fedcba9876543212' : 'fedcba9876543210', unit: unit || 'sat', mint: set[0], mints: set });
       if (!live.length) W.passes.push(p);
       return Promise.resolve({ text: codeOf(p), id: p.id, exp: p.exp, mints: p.mints || [p.mint] });
+    },
+    // ---- tips and the list of codes (08f-till-tips.js), as the wallet answers ----
+    tips: null,
+    tillTipsSet(t) { calls.tipsSet.push(JSON.parse(JSON.stringify(t))); W.tips = t; return t; },
+    tillTipsProblem: (t) => REAL.tillTipsProblem(t),
+    tillTipTaken(o) { calls.tipTaken.push(Object.assign({}, o)); return Promise.resolve({ jobs: W.tips && W.tips.to !== 'self' ? 1 : 0, kept: 0, waiting: 0 }); },
+    tillPassList() {
+      const now = Date.now();
+      const view = (x) => ({ id: x.id, label: x.label || '', unit: x.unit, main: x.main || x.unit, mints: x.mints || [x.mint],
+        tips: x.tipsRow ? { on: !!x.tipsRow.on, to: x.tipsRow.to, names: (x.tipsRow.ids || []).map((r) => r.name) } : { on: false, to: 'self', names: [] },
+        made: x.made || now - 1000, exp: x.exp, endedAt: x.endedAt || 0, how: x.endedAt ? 'ended' : 'expired', until: x.endedAt || x.exp * 1000,
+        text: !x.endedAt && x.exp * 1000 > now ? codeOf(x) : '' });
+      const all = W.passes.map(view);
+      return { live: all.filter((v) => v.text), past: all.filter((v) => !v.text) };
+    },
+    tillPassEnd(id) { calls.passEnds.push(id); const x = W.passes.find((y) => y.id === id && !y.endedAt); if (x) x.endedAt = Date.now(); return !!x; },
+    // ---- Cashu ID contacts, for who the tips go to (08e-cashu-id.js) ----
+    cids: [],
+    cashuIdContacts() { return W.cids.slice(); },
+    cashuIdCheck(text) {
+      const hit = (W.idTexts || {})[String(text).trim()];
+      if (!hit) return Promise.reject(new Error('That is not a Cashu ID.'));
+      const known = W.cids.find((c) => c.cid.id === hit.id);
+      return Promise.resolve({ id: hit.id, nostr: hit.nostr, text, own: !!hit.own, name: known ? known.name : '' });
+    },
+    cashuIdAdd(text, name) {
+      const hit = (W.idTexts || {})[String(text).trim()];
+      calls.cidAdds.push([text, name]);
+      const c = { handle: text, name, at: Date.now(), cid: { id: hit.id, nostr: hit.nostr } };
+      W.cids.unshift(c);
+      return Promise.resolve(c);
     },
     tillListen() { calls.listens += 1; return Promise.resolve(0); },
     // the keeper's till at a set of its mints, `def` the default: the visit there, and the way home
@@ -287,6 +327,9 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     await settle();
   };
   const pinUp = () => !!(A._pinEl && A._pinEl.parentNode);
+  // ACCEPT TIPS?, as the till opens: answered NO, or left for the scenario to answer (26p-till-tips.js)
+  const tipsAsked = () => /ACCEPT TIPS\?/.test(card());
+  const noTips = async () => { if (tipsAsked()) { press(A._blockedEl, 'NO'); await settle(); } };
   const stage = () => w.document.getElementById('foxy-stage');
   const fresh = async (W, state) => {
     w.FoxyWallet = W;
@@ -329,7 +372,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     A.tillGate(() => { through += 1; }, 'To open the till.');
     await settle();
     ok(/SET A LOCK FIRST/.test(card()), 'no lock: SET A LOCK FIRST', card().slice(0, 60));
-    ok(/SETTINGS > SET PIN or FACE \/ FINGER LOCK/.test(card()), 'and where to set one');
+    ok(/SETTINGS > SET PIN or FACE ID LOCK/.test(card()), 'and where to set one');
     eq(through, 0, 'and nothing opens');
   }
   {
@@ -361,7 +404,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     let through = 0;
     A.tillGate(() => { through += 1; }, 'To open the till.');
     await settle();
-    ok(pinUp() && W.calls.biometric.length === 0, 'a PIN with FACE / FINGER LOCK off: the pad, no face asked');
+    ok(pinUp() && W.calls.biometric.length === 0, 'a PIN with FACE ID LOCK off: the pad, no face asked');
     await typePin('2468');
     eq(through, 1, 'and the PIN opens it');
   }
@@ -369,31 +412,33 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
   // ---- 2. the rows ----------------------------------------------------------------------------------
   {
     const W = stubWallet({ pin: '2468' });
-    await fresh(W, { open0: true, menuSettingsOpen: false });
+    await fresh(W, { open0: true });
     const labels = () => V().menuItems.map((m) => m.label);
     let l = labels();
-    ok(l.indexOf('TOOLS') > l.indexOf('HISTORY') && l.indexOf('TOOLS') < l.indexOf('SETTINGS') && l.indexOf('POINT OF SALE') < 0 && l.indexOf('SPLIT A BILL') < 0 && l.indexOf('CONTACTS') < 0 && l.indexOf('CASHIER CODE') < 0 && l.indexOf('RESTORE LOST CARD') < 0,
-      'TOOLS shut: a drop-down between HISTORY and SETTINGS holding POINT OF SALE, SPLIT A BILL and CONTACTS; no CASHIER CODE row (that is the till’s own screen’s); RESTORE LOST CARD is SETTINGS’', l.join(', '));
+    ok(l.indexOf('TOOLS') > l.indexOf('MINTS') && l.indexOf('TOOLS') < l.indexOf('SETTINGS') && l.indexOf('POINT OF SALE') === l.indexOf('TOOLS') + 1
+       && l.indexOf('SPLIT A BILL') === l.indexOf('TOOLS') + 2 && l.indexOf('CASHIER CODE') < 0 && l.indexOf('RESTORE LOST CARD') > l.indexOf('SETTINGS'),
+      'TOOLS, open to start with, between MINTS and SETTINGS: POINT OF SALE, SPLIT A BILL; no CASHIER CODE row (that is the till’s own screen’s); RESTORE LOST CARD is SETTINGS’', l.join(', '));
     V().menuItems.find((m) => m.label === 'TOOLS').tap(); await settle();
     l = labels();
-    ok(l.indexOf('POINT OF SALE') === l.indexOf('TOOLS') + 1 && l.indexOf('SPLIT A BILL') === l.indexOf('TOOLS') + 2 && l.indexOf('CONTACTS') === l.indexOf('TOOLS') + 3 && A.state.open0 === true,
-      'TOOLS open: POINT OF SALE, SPLIT A BILL, CONTACTS under it, indented, and the drawer stays', l.join(', '));
-    ok(V().menuItems.find((m) => m.label === 'POINT OF SALE').indent === '10px', 'indented as SETTINGS rows are');
-    A.setState({ menuSettingsOpen: true }); await settle();
+    ok(l.indexOf('POINT OF SALE') < 0 && l.indexOf('SPLIT A BILL') < 0 && A.state.open0 === true, 'TOOLS tapped shut: its rows go, and the drawer stays', l.join(', '));
+    V().menuItems.find((m) => m.label === 'TOOLS').tap(); await settle();
     l = labels();
-    ok(l.indexOf('RESTORE LOST CARD') > l.indexOf('SETTINGS') && l.indexOf('RESTORE') === l.indexOf('RESTORE LOST CARD') + 1 && V().menuItems.find((m) => m.label === 'RESTORE LOST CARD').indent === '10px',
-      'SETTINGS open: RESTORE LOST CARD sits under SETTINGS before RESTORE, indented');
-    // SETTINGS opening scrolls the drawer to its end, where its rows unfold (19-update-keypad-balance.js `syncMenuScroll`)
+    ok(l.indexOf('POINT OF SALE') === l.indexOf('TOOLS') + 1 && A.state.open0 === true, 'and open again', l.join(', '));
+    ok(V().menuItems.find((m) => m.label === 'POINT OF SALE').indent === '10px', 'indented as every section’s rows are');
+    ok(l.indexOf('RESTORE LOST CARD') === l.indexOf('RESTORE') + 1 && V().menuItems.find((m) => m.label === 'RESTORE LOST CARD').indent === '10px',
+      'RESTORE LOST CARD sits under SETTINGS after RESTORE, indented');
+    // SETTINGS opened again after it was tapped shut scrolls the drawer to its end, where its rows unfold (19-update-keypad-balance.js `syncMenuScroll`)
     {
       const drawer = w.document.querySelector('[data-menu-drawer]');
       const scrolled = [];
       if (drawer) drawer.scrollTo = (o) => scrolled.push(o && o.top);
-      A.setState({ menuSettingsOpen: false }); await settle();
-      A.setState({ menuSettingsOpen: true }); await settle(); await settle();
-      ok(!!drawer && scrolled.length >= 1, 'opening SETTINGS scrolls the drawer to its end', JSON.stringify([!!drawer, scrolled]));
-      A.setState({ menuToolsOpen: false }); await settle();
+      A.setState({ menuShut: { settings: true } }); await settle();
+      ok(scrolled.length === 0, 'tapping SETTINGS shut does not scroll', String(scrolled.length));
+      A.setState({ menuShut: { settings: false } }); await settle(); await settle();
+      ok(!!drawer && scrolled.length >= 1, 'opening SETTINGS again scrolls the drawer to its end', JSON.stringify([!!drawer, scrolled]));
+      A.setState({ menuShut: { tools: true } }); await settle();
       const n = scrolled.length;
-      A.setState({ menuToolsOpen: true }); await settle();
+      A.setState({ menuShut: {} }); await settle();
       ok(scrolled.length === n, 'opening TOOLS does not', String(scrolled.length - n));
     }
     ok(/POINT OF SALE/.test(textOf(w)) && !/CASHIER CODE/.test(textOf(w)), 'and drawn in the drawer, with no CASHIER CODE row anywhere in it');
@@ -401,7 +446,10 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     await settle();
     ok(pinUp() && !A.state.open0, 'POINT OF SALE: the drawer shuts and the lock is asked');
     await typePin('2468');
-    ok(A.state.till && A.state.till.role === 'keeper' && tillAmount(), 'past the lock: the keeper’s till, on SET AMOUNT');
+    ok(tipsAsked() && !A.state.till, 'past the lock (and the mint questions, none here): ACCEPT TIPS? before the till');
+    await noTips();
+    ok(A.state.till && A.state.till.role === 'keeper' && tillAmount(), 'NO: the keeper’s till, on SET AMOUNT');
+    ok(A.state.till.tips && A.state.till.tips.on === false && W.calls.tipsSet.length === 1 && W.calls.tipsSet[0].on === false, 'with tips off, kept with the till');
   }
 
   // ---- 3. the keeper's till -----------------------------------------------------------------------
@@ -415,8 +463,9 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     v.amtCodeTap(); await settle();
     ok(pinUp(), 'which asks the lock first');
     await typePin('2468');
-    ok(stage() && stage().getAttribute('data-stage') === 'tillPass', 'and then shows the code');
-    press(stage(), 'DONE'); await settle();
+    ok(A.state.screen === 'switchMint' && A.state.tillList === 'codes' && !stage(), 'and then shows CASHIER CODES, the list');
+    A.back(); await settle();
+    ok(tillAmount(), 'back off it is the till again');
     eq(v.amtBackPath, 'M6 6l12 12M18 6L6 18', 'the top left is an X');
     ok(v.amtHistShown && !v.hideSkip, 'HISTORY at the top right');
     const t = textOf(w);
@@ -974,7 +1023,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     // one mint, one balance: straight in, in sats, no question
     let W = stubWallet({ pin: '2468' });
     await fresh(W);
-    A.tillOpen(); await settle();
+    A.tillOpen(); await settle(); await noTips();
     ok(tillAmount() && A.state.till && A.state.till.role === 'keeper' && A.state.till.unit === 'sat' && A.tillUnit() === 'sat' && A.state.screen !== 'currency',
        'one mint with one balance: POINT OF SALE opens the till at once, in sats', JSON.stringify([A.state.screen, A.state.till]));
     ok(A.walletNow('receive') === 'sat', 'every receive in the till is in that currency, no balance asked', JSON.stringify([A.walletNow('receive'), A.state.wallet]));
@@ -1023,7 +1072,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     W.twoUnits = () => true; W.mintUnits = () => ['sat', 'usd']; W.balanceOf = (u) => (u === 'usd' ? 1234 : 50000);
     W.walletChoice = () => ({ hold: 'both' });
     await fresh(W, { balUsdCents: 1234 });
-    A.tillOpen(); await settle();
+    A.tillOpen(); await settle(); await noTips();
     ok(!A.state.till && A.state.screen === 'currency' && A.state.currencyFlow === 'card' && A.state.curCard && A.state.curCard.question === 'DEFAULT CURRENCY'
        && W.calls.keeperOpens.length === 1,
        'holding both at a mint of both: DEFAULT CURRENCY is asked once the wallet is told of the till, and no till yet', JSON.stringify([A.state.screen, A.state.till, A.state.curCard, W.calls.keeperOpens.length]));
@@ -1037,14 +1086,14 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     ok(!A.state.till && A.state.screen !== 'currency' && W.calls.keeperCloses === 1 && !A._tillMainAsk,
        'back off DEFAULT CURRENCY: the opening stops, no till, and the wallet told', JSON.stringify([A.state.screen, A.state.till, W.calls.keeperCloses]));
     // again, and dollars picked as the main, then bitcoin
-    A.tillOpen(); await settle();
-    A.currencyPick('usd'); await settle(); await settle();
+    A.tillOpen(); await settle(); await noTips();
+    A.currencyPick('usd'); await settle(); await settle(); await noTips();
     ok(tillAmount() && A.state.till && A.state.till.unit === 'both' && A.state.till.main === 'usd' && A.tillMain() === 'usd' && A.tillUnit() === '' && A.tillBoth() === true,
        'dollars picked: the till takes both, dollars first', JSON.stringify([A.state.screen, A.state.till]));
     ok(A.state.unit === 'USD' && A.walletNow('receive') === 'usd', 'its keypad opens in dollars', JSON.stringify([A.state.unit, A.state.wallet]));
     A.tillEnd(); await settle();
-    A.tillOpen(); await settle();
-    A.currencyPick('sat'); await settle(); await settle();
+    A.tillOpen(); await settle(); await noTips();
+    A.currencyPick('sat'); await settle(); await settle(); await noTips();
     ok(tillAmount() && A.state.till && A.state.till.unit === 'both' && A.state.till.main === 'sat' && A.tillMain() === 'sat',
        'bitcoin picked: the till takes both, bitcoin first', JSON.stringify([A.state.screen, A.state.till]));
     await settle();
@@ -1109,8 +1158,8 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     W.twoUnits = () => true; W.mintUnits = () => ['sat', 'usd']; W.balanceOf = (u) => (u === 'usd' ? 1234 : 50000);
     W.walletChoice = () => ({ hold: 'both' });
     await fresh(W, { balUsdCents: 1234 });
-    A.tillOpen(); await settle();
-    A.currencyPick('usd'); await settle(); await settle();
+    A.tillOpen(); await settle(); await noTips();
+    A.currencyPick('usd'); await settle(); await settle(); await noTips();
     A.setState({ amount: '5.00', unit: 'USD', screen: 'confirm', stack: ['amount'], invoice: 'lnbcusd-main', recvRail: 'LIGHTNING', recvAmount: 500 }); await settle();
     offerAsk = A.tapOffering();
     const made3 = offerAsk ? [W.calls.requests[Number(String(offerAsk.req).slice(5)) - 1], W.calls.requests[Number(String(offerAsk.req2).slice(5)) - 1]].filter(Boolean) : [];
@@ -1124,7 +1173,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     W.twoUnits = () => true; W.mintUnits = () => ['sat', 'usd'];
     W.walletChoice = () => ({ hold: 'bitcoin' });
     await fresh(W);
-    A.tillOpen(); await settle(); await settle();
+    A.tillOpen(); await settle(); await settle(); await noTips();
     A.setState({ amount: '5.00', unit: 'USD', screen: 'confirm', stack: ['amount'], invoice: 'lnbcsat-one', recvRail: 'LIGHTNING', tapArmed: true }); await settle();
     const one = A.tapOffering();
     A.syncTap(); await settle();
@@ -1141,7 +1190,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     W.twoUnits = () => true; W.mintUnits = () => ['sat', 'usd'];
     W.walletChoice = () => ({ hold: 'dollars' });
     await fresh(W, { balUsdCents: 1234 });
-    A.tillOpen(); await settle(); await settle();
+    A.tillOpen(); await settle(); await settle(); await noTips();
     ok(tillAmount() && A.state.till && A.state.till.unit === 'usd' && A.tillUnit() === 'usd' && A.walletNow('receive') === 'usd' && A.state.screen !== 'currency',
        'holding dollars: the till opens in dollars, and every receive is in dollars with no question', JSON.stringify([A.state.screen, A.state.till, A.state.wallet]));
     sheetOn();
@@ -1160,7 +1209,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
       W.twoUnits = () => units.length > 1; W.mintUnits = () => units.slice();
       W.walletChoice = () => ({ hold });
       await fresh(W);
-      A.tillOpen(); await settle(); await settle();
+      A.tillOpen(); await settle(); await settle(); await noTips();
       ok(tillAmount() && A.state.till && A.state.till.unit === 'sat' && A.walletNow('receive') === 'sat' && A.state.screen !== 'currency',
          why + ': a till in sats, nothing asked', JSON.stringify([A.state.screen, A.state.till]));
       A.tillEnd(); await settle();
@@ -1169,13 +1218,13 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     W = stubWallet({ pin: '2468' });
     W.mints = () => [MINT, OWN_MINT];
     await fresh(W);
-    A.tillOpen(); await settle();
+    A.tillOpen(); await settle(); await noTips();
     let rm = A.renderMints({ s: A.state, sc: 'switchMint' });
     ok(A.state.screen === 'switchMint' && A.state.tillPick === 'set' && rm.mintTitle === 'TILL AT WHICH MINTS?' && rm.mintRows.length === 2 && rm.mintRows[0].here === true && rm.mintPickers === false,
        'two mints: the mint list asks TILL AT WHICH MINTS?, this phone’s own first and ticked, no add-a-mint pickers', JSON.stringify([A.state.screen, rm.mintTitle, rm.mintRows.map((r) => [r.host, r.here])]));
     rm.mintRows[0].tap(); await settle();
     A.renderMints({ s: A.state, sc: 'switchMint' }).mintRows[1].tap(); await settle();
-    A.renderMints({ s: A.state, sc: 'switchMint' }).tillNext(); await settle(); await settle();
+    A.renderMints({ s: A.state, sc: 'switchMint' }).tillNext(); await settle(); await settle(); await noTips();
     ok(W.calls.keeperOpens.length === 1 && JSON.stringify(W.calls.keeperOpens[0]) === JSON.stringify({ mints: [OWN_MINT], def: OWN_MINT }) && W.mintUrl === OWN_MINT
        && tillAmount() && A.state.till && A.state.till.unit === 'sat' && A.state.tillPick === false,
        'the other mint alone ticked, NEXT: no default asked, the wallet visits it, and the till opens there (one balance, sats)', JSON.stringify([W.calls.keeperOpens, W.mintUrl, A.state.screen]));
@@ -1187,10 +1236,10 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     W = stubWallet({ pin: '2468', openFails: true });
     W.mints = () => [MINT, OWN_MINT];
     await fresh(W);
-    A.tillOpen(); await settle();
+    A.tillOpen(); await settle(); await noTips();
     A.renderMints({ s: A.state, sc: 'switchMint' }).mintRows[1].tap(); await settle();
     A.renderMints({ s: A.state, sc: 'switchMint' }).tillNext(); await settle();
-    A.renderMints({ s: A.state, sc: 'switchMint' }).mintRows[1].tap(); await settle(); await settle();
+    A.renderMints({ s: A.state, sc: 'switchMint' }).mintRows[1].tap(); await settle(); await settle(); await noTips();
     ok(!A.state.till && /NO TILL/.test(card()) && W.mintUrl === MINT, 'a mint that cannot be reached opens no till, and says so', card());
     shutCard(); await settle();
 
@@ -1198,7 +1247,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     W = stubWallet({ pin: '2468' });
     W.mints = () => [MINT, OWN_MINT];
     await fresh(W);
-    A.tillOpen(); await settle();
+    A.tillOpen(); await settle(); await noTips();
     A.back(); await settle();
     ok(!A.state.till && A.state.screen !== 'switchMint' && A.state.tillPick === false && W.calls.keeperOpens.length === 0, 'back off the mint list opens nothing', JSON.stringify([A.state.screen, A.state.tillPick]));
   }
@@ -1209,7 +1258,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     let W = stubWallet({ pin: '2468' });
     W.mints = () => [MINT, OWN_MINT];
     await fresh(W);
-    A.tillOpen(); await settle();
+    A.tillOpen(); await settle(); await noTips();
     let rm = mr();
     ok(A.state.tillPick === 'set' && rm.mintRows.map((r) => r.here).join() === 'true,false' && rm.tillNextShown === true && rm.tillNextBg === 'var(--acc)',
        'the set list: the mint this phone is on ticked at first, NEXT in fur', JSON.stringify([A.state.tillPick, rm.mintRows.map((r) => r.here), rm.tillNextBg]));
@@ -1235,7 +1284,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
        'back off DEFAULT MINT: the set list, both still ticked, nothing opened', JSON.stringify([A.state.screen, A.state.tillPick, rm.mintRows.map((r) => r.here)]));
     rm.tillNext(); await settle();
     const own = mr().mintRows.filter((r) => r.host === 'own.example.net')[0];
-    own.tap(); await settle(); await settle();
+    own.tap(); await settle(); await settle(); await noTips();
     ok(W.calls.keeperOpens.length === 1 && JSON.stringify(W.calls.keeperOpens[0]) === JSON.stringify({ mints: [MINT, OWN_MINT], def: OWN_MINT }),
        'the default picked: the wallet is told the set and the default', JSON.stringify(W.calls.keeperOpens));
     ok(tillAmount() && A.state.till && A.state.till.role === 'keeper' && A.state.till.mint === OWN_MINT && JSON.stringify(A.state.till.mints) === JSON.stringify([OWN_MINT, MINT])
@@ -1286,10 +1335,10 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     W = stubWallet({ pin: '2468' });
     W.mints = () => [MINT, OWN_MINT];
     await fresh(W);
-    A.tillOpen(); await settle();
+    A.tillOpen(); await settle(); await noTips();
     mr().mintRows[1].tap(); await settle();
     mr().tillNext(); await settle();
-    mr().mintRows.filter((x) => x.host === 'forge.example.com')[0].tap(); await settle(); await settle();
+    mr().mintRows.filter((x) => x.host === 'forge.example.com')[0].tap(); await settle(); await settle(); await noTips();
     ok(W.calls.keeperOpens.length === 1 && JSON.stringify(W.calls.keeperOpens[0]) === JSON.stringify({ mints: [MINT, OWN_MINT], def: MINT }) && W.mintUrl === MINT
        && tillAmount() && JSON.stringify(A.state.till.mints) === JSON.stringify([MINT, OWN_MINT]),
        'the default where the phone is: the wallet told of the set, the phone where it was', JSON.stringify([W.calls.keeperOpens, A.state.till]));
@@ -1304,14 +1353,14 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     W.mintUnits = (u) => (String(u || W.mintUrl) === OWN_MINT ? ['sat'] : ['sat', 'usd']);
     W.walletChoice = () => ({ hold: 'both' });
     await fresh(W, { balUsdCents: 1234 });
-    A.tillOpen(); await settle();
+    A.tillOpen(); await settle(); await noTips();
     mr().mintRows[1].tap(); await settle();
     mr().tillNext(); await settle();
     ok(A.state.tillPick === 'default' && !(A.state.curCard && A.state.curCard.question), '(set-up) DEFAULT MINT first, nothing of the currency yet', JSON.stringify([A.state.tillPick, A.state.curCard]));
-    mr().mintRows.filter((x) => x.host === 'forge.example.com')[0].tap(); await settle(); await settle();
+    mr().mintRows.filter((x) => x.host === 'forge.example.com')[0].tap(); await settle(); await settle(); await noTips();
     ok(!A.state.till && A.state.screen === 'currency' && A.state.curCard && A.state.curCard.question === 'DEFAULT CURRENCY' && W.calls.keeperOpens.length === 1,
        'a set whose default issues both, holding both: DEFAULT CURRENCY after DEFAULT MINT', JSON.stringify([A.state.screen, A.state.till, A.state.curCard && A.state.curCard.question]));
-    A.currencyPick('usd'); await settle(); await settle();
+    A.currencyPick('usd'); await settle(); await settle(); await noTips();
     ok(A.state.till && A.state.till.unit === 'both' && A.state.till.main === 'usd' && A.state.till.mints.length === 2 && tillAmount(),
        'dollars first: the till opens at both mints taking both', JSON.stringify([A.state.screen, A.state.till]));
     await settle();
@@ -1384,7 +1433,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     // one mint on the phone: as ever, no list, and the request names that one mint
     W = stubWallet({ pin: '2468' });
     await fresh(W);
-    A.tillOpen(); await settle();
+    A.tillOpen(); await settle(); await noTips();
     /* The wallet is told of a till at one mint too (review, stale-keeper): its record is what a cashier code reads its
      * mints from, and one left by an app killed in an earlier till handed this till's cashiers that till's mints. */
     ok(tillAmount() && W.calls.keeperOpens.length === 1 && JSON.stringify(W.calls.keeperOpens[0]) === JSON.stringify({ mints: [MINT], def: MINT })
@@ -1402,7 +1451,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     // a one-mint till that cannot open (the wallet's no): NO TILL, in the wallet's words
     W = stubWallet({ pin: '2468', openFails: true });
     await fresh(W);
-    A.tillOpen(); await settle(); await settle();
+    A.tillOpen(); await settle(); await settle(); await noTips();
     ok(!A.state.till && /NO TILL/.test(card()) && /did not answer/.test(card()), 'one mint the wallet will not open: NO TILL, and why', card());
     shutCard();
 
@@ -1595,6 +1644,278 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     A.setState({ screen: 'flashcard', stack: ['home'] }); await settle();
     ok(W.calls.warms === n + 1, 'a card’s screen: opened for the load or the claim after it', String(W.calls.warms - n));
     await fresh(W);
+  }
+
+  // ---- 20. tips: ACCEPT TIPS?, who they go to, the tip buttons, CASHIER CODES as a list ------------------------------------
+  {
+    const ID = (n) => '02' + String(n).repeat(64).slice(0, 64);
+    const NO = (n) => String(n).repeat(64).slice(0, 64);
+    const contacts = () => [
+      { handle: 'foxyid1ana', name: 'Ana', at: 1, cid: { id: ID(1), nostr: NO(1) } },
+      { handle: 'foxyid1ben', name: 'Ben', at: 2, cid: { id: ID(2), nostr: NO(2) } },
+    ];
+    const typeInCard = async (text, label) => {
+      const f = A._blockedEl && A._blockedEl.querySelector('input');
+      if (f) f.value = text;
+      press(A._blockedEl, label); await settle();
+    };
+    const pressCard = async (label) => { press(A._blockedEl, label); await settle(); };
+    const mr = () => A.renderMints({ s: A.state, sc: 'switchMint' });
+    const openTill = async (W) => { await fresh(W); A.tillOpen(); await settle(); };
+
+    // 20a: YES, MYSELF
+    let W = stubWallet({ pin: '2468' });
+    await openTill(W);
+    ok(tipsAsked() && /YES/.test(card()) && /NO/.test(card()) && /\$1, \$2, \$5 and OTHER/.test(card()), '20a ACCEPT TIPS?: YES or NO, and what payers will see', card());
+    await pressCard('YES');
+    ok(/TIPS GO TO/.test(card()) && /MYSELF/.test(card()) && /ONE PERSON/.test(card()) && /GROUP/.test(card()), 'YES: TIPS GO TO, MYSELF, ONE PERSON, GROUP', card());
+    await pressCard('BACK');
+    ok(tipsAsked(), 'BACK off TIPS GO TO: ACCEPT TIPS? again');
+    await pressCard('YES'); await pressCard('MYSELF');
+    ok(A.state.till && tillAmount() && JSON.stringify(A.state.till.tips) === JSON.stringify({ on: true, to: 'self', ids: [] }) && W.calls.tipsSet.length === 1,
+      'MYSELF: the till opens, its tips to the keeper, kept with the till', JSON.stringify(A.state.till && A.state.till.tips));
+
+    // walked away from: no till, the wallet's record let go
+    W = stubWallet({ pin: '2468' });
+    await openTill(W);
+    A._blockedEl.dispatchEvent(new w.MouseEvent('click', { bubbles: true })); await settle(); await settle();
+    ok(!A.state.till && W.calls.keeperCloses === 1 && W.calls.tipsSet.length === 0, 'ACCEPT TIPS? closed with no answer: no till, the wallet told to let go', JSON.stringify([A.state.screen, W.calls.keeperCloses]));
+
+    // ONE PERSON: a contact
+    W = stubWallet({ pin: '2468' });
+    W.cids = contacts();
+    await openTill(W);
+    await pressCard('YES'); await pressCard('ONE PERSON');
+    let rm = mr();
+    ok(A.state.screen === 'switchMint' && A.state.tillList === 'person' && rm.mintTitle === 'TIPS GO TO' && rm.mintRows.map((r) => r.name).join() === 'Ana,Ben'
+      && rm.tillAddLabel === 'PASTE A CASHU ID' && rm.tillNextLabel === 'SCAN A CASHU ID' && rm.mintPickers === false,
+      'ONE PERSON: the SWITCH MINT list of Cashu ID contacts, PASTE and SCAN under it', JSON.stringify([rm.mintTitle, rm.mintRows.map((r) => r.name), rm.tillAddLabel, rm.tillNextLabel]));
+    A.back(); await settle();
+    ok(/TIPS GO TO/.test(card()) && A.state.screen !== 'switchMint', 'back off it: TIPS GO TO again');
+    await pressCard('ONE PERSON');
+    mr().mintRows[1].tap(); await settle();
+    ok(A.state.till && A.state.till.tips.to === 'one' && A.state.till.tips.ids.length === 1 && A.state.till.tips.ids[0].id === ID(2) && A.state.till.tips.ids[0].name === 'Ben'
+      && A.state.till.tips.ids[0].pct === 100 && A.state.screen === 'amount' && !A.state.tillList,
+      'a contact tapped: tips to Ben, 100%, and the till opens', JSON.stringify(A.state.till && A.state.till.tips));
+
+    // ONE PERSON: pasted, not a contact: NAME THIS CONTACT? first, kept as one
+    W = stubWallet({ pin: '2468' });
+    W.idTexts = { foxyid1dee: { id: ID(4), nostr: NO(4) }, foxyid1me: { id: ID(5), nostr: NO(5), own: true } };
+    await openTill(W);
+    await pressCard('YES'); await pressCard('ONE PERSON');
+    ok(mr().mintNowLine === 'No Cashu ID contacts yet. Paste or scan one.', 'with no contacts, the line says to paste or scan one');
+    mr().tillAdd(); await settle();
+    ok(/PASTE A CASHU ID/.test(card()) && !!A._blockedEl.querySelector('input'), 'PASTE A CASHU ID: a card with a field');
+    await typeInCard('foxyid1me', 'NEXT'); await settle();
+    ok(/THIS IS YOUR CASHU ID/.test(card()) && /MYSELF/.test(card()), 'this phone’s own: pick MYSELF instead', card());
+    shutCard(); await settle();
+    mr().tillAdd(); await settle();
+    await typeInCard('nonsense', 'NEXT'); await settle();
+    ok(/THAT WON’T WORK/.test(card()) && /not a Cashu ID/.test(card()), 'one that is not an ID is refused in the contacts’ words', card());
+    shutCard(); await settle();
+    mr().tillAdd(); await settle();
+    await typeInCard('foxyid1dee', 'NEXT'); await settle();
+    ok(/NAME THIS CONTACT\?/.test(card()), 'an ID that is not a contact: NAME THIS CONTACT? first', card());
+    await typeInCard('', 'SAVE'); await settle();
+    ok(/NAME THIS CONTACT\?/.test(card()) && !A.state.till, 'no name: asked again, nothing kept');
+    await typeInCard('Dee', 'SAVE'); await settle(); await settle();
+    ok(W.calls.cidAdds.length === 1 && W.calls.cidAdds[0][1] === 'Dee' && A.state.till && A.state.till.tips.ids[0].name === 'Dee' && A.state.till.tips.ids[0].id === ID(4),
+      'named Dee: kept as a contact, and the tips go to Dee', JSON.stringify(A.state.till && A.state.till.tips));
+
+    // GROUP: rows, shares that add up to 100, ADD, REMOVE, SAVE
+    W = stubWallet({ pin: '2468' });
+    W.cids = contacts().concat([{ handle: 'foxyid1cy', name: 'Cy', at: 3, cid: { id: ID(3), nostr: NO(3) } }]);
+    await openTill(W);
+    await pressCard('YES'); await pressCard('GROUP');
+    rm = mr();
+    ok(A.state.tillList === 'group' && rm.mintTitle === 'GROUP' && rm.mintRows.length === 0 && rm.tillAddLabel === 'ADD' && rm.tillNextLabel === 'SAVE' && rm.tillNextBg !== 'var(--acc)',
+      'GROUP: an empty list, ADD, and SAVE grey', JSON.stringify([rm.mintTitle, rm.tillAddLabel, rm.tillNextLabel, rm.tillNextBg]));
+    rm.tillNext(); await settle();
+    ok(A.state.tillList === 'group' && !A.state.till && toasts.slice(-1)[0] === 'Add someone first.', 'SAVE with nobody: nothing, and why', toasts.slice(-1)[0]);
+    rm.tillAdd(); await settle();
+    ok(A.state.tillList === 'person' && mr().mintTitle === 'ADD TO THE GROUP', 'ADD: the contacts, to add one');
+    mr().mintRows[0].tap(); await settle();
+    rm = mr();
+    ok(A.state.tillList === 'group' && rm.mintRows.length === 1 && rm.mintRows[0].text === '100%' && rm.tillNextBg === 'var(--acc)', 'Ana added: the whole 100%, and SAVE in fur', JSON.stringify(rm.mintRows.map((r) => r.text)));
+    rm.tillAdd(); await settle();
+    ok(mr().mintRows.map((r) => r.name).join() === 'Ben,Cy', 'one already in the group is not offered again');
+    mr().mintRows[0].tap(); await settle();
+    rm = mr();
+    ok(rm.mintRows.map((r) => r.text).join() === '100%,0%' && rm.tillNextBg !== 'var(--acc)' && /add up to 100% of 100%/.test(rm.mintNowLine),
+      'Ben added with what is left, 0%: SAVE grey', JSON.stringify([rm.mintRows.map((r) => r.text), rm.mintNowLine]));
+    rm.mintRows[0].tap(); await settle();
+    ok(/ANA/.test(card()) && !!A._blockedEl.querySelector('input') && /REMOVE/.test(card()), 'a row tapped: its share in a field, SET, REMOVE', card());
+    await typeInCard('60', 'SET');
+    mr().mintRows[1].tap(); await settle();
+    await typeInCard('150', 'SET');
+    ok(toasts.slice(-1)[0] === 'A share is a whole percent from 1 to 100.' && mr().mintRows[1].text === '0%', 'a share over 100 is refused');
+    mr().mintRows[1].tap(); await settle();
+    await typeInCard('40', 'SET');
+    rm = mr();
+    ok(rm.mintRows.map((r) => r.text).join() === '60%,40%' && rm.tillNextBg === 'var(--acc)' && /add up to 100% of 100%/.test(rm.mintNowLine), '60 and 40: SAVE in fur');
+    rm.tillAdd(); await settle(); mr().mintRows[0].tap(); await settle();
+    ok(mr().mintRows.length === 3 && mr().mintRows[2].text === '0%' && mr().tillNextBg !== 'var(--acc)', 'Cy added at 0%: SAVE grey again');
+    mr().mintRows[2].tap(); await settle(); await pressCard('REMOVE');
+    rm = mr();
+    ok(rm.mintRows.length === 2 && rm.tillNextBg === 'var(--acc)', 'REMOVE: Cy off, SAVE in fur');
+    A.back(); await settle();
+    ok(/TIPS GO TO/.test(card()), 'back off the group: TIPS GO TO again');
+    await pressCard('GROUP');
+    ok(mr().mintRows.length === 0, '(GROUP again starts from the till’s answer, here none)');
+    mr().tillAdd(); await settle(); mr().mintRows[0].tap(); await settle();
+    mr().tillAdd(); await settle(); mr().mintRows[0].tap(); await settle();
+    mr().mintRows[0].tap(); await settle(); await typeInCard('70', 'SET');
+    mr().mintRows[1].tap(); await settle(); await typeInCard('30', 'SET');
+    mr().tillNext(); await settle();
+    ok(A.state.till && A.state.till.tips.to === 'group' && A.state.till.tips.ids.map((r) => r.name + r.pct).join() === 'Ana70,Ben30' && W.calls.tipsSet.slice(-1)[0].to === 'group',
+      'SAVE: tips split 70/30, kept with the till, and the till opens', JSON.stringify(A.state.till && A.state.till.tips));
+    // eight at most: ADD gone at eight
+    A.setState({ screen: 'switchMint', stack: ['amount'], tillList: 'group', tillGroup: Array.from({ length: 8 }, (_, i) => ({ id: ID(i + 1), nostr: NO(i + 1), name: 'P' + i, pct: i ? 12 : 16 })) });
+    await settle();
+    ok(mr().tillAddShown === false && mr().tillNextBg === 'var(--acc)', 'a group of eight: no ADD');
+    A.back(); await settle();
+
+    // 20b: the tip buttons on the keeper's receive screen
+    W = stubWallet({ pin: '2468' });
+    await fresh(W);
+    A.tillStart({ unit: 'sat', tips: { on: true, to: 'one', ids: [{ id: ID(1), nostr: NO(1), name: 'Ana', pct: 100 }] } }); await settle();
+    A.setState({ amount: '10', unit: 'USD', screen: 'confirm', stack: ['amount'] }); await settle();
+    let v = V();
+    ok(v.tipRowShown === true && v.tipChips.map((c) => c.label).join() === '$1,$2,$5,OTHER' && v.tipLine === 'TIP', '20b the till’s receive: $1, $2, $5, OTHER under the amount, no NO',
+      JSON.stringify(v.tipChips.map((c) => c.label)));
+    ok(/\$1\$2\$5OTHER/.test(textOf(w).replace(/\s/g, '')), 'and drawn');
+    const inv0 = W.calls.invoices.length;
+    v.tipChips[1].tap(); await settle();
+    v = V();
+    ok(A.state.amount === '12' && A.state.tillTip && A.state.tillTip.cents === 200 && A.state.tillTip.base === '10' && v.tipChips[1].bg === 'var(--acc)'
+      && v.tipLine === 'Includes a $2.00 tip', '$2: the amount is $12, the tip on it, its button lit', JSON.stringify([A.state.amount, A.state.tillTip, v.tipLine]));
+    ok(W.calls.invoices.length === inv0 + 1 && W.calls.invoices[inv0].amount === 15000, 'and the invoice is made again for the total, 15,000 sats', JSON.stringify(W.calls.invoices.slice(inv0)));
+    ok(v.confirmAmount === '$ 12.00', 'the amount on screen is the total', v.confirmAmount);
+    v.tipChips[1].tap(); await settle();
+    ok(A.state.amount === '10' && !A.state.tillTip && W.calls.invoices.length === inv0 + 2 && W.calls.invoices[inv0 + 1].amount === 12500, 'the same tip again takes it off: $10, the invoice again');
+    V().tipChips[0].tap(); await settle(); V().tipChips[2].tap(); await settle();
+    ok(A.state.amount === '15' && A.state.tillTip.cents === 500 && A.state.tillTip.base === '10', '$1 then $5: $15, the tip $5 on the $10', JSON.stringify(A.state.tillTip));
+    V().tipChips[3].tap(); await settle();
+    ok(A.state.screen === 'amount' && A.state.flow === 'tillTip' && V().amountTitle === 'TIP' && V().amountSubtitle === 'How much is the tip?' && A.state.amount === '',
+      'OTHER: SET AMOUNT for the tip', JSON.stringify([A.state.screen, A.state.flow, V().amountTitle]));
+    A.back(); await settle(); await wait(30); await settle();
+    ok(A.state.screen === 'confirm' && A.state.amount === '15' && A.state.tillTip && A.state.tillTip.pick === 500, 'back off it: the receive, with the $5 tip it had', JSON.stringify([A.state.screen, A.state.amount]));
+    V().tipChips[3].tap(); await settle();
+    A.press('3'); A.press('5'); A.press('0'); await settle();
+    V().next(); await settle(); await wait(30); await settle();
+    v = V();
+    ok(A.state.screen === 'confirm' && A.state.amount === '13.50' && A.state.tillTip.cents === 350 && A.state.tillTip.pick === 'other' && v.tipChips[3].label === '$3.50',
+      'a tip of $3.50 typed: $13.50, OTHER says $3.50', JSON.stringify([A.state.amount, A.state.tillTip, v.tipChips[3].label]));
+    ok(['till', 'one', 'self', 'confirm'].indexOf(A.state.screen) >= 0 && !!A.state.till, 'still in the till');
+    // back to SET AMOUNT: the amount typed, no tip
+    A.back(); await settle(); await settle();
+    ok(tillAmount() && A.state.amount === '10' && !A.state.tillTip, 'back to SET AMOUNT: $10 again, no tip', JSON.stringify([A.state.screen, A.state.amount]));
+    // PAID with a tip: the tip part to the wallet
+    A.setState({ amount: '10', unit: 'USD', screen: 'confirm', stack: ['amount'] }); await settle();
+    V().tipChips[1].tap(); await settle();
+    W.tips = A.state.till.tips;
+    A.setState({ screen: 'paid', stack: ['amount', 'confirm'], paidUnit: 'sat', paidAmount: 15000, paidHash: 'sale-1' }); await settle(); await settle();
+    ok(W.calls.tipTaken.length === 1 && W.calls.tipTaken[0].amount === 2500 && W.calls.tipTaken[0].unit === 'sat' && W.calls.tipTaken[0].hash === 'sale-1',
+      'PAID 15,000 sats for $10 + $2: 2,500 sats of it passed on as the tip, by the sale’s row', JSON.stringify(W.calls.tipTaken));
+    ok(/^Tip .* · goes to Ana$/.test(toasts.slice(-1)[0] || ''), 'and said', toasts.slice(-1)[0]);
+    A.setState({ screen: 'paid', stack: ['amount'], paidUnit: 'sat', paidAmount: 9000, paidHash: 'sale-2' }); await settle();
+    ok(W.calls.tipTaken.length === 1, 'a later PAID with no tip on screen passes nothing on');
+    // a request paid: the receive closes before PAID, and the tip still goes
+    A.setState(Object.assign({}, A.homeState())); await settle();
+    A.setState({ amount: '10', unit: 'USD', screen: 'confirm', stack: ['amount'] }); await settle();
+    V().tipChips[0].tap(); await settle();
+    A.setState({ screen: 'home', stack: [] }); await settle(); await settle();
+    ok(tillAmount() && A.state.amount === '', '(a request paid closes the receive: the till’s SET AMOUNT)');
+    A.setState({ screen: 'paid', stack: ['amount'], paidUnit: 'usd', paidAmount: 1100, paidHash: 'req-abc' }); await settle();
+    ok(W.calls.tipTaken.length === 2 && W.calls.tipTaken[1].amount === 100 && W.calls.tipTaken[1].unit === 'usd', 'and its PAID, $11 in dollars, passes on the $1', JSON.stringify(W.calls.tipTaken[1]));
+    // tips off: no buttons
+    A.tillEnd(); await settle();
+    await fresh(W);
+    A.tillStart({ unit: 'sat' }); await settle();
+    A.setState({ amount: '10', unit: 'USD', screen: 'confirm', stack: ['amount'] }); await settle();
+    ok(V().tipRowShown === false && !/OTHER/.test(textOf(w)), 'a till with tips off: no tip buttons');
+    A.tillEnd(); await settle();
+    // in sats typed: the tip in sats at the price
+    await fresh(W);
+    A.tillStart({ unit: 'sat', tips: { on: true, to: 'self', ids: [] } }); await settle();
+    A.setState({ amount: '10000', unit: 'SATS', screen: 'confirm', stack: ['amount'] }); await settle();
+    V().tipChips[0].tap(); await settle();
+    ok(A.state.amount === '11250' && A.state.tillTip.num === 1250 && A.state.tillTip.den === 11250, 'sats typed: $1 is 1,250 sats more, the tip 1,250 of 11,250', JSON.stringify(A.state.tillTip));
+    A.tillEnd(); await settle();
+
+    // 20c: a cashier on a code with tips, and without
+    W = stubWallet({});
+    await cashierTill(W, passOf({ tips: true }));
+    A.setState({ amount: '10', unit: 'USD', screen: 'confirm', stack: ['amount'] }); await settle();
+    ok(V().tipRowShown === true, '20c a cashier on a code with tips: the buttons');
+    V().tipChips[2].tap(); await settle();
+    A._creqs = {};
+    A.railRequest(18750); await settle();
+    let rq = W.calls.requests.filter((r) => r.amount === 18750).slice(-1)[0];
+    ok(rq && rq.opts.lockPub === LOCK && rq.opts.tillTip === 6250, 'its request for $15 (18,750 sats) names the keeper’s lock and the $5 tip, 6,250 sats', JSON.stringify(rq && rq.opts));
+    const ia = W.calls.invoices.slice(-1)[0];
+    ok(ia && ia.opts && ia.opts.lockPub === LOCK && ia.opts.tillTip === 6250, 'and so does its invoice', JSON.stringify(ia && ia.opts));
+    A.tapOnlyRequest(18750);
+    rq = W.calls.requests.slice(-1)[0];
+    ok(rq && rq.opts.tillTip === 6250, 'and a tap’s request');
+    const keyTip = Object.keys(A._creqs).filter((k) => /\|tip/.test(k));
+    ok(keyTip.length >= 1, 'a request with a tip is kept apart from one without', Object.keys(A._creqs).join(' '));
+    A.setState({ screen: 'paid', stack: ['amount'], paidUnit: 'sat', paidAmount: 18750, paidHash: 'till-x' }); await settle();
+    ok(W.calls.tipTaken.length === 0, 'a cashier’s PAID passes nothing on itself: its delivery says the tip, and the keeper passes it on');
+    A.tillEnd(); await settle();
+    W = stubWallet({});
+    await cashierTill(W, passOf());
+    A.setState({ amount: '10', unit: 'USD', screen: 'confirm', stack: ['amount'] }); await settle();
+    ok(V().tipRowShown === false, 'a cashier on a code without tips: none');
+    A.railRequest(12500); await settle();
+    rq = W.calls.requests.slice(-1)[0];
+    ok(rq && !('tillTip' in rq.opts), 'and no tip on its requests');
+    A.tillEnd(); await settle();
+
+    // 20d: CASHIER CODES as a list: ADD, several at once, a row again with END, PAST
+    W = stubWallet({ pin: '2468' });
+    await fresh(W);
+    A.tillStart({ unit: 'sat', tips: { on: true, to: 'one', ids: [{ id: ID(1), nostr: NO(1), name: 'Ana', pct: 100 }] } }); await settle();
+    V().amtCodeTap(); await settle(); await typePin('2468');
+    rm = mr();
+    ok(A.state.tillList === 'codes' && rm.mintTitle === 'CASHIER CODES' && rm.mintRows.length === 0 && rm.tillNextLabel === 'ADD A CASHIER' && /No code is live/.test(rm.mintNowLine)
+      && rm.tillPastShown === false, '20d CASHIER CODES: none live yet, ADD A CASHIER', JSON.stringify([rm.mintTitle, rm.mintNowLine]));
+    rm.tillNext(); await settle();
+    ok(/NAME THIS CODE\?/.test(card()), 'ADD A CASHIER: a name for its row first');
+    await typeInCard('Front', 'NEXT');
+    ok(tipsAsked() && /Now: Tips to Ana/.test(card()), 'then ACCEPT TIPS?, the till’s answer said', card());
+    await pressCard('NO'); await settle(); await settle();
+    let po = W.calls.passOpts.slice(-1)[0];
+    ok(po && po.fresh === true && po.label === 'Front' && po.tips && po.tips.on === false && stage() && stage().getAttribute('data-stage') === 'tillPass' && /No tips/.test(stage().textContent),
+      'NO: a fresh code, labelled, without tips, its QR shown', JSON.stringify(po));
+    press(stage(), 'DONE'); await settle();
+    mr().tillNext(); await settle();
+    await typeInCard('Patio', 'NEXT'); await pressCard('YES'); await pressCard('MYSELF'); await settle(); await settle();
+    po = W.calls.passOpts.slice(-1)[0];
+    ok(po && po.label === 'Patio' && po.tips.on && po.tips.to === 'self' && /Tips to you/.test(stage().textContent), 'another, Patio, with tips to the keeper', JSON.stringify(po));
+    press(stage(), 'DONE'); await settle();
+    rm = mr();
+    ok(rm.mintRows.length === 2 && rm.mintRows.map((r) => r.name).join() === 'Front,Patio' && rm.mintRows.every((r) => r.text === 'LIVE')
+      && /No tips/.test(rm.mintRows[0].host) && /Tips to you/.test(rm.mintRows[1].host) && /Ends /.test(rm.mintRows[0].host) && /bitcoin/.test(rm.mintRows[0].host),
+      'two live at once, each with its mint, currency, tips and end', JSON.stringify(rm.mintRows.map((r) => [r.name, r.host])));
+    rm.mintRows[0].tap(); await settle();
+    ok(stage() && /END THIS CODE/.test(stage().textContent) && /Front/.test(stage().textContent), 'a row tapped: its QR again, with END THIS CODE');
+    press(stage(), 'END THIS CODE'); await settle();
+    ok(/END THIS CODE\?/.test(card()) && /not told/.test(card()), 'END asks first, and says its cashier is not told', card());
+    await pressCard('END'); await settle();
+    rm = mr();
+    ok(W.calls.passEnds.length === 1 && rm.mintRows.length === 1 && rm.mintRows[0].name === 'Patio' && rm.tillPastShown === true && rm.tillPastRows.length === 1
+      && rm.tillPastRows[0].name === 'Front' && rm.tillPastRows[0].text === 'ENDED' && / – /.test(rm.tillPastRows[0].host),
+      'ended: Front under PAST, ENDED, with when it ran; Patio still live', JSON.stringify([rm.mintRows.map((r) => r.name), rm.tillPastRows.map((r) => [r.name, r.text, r.host])]));
+    ok(/PAST/.test(textOf(w)) && /ENDED/.test(textOf(w)), 'PAST drawn under the live ones');
+    ok(!/\$ ?\d/.test(rm.mintRows.concat(rm.tillPastRows).map((r) => r.host + r.text).join(' ')), 'no figure of what any code took, anywhere on the list');
+    W.passes.forEach((x) => { if (x.label === 'Patio') x.exp = Math.floor(Date.now() / 1000) - 10; });
+    A.setState({ menuTick: 1 }); await settle();
+    rm = mr();
+    ok(rm.mintRows.length === 0 && rm.tillPastRows.map((r) => r.name + ':' + r.text).sort().join() === 'Front:ENDED,Patio:EXPIRED', 'run out: EXPIRED under PAST too');
+    A.back(); await settle();
+    ok(tillAmount(), 'back off the list: the till');
+    A.tillEnd(); await settle();
   }
 
   const errs = errors.filter((e) => !/never resolved|Not implemented/.test(e));

@@ -33,6 +33,7 @@ names everything linked to it.
 | Pay an invoice | melt quote, swap, melt | the invoice (amount, destination, description), the inputs, blank change outputs |
 | Send a token from pieces held | nothing | nothing: no swap, no request |
 | Keep small change | one swap, only once Foxy is put away; a payment's own swap fills the pool too | a piece swapped for small ones |
+| After a connect, card loads kept as text | checkstate, at most 400 Ys a request, on one circuit made for that sweep, at most once an hour a mint | the fingerprints (Ys) of pieces this phone made for its own cards at that mint, which the mint signed for this phone's swap |
 | Watch a sent token | checkstate after 2–4 s (no swap, or after a return) or 15–45 s (after a swap), then every 3–5 s, 15–30 s after two minutes, 1–2 min after ten | the token's fingerprints (Ys) |
 | Tell a mint's own invoices | once, if unknown: a 1-sat quote, never paid | that someone asked for an invoice |
 | Check the keys | GET keysets again, 30 s–2 min after a connect | that someone uses the mint |
@@ -190,6 +191,9 @@ connect. When the receiver redeemed it, the mint had the sender asking about
 exactly what the receiver redeemed: who paid whom. A token is now asked about
 only by its own watch (C6), which runs while its screen is open and for a day
 after, on a circuit used for nothing else, and never as a sweep at connect.
+(Card loads are asked about after a connect, `cardLoadsSpent`: a load's payer
+and receiver are the same phone, and the mint saw its pieces made by that
+phone's own swap, so the question names no second party.)
 Test: "a sent token is asked about on a circuit of its own, the same one each
 time".
 *What remains:* if the receiver redeems while the sender watches, the check

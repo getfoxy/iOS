@@ -295,6 +295,27 @@ reader('unwrap', fromCorpus(TOKENS.concat(REQUESTS, INVOICES)), {
   holds: (t) => (typeof t === 'string' ? null : 'returned ' + typeof t),
 });
 
+// ---- a token that names several mints (v3) ------------------------------------
+/* Pinned, not fuzzed: what Foxy does with a v3 token whose `token` list holds proofs of more than one mint. The reader
+ * (cashu-ts) refuses such a token, so tokenInfo says null and receiveToken says it is not a Cashu token: it REFUSES, it
+ * does not take the first mint's part, and it never reads the other mint's proofs as the first mint's. Nothing is filed or
+ * lost: the token is still whole in the holder's hands, for a wallet that keeps several mints apart. One entry stays
+ * readable, so the refusal is about the mix and not about v3. */
+const mixedPart = (mint, amount, k) => ({ mint, proofs: [{ id: '009a1f293253e41e', amount, secret: hex(64), C: '02' + hex(64) }] });
+const v3 = (parts) => 'cashuA' + Buffer.from(JSON.stringify({ token: parts, unit: 'sat' })).toString('base64url');
+const pinned = [];
+{
+  const one = W.tokenInfo(v3([mixedPart('https://a.test', 8)]));
+  pinned.push(['a v3 token of one mint is still read', !!one && one.mint === 'https://a.test' && one.amount === 8]);
+  const mixed = v3([mixedPart('https://a.test', 8), mixedPart('https://b.test', 16)]);
+  pinned.push(['a v3 token naming two mints is refused by the reader (tokenInfo is null), not read as its first mint', W.tokenInfo(mixed) === null]);
+  const same = v3([mixedPart('https://a.test', 8), mixedPart('https://a.test', 16)]);
+  pinned.push(['and so is one that lists the same mint twice (more than one entry is refused whatever the mints)', W.tokenInfo(same) === null]);
+  let said = null;
+  W.receiveToken(mixed).then(() => { said = 'taken'; }, (e) => { said = e.message; });
+  pinned.push(['receiveToken of a two-mint token says it is not a Cashu token and takes nothing', true, () => said]);
+}
+
 // ---- report ----------------------------------------------------------------
 let failed = 0;
 for (const r of results) {
@@ -315,4 +336,14 @@ if (failed) {
   console.log(failed + ' reader(s) failed; rerun with FOXY_FUZZ_SEED=' + SEED + ' to reproduce');
   process.exit(1);
 }
-console.log('all ' + results.length + ' readers hold under ' + (CASES * results.length) + ' fuzzed inputs');
+// the pinned behaviours last: receiveToken answers asynchronously
+setTimeout(() => {
+  let pinFailed = 0;
+  for (const p of pinned) {
+    const good = typeof p[2] === 'function' ? p[2]() === 'That is not a Cashu token.' : p[1];
+    console.log((good ? 'ok    ' : 'FAIL  ') + p[0]);
+    if (!good) pinFailed++;
+  }
+  if (pinFailed) { console.log(pinFailed + ' pinned behaviour(s) changed'); process.exit(1); }
+  console.log('all ' + results.length + ' readers hold under ' + (CASES * results.length) + ' fuzzed inputs, and the several-mint token is refused');
+}, 300);

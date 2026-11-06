@@ -491,6 +491,14 @@
     this.showMelt('Swapping ' + this.unitWord(from).toLowerCase() + ' into ' + this.unitWord(to).toLowerCase() + '…', 120000);
     console.log('[foxy] swap: running ' + this.unitFigure(q.total, from) + ' into ' + this.unitFigure(q.get, to));
     this._swapRun = W.swapRun(q, (stage) => console.log('[foxy] swap: ' + stage)).then(r => {
+      /* One leg unanswered is, most of the time, a mint a few seconds slow rather than a mint stuck, and the card for
+       * "still going through" read as a verdict one round trip after SWAP. The swapping screen stays up for a short while,
+       * asking the mint again every few seconds, and the card comes only if it is still not settled (`swapAwait`). */
+      if (r && r.state === 'pending' && this.SWAP_WAIT_MS > 0) {
+        return this.swapAwait(r).then(held => Object.assign({}, r, { held }));
+      }
+      return r;
+    }).then(r => {
       this._swapRun = null;
       this.hideMelt();
       this.refreshBalance();
@@ -499,6 +507,12 @@
       this._swapLast = Object.assign({}, this._swapLast || {}, { [from]: Number(q.total) || 0 });
       if (r && r.state === 'done') {
         this.setState({ swapBusy: false, swapResult: r, screen: 'swapDone', stack: [] });
+        return;
+      }
+      if (r && r.state === 'pending' && r.held === false) {
+        // settled while the screen waited: nothing is with the mint any more, and home shows where the money is
+        this._preSettle = null;
+        this.setState({ swapBusy: false, swapQuote: null, screen: 'home', stack: [] });
         return;
       }
       if (r && r.state === 'pending') { this.swapStillGoing(r); return; }
@@ -527,6 +541,31 @@
       }
       this.setState({ swapBusy: false, swapQuote: null, swapErr: why });
     });
+  }
+
+  /* How long SWAP waits on a half-answered swap before it says "still going through", and how often it asks the mint
+   * again meanwhile. Not long: a mint that is stuck stays stuck for minutes, and the held pill and the sweeps carry it. */
+  SWAP_WAIT_MS = 20000;
+  SWAP_WAIT_STEP_MS = 4000;
+
+  /* Resolves true if the swap is still with the mint after the wait, false as soon as it is not. A swap is held while
+   * the wallet lists it (`unitSwapsPending`); each asking is the sweeps' own (the melt, then a lost answer). */
+  swapAwait(r) {
+    const W = window.FoxyWallet;
+    const held = () => {
+      try { return (W.unitSwapsPending() || []).some(x => x && x.id === r.id); } catch (e) { return true; }
+    };
+    const ask = () => Promise.resolve()
+      .then(() => (W.sweepMelts ? W.sweepMelts() : null))
+      .then(() => (W.recoverSwaps ? W.recoverSwaps() : null))
+      .catch(() => {});
+    const until = Date.now() + this.SWAP_WAIT_MS;
+    const step = () => {
+      if (!held()) return Promise.resolve(false);
+      if (Date.now() >= until) return Promise.resolve(true);
+      return new Promise(ok => setTimeout(ok, this.SWAP_WAIT_STEP_MS)).then(ask).then(step);
+    };
+    return step();
   }
 
   /* One half paid and the other not answered yet: the card, and home, where

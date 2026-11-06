@@ -615,15 +615,15 @@ async function run() {
   ok((await K.W._tillArrived(fresh1.id, bodyFor('till:' + fresh1.id + ':1', proofsOf(P, late6.token)))) === 'taken'
     && (await K.W.balanceSats()) === k6 + 5, 'and a payment sent to it then is taken');
 
-  // four at most: only an ended one goes, oldest first, with its keys
+  // eight at most: only one run out goes, oldest first, with its keys
   pr = K.store('foxy.till.passes', []);
   const base = pr.find((r) => r.id === pass.id);
   const fake = (n) => Object.assign({}, base, { id: 'f' + String(n).repeat(15), made: base.made + n, exp: sNow() - 600 * n, lockId: 'till-f' + String(n).repeat(15) });
-  pr.push(fake(1), fake(2));
+  pr.push(fake(1), fake(2), fake(3), fake(4), fake(5), fake(6));
   K.storage.setItem('foxy.till.passes', JSON.stringify(pr));
   const fifth = await K.W.tillPassMake();
   const kept4 = K.store('foxy.till.passes', []);
-  ok(kept4.length === 4 && !kept4.some((r) => r.id === pass.id) && kept4.some((r) => r.id === fifth.id), 'a fifth row drops the oldest ended one', kept4.map((r) => r.id.slice(0, 4)).join());
+  ok(kept4.length === 8 && !kept4.some((r) => r.id === pass.id) && kept4.some((r) => r.id === fifth.id), 'a ninth row drops the oldest one run out', kept4.map((r) => r.id.slice(0, 4)).join());
   ok(K.said.keyDrop.indexOf(pass.id) >= 0 && !K.store('foxy.req.lockkeys', {})['till-' + pass.id], 'with its Nostr key and its lock row');
 
   // the relays are asked from the oldest listened code's start, and never more than twelve days back

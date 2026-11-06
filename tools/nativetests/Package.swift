@@ -108,6 +108,8 @@ let package = Package(
                 "RepoRoot.swift",
                 "NUT13Tests.swift",
                 "P2PKTests.swift",
+                "CashuIDTests.swift",
+                "CashuMsgTests.swift",
                 "BIP39Tests.swift",
                 "CounterStoreTests.swift",
                 "CounterRulesTests.swift",
@@ -119,8 +121,10 @@ let package = Package(
                 "CardTapDeliveryTests.swift",
                 "NetDiaryTests.swift",
                 "TorReturnTests.swift",
+                "TorRebuildTests.swift",
                 "WebStoreTests.swift",
                 "TextExportTests.swift",
+                "RetiredKeysTests.swift",
             ]
         ),
     ]

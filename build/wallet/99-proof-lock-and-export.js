@@ -139,10 +139,13 @@
           // in the refund's own unit: a dollar refund says its cents as `amount`, and 0 sats
           var ru = unitOf((r && r.unit) || 'sat') || 'sat';
           var rn = Math.round(satsOf(r && (r.amount != null ? r.amount : r.sats))) || 0;
-          atRiskRefunded(refundOf, rn, 'row').then(function () {
+          atRiskRefunded(refundOf, rn, 'row').then(function (how) {
             if (typeof FoxyWallet._onAtRisk === 'function') {
-              try { FoxyWallet._onAtRisk({ state: 'refunded', hash: refundOf, sats: ru === 'sat' ? rn : 0, unit: ru, amount: rn }); } catch (x) {}
+              try { FoxyWallet._onAtRisk({ state: 'refunded', hash: refundOf, sats: ru === 'sat' ? rn : 0, unit: ru, amount: rn,
+                                           short: how === 'partial' }); } catch (x) {}
             }
+            // a refund for part of it: the mint says which pieces were spent before any is struck (`atRiskRefunded`)
+            if (how === 'partial' && routeOpen() && FoxyWallet.settleAtRisk) return FoxyWallet.settleAtRisk();
           }, function () {});
         }
         try { dropTokenWatchesFor(text); } catch (e) {}
@@ -265,6 +268,11 @@
   FoxyWallet._trimStore = trimStore;
   FoxyWallet._storeRoom = STORE_ROOM;
   FoxyWallet._tidySentTokens = tidySentTokens;
+  // for the tests: the card loads' sweep (`cardLoadsSpent`), and its hour's notes made older by `ms` (tests/card-loads-spent.js)
+  FoxyWallet._cardLoadsSpent = function (at) { return cardLoadsSpent(wallet, at || mintUrl); };
+  FoxyWallet._cardLoadsAge = function (ms) {
+    Object.keys(cardLoadsAskedAt).forEach(function (k) { cardLoadsAskedAt[k] -= Math.max(0, Number(ms) || 0); });
+  };
   FoxyWallet._roomShort = function () { roomShortAt = Date.now(); };
   // (no per-operation holds any more: the store keeps one reserve, `growReserve`)
   FoxyWallet._holds = function () { return []; };

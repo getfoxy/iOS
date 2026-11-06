@@ -58,12 +58,15 @@ if [ -f "$cached" ] && ! cmp -s "$cached" "$ours"; then
   rm -rf "$DD"
 fi
 mkdir -p "$(dirname "$DD")"
+# FOXY_ONLY="CardGateTests TapPlaceTests": run only these classes (what tools/check-all.sh does)
+only=""
+for c in ${FOXY_ONLY:-}; do only="$only -only-testing:FoxyTests/$c"; done
 if xcodebuild -workspace Foxy.xcworkspace -scheme Foxy -configuration Debug \
      -destination "platform=iOS Simulator,id=$UDID" -derivedDataPath "$DD" \
      ARCHS=arm64 \
      CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual \
      DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
-     ENABLE_USER_SCRIPT_SANDBOXING=NO test > "$DD.log" 2>&1; then
+     ENABLE_USER_SCRIPT_SANDBOXING=NO $only test > "$DD.log" 2>&1; then
   grep -E "^Test Suite 'All tests' (passed|failed)|Executed [0-9]+ tests?, with" "$DD.log" | tail -2
   echo "unit tests pass"
 else

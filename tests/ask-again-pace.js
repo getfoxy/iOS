@@ -74,6 +74,22 @@ function page(mintOpts) {
           reply(w, m.id, said || mint.handle(m));
         }, Number(wait) || 0);
       }
+      /* The phone's side of `torRebuild` (TorReturn.Rebuild, held by TorRebuildTests): Tor is asked at three in a row,
+       * once. Every count the page tells is written down. */
+      if (m.action === 'torRebuild') {
+        ctx.rebuilds.push(m.silent);
+        let said = m.silent >= 3 && !ctx.rebuildAsked ? 'rebuilding' : m.silent >= 3 ? 'already asked on this return' : 'counted';
+        if (said === 'rebuilding') { ctx.rebuildAsked = true; ctx.afterRebuild = 0; }
+        /* The second stage (TorReturn.Restart, held by TorRebuildTests), where a check turns it on: three more after the
+         * new circuits, with no host heard since the return, and Tor's network is switched off and on, once. */
+        else if (ctx.secondStage && ctx.rebuildAsked) {
+          ctx.afterRebuild += 1;
+          said = ctx.hostHeard ? 'a host answered since the return' : ctx.restartAsked ? 'already restarted on this return'
+            : ctx.afterRebuild >= 3 ? 'restarting' : 'counted after new circuits';
+          if (said === 'restarting') ctx.restartAsked = true;
+        }
+        return reply(w, m.id, said);
+      }
       const got = phone.answer(w, m);
       if (!got) return reply(w, m.id, null, 'not in this test');
       return Promise.resolve(got).then((r) => reply(w, m.id, r[0], r[1]));
@@ -81,6 +97,12 @@ function page(mintOpts) {
     before: (w) => { phone.attach(w); mint = fakeMint(w, Object.assign({ p2pk: true }, mintOpts || {})); },
   });
   ctx.asked = [];
+  ctx.rebuilds = [];
+  ctx.rebuildAsked = false;
+  ctx.secondStage = false;
+  ctx.afterRebuild = 0;
+  ctx.hostHeard = false;
+  ctx.restartAsked = false;
   ctx.t0 = Date.now();
   ctx.delay = null;
   ctx.say = null;
@@ -457,14 +479,132 @@ async function partHBusy() {
      'H. a mint that has just said 429 is not asked again sooner, though it then answered quickly', quick + ' then ' + c.W._askAgainWait(MINT, 0, true));
 }
 
+async function partI() {
+  // Foxy put away: a question waiting to be asked again on a new circuit is not asked from the background
+  const c = await connectedPage();
+  c.delay = (m, path) => (path === '/v1/mint/quote/bolt11' ? 'hang' : 0);
+  const t = Date.now() - c.t0;
+  c.W.invoice(100, '').then(() => {}, () => {});
+  await pause(600);
+  const before = c.timers.live();
+  const let_go = typeof c.W._stopAskingAgain === 'function' ? c.W._stopAskingAgain() : -1;
+  const after = c.timers.live();
+  await pause(5600);
+  const asked = quotes(c).length;
+  ok(before >= 1 && after === 0 && let_go >= 1 && asked === 1,
+     'I. put away, the waiting askings again are let go: no timer left, and no second circuit asked after it',
+     before + ' timers before, ' + after + ' after, ' + let_go + ' let go, ' + asked + ' asked at ' + JSON.stringify(since(quotes(c), t)));
+  const app = require('fs').readFileSync(require('path').join(__dirname, '..', 'build', 'foxy-app.js'), 'utf8');
+  ok(/putAway\(on\) \{[^}]*\n    if \(!on\) return;\n[^\n]*\n[^\n]*_stopAskingAgain/.test(app),
+     'I. and the app lets them go when Foxy is put away, not when it is brought back');
+}
+
+async function partJ() {
+  /* Tor up and carrying nothing after a return: the askings again on fresh circuits are counted in a row since Foxy
+   * was put away, each told to the phone (`torRebuild`), and any answer from a mint puts the count back to none. */
+  const c = await connectedPage();
+  const pushes = [];
+  c.W._onPrivacy = () => pushes.push(c.W.torRebuilding());
+  c.W._askAgainMs = 500;
+  c.delay = (m, path) => (path === '/v1/mint/quote/bolt11' ? 'hang' : 0);
+  c.W.invoice(100, '').then(() => {}, () => {});
+  await pause(1700);
+  ok(quotes(c).length >= 3 && c.rebuilds.length === 0 && c.W._torSilent().count === 0 && !c.W._torSilent().armed,
+     'J. before Foxy has been put away, askings again are not counted and nothing is told to the phone',
+     quotes(c).length + ' asked, told ' + JSON.stringify(c.rebuilds) + ', ' + JSON.stringify(c.W._torSilent()));
+  c.W._stopAskingAgain();
+  ok(c.W._torSilent().armed && c.W._torSilent().count === 0, 'J. put away: counted from here, from none', JSON.stringify(c.W._torSilent()));
+  c.W.invoice(100, '').then(() => {}, () => {});
+  await pause(750);
+  ok(c.rebuilds.join() === '1' && !c.W.torRebuilding(),
+     'J. back, one asking again unanswered: the phone is told one, and the shield is not turned for it', JSON.stringify(c.rebuilds));
+  await pause(500);
+  ok(c.rebuilds.join() === '1,2' && !c.W.torRebuilding(), 'J. two in a row: told two, still nothing asked of Tor', JSON.stringify(c.rebuilds));
+  await pause(500);
+  ok(c.rebuilds.slice(0, 3).join() === '1,2,3' && c.W.torRebuilding() === true && pushes.indexOf(true) >= 0,
+     'J. three in a row: the phone says Tor is asked for new circuits, and the route is pushed so the shield turns',
+     JSON.stringify(c.rebuilds) + ' ' + JSON.stringify(pushes));
+  await pause(500);
+  ok(c.rebuilds.slice(0, 4).join() === '1,2,3,4' && c.W.torRebuilding() === true,
+     'J. a fourth is told as four: the phone, not the page, keeps Tor to once a return', JSON.stringify(c.rebuilds));
+  // a mint answers anything: Tor is carrying again
+  c.delay = null;
+  await c.W.nativeRequest({ endpoint: MINT + '/v1/info', method: 'GET', foxyFresh: true });
+  ok(c.W._torSilent().count === 0 && c.W.torRebuilding() === false && pushes[pushes.length - 1] === false,
+     'J. any answer from a mint: the count back to none, and the shield no longer says Tor is building circuits',
+     JSON.stringify(c.W._torSilent()) + ' ' + JSON.stringify(pushes));
+  // put away and back again: the count starts over
+  c.delay = (m, path) => (path === '/v1/mint/quote/bolt11' ? 'hang' : 0);
+  c.W.invoice(100, '').then(() => {}, () => {});
+  await pause(750);
+  const before = c.W._torSilent().count;
+  c.W._stopAskingAgain();
+  ok(before >= 1 && c.W._torSilent().count === 0, 'J. put away again: the count starts over', before + ' then ' + c.W._torSilent().count);
+  c.W._askAgainMs = 0;
+}
+
+async function partJ2() {
+  /* New circuits were not enough: the count goes on past three, each told to the phone, which switches Tor's network
+   * off and on at three more with no host heard (`torRebuild` answers "restarting"); the shield says so
+   * (`torRestarting`), and an answer from any host, not a mint's only, puts it all back to none. */
+  const c = await connectedPage();
+  c.secondStage = true;
+  const pushes = [];
+  c.W._onPrivacy = () => pushes.push([c.W.torRebuilding(), typeof c.W.torRestarting === 'function' && c.W.torRestarting()]);
+  c.W._askAgainMs = 500;
+  c.W._askAgainMost = 8;
+  c.delay = (m, path) => (path === '/v1/mint/quote/bolt11' ? 'hang' : 0);
+  c.W._stopAskingAgain();
+  c.W.invoice(100, '').then(() => {}, () => {});
+  await pause(1750);
+  const restarting = () => typeof c.W.torRestarting === 'function' && c.W.torRestarting() === true;
+  ok(c.rebuilds.slice(0, 3).join() === '1,2,3' && c.W.torRebuilding() === true && !restarting(),
+     'J. three in a row: new circuits, and the shield says that, not a restart', JSON.stringify(c.rebuilds));
+  await pause(1000);
+  ok(c.rebuilds.slice(0, 5).join() === '1,2,3,4,5' && !restarting() && !c.restartAsked,
+     'J. two more after the new circuits: told as four and five, nothing more done', JSON.stringify(c.rebuilds));
+  await pause(500);
+  ok(c.rebuilds.slice(0, 6).join() === '1,2,3,4,5,6' && c.restartAsked && restarting() && c.W.torRebuilding() === true
+     && pushes.some((p) => p[1] === true),
+     'J. a third more: the phone switches Tor\u2019s network off and on, the page says so, and the route is pushed for the shield',
+     JSON.stringify(c.rebuilds) + ' ' + JSON.stringify(pushes));
+  await pause(500);
+  ok(restarting(), 'J. what the phone answers after that (already restarted) leaves the words as they are');
+  // an answer from a host that is not a mint, an explorer's: Tor carries
+  c.delay = null;
+  c.say = (m) => (/mempool\.space/.test(m.url) ? '200\n870000' : null);
+  await c.W.nativeRequest({ endpoint: 'https://mempool.space/api/blocks/tip/height', method: 'GET', foxyFresh: true }).catch(() => {});
+  ok(c.W._torSilent().count === 0 && !restarting() && c.W.torRebuilding() === false
+     && JSON.stringify(pushes[pushes.length - 1]) === '[false,false]',
+     'J. any host answering, an explorer as much as a mint: the count back to none and the shield no longer says Tor is restarting',
+     JSON.stringify(c.W._torSilent()) + ' ' + JSON.stringify(pushes));
+  // and put away while it says so: the words go with the count
+  c.say = null;
+  c.delay = (m, path) => (path === '/v1/mint/quote/bolt11' ? 'hang' : 0);
+  c.hostHeard = false; c.restartAsked = false; c.rebuildAsked = false;
+  c.W._stopAskingAgain();
+  c.rebuilds.length = 0;
+  c.W.invoice(100, '').then(() => {}, () => {});
+  await pause(3250);
+  const was = restarting();
+  c.W._stopAskingAgain();
+  ok(was && !restarting() && c.W._torSilent().count === 0, 'J. put away while restarting: the words and the count start over',
+     was + ' then ' + restarting() + ', ' + JSON.stringify(c.W._torSilent()));
+  c.W._askAgainMs = 0;
+  c.W._askAgainMost = 0;
+}
+
 async function run() {
   const t = Date.now();
   // the quick parts one after another, the long ones side by side
   await partA();
   await partF();
   await partHBusy();
+  await partI();
+  await partJ();
+  await partJ2();
   await Promise.all([partB(), partC12(), partC5(), partD(), partD2(), partE(), partG(), partH()]);
-  const order = (l) => 'ABCDEFGH'.indexOf(l.slice(6, 7));
+  const order = (l) => 'ABCDEFGHIJ'.indexOf(l.slice(6, 7));
   lines.sort((a, b) => order(a) - order(b)).forEach((l) => console.log(l));
   console.log('(' + Math.round((Date.now() - t) / 1000) + ' s)');
   console.log(failed ? '\n' + failed + ' ask-again-pace check(s) failed' : '\nall ask-again-pace checks pass');

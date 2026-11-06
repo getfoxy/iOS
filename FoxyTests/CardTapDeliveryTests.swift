@@ -21,6 +21,9 @@ final class CardTapDeliveryTests: XCTestCase {
         var asked = 0
         var timers: [() -> Void] = []
         var lines: [String] = []
+        /// The arrivals the page was asked about, and what it answers, in order; the last answer is repeated.
+        var arrivalsAsked: [Arrival] = []
+        var arrivalAnswers: [String?] = ["keep"]
 
         init() {
             delivery.now = { [unowned self] in self.clock }
@@ -30,6 +33,11 @@ final class CardTapDeliveryTests: XCTestCase {
                 let answer = self.answers[min(self.asked, self.answers.count - 1)]
                 self.asked += 1
                 if self.holdAnswers { self.held.append(done) } else { done(answer) }
+            }
+            delivery.askArrival = { [unowned self] found, done in
+                let answer = self.arrivalAnswers[min(self.arrivalsAsked.count, self.arrivalAnswers.count - 1)]
+                self.arrivalsAsked.append(found)
+                done(answer)
             }
         }
 
@@ -252,6 +260,160 @@ final class CardTapDeliveryTests: XCTestCase {
         rig.held.removeFirst()(false)
         XCTAssertTrue(rig.timers.isEmpty, "no timer for a tap that is over")
         XCTAssertEqual(rig.asked, 1)
+    }
+
+    // MARK: an arrival, on a first run
+
+    /// Foxy started with no wallet, and the card's address opened it: not a tap, an arrival, asked of the page for as long
+    /// as it says keep, and told nothing as a tap.
+    func testOnAFirstRunTheCardIsAnArrivalNotATap() {
+        let rig = Rig()
+        rig.delivery.firstRun = true
+        rig.delivery.received(card)
+        XCTAssertEqual(rig.delivery.arrival, Arrival.card, "kept before the page is up")
+        XCTAssertNil(rig.delivery.since, "and not a tap")
+        XCTAssertTrue(rig.arrivalsAsked.isEmpty, "the page is not up")
+        rig.open()
+        XCTAssertEqual(rig.arrivalsAsked, [Arrival.card])
+        XCTAssertEqual(rig.asked, 0, "the tap's question is never asked")
+        XCTAssertEqual(rig.timers.count, 1, "asked again, while the page keeps it")
+        rig.fireTimers()
+        rig.fireTimers()
+        XCTAssertEqual(rig.arrivalsAsked.count, 3)
+        XCTAssertNotNil(rig.delivery.arrival, "and kept here meanwhile")
+    }
+
+    /// A page loaded again during the set-up is asked again: the arrival outlives the page, not Foxy.
+    func testAnArrivalOutlivesThePageLoadedAgain() {
+        let rig = Rig()
+        rig.delivery.firstRun = true
+        rig.open()
+        rig.delivery.received(card)
+        XCTAssertEqual(rig.arrivalsAsked.count, 1)
+        rig.delivery.pageGone()
+        rig.fireTimers()
+        XCTAssertEqual(rig.arrivalsAsked.count, 1, "not asked while the page is gone")
+        rig.delivery.pageLoaded()
+        XCTAssertEqual(rig.arrivalsAsked.count, 2, "asked as soon as it is back")
+        XCTAssertNotNil(rig.delivery.arrival)
+    }
+
+    /// The page opened it at home: it is gone, the first run is over here too, and the next card is a tap as ever.
+    func testShownEndsItAndTheNextCardIsATap() {
+        let rig = Rig()
+        rig.arrivalAnswers = ["keep", nil, "shown"]
+        rig.delivery.firstRun = true
+        rig.open()
+        rig.delivery.received(card)
+        rig.fireTimers()
+        rig.fireTimers()
+        XCTAssertEqual(rig.arrivalsAsked.count, 3, "keep, then no answer (a page not booted), then shown")
+        XCTAssertNil(rig.delivery.arrival)
+        XCTAssertFalse(rig.delivery.firstRun)
+        XCTAssertTrue(rig.timers.isEmpty, "nothing asks again")
+        XCTAssertEqual(rig.asked, 0)
+        rig.delivery.received(card)
+        XCTAssertEqual(rig.asked, 1, "a later card is told as a tap")
+        XCTAssertEqual(rig.arrivalsAsked.count, 3)
+    }
+
+    /// The page's first run was over before the arrival came: the card's arrival is then the tap it always was.
+    func testOverMakesTheCardATap() {
+        let rig = Rig()
+        rig.arrivalAnswers = ["over"]
+        rig.delivery.firstRun = true
+        rig.open()
+        rig.delivery.received(card)
+        XCTAssertEqual(rig.arrivalsAsked.count, 1)
+        XCTAssertNil(rig.delivery.arrival)
+        XCTAssertFalse(rig.delivery.firstRun)
+        XCTAssertEqual(rig.asked, 1, "told as a tap")
+        XCTAssertNil(rig.delivery.since)
+    }
+
+    /// Off a first run nothing changes: the card is a tap, and no other address is read.
+    func testOffAFirstRunTheCardIsATapAndNothingElseIsRead() {
+        let rig = Rig()
+        var read = 0
+        rig.delivery.arrivalReaders = [{ _ in read += 1; return Arrival(kind: "other", code: "123456") }]
+        rig.open()
+        rig.delivery.received(card)
+        rig.delivery.received(URL(string: "https://example.com/other?c=123456"))
+        XCTAssertEqual(rig.asked, 1)
+        XCTAssertTrue(rig.arrivalsAsked.isEmpty)
+        XCTAssertEqual(read, 0, "a build's readers are not asked")
+        XCTAssertFalse(rig.delivery.arrive(Arrival(kind: "other")!), "and a build's own arrival is its caller's to handle")
+        XCTAssertNil(rig.delivery.arrival)
+    }
+
+    /// A build's own kind: read from its address on a first run, kept as the card's is, and what it always was if the first
+    /// run was over.
+    func testABuildsOwnKindOnAFirstRun() {
+        let rig = Rig()
+        var fellBack: [Arrival] = []
+        rig.delivery.arrivalReaders = [{ url in url.host == "example.com" ? Arrival(kind: "other", code: "123456") : nil }]
+        rig.delivery.arrivalFallbacks = ["other": { fellBack.append($0) }]
+        rig.delivery.firstRun = true
+        rig.delivery.received(URL(string: "https://example.org/x"))
+        XCTAssertNil(rig.delivery.arrival, "an address nobody reads is dropped")
+        rig.delivery.received(URL(string: "https://example.com/other?c=123456"))
+        XCTAssertEqual(rig.delivery.arrival, Arrival(kind: "other", code: "123456"))
+        rig.arrivalAnswers = ["over"]
+        rig.open()
+        XCTAssertEqual(fellBack, [Arrival(kind: "other", code: "123456")!])
+        XCTAssertEqual(rig.asked, 0, "not a card's tap")
+    }
+
+    /// The latest arrival is the one: a second address replaces the first, and is what the page is asked about.
+    func testTheLatestArrivalIsAskedAbout() {
+        let rig = Rig()
+        rig.delivery.firstRun = true
+        rig.delivery.received(card)
+        XCTAssertTrue(rig.delivery.arrive(Arrival(kind: "other", code: "654321")!))
+        rig.open()
+        XCTAssertEqual(rig.arrivalsAsked, [Arrival(kind: "other", code: "654321")!])
+    }
+
+    /// Not asked under a cover or before the return is told, as a tap is not.
+    func testAnArrivalWaitsAsATapDoes() {
+        let rig = Rig()
+        rig.delivery.firstRun = true
+        rig.open()
+        rig.delivery.wentToBackground()
+        rig.delivery.received(card)
+        rig.delivery.coverChanged(up: true)
+        rig.delivery.coverChanged(up: false)
+        XCTAssertTrue(rig.arrivalsAsked.isEmpty, "back, but the return not told")
+        rig.delivery.cameBack()
+        XCTAssertEqual(rig.arrivalsAsked.count, 1)
+    }
+
+    /// Kept half an hour at most: a first run left that long is not sent anywhere when it ends.
+    func testAnArrivalIsGivenUpAfterHalfAnHour() {
+        let rig = Rig()
+        rig.delivery.firstRun = true
+        rig.open()
+        rig.delivery.received(card)
+        rig.advance(29 * 60)
+        rig.fireTimers()
+        XCTAssertNotNil(rig.delivery.arrival)
+        rig.advance(2 * 60)
+        rig.fireTimers()
+        XCTAssertNil(rig.delivery.arrival)
+        XCTAssertTrue(rig.timers.isEmpty)
+        XCTAssertEqual(rig.lines.last, "an arrival given up, the first run did not reach home within half an hour")
+    }
+
+    /// Kinds and codes need no quoting in the page's call, and anything else is no arrival.
+    func testWhatAnArrivalMayBe() {
+        XCTAssertEqual(Arrival.card.pageCall,
+                       "window.FoxyWallet && window.FoxyWallet._arrived && window.FoxyWallet._arrived('card', '')")
+        XCTAssertEqual(Arrival(kind: "other", code: "123456")?.pageCall.hasSuffix("._arrived('other', '123456')"), true)
+        XCTAssertNil(Arrival(kind: ""))
+        XCTAssertNil(Arrival(kind: "Card"))
+        XCTAssertNil(Arrival(kind: "card", code: "1'); x('"))
+        XCTAssertNil(Arrival(kind: "card", code: String(repeating: "1", count: 33)))
+        XCTAssertNil(Arrival(kind: "averyveryverylongkind"))
     }
 
     /// The same delivery serves every tap of a session: the shared one is the app's.

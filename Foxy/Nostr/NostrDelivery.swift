@@ -8,15 +8,25 @@ import Foundation
 /// key made for this payment and thrown away after. It never learns who sent
 /// it, what it holds, or where this phone is.
 ///
-/// Foxy only sends. It has no Nostr identity, listens on no relay, and reads
-/// nothing: its own requests are answered over Tor instead (OnionInbox).
+/// What Foxy sends is always wrapped this way. What it listens for is a
+/// request's own key, a till's cashier code's, the Cashu ID's delivery key
+/// once MY CASHU ID has been shown (CASHU-ID.md), and the keys its contacts'
+/// next messages may come to, each used once (CashuMsg.swift); it has no other
+/// Nostr identity and reads nothing else.
 enum NostrDelivery {
 
     /// Relays Foxy will fall back to when a request names none. The ones
     /// cashu.me and Minibits publish to and listen on by default, so a payment
-    /// still reaches them.
-    static let fallbackRelays = ["wss://relay.damus.io", "wss://nos.lol",
-                                 "wss://relay.primal.net", "wss://relay.minibits.cash"]
+    /// still reaches them: cashu.me's relay.damus.io and relay.primal.net,
+    /// and Minibits' relay.primal.net, relay.damus.io and relay.minibits.cash.
+    ///
+    /// Not nos.lol, though cashu.me names it. Through Tor its host could not be
+    /// reached at all (Tor's exits could not connect to it, every circuit
+    /// tried), so an inbox listening there heard nothing and a payment sent
+    /// there waited out the whole patience. A wallet that names nos.lol still
+    /// reaches Foxy on the other relays it names beside it.
+    static let fallbackRelays = ["wss://relay.damus.io", "wss://relay.primal.net",
+                                 "wss://relay.minibits.cash"]
     /// At most this many relays for one payment, and this long on each.
     static let mostRelays = 5
     static let patience: TimeInterval = 25
@@ -27,21 +37,30 @@ enum NostrDelivery {
     }
 
     /// Wrap `payload` for the `nprofile` in a payment request and publish it.
-    /// `done` on the main queue once every relay has answered or timed out.
+    /// `done` on the main queue at the first relay that takes it, or once every
+    /// relay has refused or timed out.
     static func send(payload: String, to nprofile: String,
                      done: @escaping (Swift.Result<Result, Error>) -> Void) {
         guard let (pubkey, listed) = Bech32.nprofile(nprofile) else {
             done(.failure(NostrCrypto.Failure.badPeer))
             return
         }
+        send(payload: payload, receiver: pubkey, relays: listed, seal: nil, done: done)
+    }
+
+    /// The same, to a key and a list of relays (Foxy's own three when it is empty), the seal signed by `seal` where
+    /// the receiver checks who sealed it (a message between two Cashu IDs, CashuMsg.swift) and by a key made for the
+    /// wrap otherwise.
+    static func send(payload: String, receiver pubkey: [UInt8], relays listed: [String], seal: [UInt8]?,
+                     done: @escaping (Swift.Result<Result, Error>) -> Void) {
         let urls = relays(listed)
-        guard !urls.isEmpty else {
+        guard pubkey.count == 32, !urls.isEmpty else {
             done(.failure(NostrCrypto.Failure.badPeer))
             return
         }
         let wrap: NostrEvent.Event
         do {
-            wrap = try NostrEvent.giftWrapped(payload: payload, receiver: pubkey)
+            wrap = try NostrEvent.giftWrapped(payload: payload, receiver: pubkey, seal: seal)
         } catch {
             done(.failure(error))
             return
@@ -51,11 +70,27 @@ enum NostrDelivery {
 
         var result = Result()
         var left = urls.count
+        var answered = false
         let finish: (String, String?) -> Void = { relay, refusal in
             // on the main queue
             if let refusal { result.refused[relay] = refusal } else { result.accepted.append(relay) }
             left -= 1
-            if left == 0 { done(.success(result)) }
+            /* Answered at the FIRST relay that takes it, not the last to
+             * answer: one relay slow or dead over Tor (nos.lol was, and is no longer listed) held every
+             * payment's "sent" for the whole 25 s of patience while the
+             * receiver had the money in two. The other relays go on being
+             * asked for the log, and for the payment's reach. Only when every
+             * relay has refused is the answer a refusal. */
+            if !answered, refusal == nil || left == 0 {
+                answered = true
+                done(.success(result))
+                return
+            }
+            #if DEBUG
+            if left == 0 {
+                print("[foxy] nostr: in all, \(result.accepted.count) relay(s) took the payment, \(result.refused.count) did not")
+            }
+            #endif
         }
         #if DEBUG
         print("[foxy] nostr: wrap \(wrap.id) to \(urls.count) relay(s)")
@@ -105,7 +140,7 @@ enum NostrDelivery {
             socket.task.receive { result in
                 switch result {
                 case .failure(let error):
-                    finish(error.localizedDescription)
+                    finish(NostrInbox.whyNot(error))
                 case .success(let answer):
                     let text: String
                     switch answer {
@@ -121,7 +156,8 @@ enum NostrDelivery {
             }
         }
         socket.task.send(.string(message)) { error in
-            if let error { finish(error.localizedDescription); return }
+            // a relay Tor could not reach fails here, as soon as Tor gives up on it (NostrInbox.whyNot)
+            if let error { finish(NostrInbox.whyNot(error)); return }
             listen()
         }
     }

@@ -231,6 +231,15 @@ starting and its minute, and a second request being the same tap. The pure Swift
 `CardTapDeliveryTests.swift`, run by `tools/nativetests`; **`flashcard-screens.js`**
 begins a real tap from the address, against the model of the card.
 
+**`arrival.js`** holds the same address on a first run: a person who tapped a card
+without Foxy installs it and taps again, and the phone keeps the address as an
+arrival (`CardTapDelivery.swift`, `Arrival`) and asks the page about it until home
+is first reached. It drives the first run (the launch, the mint's notice, the
+question of what to hold, the lock, a page loaded again) with a new card in reach,
+and checks that each step is kept, that the card's screen and WELCOME TO YOUR
+CASHU CARD are the first thing after home, once, and that an arrival after home
+was reached is left to be the tap it always was.
+
 **`two-balances.js`** holds the wallet's half of a mint with two balances,
 sats and dollars in cents: which units the mint issues, the choice of what to
 hold and the two remembered starting units, the pile guard (a piece goes only

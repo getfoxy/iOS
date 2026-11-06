@@ -471,10 +471,12 @@ async function part2() {
     walletChoice: () => ({ hold: 'both', recv: '', send: '' }), setWalletChoice() {},
     balanceOf: (u) => (u === 'usd' ? st.usd : st.sat), heldIn: () => 0, recoveringIn: () => 0,
     mintRate: () => ({ usdPerBtc: 81786 }),
-    unitSwapsPending: () => (st.runAs === 'pending' && st.ran ? [{ id: 'p', at: 1, from: { unit: 'usd', amount: 1000 }, to: { unit: 'sat', amount: 1220 } }] : []),
+    unitSwapsPending: () => (st.runAs === 'pending' && st.ran && !st.cleared ? [{ id: st.heldId || 'p', at: 1, from: { unit: 'usd', amount: 1000 }, to: { unit: 'sat', amount: 1220 } }] : []),
     swapQuote(from, to, amount) { asked.push([from, to, amount]); return Promise.resolve(quote(from, to, amount)); },
+    sweepMelts() { st.sweeps = (st.sweeps || 0) + 1; if (st.clearAt && st.sweeps >= st.clearAt) st.cleared = true; return Promise.resolve([]); },
+    recoverSwaps() { return Promise.resolve([]); },
     swapRun(q, stage) {
-      st.ran = true;
+      st.ran = true; st.heldId = q.id;
       if (st.runAs === 'pending') return Promise.resolve({ id: q.id, state: 'pending', from: { unit: q.from, amount: q.total }, to: { unit: q.to, amount: q.get }, fee: q.fee, rate: q.rate });
       stage('paying'); stage('paid'); stage('claiming'); stage('done');
       if (q.from === 'usd') { st.usd -= q.total; st.sat += q.get; } else { st.sat -= q.total; st.usd += q.get; }
@@ -537,6 +539,7 @@ async function part2() {
   st.online = true;
   // a swap still going through
   st.runAs = 'pending';
+  A.SWAP_WAIT_MS = 0;
   A.goSwap();
   A.swapToAmount();
   A.setState({ amount: '10.00' });
@@ -548,4 +551,28 @@ async function part2() {
   ok(A.state.screen === 'home' && /SWAP STILL GOING THROUGH/.test(card), 'one leg unanswered: the card SWAP STILL GOING THROUGH, over home');
   ok(A.renderVals().deltaText === '$ 10.00 pending with the mint', 'and home’s held pill names it', A.renderVals().deltaText);
   if (A._blockedEl) A._blockedEl.remove();
+
+  /* The wait: the swapping screen stays up, asking the mint again, instead of the card one round trip after SWAP. */
+  const cardUp = () => /SWAP STILL GOING THROUGH/.test([...w.document.body.children].map((el) => el.textContent).join(' '));
+  const pendingSwap = async (clearAt, waitMs) => {
+    [...w.document.body.children].filter((el) => /SWAP STILL GOING/.test(el.textContent)).forEach((el) => el.remove());
+    A._blockedEl = null; A._blockedKind = ''; A._cardQueue = [];
+    Object.assign(st, { runAs: 'pending', ran: false, cleared: false, sweeps: 0, clearAt });
+    A.SWAP_WAIT_MS = waitMs; A.SWAP_WAIT_STEP_MS = 40;
+    A.setState({ screen: 'home', stack: [], swapBusy: false, swapQuote: null });
+    A.goSwap(); A.swapToAmount(); A.setState({ amount: '10.00' }); A.swapNext(false);
+    await settle(); await settle();
+    A.swapGo();
+  };
+  await pendingSwap(0, 400);
+  await wait(120);
+  ok(A.state.swapBusy && !cardUp() && A.state.screen !== 'home', 'a half-answered swap: no card yet, the swapping screen is still up', JSON.stringify([A.state.swapBusy, cardUp(), A.state.screen, A.state.swapErr]));
+  await wait(500);
+  ok(A.state.screen === 'home' && cardUp(), 'and when the wait runs out with the mint still holding it, the card');
+  ok(st.sweeps >= 2, 'having asked the mint again meanwhile', String(st.sweeps));
+  await pendingSwap(2, 2000);
+  await wait(300);
+  ok(A.state.screen === 'home' && !cardUp() && !A.state.swapBusy, 'a swap the mint finishes during the wait ends at home with no card', JSON.stringify([A.state.swapBusy, cardUp(), A.state.screen, st.sweeps]));
+  if (A._blockedEl) A._blockedEl.remove();
+  A.SWAP_WAIT_MS = 0;
 }

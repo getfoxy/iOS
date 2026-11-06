@@ -90,6 +90,78 @@ final class SeedVaultTests: XCTestCase {
         XCTAssertNil(SeedVault.takeUnlock(forScreen: false, now: Date().addingTimeInterval(31)))
     }
 
+    /// The lock's prompt and the wake's seed read raced: the read put up its
+    /// own Face ID, the lock's lost, and the lock asked for a second face
+    /// (a phone log). A read while the lock asks waits for its answer.
+    func testAReadWhileTheLockAsksWaitsForItsAnswer() {
+        let at = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertFalse(SeedVault.waitsForLock(askingSince: nil, now: at, forScreen: false), "nothing asking, nothing to wait for")
+        XCTAssertTrue(SeedVault.waitsForLock(askingSince: at, now: at, forScreen: false))
+        XCTAssertTrue(SeedVault.waitsForLock(askingSince: at, now: at.addingTimeInterval(59), forScreen: false))
+        XCTAssertFalse(SeedVault.waitsForLock(askingSince: at, now: at.addingTimeInterval(60), forScreen: false), "sixty seconds at most")
+        XCTAssertFalse(SeedVault.waitsForLock(askingSince: at, now: at.addingTimeInterval(-1), forScreen: false))
+        XCTAssertFalse(SeedVault.waitsForLock(askingSince: at, now: at, forScreen: true), "the words screen always asks")
+        XCTAssertEqual(SeedVault.lockWaitSeconds, 60)
+
+        let background = DispatchQueue(label: "test.lock.wait")
+        func waitOff(forScreen: Bool = false) -> (waited: Bool, seconds: TimeInterval) {
+            var out = (waited: false, seconds: 0.0)
+            let done = expectation(description: "read")
+            background.async {
+                let start = Date()
+                out.waited = SeedVault.awaitLockAnswer(forScreen: forScreen)
+                out.seconds = Date().timeIntervalSince(start)
+                done.fulfill()
+            }
+            wait(for: [done], timeout: 5)
+            return out
+        }
+
+        // no lock asking: the read goes at once
+        XCTAssertFalse(waitOff().waited)
+
+        // yes: the read waits for it, then takes the noted approval and no prompt of its own
+        SeedVault.forgetNativeSeed()
+        var token = SeedVault.lockPromptBegan()
+        let unlock = LAContext()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
+            SeedVault.noteUnlock(unlock)
+            SeedVault.lockPromptAnswered(token)
+        }
+        var read = waitOff()
+        XCTAssertTrue(read.waited)
+        XCTAssertGreaterThanOrEqual(read.seconds, 0.25)
+        XCTAssertTrue(SeedVault.takeUnlock(forScreen: false) === unlock, "the lock's approval serves the read")
+
+        // no, or cancelled: the gate opens with nothing noted, so the read asks as before
+        token = SeedVault.lockPromptBegan()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { SeedVault.lockPromptAnswered(token) }
+        read = waitOff()
+        XCTAssertTrue(read.waited)
+        XCTAssertNil(SeedVault.takeUnlock(forScreen: false))
+
+        // the words screen never waits
+        token = SeedVault.lockPromptBegan()
+        XCTAssertFalse(waitOff(forScreen: true).waited)
+        SeedVault.lockPromptAnswered(token)
+
+        // a prompt asking for sixty seconds or more holds nothing up
+        token = SeedVault.lockPromptBegan(now: Date().addingTimeInterval(-61))
+        XCTAssertFalse(waitOff().waited)
+
+        // an earlier prompt's answer does not end a later one
+        let later = SeedVault.lockPromptBegan()
+        SeedVault.lockPromptAnswered(token)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { SeedVault.lockPromptAnswered(later) }
+        XCTAssertTrue(waitOff().waited)
+
+        // never on the main queue
+        token = SeedVault.lockPromptBegan()
+        XCTAssertFalse(SeedVault.awaitLockAnswer(forScreen: false))
+        SeedVault.lockPromptAnswered(token)
+        XCTAssertFalse(waitOff().waited)
+    }
+
     /// The seed in memory serves the work Foxy does as it is put away, and
     /// nothing after it.
     ///

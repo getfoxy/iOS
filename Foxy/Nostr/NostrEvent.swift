@@ -40,10 +40,12 @@ enum NostrEvent {
     // MARK: The three events
 
     /// The whole wrap, ready to publish, or a throw. `payload` is the NUT-18
-    /// payment JSON; `receiver` the 32-byte x-only key it is for.
+    /// payment JSON; `receiver` the 32-byte x-only key it is for. `seal`: the
+    /// seal's key where the receiver checks who sealed it (a message between two
+    /// Cashu IDs, CashuMsg.swift); otherwise one made for this wrap.
     static func giftWrapped(payload: String, receiver: [UInt8],
-                            now: Int = Int(Date().timeIntervalSince1970)) throws -> Event {
-        let sealKey = try NostrCrypto.newKey()
+                            now: Int = Int(Date().timeIntervalSince1970), seal fixedSeal: [UInt8]? = nil) throws -> Event {
+        let sealKey = try fixedSeal ?? NostrCrypto.newKey()
         let sealPub = try NostrCrypto.publicKey(of: sealKey)
         let receiverHex = hex(receiver)
 

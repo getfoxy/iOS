@@ -330,8 +330,9 @@
    * none of them says anything of the address. */
 
   // the screens on which nothing is in progress: a card's address may take the person away from any of them
-  // (RESTORE CARD, 'fcRestore', is a list: a take-back under way is its stage, drawn over it)
-  CARD_TAP_FREE = ['home', 'history', 'contacts', 'txDetail', 'flashcard', 'change', 'fieldLog', 'switchMint', 'fcRestore'];
+  // (RESTORE CARD, 'fcRestore', is a list: a take-back under way is its stage, drawn over it; so is INBOX, 'inbox', with nothing
+  // written there: a message is written on the contact's own screen)
+  CARD_TAP_FREE = ['home', 'history', 'contacts', 'txDetail', 'flashcard', 'change', 'fieldLog', 'switchMint', 'fcRestore', 'inbox'];
   // how long a request waits for Foxy to be open before it lapses, and how often it looks again meanwhile
   CARD_TAP_KEEP_MS = 60000;
   CARD_TAP_POLL_MS = 250;
@@ -364,7 +365,8 @@
       screen: String(s.screen || ''),
       // the mint list asked for a transfer's mint, or for the one a card moves to: money, not a list
       transfer: !!s.trStep,
-      pick: !!s.fcPick,
+      // (and the till's lists: who its tips go to, and its cashier codes, 26p-till-tips.js)
+      pick: !!s.fcPick || !!s.tillList || !!s.bankPick,
       // the till, which has no card screen whatever screen of its own is up (26m-till.js)
       till: !!s.till,
       over: starting ? '' : this.cardTapOver(),
@@ -441,6 +443,86 @@
     if (this.state.open0) this.setState({ open0: false });
     if (this.hideGetDollars) this.hideGetDollars();
     this.goFlashcard();
+  }
+
+  /* ---- an arrival, on the first run ------------------------------------------
+   *
+   * A person without Foxy who taps a card is sent to get it, installs it, and
+   * taps the card again: that address opens a Foxy with no wallet yet. The phone
+   * keeps it as an arrival (Foxy/Flashcard/CardTapDelivery.swift, `Arrival`: a
+   * kind, `card`, and a code, none for a card) and asks the page about it,
+   * `FoxyWallet._arrived(kind, code)`, every half second, from before the page
+   * has booted until it answers:
+   *
+   *   keep     the first run is going on (the launch, the warning, the words,
+   *            what to hold, the notices over home, the lock): it is kept here
+   *            and at the phone, so a page loaded again has it too;
+   *   shown    home is reached, with nothing over it, for the first time since
+   *            this page loaded: it is opened now (`arrivalOpen`; a card's is
+   *            CARD on home, the phone's sheet, and a new card read is WELCOME
+   *            TO YOUR CASHU CARD) and forgotten, here and at the phone;
+   *   over     home had been reached before it came: the first run was over,
+   *            and the phone makes it what it is on any other run (a card's is
+   *            a tap, `cardTapped`).
+   *
+   * Opened only on the phone's question, so the answer and the opening are one
+   * step and a page loaded again cannot open it twice. Kept in memory only.
+   * Off a first run the phone never asks. A kind this page does not know is
+   * `over`; a build adds its kinds by wrapping `arrivalOpen`. */
+  ARRIVAL_SETTLE_MS = 1800;   // past walletReady's notices and the question of what to hold (09-melt-paste-switch.js)
+  ARRIVAL_POLL_MS = 400;
+
+  arrived(kind, code) {
+    const k = String(kind == null ? '' : kind), c = String(code == null ? '' : code);
+    if (!/^[a-z]{1,16}$/.test(k) || !/^[0-9A-Za-z]{0,32}$/.test(c)) return 'over';
+    if (!this._arrival && this._homeReached) {
+      console.log('[foxy] arrival: home was reached before it came');
+      return 'over';
+    }
+    if (!this._arrival) console.log('[foxy] arrival: kept for when home is reached');
+    this._arrival = { kind: k, code: c };
+    if (!this.arrivalHomeNow()) return 'keep';
+    const a = this._arrival;
+    this._arrival = null;
+    this._homeReached = true;
+    if (!this.arrivalOpen(a)) {
+      console.log('[foxy] arrival: not a kind this page opens');
+      return 'over';
+    }
+    console.log('[foxy] arrival: home reached, opened');
+    return 'shown';
+  }
+
+  /* What an arrival opens; false for a kind this page does not know. */
+  arrivalOpen(a) {
+    if (a && a.kind === 'card') { this.cardTapAct(); return true; }
+    return false;
+  }
+
+  /* Home, reached: the home screen with nothing over it, past the launch and the lock, the mint answered a moment ago
+   * (`walletReady`, whose notices and question of what to hold come in its first second and a half), and nothing still to
+   * be asked of what to hold. */
+  arrivalHomeNow() {
+    const s = this.state || {};
+    if (this._pinLocked || s.till || s.open0 || String(s.screen || '') !== 'home') return false;
+    let starting = false;
+    try { const G = window.FoxyGate; starting = !!(G && G.visible && G.visible()); } catch (e) { starting = false; }
+    if (starting) return false;
+    if (!this._readyAt || Date.now() - this._readyAt < this.ARRIVAL_SETTLE_MS) return false;
+    if (this.holdDue && this.holdDue() && !this._holdGaveUp) return false;
+    return this.cardTapOver() === '';
+  }
+
+  /* From the boot until home is first reached: whether it has been, so an arrival after that is `over`. */
+  arrivalWatch() {
+    clearTimeout(this._arrivalT);
+    if (this._homeReached) return;
+    if (this.arrivalHomeNow()) {
+      // (an arrival waiting is opened at the phone's next question, which is never more than half a second away)
+      if (!this._arrival) this._homeReached = true;
+      if (this._homeReached) return;
+    }
+    this._arrivalT = setTimeout(() => this.arrivalWatch(), this.ARRIVAL_POLL_MS);
   }
 
   /* ---- one tap ------------------------------------------------------------
@@ -754,6 +836,14 @@
     /* ADD FUNDS to a card at another mint: what this phone can cover, the fees in it and in whichever balance pays, is the
      * confirmation's to say (`fcXlBegin`), asked of both mints. */
     if (flow === 'cardAdd' && this.fcAddAway()) { this.fcXlAdd(sats); return; }
+    /* DEPOSIT of more than this phone holds in the card's currency: the receive invoice for the whole of it, and the card
+     * tapped again once it has come in (`fcDepOpen`). Not where the card could not take it. */
+    if (flow === 'cardAdd' && sats > have && this.fcDepCan()) {
+      const fits = this.fcLoadFits(sats);
+      if (fits && !fits.ok) { this.toast(fits.why, true); return; }
+      this.fcDepOpen(sats, unit);
+      return;
+    }
     // the card's room first, as the line under the figure names it first: the wallet's own words, asked of what the phone holds at the most
     const room = flow === 'cardAdd' ? this.fcLoadFits(Math.min(sats, have)) : null;
     if (room && !room.ok) { this.toast(room.why, true); return; }
@@ -3796,7 +3886,8 @@
       return;
     }
     if (fc && fc.v123 && this.twoUnitsOn && this.twoUnitsOn()) {
-      const none = (u) => !(this.unitBalance(u) > 0);
+      // (none on this phone is no bar where the deposit can be asked for by invoice, `fcDepOpen`)
+      const none = (u) => !(this.unitBalance(u) > 0) && !this.fcDepCan();
       this.fcPickUnit({
         question: 'ADD WHICH TO THE CARD?',
         foot: 'From what this phone holds. The card keeps dollars and bitcoin side by side.',
@@ -3914,6 +4005,126 @@
       if (run.closed) return;
       this.fcFailed(e, {});
     });
+  }
+
+  /* ---- DEPOSIT above what this phone holds ---------------------------------
+   * Decided 2026-11-04: DEPOSIT, an amount more than this phone holds in the card's currency at its mint, opens the app's
+   * own receive invoice for the WHOLE amount (RECEIVE's screen, its tap to pay and its card with it); when the money has
+   * come in, TAP THE CARD AGAIN puts that amount on the card, by ADD FUNDS' own steps (`fcAddPin`). What the phone held
+   * before is not touched: the load is the amount that came in. The ask is held as a TRANSFER's second tap is
+   * (`fcMoveHold`): LATER, the card closed any other way, or two minutes with no tap end it, and the money stays on this
+   * phone with its history row saying so. */
+  FC_DEP_HOLD_MS = 120000;
+
+  // the history row's words for money that came in for the card and stayed on this phone
+  FC_DEP_KEPT = 'For the card · kept on this phone';
+
+  /* Whether DEPOSIT may ask for what this phone lacks by invoice: a card on show at this phone's own mint (not one loaded
+   * at its own mint from here, `fcAddAway`), a route, and no till. */
+  fcDepCan() {
+    const W = this.fcW();
+    const s = this.state;
+    return !!(s.fc && W && W.invoice && !this.offlineNow() && !s.till && !this.fcAddAway());
+  }
+
+  /* The receive invoice for a DEPOSIT of `amount` (cents for dollars, else sats), in the card's currency: SET AMOUNT gives
+   * way to RECEIVE's screen, made as RECEIVE makes it, with the figure typed (`openReceive`). Back from it is the card. */
+  fcDepOpen(amount, unit) {
+    const u = unit === 'usd' ? 'usd' : 'sat';
+    const fc = this.state.fc;
+    this._fcDep = { key: String((fc && fc.key) || ''), amount: Math.round(Number(amount) || 0), unit: u,
+                    flowUnit: this._fcFlowUnit || null, hash: '', arrived: false };
+    console.log('[foxy] card: a deposit of ' + this.fcBoth(amount, u) + ' is more than this phone holds; asking for it by invoice');
+    this.setState(p => ({
+      screen: 'confirm', stack: p.screen === 'amount' ? p.stack : p.stack.concat([p.screen]),
+      flow: 'receive', wallet: u, walletAuto: false, asset: 'BITCOIN', network: 'LIGHTNING', depositVia: '',
+    }));
+    this.openReceive();
+  }
+
+  /* Called on every update: the deposit's money come in (PAID, money in, in the card's currency, at least the amount),
+   * or the invoice left with nothing come (the card's screen, or home), which lets it go. */
+  syncFcDep(prev) {
+    const d = this._fcDep;
+    if (!d || d.arrived) return;
+    const s = this.state;
+    if (s.screen === 'paid' && !s.payOut && (!prev || prev.screen !== 'paid')) {
+      const u = s.paidUnit === 'usd' ? 'usd' : 'sat';
+      if (u !== d.unit || !(Math.round(Number(s.paidAmount) || 0) >= d.amount)) {
+        console.log('[foxy] card: money came in that is not the deposit asked for; the card is not asked');
+        return;
+      }
+      d.arrived = true;
+      d.hash = String(s.invoiceHash || '');
+      setTimeout(() => this.fcDepArrived(d), 0);
+      return;
+    }
+    if (s.screen === 'home' || s.screen === 'flashcard') {
+      console.log('[foxy] card: the deposit\u2019s invoice was left with nothing come in');
+      this._fcDep = null;
+    }
+  }
+
+  /* The deposit's money is in: the card's screen, and TAP THE CARD AGAIN over it. TAP CARD loads the amount typed;
+   * LATER keeps it on this phone (`fcDepHold`). */
+  fcDepArrived(d) {
+    if (this._fcDep !== d) return;
+    this._fcDep = null;
+    const fig = this.fcBoth(d.amount, d.unit);
+    console.log('[foxy] card: the deposit came in; asking for the card again');
+    this.setState(p => {
+      const at = (p.stack || []).lastIndexOf('flashcard');
+      return { screen: 'flashcard', stack: at >= 0 ? p.stack.slice(0, at) : [], amount: '', network: '', unit: 'USD', payOut: false,
+               paidPlace: null, paidUnit: '', paidAmount: null, recv: Object.assign({}, p.recv, { live: 'gone' }) };
+    });
+    // (the balance was read again as the money landed: RECEIVE's watch)
+    if (this.paidDismissed) this.paidDismissed();
+    const held = this.fcDepHold(d);
+    this.blockedCard('fc-dep-tap', {
+      tone: 'warn', title: 'TAP THE CARD AGAIN',
+      reason: fig + ' came in on this phone. Tap the card to put it on.',
+      retry: 'TAP CARD', go: () => { held.take(); this.fcDepLoad(d); },
+      shut: { label: 'LATER', tap: () => held.end() },
+      // closed without TAP CARD (outside the card, say): kept on this phone; TAP CARD has taken it by then
+      onClose: () => setTimeout(() => { if (this._fcDepHeld === held) held.end(); }, 0),
+    });
+  }
+
+  /* The ask held for its tap, as a TRANSFER's is (`fcMoveHold`): { take(), end(), ended }. `take()` is TAP CARD's; `end()`
+   * keeps the money on this phone, said in the history and once on screen. Ended by itself after FC_DEP_HOLD_MS. */
+  fcDepHold(d) {
+    clearTimeout(this._fcDepHoldT);
+    const held = { ended: false, take: null, end: null };
+    held.take = () => {
+      held.ended = true;
+      clearTimeout(this._fcDepHoldT);
+      if (this._fcDepHeld === held) this._fcDepHeld = null;
+    };
+    held.end = () => {
+      if (held.ended) return;
+      held.take();
+      const W = this.fcW();
+      if (d.hash && W && W.tag) { try { W.tag(d.hash, { note: this.FC_DEP_KEPT }); } catch (x) { /* the toast still says it */ } }
+      console.log('[foxy] card: the deposit stays on this phone');
+      this.toast(this.fcBoth(d.amount, d.unit) + ' stays on this phone. DEPOSIT puts it on the card.');
+      if (this.loadHistory) this.loadHistory();
+      if (this.dismissCard) this.dismissCard('fc-dep-tap');
+    };
+    this._fcDepHeld = held;
+    this._fcDepHoldT = setTimeout(() => held.end(), this.FC_DEP_HOLD_MS);
+    return held;
+  }
+
+  /* TAP CARD: the amount that came in, onto the card it was asked for, by ADD FUNDS' own steps: its PIN where the card
+   * wants one, then the tap. Not onto another card. */
+  fcDepLoad(d) {
+    const fc = this.state.fc;
+    if (!fc || String(fc.key || '') !== d.key) {
+      this.toast(this.fcBoth(d.amount, d.unit) + ' stays on this phone. Open the card it was for to put it on.', true);
+      return;
+    }
+    this._fcFlowUnit = d.flowUnit;
+    this.fcAddPin(d.amount);
   }
 
   /* ---- withdraw --------------------------------------------------------------
@@ -6256,8 +6467,8 @@
 
   /* ---- home and the card --------------------------------------------------------------------------------------------
    *
-   * Home's round button at the top left is the CARD button: it opens the card's screen as a card's address does (`goFlashcard`),
-   * which asks for the card to be tapped; nothing of a card is shown before it has been read. The card's screen has the HOME
+   * FOXY CARD, the first row of the menu's WALLET (home's round button at the top left was CARD, and is CHAT now), opens the
+   * card's screen as a card's address does (`goFlashcard`), which asks for the card to be tapped; nothing of a card is shown before it has been read. The card's screen has the HOME
    * button in the same place, which comes back home (`fcGoHome`). A swipe does the same (`fcSwipe`): to the left on home is CARD,
    * to the right on the card's screen is HOME; nothing is drawn for it and nothing of a card is kept for it. */
   // the stores an earlier build kept for a swipe between home and the card: a card's last read and the newest card; cleared once

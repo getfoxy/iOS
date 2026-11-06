@@ -1467,7 +1467,7 @@
       var w = W();
       if (!w || !w.setOffline) return;
       console.log('[foxy] tor gate: the person chose to work offline');
-      w.setOffline(true);
+      w.setOffline(true, true);
       takeDown(true, 'the person chose to work offline');
       gateChanged();
       if (onRetry) { try { onRetry(); } catch (e) { console.error('[foxy] offline boot:', e && e.message); } }

@@ -39,22 +39,8 @@
     this.applyShell();
     this._onResize = () => this.applyShell();
     window.addEventListener('resize', this._onResize);
-    if (window.visualViewport) {
-      // iOS ignores interactive-widget; compress the app above the keyboard by hand
-      this._onVv = () => {
-        const vv = window.visualViewport;
-        const kb = Math.max(0, Math.round(window.innerHeight - vv.height));
-        if (kb !== (this.state.kbInset || 0)) this.setState({ kbInset: kb });
-        // iOS scrolls the document to reveal the input; undo it — the inset handles visibility
-        if (window.scrollY || vv.offsetTop) window.scrollTo(0, 0);
-        const sh = document.scrollingElement;
-        if (sh && sh.scrollTop) sh.scrollTop = 0;
-      };
-      this._onWinScroll = () => { if ((this.state.kbInset || 0) > 0 && window.scrollY) window.scrollTo(0, 0); };
-      window.addEventListener('scroll', this._onWinScroll, { passive: true });
-      window.visualViewport.addEventListener('resize', this._onVv);
-      window.visualViewport.addEventListener('scroll', this._onVv);
-    }
+    // iOS ignores interactive-widget: the page lifts itself above the keyboard (15-paid-wake-keyboard.js)
+    this.watchKeyboard();
   }
   componentWillUnmount() {
     if (this._tokQr) { clearInterval(this._tokQr.timer); this._tokQr = null; }
@@ -63,8 +49,7 @@
     if (this._unlockAudio) window.removeEventListener('pointerdown', this._unlockAudio);
     if (this._ac) { try { this._ac.close(); } catch (e) {} this._ac = undefined; }
     (this._dlT || []).forEach(clearTimeout);
-    if (this._onVv && window.visualViewport) { window.visualViewport.removeEventListener('resize', this._onVv); window.visualViewport.removeEventListener('scroll', this._onVv); }
-    if (this._onWinScroll) window.removeEventListener('scroll', this._onWinScroll);
+    this.unwatchKeyboard();
     // every timer this component can start, or an orphan keeps running after unmount
     ['_cardBalT','_otpTick','_eta','_balT','_bkT'].forEach(k => { clearInterval(this[k]); this[k] = null; });
     ['_toastT','_nfcT','_scanT','_sendA','_sendB','_retryT','_moreT','_spResumeT','_queueT','_claimT','_shieldT','_cardTapT'].forEach(k => { clearTimeout(this[k]); this[k] = null; });

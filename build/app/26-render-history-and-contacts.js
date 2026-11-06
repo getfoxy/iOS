@@ -172,7 +172,12 @@
           : 'var(--surface)',
         cardEdge: A.flagged.has(t) ? '2.5px' : '1.5px',
         cardSpin: A.flagged.has(t) ? 'foxyEdge 1.6s linear infinite' : 'none',
-        metaRail: A.flagged.has(t) ? A.flagged.get(t) : (ofCard && cardRail(t)) ? cardRail(t) : t.highRisk ? 'HIGH RISK \u00b7 refused, not returned'
+        metaRail: A.flagged.has(t) ? A.flagged.get(t) : (ofCard && cardRail(t)) ? cardRail(t)
+          // at a mint this phone does not use, waiting for its receiver's answer (26o-cashu-id.js)
+          : t.cidWait ? (t.cidLine || 'Waiting \u00b7 tap to decide')
+          // a till's sale whose tip could not be passed on: it stayed in this balance (26p-till-tips.js)
+          : (t.tillTipFailed && t.tillTipFailed.length) ? 'Tip not sent to ' + t.tillTipFailed.join(', ') + ' \u00b7 kept'
+          : t.highRisk ? 'HIGH RISK \u00b7 refused, not returned'
           : t.failed ? 'Failed' : t.atRisk ? 'AT RISK \u00b7 not settled'
           // paid by a card while this phone was offline: received, and settled with the mint the next time it is online
           : t.cardWaits ? 'Paid by card \u00b7 settles online'
@@ -208,7 +213,7 @@
           ? this.stageMoney(Math.max(0, balOf.get(t) || 0)) + ' \u00b7 \u20bf ' + this.group(Math.max(0, balOf.get(t) || 0))
           : '\u20bf ' + this.group(Math.max(0, balOf.get(t) || 0))),
         // the collecting screen, not a transaction detail, while a bill is open
-        open: () => (t.split ? this.openPendingSplit() : this.openTx(t)),
+        open: () => (t.split ? this.openPendingSplit() : t.cidWait ? this.cidOfferOpen(t) : this.openTx(t)),
       /* The card is three lines, each shared with a figure on the right: the
        * title beside the amount, so a note runs as far as the amount and no
        * further; then how the payment stands, where it has something to
@@ -695,6 +700,9 @@
       contactAll: this.contactRows(),
       contactLetter: (this.contactRows()[0] || {}).ini || '',
       contactRecents: this.contactRows().slice(0, 3),
+      // people who are not contacts and wrote by Cashu ID (26p-cashu-msg.js)
+      contactNew: sc === 'contacts' ? this.cmNewRows() : [],
+      contactNewShown: sc === 'contacts' && this.cmNewRows().length > 0,
       /* A contact is paid at a Lightning address, which offline can be neither
        * resolved nor paid. The list itself is local and could be shown, but a
        * screen of people none of whom can be paid is a worse answer than saying
@@ -720,7 +728,7 @@
       ctResults: (function (qq) {
         if (!qq || s.fresh) return [];
         return (s.contacts || []).filter(c => c.name.toLowerCase().indexOf(qq) >= 0 || c.handle.toLowerCase().indexOf(qq) >= 0)
-          .map(c => ({ name: c.name, handle: c.handle, initial: c.name.charAt(0), tint: c.tint }));
+          .map(c => ({ name: c.name, handle: c.cid ? 'CASHU ID' : c.handle, initial: c.name.charAt(0), tint: c.tint }));
       })((s.ctQuery || '').trim().toLowerCase()),
       ctHasResults: (function (qq) {
         if (!qq || s.fresh) return false;
@@ -743,17 +751,23 @@
         const hit = !s.fresh && (s.contacts || []).some(c => c.name.toLowerCase().indexOf(qq) >= 0 || c.handle.toLowerCase().indexOf(qq) >= 0);
         return !hit && qq.indexOf('@') < 0;
       })((s.ctQuery || '').trim().toLowerCase()),
-      payContact: () => this.setState(p => {
-        const fresh = { wallet: '', walletAuto: false, walletTapped: false, feeQ: null };
-        const qq = (p.ctQuery || '').trim().toLowerCase();
-        const hit = (s.contacts || []).filter(c => c.name.toLowerCase().indexOf(qq) >= 0 || c.handle.toLowerCase().indexOf(qq) >= 0)[0];
-        return {
-          screen: 'amount', stack: p.stack.concat([p.screen]), flow: 'send',
-          recipient: qq ? ((hit && hit.handle) || qq) : '',
-          recipientKind: 'email', ctSearch: false,
-          amount: '', unit: 'USD', asset: '',
-          ...fresh,
-        };
-      }),
+      payContact: () => {
+        // the first match a Cashu ID: paid as one (26o-cashu-id.js)
+        const q0 = (this.state.ctQuery || '').trim().toLowerCase();
+        const first = q0 ? (s.contacts || []).filter(c => c.name.toLowerCase().indexOf(q0) >= 0 || c.handle.toLowerCase().indexOf(q0) >= 0)[0] : null;
+        if (first && first.cid) { this.cidPayStart(first); return; }
+        this.setState(p => {
+          const fresh = { wallet: '', walletAuto: false, walletTapped: false, feeQ: null };
+          const qq = (p.ctQuery || '').trim().toLowerCase();
+          const hit = (s.contacts || []).filter(c => c.name.toLowerCase().indexOf(qq) >= 0 || c.handle.toLowerCase().indexOf(qq) >= 0)[0];
+          return {
+            screen: 'amount', stack: p.stack.concat([p.screen]), flow: 'send',
+            recipient: qq ? ((hit && hit.handle) || qq) : '',
+            recipientKind: 'email', ctSearch: false,
+            amount: '', unit: 'USD', asset: '',
+            ...fresh,
+          };
+        });
+      },
     };
   }

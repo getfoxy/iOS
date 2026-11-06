@@ -23,6 +23,9 @@
    *     phone's own mint and any other by the crossing (26d-tap.js).
    *   a bitcoin address ............... every mint's sats; the fee is asked
    *     after the choice, on a visit to the mint chosen (26b-onchain.js).
+   *   a Cashu request, short in its unit .. the other balance at the mint this
+   *     phone is on, by the SWAP screen's own swap there (`pfSwapSource`),
+   *     made under the same PAY as the payment (`pfSwapThenPay`).
    *
    * Where every pile that could pay is at the mint this phone is on, nothing
    * here changes a screen: CURRENCY and WALLET ask between its two balances as
@@ -248,6 +251,7 @@
   pfCostText(e) {
     if (e.ok === null) return 'CALCULATING…';
     if (e.ok === false) return '';
+    if (e.swap) return this.pfSwapText(e, this.pfFull(e.key));
     if (e.cost == null) return e.note || '';
     const fig = this.unitFigure(e.cost, e.unit);
     return 'Costs ' + fig + (Number(e.fee) === 0 ? ' · no fee' : '');
@@ -310,7 +314,7 @@
     if ((keep[f] || []).indexOf(sc) >= 0) return;
     // a payment on its way keeps what it was made from until it ends
     if (f === 'send' && this._sendRun) return;
-    if (f === 'req' && s.reqBusy) return;
+    if (f === 'req' && (s.reqBusy || s.reqSwapping)) return;
     if (f === 'oc' && s.ocBusy) return;
     this._pf = null;
     this._pfRun = (this._pfRun || 0) + 1;
@@ -492,17 +496,22 @@
    * route, where only the request's own mint can pay. */
   pfRequest(req) {
     const W = window.FoxyWallet;
-    if (!req || req.unit === 'usd' || !W || !W.balances || !W.transferQuote) return false;
+    if (!req || !W || !W.balances) return false;
     if (this.offlineNow()) return false;
+    /* The other balance at this mint, where the request's own is short there and the other could cover what is missing:
+     * a swap, then the payment, under one PAY (`pfSwapSource`). The only source a request in dollars can have besides its
+     * own dollars, which do not cross between mints. */
+    const swap = this.pfSwapSource ? this.pfSwapSource(req) : null;
+    if (req.unit === 'usd' || !W.transferQuote) return swap ? this.pfReqOpen(req, [swap], '', this.unitFigure(swap.amt, 'usd')) : false;
     /* Every mint it names pays it as it stands, with no crossing (a till's, the default first); any other crosses into
      * the default, `want`. It read the first alone, and offered a crossing from a mint the request also takes. */
     const listed = this.reqMints(req).map((m) => this.pfMint(m));
     const want = listed[0] || '';
     const need = Math.round(Number(req.sats) || 0);
-    if (!want || !(need > 0)) return false;
+    if (!want || !(need > 0)) return swap ? this.pfReqOpen(req, [swap], '', this.money(need).main) : false;
     const here = this.pfHere();
     const piles = this.pfPiles().filter((p) => p.unit === 'sat' && p.have >= need);
-    if (piles.length < 2) return false;
+    if (piles.length < (swap ? 1 : 2)) return swap ? this.pfReqOpen(req, piles.map((p) => this.pfEntry(p)).concat([swap]), want, this.money(need).main) : false;
     const list = piles.map((p) => {
       if (listed.indexOf(p.mint) < 0) return this.pfEntry(p);
       // at their mint: no fee, or where it is this phone's own, the mint's fee for the pieces (`sendShortfall`)
@@ -515,24 +524,37 @@
       return this.pfEntry(p, { pref: true, cost: need + fee, fee: fee, rank: fee, ok: !(lack && lack.short),
         why: lack && lack.short ? String(lack.why || '') : '', tag: lack && lack.short ? 'NOT ENOUGH' : '' });
     });
+    return this.pfReqOpen(req, swap ? list.concat([swap]) : list, want, this.money(need).main);
+  }
+
+  /* PAY FROM over a request's offer, with the sources in `list`: a crossing to `want` for another mint's sats, the swap at
+   * this mint for the other balance (`swap` on the entry), and none asked for one already known. */
+  pfReqOpen(req, list, want, fig) {
+    const W = window.FoxyWallet;
+    const need = Math.round(Number(req.sats) || 0);
     /* One invoice at the request's mint for every source asked (`landing`, this run's): each source's crossing used to
      * have the request's mint make an invoice of its own, and the one chosen pays the one they share. */
     const landing = {};
-    const quote = (e) => W.transferQuote(e.mint, need, { to: want, land: true, landing: landing }).then((plan) => {
-      const fee = Math.max(0, Math.round(Number(plan && plan.feeSats) || 0));
-      return { cost: need + fee, fee: fee, ok: true, rank: fee, full: plan };
-    });
+    const quote = (e) => (e.swap ? this.pfSwapQuote(e).then((q) => this.pfSwapCost(e, q))
+      : W.transferQuote(e.mint, need, { to: want, land: true, landing: landing }).then((plan) => {
+        const fee = Math.max(0, Math.round(Number(plan && plan.feeSats) || 0));
+        return { cost: need + fee, fee: fee, ok: true, rank: fee, full: plan };
+      }));
     const out = () => {
       if (req.viaTap && W.tapQuote) W.tapQuote(JSON.stringify({ gaveUp: 'The payer cancelled.' })).catch(() => {});
       this.setState({ screen: 'home', stack: [], req: null, note: '', noteDraft: '', tapQuoteFor: '' });
     };
     this.pfOpen('req', list, {
-      show: true, ask: 'Pay ' + this.money(need).main + ' from', quote: quote,
+      show: true, ask: 'Pay ' + fig + ' from', quote: quote,
       go: (e, shown) => {
-        this.setState({ payMint: e.mint, payUnit: 'sat', payFromReopen: false });
+        this.setState({ payMint: e.mint, payUnit: e.unit, payFromReopen: false });
         if (shown && this.state.screen === 'payFrom') this.back();
       },
-      none: () => { if (this.state.screen === 'payFrom') this.back(); },
+      none: () => {
+        if (this.state.screen === 'payFrom') this.back();
+        // the offer says NOT ENOUGH, and a payer that cannot cover it tells the phone it is touching (`tellPayerShort`)
+        if (list.some((e) => e.swap) && this.tellPayerShort) this.tellPayerShort(req);
+      },
       cancel: out,
     });
     return true;
@@ -546,7 +568,13 @@
     // a crossing only from a mint the request does not name: one it names pays it there (`pfRequest`)
     const listed = this.reqMints(req).map((m) => this.pfMint(m));
     const mint = this.pfMint(s.payMint);
-    return { mint: mint, plan: (listed.length && listed.indexOf(mint) < 0) ? this.pfFull(this.pfKey(mint, 'sat')) : null };
+    const unit = s.payUnit === 'usd' ? 'usd' : 'sat';
+    // the other balance at this mint, swapped first (`pfSwapSource`): its entry and the swap's quote, and no crossing
+    if (unit !== (req.unit === 'usd' ? 'usd' : 'sat')) {
+      const e = this.pfList().filter((x) => x.key === this.pfKey(mint, unit) && x.swap)[0] || null;
+      return { mint: mint, unit: unit, plan: null, swap: e ? { e: e, q: this.pfFull(e.key) } : null };
+    }
+    return { mint: mint, unit: unit, plan: (listed.length && listed.indexOf(mint) < 0) ? this.pfFull(this.pfKey(mint, 'sat')) : null };
   }
 
   /* For `makeTokenForRequest`: the crossing to make before the payment, when the source chosen is another mint than the
@@ -559,6 +587,142 @@
     if (!src || !src.plan || this.offlineNow() || this.pfMint(want) === src.mint) return null;
     if (this._crossMovedTo && this.pfMint(this._crossMovedTo) === this.pfMint(want)) return null;
     return { plan: src.plan, from: src.mint };
+  }
+
+  // ---- the other balance at the same mint ----
+
+  /* Found short in the unit asked, with the other unit at hand (decided 2026-11-04): a request for sats at Forge, with
+   * 3,190 sats there and $ 89.16 in dollars, said NOT ENOUGH, and the dollars had to be swapped by hand and the code
+   * scanned again. Now the other balance at that mint is a source: the swap the SWAP screen makes (melt one unit, mint the
+   * other, at that mint: 16b-two-balances.js `swapQuote`, `swapRun`), for what is missing and a little over, and then the
+   * payment, under one PAY. Only at the mint this phone is on, where swaps are made, and where it issues both; only where
+   * the request's own balance there is short with its fee (`sendShortfall`), and the other covers what is missing on its
+   * face (the quote says for certain). Null where none. */
+  pfSwapSource(req) {
+    const W = window.FoxyWallet;
+    if (!req || !W || !W.swapQuote || !W.swapRun || !W.sendShortfall || this.offlineNow()) return null;
+    if (!(this.twoUnitsOn && this.twoUnitsOn()) || !this.requestHere(req)) return null;
+    const unit = req.unit === 'usd' ? 'usd' : 'sat';
+    const from = unit === 'usd' ? 'sat' : 'usd';
+    const amt = unit === 'usd' ? Math.max(0, Math.round(Number(req.amount) || 0)) : Math.round(Number(req.sats) || 0);
+    if (!(amt > 0)) return null;
+    let lack = null;
+    try {
+      lack = W.sendShortfall(amt, Object.assign(unit === 'usd' ? { unit: 'usd' } : {}, { locked: !!(req.lockTo && !this.offlineNow()) }));
+    } catch (x) { lack = null; }
+    if (!lack || !lack.short) return null;
+    const here = this.pfHere();
+    const pile = this.pfPiles().filter((p) => p.mint === here && p.unit === from)[0];
+    if (!pile) return null;
+    // what is missing, with a little over: the pieces the swap brings may cost a piece more to spend
+    const gap = Math.max(1, Math.round(Number(lack.need) || 0) - Math.round(Number(lack.have) || 0));
+    const want = gap + (unit === 'sat' ? Math.max(2, Math.ceil(gap / 100)) : 1);
+    const r = this.pfSwapRate();
+    // on its face: the other balance is worth what is missing at this phone's price, with a tenth to spare (`pfFace`)
+    const worth = r > 0 ? (from === 'usd' ? pile.have / 100 / r * 1e8 : pile.have * r / 1e8 * 100) : pile.have;
+    if (r > 0 ? worth * 1.1 < want : !(pile.have > 0)) return null;
+    return this.pfEntry(pile, { swap: true, toUnit: unit, want: want, amt: amt, pref: true });
+  }
+
+  /* Dollars a bitcoin is worth, as a swap at this mint is sized: the mint's last rate, else this phone's price. 0 with neither. */
+  pfSwapRate() {
+    const W = window.FoxyWallet;
+    let r = 0;
+    try { const m = W && W.mintRate ? W.mintRate(this.pfHere()) : null; r = Number(m && m.usdPerBtc) || 0; } catch (x) { r = 0; }
+    if (!(r > 0)) r = (this.satUsd ? Number(this.satUsd()) || 0 : 0) * 1e8;
+    return r > 0 ? r : 0;
+  }
+
+  /* The swap for a source of `pfSwapSource`: the SWAP screen's quote (`swapQuote`, an amount of the balance that leaves),
+   * sized so that what arrives covers `e.want`; asked once more, larger, where the first brings too little. Refused as
+   * NOT ENOUGH where that is more than the balance holds. */
+  pfSwapQuote(e) {
+    const W = window.FoxyWallet;
+    const from = e.unit === 'usd' ? 'usd' : 'sat', to = e.toUnit === 'usd' ? 'usd' : 'sat';
+    const r = this.pfSwapRate();
+    const short = () => Object.assign(new Error('Your ' + this.unitWord(from).toLowerCase() + ' at ' + this.pfName(e.mint)
+      + ' cannot cover the swap with its fee.'), { foxyHave: e.have });
+    // a little over what arrives, for the mint's fee
+    const size = (get) => (r > 0 ? Math.ceil((from === 'usd' ? get / 1e8 * r * 100 : get / 100 / r * 1e8) * 1.02) + 1 : e.have);
+    const ask = (amount, n) => {
+      if (amount > e.have) return Promise.reject(short());
+      return W.swapQuote(from, to, amount).then((q) => {
+        if (Number(q && q.get) >= e.want) return q;
+        if (n >= 1 || !(Number(q && q.get) > 0)) throw short();
+        return ask(Math.ceil(amount * e.want / Number(q.get)) + 1, n + 1);
+      });
+    };
+    return ask(Math.min(e.have, Math.max(1, size(e.want))), 0);
+  }
+
+  /* A swap's quote as a tile reads it: what leaves, in its own unit, and the swap's cost as the SWAP screen counts it (what
+   * leaves less what arrives, both at the quote's rate), in sats to rank by. */
+  pfSwapCost(e, q) {
+    const from = e.unit === 'usd' ? 'usd' : 'sat';
+    const fee = this.pfSwapFee(q, from);
+    const rate = this.swapRateOf ? this.swapRateOf(q && q.rate) : 0;
+    const rank = from === 'usd' ? (rate > 0 ? Math.round(fee / 100 / rate * 1e8) : fee * 1000) : fee;
+    return { cost: Math.round(Number(q.total) || 0), fee: fee, ok: true, rank: rank, full: q };
+  }
+
+  /* What a swap costs, in the unit that leaves: what leaves less what arrives, at the quote's rate (26i-swap.js `swapSpec`'s
+   * FEE); the mint's fee alone with no rate to put the two in one unit. */
+  pfSwapFee(q, from) {
+    const rate = this.swapRateOf ? this.swapRateOf(q && q.rate) : 0;
+    if (!q) return 0;
+    if (!(rate > 0)) return Math.max(0, Math.round(Number(q.fee) || 0));
+    const got = from === 'usd' ? Number(q.get) / 1e8 * rate * 100 : Number(q.get) / 100 / rate * 1e8;
+    return Math.max(0, Math.round(Number(q.total) - got));
+  }
+
+  /* "From your dollars at FORGE, fee about $ 0.03": a swap's tile, and its row on the offer. */
+  pfSwapText(e, q) {
+    const from = e.unit === 'usd' ? 'usd' : 'sat';
+    const word = from === 'usd' ? 'dollars' : 'sats';
+    return 'From your ' + word + ' at ' + this.pfName(e.mint) + (q ? ', fee about ' + this.unitFigure(this.pfSwapFee(q, from), from) : '');
+  }
+
+  /* For `makeTokenForRequest`: the swap chosen for this request, while it has not been made. */
+  pfReqSwap(req) {
+    const src = this.pfReqSource(req);
+    return (src && src.swap && src.swap.e && src.mint === this.pfHere()) ? src : null;
+  }
+
+  /* PAY on an offer paid from the other balance: the swap, then the payment, with nothing more asked
+   * (`makeTokenForRequest`, `go.swapped`). The quote PAY FROM showed is used while it holds; one run out is asked again
+   * first. A swap the mint has not finished is the SWAP screen's card, and nothing is paid; one it did not make says so,
+   * and the offer stays. */
+  pfSwapThenPay(req, src, go) {
+    const W = window.FoxyWallet;
+    const e = src.swap.e;
+    const from = e.unit === 'usd' ? 'usd' : 'sat', to = e.toUnit === 'usd' ? 'usd' : 'sat';
+    const held = (q) => !!(q && q.state === 'quoted' && Number(q.expiresAt) - Date.now() >= 20000);
+    this.setState({ reqSwapping: true });
+    this.showMelt('Swapping ' + this.unitWord(from).toLowerCase() + ' into ' + this.unitWord(to).toLowerCase() + '…', 120000);
+    console.log('[foxy] request: paying it from ' + (from === 'usd' ? 'dollars' : 'sats') + ' at ' + this.pfName(e.mint).toLowerCase()
+      + ', swapped first');
+    const done = () => { this.hideMelt(); this.setState({ reqSwapping: false }); this.refreshBalance(); };
+    Promise.resolve().then(() => (held(src.swap.q) ? src.swap.q : this.pfSwapQuote(e)))
+      .then((q) => W.swapRun(q, (st) => console.log('[foxy] request: swap ' + st)))
+      .then((r) => {
+        done();
+        if (this.loadHistory) this.loadHistory();
+        if (r && r.state === 'done') {
+          this.makeTokenForRequest(Object.assign({}, go || {}, { req: req, swapped: true }));
+          return;
+        }
+        if (r && r.state === 'pending') {
+          if (req.viaTap && W.tapQuote) W.tapQuote(JSON.stringify({ gaveUp: 'The payer cancelled.' })).catch(() => {});
+          this.setState({ screen: 'home', stack: [], req: null, tapQuoteFor: '' });
+          this.swapPendingCard(r);
+          return;
+        }
+        this.toast('The mint did not make the swap. Nothing moved, and your ' + this.unitWord(from).toLowerCase() + ' are where they were.', true);
+      })
+      .catch((x) => {
+        done();
+        this.toast(W.reason ? W.reason(x) : String((x && x.message) || x), true);
+      });
   }
 
   // ---- a tap from somebody at another mint ----

@@ -24,8 +24,9 @@
     /* Sit above the keyboard.
      *
      * The page is not resized for the keyboard here, so a card anchored to the
-     * bottom ends up underneath it — field invisible, ADD unreachable.
-     * visualViewport reports how much is covered; the card moves by that. */
+     * bottom ends up underneath it — field invisible, ADD unreachable. The
+     * app's one measurement (kbMeasure, 15-paid-wake-keyboard.js) says how much
+     * is covered, and the card moves by that whenever it changes. */
     const kbTimers = [];
     const pinScroll = () => {
       if (window.scrollY || document.documentElement.scrollTop) window.scrollTo(0, 0);
@@ -33,22 +34,15 @@
     window.addEventListener('scroll', pinScroll, true);
     const lift = () => {
       pinScroll();
-      const vv = window.visualViewport;
-      if (!vv) return;
-      const gap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-      card.style.transform = gap > 80 ? 'translateY(-' + Math.round(gap) + 'px)' : 'none';
+      const gap = this._kbNow || 0;
+      const want = gap > 80 ? 'translateY(-' + Math.round(gap) + 'px)' : 'none';
+      if (want !== 'none' || card.style.transform) card.style.transform = want;
     };
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', lift);
-      window.visualViewport.addEventListener('scroll', lift);
-    }
+    window.addEventListener('foxykeyboard', lift);
     const done = () => {
       kbTimers.forEach(clearTimeout);
       window.removeEventListener('scroll', pinScroll, true);
-      if (window.visualViewport) {
-        window.visualViewport.removeEventListener('resize', lift);
-        window.visualViewport.removeEventListener('scroll', lift);
-      }
+      window.removeEventListener('foxykeyboard', lift);
       root.remove();
     };
 
@@ -303,12 +297,14 @@
      * to the bottom ends up underneath it — the field invisible and the button
      * unreachable.
      *
-     * visualViewport is the measurement when it works: it says how much of the
-     * page is covered and the card lifts by exactly that. In this web view it
-     * frequently reports nothing at all, and then there is no height to lift
-     * by. So the fallback does not guess a keyboard height — it moves the card
-     * to the top of the screen, which no keyboard can reach. Decided ~420ms
-     * after focus, by which time a real measurement would have arrived.
+     * The app's one measurement (kbMeasure, 15-paid-wake-keyboard.js: the
+     * phone's report of the keyboard, and visualViewport) says how much of the
+     * page is covered and the card lifts by exactly that. visualViewport alone
+     * frequently reported nothing at all in this web view, and should both say
+     * nothing there is no height to lift by. So the fallback does not guess a
+     * keyboard height — it moves the card to the top of the screen, which no
+     * keyboard can reach. Decided ~420ms after focus, by which time a real
+     * measurement would have arrived.
      */
     const timers = [];
     let pinned = false;
@@ -321,11 +317,7 @@
     };
     window.addEventListener('scroll', pinScroll, true);
 
-    const covered = () => {
-      const vv = window.visualViewport;
-      if (!vv) return 0;
-      return Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-    };
+    const covered = () => this._kbNow || 0;
 
     const lift = () => {
       pinScroll();
@@ -356,10 +348,7 @@
       card.style.transform = 'none';
     };
 
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', lift);
-      window.visualViewport.addEventListener('scroll', lift);
-    }
+    window.addEventListener('foxykeyboard', lift);
 
     const title = document.createElement('div');
     title.style.cssText =
@@ -414,10 +403,7 @@
     function close() {
       timers.forEach(clearTimeout);
       window.removeEventListener('scroll', pinScroll, true);
-      if (window.visualViewport) {
-        window.visualViewport.removeEventListener('resize', lift);
-        window.visualViewport.removeEventListener('scroll', lift);
-      }
+      window.removeEventListener('foxykeyboard', lift);
       root.remove();
     }
 

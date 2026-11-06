@@ -44,6 +44,8 @@ final class FoxyAppDelegate: NSObject, UIApplicationDelegate {
         FieldLog.takeLastRun()
         // and this run's banner after them, so the two runs are told apart
         FieldLog.begin()
+        // a push token and secret an earlier build kept, gone (RetiredKeys.swift)
+        RetiredKeys.remove()
         return true
     }
 

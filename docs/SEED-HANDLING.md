@@ -36,8 +36,9 @@ secrets and blinding factors in `Foxy/Keychain/NUT13.swift`: HMAC-SHA256 for
 `01` keysets, BIP-32 with libsecp256k1 (`Vendor/README.md`) for `00`. They are
 tested byte for byte against the spec's vectors and 856 answers from the bundled
 cashu-ts (`FoxyTests/NUT13Tests.swift`). Nothing else is derived from the words
-except the P2PK lock keys, at NUT-13's path (below): Foxy's own earlier labelled
-SHA-256 derivation for P2PK keys was removed.
+except the P2PK lock keys, at NUT-13's path (below), a card's owner key, and the
+Cashu ID's four keys (below): Foxy's own earlier labelled SHA-256 derivation for
+P2PK keys was removed.
 
 ## At rest, and reading it
 
@@ -83,7 +84,7 @@ The section above describes a seed behind `.userPresence`. That is now a
 `SeedVault.protection = .none` at its install marker, so its seed is written to
 the older item `foxy.seed.v1` (this device only, readable while the phone is
 unlocked, **no Face ID or passcode on a read**), and stays there until the
-person turns FACE / FINGER LOCK on in MENU › SETTINGS or answers the SECURE FOXY card.
+person turns FACE ID LOCK on in MENU › SETTINGS or answers the SECURE FOXY card.
 An installation from before that keeps `device`.
 
 What `.none` gives up, plainly:
@@ -156,6 +157,11 @@ plain message.
 | `p2pkReserve` | `{count}`, count 0 to 64 | `{start, next, pubkeys}` for `next ..< next + count`, reserved first; count 0 is a peek. Public halves only |
 | `p2pkPubkeys` | `{start, count}`, count 1 to 300, no index past 20,000 | the same shape, nothing moved: the walk that finds which index a token in hand is locked to |
 | `p2pkKey` | `{index}` | `{index, privkey, pubkey}`, inside 1,000 of the last index reserved or inside a range this session's walk served; "outside the lock-key window" |
+| `cashuIdPublic` | `{}` | `{"id": "<66 hex>", "nostr": "<64 hex>", "sig": "<128 hex>", "recovery": "<64 hex>"}`: the ID key's compressed public key, the delivery key's x-only one, the ID key's BIP-340 signature binding them (all-zero auxiliary randomness, so always the same), and the recovery key's x-only public key; "no seed" |
+| `cashuIdSign` | `{pieces: [{secret, e}]}`: 1 to 100, each a NUT-10 P2PK secret of at most 1,024 characters not asking for SIG_ALL, with the E it carried as 66 hex characters for a point (02 or 03) | `{"sigs": ["<128 hex>", …]}`: one BIP-340 signature per piece by its one-time key over SHA-256 of its secret, in order; "bad request" before the seed is read, "That ecash is not locked to this Cashu ID." when any secret's `data` is not the ID blinded by its own E (NUT-28 slot 0), with nothing signed |
+| `cashuIdSignUnblinded` | `{secrets: ["…"]}`: 1 to 100 NUT-10 P2PK secrets of at most 1,024 characters not asking for SIG_ALL | `{"sigs": ["<128 hex>", …]}`: one BIP-340 signature per secret by the ID key d itself over SHA-256 of the secret, in order, only on the receiver's TAKE IT ANYWAY (`CASHU-ID.md`, Paid to the ID key itself) and logged each time; "bad request" before the seed is read, "That ecash is not locked to this Cashu ID." when any secret's `data` is not the ID as it is (its x, either parity), with nothing signed |
+| `cashuIdTag` | `{peer, e}`: two points as above | `{"tag": "<64 hex>"}`: SHA-256("foxy-cashu-id-from-v1" ‖ x(d·peer) ‖ E); "bad request" before the seed is read |
+| `cashuIdEphemeral` | `{to, index, locktime}`: the receiver's ID as a point, an index below 2^32, a whole number of seconds | `{"base": "<64 hex>"}`: HMAC-SHA256 keyed by the paying key over "foxy-cashu-id-e-v1" ‖ ID ‖ index (4 bytes) ‖ locktime (8 bytes), big-endian; "bad request" before the seed is read |
 | `cardOwnerKey` | `{key}`, a card's compressed public key: 66 hex characters, either case, starting 02 or 03 | `{"pub": "<130 lowercase hex>"}`, the owner PUBLIC key, `04` and X and Y; "bad request" before the seed is read, "no seed" |
 | `cardOwnerSign` | `{key, label, nonce, value, refundIndex?}`: the key as above; `refundIndex`, for `set-card` only, the lock-key index the record's refund key was taken at; `label` exactly one of `change-pin`, `set-limit`, `set-owner`, `set-card`, `load`, `reset`; `nonce` 32 hex characters; `value` hex of the shape that label takes (empty for `load` and `reset`) | `{"sig": "<DER, lowercase hex>"}`, an ECDSA signature by the owner key over `"FoxyCard/" + label`, the nonce and the value; "bad request" before the seed is read, "no seed"; "Nothing was changed on the card." without the keeper's yes it needs, or for a record whose refund key is not this phone's |
 | `cardOwnerApprove` | `{label, value}` for `change-pin`, `reset` and `set-owner`; `{label, mint, units?, card?, keep?}` for `set-card`; `{label, figures}` for `set-limit`; `card`, where given, a card's key as above | `{"approved": true}` after the alert and, for all but `set-limit`, Face ID or the passcode; "Nothing was changed on the card." otherwise; "bad request" for `load` or any other shape |
@@ -299,6 +305,67 @@ or the seed.
   cannot drift. It is a weaker guard than the restore window and it is meant to
   be: a NUT-13 secret is money on its own, and a lock private key opens only
   proofs somebody has already locked to its public half.
+- **The Cashu ID's keys** (`cashuIdPublic`, `cashuIdSign`, `cashuIdTag`, `cashuIdEphemeral`, `cashuIdSignUnblinded`,
+  `cashuIdCopiesOpen`, `Foxy/Keychain/CashuID.swift`; the design is `CASHU-ID.md`). A Cashu ID is a
+  name the person gives out, so unlike every request's key it is meant to last,
+  and it comes from the words:
+
+      m/129373'/20'/0'/0'/0'    the ID key d (secp256k1); its public half is the ID
+      m/129373'/20'/1'/0'/0'    the delivery key q (secp256k1); its x-only public half is the Nostr key payments are sent to
+      m/129373'/20'/2'/0'/0'    the paying key: the HMAC key this phone's own throwaway keys come from, for what it pays others
+      m/129373'/20'/3'/0'/0'    the recovery key (secp256k1): its x-only public half is where this phone sends itself a copy of each payment it makes
+
+  BIP-32 from the 64-byte BIP-39 seed, NUT-13's P2PK purpose (129373') at an
+  account of its own, 20' (the lock keys are 10'), and **every level hardened**,
+  so no public key and chain code of these paths reaches any other key. A
+  restore from the words gives the same keys, and so the same ID string.
+
+  No private key reaches the page. The delivery key is read on the seed queue
+  and handed to the inbox that listens on it (`cashuIdInboxOpen`,
+  `Foxy/Bridge/FoxyBridge+CashuID.swift`) and to nothing else; it is used for
+  nothing on Nostr but receiving. The recovery key is the same on its own path:
+  read on the seed queue only for the inbox that reads this phone's copies back
+  after a restore (`cashuIdCopiesOpen`, `SeedActions.cashuIdRecoverySecret`). It
+  is never the delivery key, never in the ID string, never shown, and nothing
+  but the copies is ever sent to it (`CASHU-ID.md`, Restoring); the page knows
+  only its public half, to address them. A payment's one-time key is NUT-28's, d + r₀
+  or −d + r₀ with r₀ = SHA-256("Cashu_P2BK_v1" ‖ x(d·E) ‖ 0), made for one
+  `cashuIdSign`, signs, and is wiped; it is never answered, because a page that
+  chose the payer's e itself knows r₀, and from the key would have d. The ID key
+  signs one thing besides: SHA-256("foxy-cashu-id-bind-v1" ‖ ID ‖ delivery key),
+  which no NUT-11 secret hashes to, and, only on its receiver's explicit
+  consent (TAKE IT ANYWAY on PAID TO YOUR ID KEY), the secrets of one delivery
+  a payer locked to the ID itself without blinding it (`cashuIdSignUnblinded`,
+  logged each time; it signs nothing locked to any other key). What the page can do: learn the public keys,
+  have the phone sign for pieces locked to the ID's blinding by any E it names,
+  which opens only ecash somebody has already locked so, get the from-tag for
+  any pair of points, and get a payment base, from which only that payment's
+  throwaway keys follow. No counter moves and no window applies.
+  `FoxyTests/CashuIDTests.swift` holds the paths, NUT-28's own vectors, r₀, the
+  one-time key both ways, the tag and the base to `tests/fixtures/cashu-id-vectors.json`
+  (made by a second implementation, `tests/harness.js`, and held to cashu-ts by
+  `tests/cashu-id.js`), and checks no reply holds d, q, the paying key, the
+  recovery key, r₀ or a one-time key.
+
+  **Messages between Cashu IDs** (`cashuIdMsgSend`, `cashuIdMsgOpen`,
+  `Foxy/Keychain/CashuMsg.swift`; the design is `CASHU-ID.md`, Messages) use d
+  once more, for a secret shared with one contact:
+
+      secret = SHA-256("foxy-msg-pair-v1" ‖ x(d·ID_peer))                  the same on both phones
+      k_i    = SHA-256("foxy-msg-recv-v1" ‖ secret ‖ dir ‖ i, 4 bytes)     message i's key (0xFF retry)
+      s_i    = SHA-256("foxy-msg-seal-v1" ‖ secret ‖ dir ‖ i, 4 bytes)     its seal's key
+
+  `dir` is 0 for messages from the lower ID key (its 33 bytes) to the higher.
+  None of them reaches the page: the secret is worked out on the seed queue,
+  kept in memory for the session (`CashuMsg.cache`, at most 64, wiped when Foxy
+  leaves the foreground), and used only to wrap a message to k_i·G sealed by s_i
+  and to listen on and open the keys a contact may send to. The secret gives
+  every key of both chains, so it is held as d is. What the page can do: have the
+  phone send any body as message i to any contact, and listen on any index; it
+  learns only plaintexts sealed by the chain. `FoxyTests/CashuMsgTests.swift`
+  holds the derivation to `tests/fixtures/cashu-msg-vectors.json`, which
+  `tests/harness.js` wrote and `tests/cashu-msg.js` holds the page bundle's noble
+  curve to.
 - **A card's owner key** (`cardOwnerKey`, `cardOwnerSign`, `CardOwner` in
   `Foxy/Keychain/NUT13.swift`). A card that holds ecash is shown its owner as a
   P-256 public key at set-up, and its owner later signs, with the private half, to
@@ -488,7 +555,7 @@ a keyset. Worth a look during the review.
 | | |
 |---|---|
 | Entropy | `SecRandomCopyBytes`, 128 bits, in Swift — the wordlist pinned by its SHA-256 |
-| Derivation | PBKDF2-SHA512 2048 (BIP39 standard), natively; NUT-13 secrets from it natively (HMAC-SHA256, or BIP-32 with libsecp256k1); nothing else |
+| Derivation | PBKDF2-SHA512 2048 (BIP39 standard), natively; NUT-13 secrets from it natively (HMAC-SHA256, or BIP-32 with libsecp256k1); the P2PK lock keys at `m/129373'/10'/0'/0'/i`, a card's owner key, and the Cashu ID's four keys at `m/129373'/20'/0'/0'/0'`, `m/129373'/20'/1'/0'/0'`, `m/129373'/20'/2'/0'/0'` and `m/129373'/20'/3'/0'/0'`; nothing else |
 | At rest | the iOS keychain, this device only. With Face ID on (`device`): item `foxy.seed.v2`, readable only with Face ID or the device passcode (`.userPresence`); the older `foxy.seed.v1` is moved into it and deleted on the first read. With it off (`none`: where a new install starts, and on a phone with no passcode): `foxy.seed.v1`, readable while the phone is unlocked, with no prompt. A seed the page still holds from before the keychain moves in once (`seedMigrate`), never over a saved one |
 | In the page | never: the page gets the secrets of counters native reserved, or of a restore inside its window |
 | Counters | `foxy-counters.json`, native: flushed and renamed, never lowered, capped moves, one entry per derivation path, imported once, set aside when the seed changes |

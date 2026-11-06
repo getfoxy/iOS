@@ -126,11 +126,12 @@ async function fund(c, where, sats) {
 /* A phone whose own mint is `HOME`, holding `sats` paid to it at `paidAt`
  * while it had no route and not yet claimed, now back on its own mint and
  * still offline. `seed` is the page that funded the payer, for its mints. */
-async function withOneWaiting(paidAt, sats) {
+async function withOneWaiting(paidAt, sats, pileAt) {
   const seed = page();
   await fund(seed, paidAt, 2000);
   const rx = page({ mints: seed.mints, words: OTHER_WORDS });
   await fund(rx, HOME, 3000);
+  if (pileAt) await fund(rx, pileAt, 1000);
   if (paidAt !== HOME) await rx.W.connect(paidAt, null, null, { remember: true });
   await rx.W.primeLocks();
   goOffline(rx);
@@ -148,6 +149,10 @@ async function withOneWaiting(paidAt, sats) {
   if (paidAt !== HOME) await rx.W.connect(HOME, null, null, { remember: true });
   return { rx, seed, paid };
 }
+/* A payment taken at the payer's mint and swapped in there, to be brought
+ * home (the job `carryPaid` writes): `kept` sats of the phone's own pile there. */
+const carryJob = (id, kept) => ({ id, home: HOME, from: THEIR, net: 0, ask: kept, kept, state: 'paid', at: Date.now(), paidAt: Date.now(),
+  hash: 'req-' + id, reqId: id, payerKey: '02' + '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798' });
 const savedMint = (c) => canon(read(c, 'foxy.cashu.mint', ''));
 const since = (c, from, what) => c.hits.slice(from).filter((h) => h === what).length;
 
@@ -267,6 +272,97 @@ async function run() {
     clearInterval(watch);
     ok(!away && canon(inv.mint) === HOME, 'a payment waiting at the phone’s own mint is claimed with nothing made to wait', 'away seen: ' + away);
     ok(during && took === 300 && W.unclaimedSats() === 0, 'and an invoice asked for meanwhile is answered before the walk is over', took + ' taken');
+  }
+
+  /* ---- 5: a payment being brought home holds what a person starts ------- */
+  /* The late claim is one visit; bringing a payment home (`carryResume`, run by
+   * a connect's catch-up) is another, and it moved `wallet` and `mintUrl` with
+   * nothing held: an invoice asked for while it was at the payer's mint was
+   * made there. */
+  {
+    const t = await withOneWaiting(HOME, 300, THEIR);
+    const rx = t.rx, W = rx.W;
+    rx.storage.setItem('foxy.cashu.carry', JSON.stringify([carryJob('cbg1', 300)]));
+    rx.slow = (m) => (at(m) === THEIR ? 30 : 0);
+    goOnline(rx);
+    // the connect's catch-up brings it home, in the background
+    await W.connect(HOME, null, null, { remember: true });
+    const there = await until(() => canon(W.mintUrl) === THEIR, 8000);
+    ok(there, 'bringing a payment home takes the wallet to the payer’s mint', 'on ' + canon(W.mintUrl));
+    const from = rx.hits.length;
+    const asked = W.paymentRequest(120, { purpose: 'receive' });
+    const invP = W.invoice(700, '').then((r) => r, (e) => ({ err: e.message }));
+    const heldNow = W.awayClaiming();
+    const done = await W.carryResume();
+    const inv = await invP;
+    await settle();
+    ok(asked === '' && heldNow, 'while it is there, no request is made that would name that mint, and the screens are told to wait',
+       (asked ? 'a request was made; ' : '') + 'held ' + heldNow);
+    ok(!inv.err && canon(inv.mint) === HOME && since(rx, from, 'POST ' + THEIR + '/v1/mint/quote/bolt11') === 0,
+       'an invoice asked for meanwhile is made at the phone’s own mint, once it is home',
+       inv.err || ('made at ' + canon(inv.mint) + '; ' + since(rx, from, 'POST ' + THEIR + '/v1/mint/quote/bolt11') + ' asked of their mint'));
+    ok(canon(W.mintUrl) === HOME && !W.awayClaiming() && !(read(rx, 'foxy.cashu.carry', []) || []).length && W.balanceAt(HOME) >= 3000 + 290,
+       'and the payment is home, with the phone', canon(W.mintUrl) + ', ' + W.balanceAt(HOME) + ' at home; ' + JSON.stringify((done || []).map((r) => r.state)));
+  }
+
+  /* ---- 6: two visits at once queue ---------------------------------------- */
+  /* A catch-up that brought a payment home while the late claim was away set
+   * out from the mint the claim was visiting, and the two moved the same
+   * globals under each other. */
+  {
+    const t = await withOneWaiting(THEIR, 300, THEIR);
+    const rx = t.rx, W = rx.W;
+    rx.storage.setItem('foxy.cashu.carry', JSON.stringify([carryJob('cbg2', 300)]));
+    rx.slow = (m) => (at(m) === THEIR ? 30 : 0);
+    goOnline(rx);
+    await W.connect(HOME, null, null, { remember: true });
+    const walk = W.claimUnclaimed();
+    let walkOver = false;
+    walk.then(() => { walkOver = true; }, () => { walkOver = true; });
+    await until(() => W.awayClaiming() && canon(W.mintUrl) === THEIR);
+    // the carry's first question, and whether the claim's visit was over by then
+    let firstAsk = null;
+    const quote = W.transferQuote;
+    W.transferQuote = function () { if (firstAsk === null) firstAsk = { walkOver, on: canon(W.mintUrl) }; return quote.apply(this, arguments); };
+    const carrying = W.carryResume();
+    const took = await walk;
+    const done = await carrying;
+    await settle();
+    W.transferQuote = quote;
+    ok(took === 300 && !!firstAsk && firstAsk.walkOver,
+       'a payment to bring home waits for the late claim’s visit to be over before it sets out',
+       'claimed ' + took + '; ' + JSON.stringify(firstAsk));
+    ok(canon(W.mintUrl) === HOME && !W.awayClaiming() && (done || []).some((r) => r.state === 'home') && W.balanceAt(HOME) >= 3000 + 290,
+       'and both are done, with the phone home', canon(W.mintUrl) + ', ' + W.balanceAt(HOME) + ' at home; ' + JSON.stringify((done || []).map((r) => r.state)));
+  }
+
+  /* ---- 7: and the other way round ---------------------------------------- */
+  /* The late claim, started while a payment is being brought home, waits for
+   * it: it set out from the payer's mint and came home to it. */
+  {
+    const t = await withOneWaiting(THEIR, 300, THEIR);
+    const rx = t.rx, W = rx.W;
+    rx.storage.setItem('foxy.cashu.carry', JSON.stringify([carryJob('cbg3', 300)]));
+    rx.slow = (m) => (at(m) === THEIR ? 30 : 0);
+    let firstClaim = null, carryOver = false;
+    const take = W.receiveToken;
+    W.receiveToken = function () { if (firstClaim === null) firstClaim = { carryOver, on: canon(W.mintUrl) }; return take.apply(this, arguments); };
+    goOnline(rx);
+    // a visit's connect: it sweeps, and its sweep starts the late claim
+    await W.connect(HOME, null, null, { remember: false });
+    const carrying = W.carryResume();
+    carrying.then(() => { carryOver = true; }, () => { carryOver = true; });
+    await until(() => canon(W.mintUrl) === THEIR, 8000);
+    const walk = W.claimUnclaimed();
+    const done = await carrying;
+    const took = await walk;
+    await settle();
+    W.receiveToken = take;
+    ok(!!firstClaim && firstClaim.carryOver && took === 300,
+       'a late claim started while a payment is being brought home waits for that visit to be over',
+       'claimed ' + took + '; ' + JSON.stringify(firstClaim));
+    ok(canon(W.mintUrl) === HOME && !W.awayClaiming() && (done || []).some((r) => r.state === 'home'),
+       'and the phone ends at home', canon(W.mintUrl) + '; ' + JSON.stringify((done || []).map((r) => r.state)));
   }
 
   console.log(failed ? '\n' + failed + ' check(s) failed' : '\nall away-claim checks pass');

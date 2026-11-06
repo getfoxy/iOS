@@ -378,6 +378,8 @@ const copyStorage = (ctx) => {
       mintDown: () => null,
       quarantinedSats: () => 0,
       quarantinedUnknown: () => 0,
+      // the menu's sections are drawn open now, so OTHER MINTS asks for the remembered answers on every home draw
+      cashuIdChoices: () => [],
       tokensNotClaimed: () => Promise.resolve([]),
       transactions: () => Promise.resolve([]),
       balanceSats: () => Promise.resolve(5000),

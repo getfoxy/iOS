@@ -32,7 +32,7 @@ function method(sig) {
   if (at < 0) throw new Error('missing ' + sig);
   return block(at + 3);
 }
-const methods = new Function('return {' + ['histAudit() {', 'txTotalOut(t) {', 'txTotalUnit(t) {', 'heldNote() {', 'heldBlocks(shortBy) {', 'arrivingBucket(unit) {'].map(method).join(',') + '}')();
+const methods = new Function('return {' + ['histAudit() {', 'txTotalOut(t) {', 'txTotalUnit(t) {', 'heldNote() {', 'heldBlocks(shortBy) {', 'arrivingBucket(unit) {', 'histAuditUsd() {', 'meltingIn(unit) {'].map(method).join(',') + '}')();
 
 global.window = { FoxyWallet: { heldSats: () => 0 } };
 const quiet = console.log;
@@ -150,6 +150,34 @@ const out = (sats, o) => Object.assign({ dir: 'out', sats, hash: 'out-' + Math.r
   global.window = { FoxyWallet: { heldSats: () => 0, arriving: () => [] } };
   ok(audit(100, [coming, inn(100)]).off === -1216, 'with nothing arriving, a payment that is not in the balance is still missing');
   global.window = { FoxyWallet: { heldSats: () => 0 } };
+}
+
+{
+  /* A melt still with the mint: its pieces out of the balance and on no row until it lands (`W.meltingIn`). Seen on a
+   * phone as "off by -1482" through a swap into dollars and "-2449" through a card's payment, until the row was written,
+   * and for as long as the mint said PENDING. On its way, as money arriving is. */
+  const melts = { sat: 1010, usd: 0 };
+  global.window = { FoxyWallet: { heldSats: () => 0, meltingIn: (u) => melts[u] || 0 } };
+  const r = audit(1990, [inn(3000)]);
+  ok(r.off === 0 && r.melting === 1010, 'a payment the mint has not settled is on its way, and the audit is off by 0', r.off + ' / ' + r.melting);
+  ok(audit(1900, [inn(3000)]).off === -90, 'and anything short beyond it is still short', String(audit(1900, [inn(3000)]).off));
+  // a card's payment: the card paid this phone (its pieces held for the payment, then in the melt)
+  melts.sat = 2449;
+  ok(audit(0, [inn(2449, { memo: 'from card' })]).off === 0, 'a card’s payment in its melt is on its way too');
+  // landed: the row is written and the melt is gone; nothing is counted twice
+  melts.sat = 0;
+  ok(audit(1990, [out(1000, { fee: 0 }), inn(3000)]).off === -10 && audit(2000, [out(1000), inn(3000)]).off === 0,
+     'once it lands its row carries it, and the melt counts nothing');
+  // dollars: a melt in cents, counted in the dollar books only
+  melts.usd = 2048;
+  const u = Object.assign({ state: { balSats: 0, balUsdCents: 952, history: [{ items: [inn(0, { unit: 'usd', amount: 3000 })] }],
+    historyComplete: true, fresh: false } }, methods);
+  console.log = () => {};
+  let du; try { du = u.histAuditUsd(); } finally { console.log = quiet; }
+  ok(du.off === 0 && du.melting === 2048, 'a dollar melt is on its way in the dollar books', du.off + ' / ' + du.melting);
+  ok(audit(0, [inn(0, { unit: 'usd', amount: 3000 })]).off === 0, 'and never in the bitcoin books');
+  global.window = { FoxyWallet: { heldSats: () => 0 } };
+  ok(audit(1990, [inn(3000)]).off === -1010, 'with no melt in flight the same balance is still 1010 short');
 }
 
 // ---- said where a person is about to pay -----------------------------------

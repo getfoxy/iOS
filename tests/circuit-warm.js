@@ -25,7 +25,7 @@ const ok = (good, name, detail) => {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const canon = (u) => String(u || '').replace(/\/+$/, '');
-setTimeout(() => { console.log('WATCHDOG: a scenario never finished'); process.exit(2); }, 120000).unref();
+setTimeout(() => { console.log('WATCHDOG: a scenario never finished'); process.exit(2); }, 240000).unref();
 
 /* A page on two mints, with a phone whose circuits take time to build. `lat` is changed as the test goes. */
 function page() {
@@ -48,6 +48,8 @@ function page() {
         const row = { at: Date.now(), method: m.method, mint: canon(u.origin), path: u.pathname, label: m.circuit || '', warm: !!m.warm, ms: 0 };
         log.push(row);
         const answer = lat.answer;
+        // a circuit that goes nowhere (`ctx.hang`): the request is written down and never answered
+        if (ctx.hang && ctx.hang(row, label)) return null;
         built.get(label).then(() => sleep(answer)).then(() => { row.ms = Date.now() - row.at; reply(w, m.id, mint.handle(m)); });
         return null;
       }
@@ -60,6 +62,7 @@ function page() {
       mints = {
         [HOME]: fakeMint(w, { p2pk: true, fill: 7 }),
         [THEIR]: fakeMint(w, { p2pk: true, fill: 9, quoteFrom: 5000 }),
+        'https://dead.test': fakeMint(w, { fill: 11, quoteFrom: 9000 }),
       };
     },
   });
@@ -216,6 +219,59 @@ async function run() {
     const m2 = c.find((r) => is(r, 'POST', HOME, '/v1/melt/quote/bolt11'));
     ok(!!S && !!m2 && m2.label === S && !c.some((r) => is(r, 'GET', HOME, '/v1/keysets')),
        'a spare ready at the near mint is the fee quote’s, and no other circuit is opened for it');
+  }
+
+  /* ---- 3: a first connect whose circuit goes nowhere ---------------------------------------------------- *
+   * A switch to a mint took 13.5 s on a phone where every other switch took 2.2 s: one bad circuit, and the
+   * connect's reads (the mint's info, keysets and keys, `loadMintOnOne`) were never asked again elsewhere, as a
+   * quote is. Now each is asked again on another circuit at the pace a quote is (`askedAgain`), inside the
+   * connect's thirty seconds; and a mint that answers nothing still fails at those thirty seconds, not later. */
+  {
+    const p = page();
+    const W = p.W;
+    p.lat.build = 200; p.lat.answer = 50;
+    // the first circuit any of THEIR's reads takes goes nowhere; every other answers
+    let deadLabel = '';
+    p.hang = (row, label) => {
+      if (row.mint !== THEIR || !row.label) return false;
+      if (!deadLabel) deadLabel = row.label;
+      return row.label === deadLabel;
+    };
+    const lines = [];
+    const was = p.window.console.log;
+    p.window.console.log = (...a) => { lines.push(a.join(' ')); };
+    let n = p.log.length;
+    let t0 = Date.now();
+    let no = '';
+    try { await W.connect(THEIR, null, null, { remember: true }); } catch (e) { no = e.message; }
+    const took = Date.now() - t0;
+    p.window.console.log = was;
+    const reads = since(p, n).filter((r) => r.mint === THEIR && /^\/v1\/(info|keysets|keys)/.test(r.path));
+    const onDead = reads.filter((r) => r.label === deadLabel);
+    const elsewhere = reads.filter((r) => r.label && r.label !== deadLabel);
+    ok(!no && took < 12000, 'a first connect whose circuit goes nowhere completes on another, well inside its thirty seconds',
+       (no ? no.slice(0, 80) + '; ' : '') + took + ' ms');
+    ok(onDead.length >= 1 && elsewhere.length >= onDead.length, 'each read the dead circuit held was asked again on another circuit',
+       onDead.length + ' on the dead circuit, ' + elsewhere.length + ' elsewhere');
+    const again = lines.filter((l) => /has not answered in \d+s; asking again on another circuit/.test(l) && l.indexOf('their.test') >= 0);
+    ok(again.length >= 1, 'and the log says so as a quote’s asking again does', again[0] || lines.filter((l) => /their/.test(l)).slice(0, 3).join(' | '));
+    ok(/their\.test/.test(String(W.mintHost())), 'the phone is on that mint', String(W.mintHost()));
+
+    // a mint that answers nothing at all: refused at the connect's thirty seconds, not later
+    const DEAD = 'https://dead.test';
+    p.hang = (row) => row.mint === DEAD;
+    n = p.log.length;
+    t0 = Date.now();
+    no = '';
+    try { await W.connect(DEAD, null, null, { remember: true }); } catch (e) { no = e.message; }
+    const deadMs = Date.now() - t0;
+    const deadReads = since(p, n).filter((r) => r.mint === DEAD);
+    ok(!!no && deadMs >= 29000 && deadMs < 32000, 'a mint that never answers still fails at the thirty seconds, not later', deadMs + ' ms; ' + no.slice(0, 80));
+    const labels = new Set(deadReads.map((r) => r.label));
+    ok(deadReads.length <= 3 * 6, 'with a bounded number of askings', deadReads.length + ' requests on ' + labels.size + ' circuits');
+    await sleep(1500);
+    const late = p.log.slice(n).filter((r) => r.mint === DEAD && r.at > t0 + deadMs);
+    ok(late.length === 0, 'and nothing is asked of it after the connect gave up', late.length + ' late request(s)');
   }
 
   console.log(failed ? '\n' + failed + ' circuit-warm check(s) failed' : '\nall circuit-warm checks pass');

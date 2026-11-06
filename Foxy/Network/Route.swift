@@ -167,12 +167,17 @@ enum Route {
     static var out: Int { traffic.value }
     private static let traffic = Locked(0)
 
-    /// `done`, counted: out from now until it is called.
+    /// `done`, counted: out from now until it is called. A request any host
+    /// answered, whatever it said, is told to TorService (`hostAnswered`): Tor
+    /// carries, so a silence after a return is that host's, not Tor's.
     private static func counted(_ done: @escaping (Data?, URLResponse?, Error?) -> Void)
         -> (Data?, URLResponse?, Error?) -> Void {
         traffic.exchange { $0 + 1 }
         return { data, response, error in
             traffic.exchange { max(0, $0 - 1) }
+#if canImport(Tor)
+            if response is HTTPURLResponse { DispatchQueue.main.async { TorService.hostAnswered() } }
+#endif
             done(data, response, error)
         }
     }
@@ -420,10 +425,14 @@ enum Route {
 #if canImport(Tor)
             if TorService.isRunning { return nil }
 #endif
-            return "An .onion address needs Tor, and Foxy is not connected to Tor."
+            return onionNeedsTor
         }
         return nil
     }
+
+    /// The one refusal a request to an .onion gets only because Tor is not up
+    /// at that moment (`TorReturn.onionWhenTorIsBack`).
+    static let onionNeedsTor = "An .onion address needs Tor, and Foxy is not connected to Tor."
 
     /// Whether Foxy will ask for this URL at all: https, or http to an .onion
     /// (Tor authenticates and encrypts that end to end), and a host that

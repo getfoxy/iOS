@@ -31,6 +31,7 @@ interface Window {
   webkit: any;                         // WKWebView's message handlers, present only in the app
   FOXY_DEBUG: any;                     // set by the native side at document start, in a debug build only
   __foxyGateChanged: () => void;       // the app sets it; the gate calls it when its warning changes
+  __foxyKeyboard?: (covered: number) => void;  // the app sets it; FoxyWebView.swift calls it with the keyboard's height
   __foxyPageHash: any;                 // set by the native side at document start: the hash of the page it staged
   __resources: any;                    // the page loader's map of unpacked assets
   webkitAudioContext: typeof AudioContext; // an older WebKit's name for AudioContext

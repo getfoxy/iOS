@@ -101,6 +101,32 @@
       return sum + unitSwapHeld(u, here);
     },
 
+    /* Pieces handed to a melt the mint has not settled (K.melting), at this mint, in `unit`: out of the pile and on no
+     * row until the melt lands (its row is written then) or comes back (into the pile). On their way, for the history
+     * audit only (16-history-lists.js `histAudit`, `histAuditUsd`), which read "off by" the melt for as long as the mint
+     * took: seconds for a payment, a swap's first leg, a card's payment, and for as long as the mint says PENDING, across
+     * a relaunch too. A swap's leg that `heldIn` already names (`unitSwapHeld`) is left out, so nothing is counted twice.
+     * Not the balance, and not what home says is pending: those are as they were. */
+    meltingIn: function (unit) {
+      var u = unitOf(unit) || 'sat';
+      var here = wallet ? mintOf(wallet) : '';
+      if (!here) return 0;
+      var named = {};
+      if (u !== 'sat') {
+        unitSwaps().forEach(function (r) {
+          if (r.meltQuote && recordUnit({ unit: r.from }) === u && canonicalMint(r.mint) === here) named[r.meltQuote] = true;
+        });
+      }
+      var sum = 0;
+      load(K.melting, []).forEach(function (e) {
+        if (!e || named[e.quote] || recordUnit(e) !== u) return;
+        // a hold that names no mint is from before holds named one, and is the connected mint's (`_sweepMeltsOnce`)
+        if (e.mint && canonicalMint(e.mint) !== here) return;
+        sum += sumProofs(e.proofs || []);
+      });
+      return sum;
+    },
+
     /* What a swap took after Foxy was put away, on its way back (`recoveringSats`). */
     recoveringIn: function (unit) {
       var u = unitOf(unit) || 'sat';
@@ -344,6 +370,8 @@
         }
         // asking the mint nothing, it writes all the same: room first, and the last token on its note (as `sendToken`)
         if (withLocked || exact || cover) { roomFor('token'); noteLastToken(); }
+        // and room on the handed-on list for every locked piece going out, before any is signed (`handedRoom`)
+        if (withLocked) handedRoom(piecesOfRows(withLocked.rows));
         if (withLocked) {
           /* Signed now, and only the rows that are really going out; struck
            * off once the token is written down (below), as `sendToken` does. */
@@ -395,6 +423,8 @@
               ? { pubkey: lockTo, locktime: Math.floor(o.lockUntil), refundKeys: o.refundTo ? [String(o.refundTo)] : undefined }
               : { pubkey: lockTo } });
             if (o.sigAll) lockOut.options.sigFlag = 'SIG_ALL';
+            // NUT-28: every key of the lock blinded per piece, E on each proof (a payment to a Cashu ID, 08e-cashu-id.js)
+            if (o.blindKeys) lockOut.options.blindKeys = true;
             if (Array.isArray(o.denominations) && o.denominations.length) {
               lockOut.denominations = o.denominations.map(function (d) { return Math.round(Number(d)); });
             }
@@ -426,9 +456,10 @@
             ? { memo: CHANGE_NOTE + changeNoteKey + ':' + want } : null);
           var hash = sendHash;
           var sent = sumProofs(split.send);
-          var tokFee = split.swapped
-            ? Math.max(0, sumProofs(have) - sent - sumProofs(split.keep || []))
-            : 0;
+          // what the mint charges for the pieces that went in, not what is left over (`swapCost`, as `sendToken`)
+          var cost = split.swapped ? swapCost(w, have, split) : null;
+          var tokFee = cost ? cost.fee : 0;
+          var costOff = cost && cost.off !== 0 ? { swapInSats: cost.wentIn, swapOutSats: cost.cameBack } : {};
           // the string is the money now: written down before anything else, with the swap's record still standing (`keepSentToken`)
           var handed = {};
           (split.handedOn || []).forEach(function (p) { if (p && p.secret) handed[p.secret] = true; });
@@ -457,7 +488,8 @@
             } else {
               logTx(unitRow(u, { dir: 'out', sats: sent - over, grossSats: over > 0 ? sent : undefined,
                                  changeSats: over > 0 ? over : undefined, changeState: over > 0 ? 'owed' : '',
-                                 dustSats: dust || undefined, feeSats: tokFee, settled: true, state: 'success',
+                                 dustSats: dust || undefined, feeSats: tokFee, swapInSats: costOff.swapInSats,
+                                 swapOutSats: costOff.swapOutSats, settled: true, state: 'success',
                                  memo: 'ecash', hash: hash, mint: at }));
             }
             logAudit({ hash: hash, sats: 0, feeSats: 0, unit: u, amount: sent, kind: 'token',

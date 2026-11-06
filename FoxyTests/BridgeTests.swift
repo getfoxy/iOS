@@ -19,7 +19,7 @@ final class BridgeTests: XCTestCase {
 
     func testTheTableHoldsExactlyTheDocumentedActions() throws {
         let documented = try documentedActions()
-        XCTAssertEqual(documented.count, 80, "THREAT-MODEL.md §1 lists \(documented.sorted())")
+        XCTAssertEqual(documented.count, 92, "THREAT-MODEL.md §1 lists \(documented.sorted())")
         XCTAssertEqual(Set(FoxyBridge.handlers.keys), documented)
     }
 
@@ -147,6 +147,39 @@ final class BridgeTests: XCTestCase {
             XCTAssertFalse(FoxyBridge.movesMoney(method: "POST", path: path), path)
         }
         XCTAssertFalse(FoxyBridge.movesMoney(method: "GET", path: "/v1/swap"))
+    }
+
+    // MARK: messages between Cashu IDs: each contact on its own
+
+    /// The bridge hands each contact's keys to the listener on their own: two contacts' keys in one open make two
+    /// REQs that share no key, each naming all of one contact's. Closing ends them; an open after a close makes a new
+    /// listener, and the relays' rotation outlives it.
+    func testTheMessagesOpenAsksForEachContactOnItsOwn() throws {
+        let bridge = FoxyBridge()
+        let rig = CashuMsgListenTests.Rig()
+        bridge.cashuMsgInbox = rig.listen
+        let a = try CashuMsgListenTests.contact("aa", keys: 8).keys
+        let b = try CashuMsgListenTests.contact("bb", keys: 8).keys
+        let ticket = UUID()
+        bridge.cashuMsgTicket = ticket
+        bridge.listenCashuMsg(id: "t1", keys: .success((a + b).shuffled()), since: 1_800_000_123, ticket: ticket)
+        rig.fire()
+        XCTAssertEqual(rig.sockets.count, 2, "one REQ a contact")
+        let asked = rig.sockets.map { $0.filters.reduce(Set<String>()) { $0.union($1) } }
+        XCTAssertTrue(asked[0].isDisjoint(with: asked[1]), "no key in both")
+        XCTAssertEqual(Set(asked), [try CashuMsgListenTests.names(a), try CashuMsgListenTests.names(b)])
+        bridge.closeCashuMsgInbox()
+        XCTAssertNil(bridge.cashuMsgInbox)
+        XCTAssertNil(bridge.cashuMsgAnswer)
+        XCTAssertTrue(rig.sockets.allSatisfy { $0.ended })
+        let rotation = bridge.cashuMsgRotation
+        let again = UUID()
+        bridge.cashuMsgTicket = again
+        bridge.listenCashuMsg(id: "t2", keys: .success(a), since: 1_800_000_123, ticket: again)
+        let fresh = try XCTUnwrap(bridge.cashuMsgInbox)
+        XCTAssertFalse(fresh === rig.listen, "a closed listener is never used again")
+        XCTAssertTrue(fresh.rotation === rotation, "each contact's rotation lasts the session")
+        bridge.closeCashuMsgInbox()
     }
 }
 

@@ -272,12 +272,47 @@
   function moveNote(quoteId) {
     return moveNotes().filter(function (n) { return n.quote === quoteId; })[0] || null;
   }
+  /* How many transfers may be in flight at once, and how large their list may grow.
+   *
+   * Both lists below (crossings' notes and payments being carried home) were cut to their last 20 on every write, the
+   * oldest dropped without a word. A note or a job is the only way back to a payment that has been made and not yet
+   * claimed, so the one dropped was money paid at the far mint that nothing could claim. Now a list holds up to 200
+   * rows or 256 KB; past that, only a row that holds no money (`settledRow`) is let go, oldest first, and a NEW
+   * transfer that would need more room is refused before anything is paid (`unsent`). A row already on file, or one
+   * written as money arrives, is never refused for room: it is written, over the bound if it has to be. */
+  var IN_FLIGHT_MOST = 200;
+  var IN_FLIGHT_BYTES = 256 * 1024;
+  /* `say(n)`: the refusal's words, for a list whose rows are not transfers (the handed-on list, 07-request-delivery.js). */
+  function boundedRows(l, fresh, settledRow, must, what, say) {
+    var over = function () {
+      if (l.length > IN_FLIGHT_MOST) return true;
+      try { return JSON.stringify(l).length > IN_FLIGHT_BYTES; } catch (e) { return false; }
+    };
+    while (over()) {
+      var at = -1;
+      for (var i = 0; i < l.length - 1; i++) { if (settledRow(l[i])) { at = i; break; } }
+      if (at < 0) break;
+      l.splice(at, 1);
+    }
+    if (over() && fresh && must) {
+      var e = /** @type {any} */ (new Error(typeof say === 'function' ? say(l.length - 1)
+        : (l.length - 1) + ' ' + what + ' are still waiting to finish, and Foxy keeps the only way '
+        + 'to claim each. It will not start another until some of them have finished: connect, let them finish, and try again.'));
+      e.unsent = true;
+      e.inFlightFull = true;
+      throw e;
+    }
+    return l;
+  }
   /* `must`: the note is the only way back to a payment about to be made, so
-   * a write that is refused has to stop it (mustSave). */
+   * a write that is refused has to stop it (mustSave). A note is dropped only
+   * when its crossing is finished (`dropMoveNote`), so none on file is settled. */
   function putMoveNote(note, must) {
-    var l = moveNotes().filter(function (n) { return n.quote !== note.quote; });
+    var had = moveNotes();
+    var l = had.filter(function (n) { return n.quote !== note.quote; });
+    var fresh = l.length === had.length;
     l.push(note);
-    l = l.slice(-20);
+    l = boundedRows(l, fresh, function () { return false; }, must, 'transfers between mints');
     if (must) mustSave(K.move, l, true); else save(K.move, l);
   }
   /* The melt for this invoice was given back: it was not paid and will not
@@ -329,10 +364,14 @@
   function carryJob(id) {
     return carryJobs().filter(function (j) { return j.id === id; })[0] || null;
   }
+  /* A job still 'asked' holds nothing: no payment has come for it, and one that comes later is written down afresh
+   * (`carryArrived`). Every other state is money at a mint this person did not choose, and is never let go for room. */
   function putCarryJob(job, must) {
-    var l = carryJobs().filter(function (j) { return j.id !== job.id; });
+    var had = carryJobs();
+    var l = had.filter(function (j) { return j.id !== job.id; });
+    var fresh = l.length === had.length;
     l.push(job);
-    l = l.slice(-20);
+    l = boundedRows(l, fresh, function (j) { return j.state === 'asked'; }, must, 'payments being brought home');
     if (must) mustSave(K.carry, l, true); else save(K.carry, l);
   }
   function dropCarryJob(id) {
@@ -412,6 +451,7 @@
       var job = carryJobs().filter(function (j) { return j.quote && j.quote === note.quote; })[0] || null;
       if (job) {
         dropCarryJob(job.id);
+        if (job.cid) { try { cidCameHome(job, note.quote, sats, null); } catch (x) {} }
         if (typeof FoxyWallet._onCarry === 'function') {
           FoxyWallet._onCarry({ state: 'home', sats: Number(sats) || 0, job: job, late: true, quote: note.quote });
         }
@@ -430,19 +470,35 @@
    * route that has become dearer since is not this phone's to make up out of
    * its own pocket without being asked. Stepped down until it fits;
    * `lands` is what would arrive. */
+  /* In units: a job taken in dollars (`job.unit`, a payment to this phone's
+   * Cashu ID at a mint it does not use, 08e-cashu-id.js `bringHome`) melts its
+   * dollars there, and lands as `job.toUnit` at home, dollars at a home that
+   * issues them and sats at one that does not. The budget is in the job's unit
+   * and what lands in the other, so a step down across units is in proportion,
+   * from the figure the crossing was first quoted at (`job.guess`). */
   function carryPlan(job) {
+    var ju = unitOf(job.unit) || 'sat', du = unitOf(job.toUnit) || 'sat';
     var budget = Math.max(0, (Number(job.kept) || Number(job.ask) || 0) - (Number(job.lost) || 0));
-    var want = Number(job.net) > 0 ? Number(job.net) : budget;
+    var want = Number(job.net) > 0 ? Number(job.net) : Number(job.guess) > 0 ? Number(job.guess) : budget;
+    var how = { to: job.home };
+    if (ju !== 'sat') how.unit = ju;
+    if (du !== 'sat') how.toUnit = du;
+    var less = function (amount, cost) {
+      return ju === du ? amount - (cost - budget) : Math.min(amount - 1, Math.floor(amount * budget / cost));
+    };
     var step = function (amount, n) {
       if (!(amount > 0)) return Promise.reject(new Error('Bringing it home costs more than it is worth.'));
-      return FoxyWallet.transferQuote(job.from, amount, { to: job.home }).then(function (plan) {
+      return FoxyWallet.transferQuote(job.from, amount, how).then(function (plan) {
         var over = Math.max(0, Number(plan.gross) - budget);
-        if (over > 0 && n < 4) return step(amount - over, n + 1);
+        if (over > 0 && n < 4) return step(less(amount, Number(plan.gross)), n + 1);
         if (over > 0) throw new Error('The cost of bringing it home kept changing. Try again in a moment.');
         return { plan: plan, lands: amount };
       }, function (e) {
         var fits = Number(e && e.foxyFits) || 0;
         if (fits > 0 && fits < amount && n < 4) return step(fits, n + 1);
+        // across units, what it would take, and a step down in proportion
+        var needs = Number(e && e.foxyNeed) || 0;
+        if (needs > budget && n < 4 && (ju !== 'sat' || du !== 'sat')) return step(less(amount, needs), n + 1);
         throw e;
       });
     };
@@ -473,18 +529,28 @@
         return { state: 'retry', why: carryWhy(e), job: job };
       });
     };
+    var ju = unitOf(job.unit) || 'sat';
     var run = function (pl, lands, again) {
-      var before = sumProofs(proofs(canonicalMint(job.from)));
+      var before = sumProofs(proofs(canonicalMint(job.from), ju));
       job.state = 'moving';
       job.quote = pl.mintQuote.quote;
       job.invoice = pl.mintQuote.request;
       job.lands = lands;
+      // across units: what the invoice cost at the source, in its unit, for the fee its row says (`cidCameHome`)
+      if (pl.amountUnit != null) job.priceUnit = Number(pl.amountUnit) || 0;
       delete job.short;
       putCarryJob(job);
       return carryVisit(job.from).then(function () {
-        return FoxyWallet.moveRun(pl, onStage, { visit: true });
+        /* The visit's own payment, made while it holds what a person starts (`visitTake`): `moveRun` calls `pay`
+         * before it returns, and `pay` reads this mark as it is called, as the late claim's own claim does. */
+        var was = walkCalling;
+        walkCalling = true;
+        try { return FoxyWallet.moveRun(pl, onStage, { visit: true }); }
+        finally { walkCalling = was; }
       }).then(function (done) {
         dropCarryJob(id);
+        // a payment to this phone's Cashu ID at a mint it does not use: its row at home says so, with the fee (08e-cashu-id.js)
+        if (job.cid) { try { cidCameHome(job, pl.mintQuote.quote, Number(done && done.sats) || lands, done); } catch (x) {} }
         return { state: 'home', sats: Number(done && done.sats) || lands, done: done, job: job, quote: pl.mintQuote.quote };
       }, function (e) {
         var why = carryWhy(e);
@@ -498,7 +564,7 @@
         }
         /* Nothing is on its way: what was to be melted is back in the pile,
          * less whatever a split that was made and not used cost. */
-        var after = sumProofs(proofs(canonicalMint(job.from)));
+        var after = sumProofs(proofs(canonicalMint(job.from), ju));
         if (after < before) job.lost = (Number(job.lost) || 0) + (before - after);
         job.state = 'paid';
         delete job.quote; delete job.invoice;
@@ -668,7 +734,7 @@
     /* Still there to bring? Moved by hand from the mint screen, or spent,
      * it is no longer this job's to carry, and bringing "it" home would take
      * whatever else this phone holds at that mint. */
-    var there = sumProofs(proofs(canonicalMint(job.from)));
+    var there = sumProofs(proofs(canonicalMint(job.from), unitOf(job.unit) || 'sat'));
     var owed = Math.max(1, (Number(job.kept) || 0) - (Number(job.lost) || 0));
     if (there < owed) {
       console.log('[foxy] a payment that was to be brought home is no longer at ' + hostOf(job.from)
@@ -1017,9 +1083,29 @@
      * "Foxy is not connected to Tor." matched /tor/ and held 16,384 sats out
      * of a balance for a swap the mint never saw. */
     if (neverSent(e)) return false;
+    /* A 5xx is a server between here and the mint, or the mint itself, failing
+     * after the request reached it: a 500 mid-swap, a 502 or 503 from a proxy
+     * that may have passed it on, a 504 whose answer was lost on the way back.
+     * Any of them may come after the mint did the work. (A 4xx, or a coded mint
+     * error, is a refusal, and `mintRefused` has already said so above.) "The
+     * mint answered 502." matched no word below, and the pieces stayed in the
+     * pile, spendable, until a sweep. */
+    var status = Number(e.status || (e.response && e.response.status)) || 0;
+    if (status >= 500 && status < 600) return true;
     var m = String(e.message || e.detail || e);
-    return /network|fetch|load failed|connection|did not answer|timed out|timeout|tor|no answer|abort/i.test(m);
+    return LOST_ON_THE_WIRE.test(m);
   }
+  /* What a request cut short on the wire is called by the phone's network
+   * (URLSession), by a browser's fetch, by Tor, and by this page's own timers.
+   * Specific phrases, not words: a bare /tor/ matched "storage", "history" and
+   * "restore", and so any message that held one of those. */
+  var LOST_ON_THE_WIRE = new RegExp([
+    'network connection was lost', 'network ?error', 'networkerror', 'failed to fetch', 'fetch failed', 'load failed',
+    'connection (was |has been )?(lost|reset|closed|dropped|interrupted|aborted)', 'private connection was rebuilt',
+    'socket', 'econnreset', 'epipe', 'did not answer', 'timed out', 'timeout', 'no answer', 'aborted', 'aborterror',
+    'over tor', 'tor circuit', 'circuit (was )?(closed|failed|destroyed)', 'stream (was )?(closed|failed|reset)',
+    'the answer was lost', 'cancell?ed',
+  ].join('|'), 'i');
 
   function holdInputs(rec, e) {
     if (e !== undefined && !answerLost(e)) return 0;
@@ -1360,14 +1446,24 @@
    * Held here instead, as the app opens, with or without a
    * route, until `recoverSwaps` has the mint's word on it. Only locked sends:
    * theirs is the swap where the value leaves, so theirs are the pieces that
-   * must not be shown or spent on a guess. */
+   * must not be shown or spent on a guess.
+   *
+   * Every mint the phone holds pieces at, not only the one it connects to
+   * (`at`, kept for the callers): a locked send cut short at another mint
+   * left its pieces in that mint's pile, spendable from there (a payment
+   * from it, a card loaded from it) while the mint may have spent them.
+   * Each record's pieces are taken from its own mint's pile (`holdInputs`),
+   * and `recoverSwaps` asks each mint about them, the away ones with a
+   * wallet made for them. */
   function holdUnanswered(at) {
-    var here = canonicalMint(at);
     var sats = 0;
+    var mints = {};
+    if (at) mints[canonicalMint(at)] = true;
+    loadSwaps().forEach(function (r) { if (r && r.mint) mints[canonicalMint(r.mint)] = true; });
     // a send that finished, all but its record's drop, holds nothing back (`swapFinished`)
-    dropFinishedSwaps(at);
+    Object.keys(mints).forEach(function (m) { dropFinishedSwaps(m); });
     loadSwaps().forEach(function (r) {
-      if (canonicalMint(r.mint) !== here || liveSwap[r.id]) return;
+      if (!r || !r.mint || liveSwap[r.id]) return;
       if (r.kind !== 'send' || !(r.locked && r.locked.length) || r.freeInputs || heldHas(r.id)) return;
       sats += holdInputs(r);
     });

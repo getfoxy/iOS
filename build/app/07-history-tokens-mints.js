@@ -453,6 +453,8 @@
     this._putAway = !!on;
     clearTimeout(this._closingT);
     if (!on) return;
+    // a question waiting to be asked again on a new circuit is not asked from the background (the house rule for timers)
+    try { const Wa = window.FoxyWallet; if (Wa && Wa._stopAskingAgain) Wa._stopAskingAgain(); } catch (e) {}
     this._putAwayAt = Date.now();
     if (this._tidyOwed || this._tidyT) this.tidyChangeLater(this._tidyMore);
     this._closingT = setTimeout(() => {
@@ -1044,7 +1046,7 @@
       else this.toast('A payment is still being delivered. Wait for it.', true);
       return;
     }
-    if (this.state.reqBusy) return;
+    if (this.state.reqBusy || this.state.reqSwapping) return;
     if (this.state.reqCollecting) {
       // PAY on a request other than the one whose move is being collected: said, not silent
       if (this._reqCollect && this._reqCollect !== req) this.toast('Foxy is collecting an earlier move. Wait for it.', true);
@@ -1142,6 +1144,10 @@
       }
     }
     this._reqMintOk = null;
+    /* Chosen on PAY FROM: the other balance at this mint (26l-pay-from.js `pfSwapSource`). The swap is made first, and this
+     * pass comes back once it has landed (`go.swapped`), to pay from what it brought with nothing more asked. */
+    const swapSrc = ((here || !want) && !(go && go.swapped) && this.pfReqSwap) ? this.pfReqSwap(req) : null;
+    if (swapSrc) { this.pfSwapThenPay(req, swapSrc, go); return; }
     const need = Math.round(Number(req.sats) || 0);
     /* Chosen on PAY FROM (26l-pay-from.js): sats from another of this phone's mints than the one the request names, by
      * the crossing quoted there. The offer said what it costs, its FEE and PAYING FROM, so it is moved with no second
@@ -1553,21 +1559,26 @@
             const m = (n) => this.moneyIn(n, 'usd');
             const got = Math.round(Number(back.amount) || 0);
             const paid = Math.round(Number(back.paidAmount != null ? back.paidAmount : back.paid) || 0);
+            // a short refund: the pieces they did not spend came back as well (`afterRefusal`)
+            const also = Math.max(0, Math.round(Number(back.recovered) || 0));
             this.blockedCard('theyRefused', back.short ? {
               tone: 'warn', title: 'THEY DID NOT TAKE IT',
-              reason: W.reason(e) + ' They sent back ' + m(got) + ' of the ' + m(paid) + '.',
-              chip: m(paid - got) + ' was not returned.',
+              reason: W.reason(e) + ' They sent back ' + m(got) + ' of the ' + m(paid) + '.'
+                + (also ? ' Foxy took back ' + m(also) + ' they had not spent.' : ''),
+              chip: m(Math.max(0, paid - got - also)) + ' was not returned.',
             } : {
               tone: 'warn', title: 'THEY DID NOT TAKE IT', reason: W.reason(e),
               chip: 'Your ' + m(got) + ' came back, locked to this phone. Nothing is at risk.',
             });
             return;
           }
+          const alsoSats = Math.max(0, Math.round(Number(back.recovered) || 0));
           this.blockedCard('theyRefused', back.short ? {
             tone: 'warn',
             title: 'THEY DID NOT TAKE IT',
-            reason: W.reason(e) + ' They sent back ' + this.group(back.sats) + ' of the ' + this.group(back.paid) + ' sats.',
-            chip: this.group(back.paid - back.sats) + ' sats were not returned.',
+            reason: W.reason(e) + ' They sent back ' + this.group(back.sats) + ' of the ' + this.group(back.paid) + ' sats.'
+              + (alsoSats ? ' Foxy took back ' + this.group(alsoSats) + ' sats they had not spent.' : ''),
+            chip: this.group(Math.max(0, back.paid - back.sats - alsoSats)) + ' sats were not returned.',
           } : {
             tone: 'warn',
             title: 'THEY DID NOT TAKE IT',

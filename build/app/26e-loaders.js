@@ -151,6 +151,20 @@
       u.addEventListener('click', () => { if (typeof o.aboveGo === 'function') o.aboveGo(); });
       wrap.appendChild(u);
     }
+    /* Two buttons side by side above the main one, neither ending the screen (`o.pair`, [{ label, go }, { label, go }]):
+     * COPY and SHARE under ANY WALLET's code (26o-cashu-id.js). */
+    if (Array.isArray(o.pair) && o.pair.length) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:12px;margin-bottom:12px';
+      o.pair.forEach((p) => {
+        const u = document.createElement('div');
+        u.style.cssText = b.style.cssText + ';flex:1 1 0;background:#13333C;color:#fff';
+        u.textContent = p.label;
+        u.addEventListener('click', () => { if (typeof p.go === 'function') p.go(); });
+        row.appendChild(u);
+      });
+      wrap.appendChild(row);
+    }
     b.textContent = o.button || 'CANCEL';
     // found by a screen that takes its button away part-way through (26f-flashcard.js)
     b.setAttribute('data-stage-button', '1');

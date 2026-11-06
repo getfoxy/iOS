@@ -309,10 +309,10 @@ check('the gate: and NO CONNECTION is the honest screen even unprotected',
 check('the wallet: routeOpen agrees',
   /if \(privacy\.network === 'none'\) return false;/.test(wallet), 'routeOpen()');
 check('the wallet: setOffline agrees',
-  /var reallyUp = privacy\.tor === 'up' && privacy\.network !== 'none';/.test(wallet),
-  'the choice sticks with the radios off');
+  /var reallyUp = privacy\.tor === 'up' && privacy\.network !== 'none';[\s\S]{0,900}?privacy\.offline = !!on && \(!!chosen \|\| !reallyUp\);/.test(wallet),
+  'the automatic choice yields to a route; the holder\'s own (chosen) sticks');
 check('the wallet: and a push does not throw the choice away',
-  /offline: !!privacy\.offline[\s\S]{0,200}?String\(next\.network \|\| 'unknown'\) !== 'none'/
+  /offline: !!privacy\.offline[\s\S]{0,300}?String\(next\.network \|\| 'unknown'\) !== 'none'/
     .test(wallet), '_privacy');
 
 /* 10 — a payment handed over is not the payer's to take back -----------------
@@ -552,8 +552,9 @@ densityDrives();
     /* `held` first in the hold, which since 38205ad also holds the button
      * while an owed move is collected (COLLECTING…); the route's hold is the
      * one this is about, and it is still there, on the button and its busy. */
-    && /go: \(held \|\| s\.reqCollecting\) \? \(\) => \{\} : \(\) => this\.makeTokenForRequest\(\)/.test(app)
-    && /ctaBusy: held \|\| !!s\.reqBusy \|\| !!s\.reqCollecting,/.test(app),
+    // (and while a swap from the other balance is made first, SWAPPING…, 26l-pay-from.js `pfSwapThenPay`)
+    && /go: \(held \|\| s\.reqCollecting \|\| s\.reqSwapping\) \? \(\) => \{\} : \(\) => this\.makeTokenForRequest\(\)/.test(app)
+    && /ctaBusy: held \|\| !!s\.reqBusy \|\| !!s\.reqCollecting \|\| !!s\.reqSwapping,/.test(app),
     'requestSpec');
 }
 

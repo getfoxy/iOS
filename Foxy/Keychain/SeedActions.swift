@@ -128,6 +128,14 @@ enum SeedActions {
         // it gets here, so this is belt and braces.
         case P2PK.Failure.badIndex:
             return "outside the lock-key window"
+        // a Cashu ID's one-time key (CashuID.swift)
+        case CashuID.Failure.notLocked:
+            return "That ecash is not locked to this Cashu ID."
+        case CashuID.Failure.badPoint, CashuID.Failure.badTweak:
+            return "That is not a payment to this Cashu ID."
+        // messages between Cashu IDs (CashuMsg.swift)
+        case CashuMsg.Failure.badPeer, CashuMsg.Failure.badKey:
+            return "That is not another Cashu ID."
         default:
             // NUT13: an invalid BIP-32 child or r = 0, about 1 in 2^127, never a different key instead
             return "the secrets could not be derived"
@@ -464,6 +472,131 @@ enum SeedActions {
         } catch {
             return .refuse(problem(error))
         }
+    }
+
+    // MARK: The Cashu ID (CashuID.swift)
+
+    /// cashuIdSign's request, checked (NativeSeedBridge.cashuIdSignCheck).
+    struct CashuIdSignRequest: Equatable {
+        let pieces: [CashuID.Piece]
+    }
+
+    /// cashuIdSignUnblinded's request, checked (NativeSeedBridge.cashuIdSignUnblindedCheck): the secrets alone.
+    struct CashuIdSignUnblindedRequest: Equatable {
+        let secrets: [String]
+    }
+
+    /// cashuIdTag's request: the other ID, and the E the tag is bound to.
+    struct CashuIdTagRequest: Equatable {
+        let peer: [UInt8]
+        let e: [UInt8]
+    }
+
+    /// cashuIdEphemeral's request: the receiver's ID, the payment's index and its locktime.
+    struct CashuIdEphemeralRequest: Equatable {
+        let id: [UInt8]
+        let index: UInt32
+        let locktime: UInt64
+    }
+
+    /// cashuIdPublic {} → {"id", "nostr", "sig", "recovery"}: the ID public key (33
+    /// bytes), the delivery key's x-only public key (32), from the seed at their own
+    /// paths, the ID key's signature binding the two (CashuID.bindDigest), and the
+    /// recovery key's x-only public key (32). No counter moves; nothing private is answered.
+    static func cashuIdPublic(_ env: SeedEnvironment) -> SeedReply {
+        do {
+            let keys = try CashuID.publicKeys(seed: try readSavedSeed(env))
+            return .answer(CashuID.publicReply(keys))
+        } catch {
+            return .refuse(problem(error))
+        }
+    }
+
+    /// cashuIdSign {pieces: [{secret, e}]} → {"sigs"}: signatures by each piece's
+    /// one-time key, over secrets whose lock key is this ID blinded by that piece's
+    /// E (NUT-28) and nothing else. The key itself is never answered: with an e of
+    /// its own choosing the page could take the ID key out of it (CashuID.swift).
+    static func cashuIdSign(pieces: [CashuID.Piece], env: SeedEnvironment) -> SeedReply {
+        guard !pieces.isEmpty, pieces.count <= CashuID.mostSecrets,
+              pieces.allSatisfy({ CashuID.isPoint($0.e) && CashuID.lockOf($0.secret) != nil }) else { return .refuse("bad request") }
+        do {
+            let sigs = try CashuID.sign(seed: try readSavedSeed(env), pieces: pieces)
+            return .answer(CashuID.signReply(sigs))
+        } catch {
+            return .refuse(problem(error))
+        }
+    }
+
+    /// cashuIdSignUnblinded {secrets} → {"sigs"}: signatures by the ID key itself, over secrets locked to the ID
+    /// as it is (not blinded), for one delivery the receiver chose to take anyway (TAKE IT ANYWAY, docs/CASHU-ID.md).
+    /// Nothing else is signed by the ID key but the binding of its delivery key. Logged every time it signs; the
+    /// key is never answered.
+    static func cashuIdSignUnblinded(secrets: [String], env: SeedEnvironment) -> SeedReply {
+        guard !secrets.isEmpty, secrets.count <= CashuID.mostSecrets,
+              secrets.allSatisfy({ CashuID.lockOf($0) != nil }) else { return .refuse("bad request") }
+        do {
+            let sigs = try CashuID.signUnblinded(seed: try readSavedSeed(env), secrets: secrets)
+            print("[foxy] cashu id: the ID key itself signed \(sigs.count) piece(s) of one delivery paid to it unblinded,"
+                  + " on the receiver's TAKE IT ANYWAY")
+            return .answer(CashuID.signReply(sigs))
+        } catch {
+            return .refuse(problem(error))
+        }
+    }
+
+    /// cashuIdTag {peer, e} → {"tag"}: SHA-256("foxy-cashu-id-from-v1" ‖ x(d·peer) ‖ E),
+    /// the payer's name on a delivery proved; the same on both sides.
+    static func cashuIdTag(peer: [UInt8], e: [UInt8], env: SeedEnvironment) -> SeedReply {
+        guard CashuID.isPoint(peer), CashuID.isPoint(e) else { return .refuse("bad request") }
+        do {
+            let tag = try CashuID.tag(seed: try readSavedSeed(env), peer: peer, e: e)
+            return .answer(CashuID.tagReply(tag))
+        } catch {
+            return .refuse(problem(error))
+        }
+    }
+
+    /// cashuIdEphemeral {to, index, locktime} → {"base"}: what one payment's
+    /// throwaway keys come from (CashuID.payBase). Its keys are the payer's own, for
+    /// that payment alone; the paying key itself is never answered.
+    static func cashuIdEphemeral(id: [UInt8], index: UInt32, locktime: UInt64, env: SeedEnvironment) -> SeedReply {
+        guard CashuID.isPoint(id) else { return .refuse("bad request") }
+        do {
+            let base = try CashuID.payBase(seed: try readSavedSeed(env), id: id, index: index, locktime: locktime)
+            return .answer(CashuID.baseReply(base))
+        } catch {
+            return .refuse(problem(error))
+        }
+    }
+
+    /// The delivery key's private half, for the inbox that listens on it and for
+    /// nothing else (FoxyBridge+CashuID.swift). Native only: no action answers it.
+    /// The caller wipes it.
+    static func cashuIdDeliverySecret(_ env: SeedEnvironment) throws -> [UInt8] {
+        let seed = try readSavedSeed(env)
+        return try CashuID.secret(seed: seed, path: CashuID.deliveryPath)
+    }
+
+    /// The recovery key's private half, for the inbox that reads this phone's own
+    /// copies back after a restore and for nothing else (FoxyBridge+CashuID.swift).
+    /// Native only: no action answers it. The caller wipes it.
+    static func cashuIdRecoverySecret(_ env: SeedEnvironment) throws -> [UInt8] {
+        let seed = try readSavedSeed(env)
+        return try CashuID.secret(seed: seed, path: CashuID.recoveryPath)
+    }
+
+    // MARK: Messages between Cashu IDs (CashuMsg.swift)
+
+    /// What `cashuIdMsgSend` wraps a message with: the x-only key message `index` to `peer` goes to and the seal's
+    /// private key. Native only: no action answers either. The caller wipes `seal`.
+    static func cashuMsgSendKeys(peer: [UInt8], index: UInt32, env: SeedEnvironment) throws -> (to: [UInt8], seal: [UInt8]) {
+        try CashuMsg.sendKeys(seed: try readSavedSeed(env), peer: peer, index: index)
+    }
+
+    /// The keys `cashuIdMsgOpen` listens on, private halves included, for the inbox and nothing else. Native only.
+    /// The caller wipes each one.
+    static func cashuMsgListenKeys(wants: [CashuMsg.Want], env: SeedEnvironment) throws -> [CashuMsg.Listened] {
+        try CashuMsg.listenKeys(seed: try readSavedSeed(env), wants: wants)
     }
 
     // MARK: A card's owner key

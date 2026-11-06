@@ -44,7 +44,7 @@
     const usdSats = usdPx > 0 ? Math.round(usdCents / 100 / usdPx * 1e8) : 0;
     // a till that takes both has no WALLET chip: it receives in its main, and a tap is offered either (26m-till.js, `tillMain`)
     const tillBoth = !!(this.tillBoth && this.tillBoth());
-    return {
+    return Object.assign({
       isConfirm: sc === 'confirm',
       recvHeadOne: !two,
       recvHeadTwo: two,
@@ -208,7 +208,8 @@
        * the middle of the QR. */
       cardPay: () => this.payByCard(),
       scanToReceive: () => this.scanTokenToReceive(),
-    };
+    // and in the till, its tip buttons under the amount where it offers tips (26p-till-tips.js, `tillTipVals`)
+    }, this.tillTipVals ? this.tillTipVals(sc) : { tipRowShown: false, tipChips: [], tipLine: '' });
   }
 
   /* paid: the confirmation after money moves. A Lightning send ends here. */
@@ -425,6 +426,11 @@
       clCardOn: !cardOut,
       clCardDim: off ? '0.38' : '1',
       goSendCard: () => this.fcSendCard(),
+      /* BANK ACCOUNT, under it: the balance to an exchange the person uses, for dollars (26q-bank.js). Lightning, so dimmed
+       * offline and said why; not from a card, whose rows are the card's. */
+      clBankOn: !cardOut,
+      clBankDim: off ? '0.38' : '1',
+      goBank: () => this.bankStart(),
       goMakeEcash: () => this.setState(p => ({
         screen: 'amount', stack: p.stack.concat([p.screen]),
         flow: 'send', tokenMode: true, asset: 'BITCOIN',
@@ -469,6 +475,14 @@
     }, usdVals);
   }
 
+  /* Is this payment waiting behind some other job's request, on the wallet's proof lock? The holder named something that is
+   * not a send: a send with the lock is the payment itself, and what it waits for is the mint or the other phone. */
+  sendBehindOther() {
+    const W = window.FoxyWallet;
+    const holder = W && W.proofLockHolder && W.proofLockHolder();
+    return !!holder && !/^(sendToken|pay|payLnurl)$/.test(String(holder.what || ''));
+  }
+
   /** @param {RenderContext} c */
   renderSentBase(c) {
     const { s, sc, sats } = c;
@@ -477,6 +491,10 @@
       isSendDone: sc === 'sendDone',
       // eight seconds in and still sending: say so, and offer the way off
       sendSlowShown: sc === 'sendDone' && !!s.sendSlow && (sendPhase === 'in'),
+      /* What it is waiting for. Behind another job's request to the mint (the lock is held by something that is not this
+       * payment) it says so, rather than blaming a phone that has not been asked yet. */
+      sendSlowText: this.sendBehindOther() ? 'Still waiting for an earlier request to the mint to finish.'
+        : 'Still waiting for their phone to answer.',
       sendStopWaiting: () => {
         /* Still behind something else — the change top-up, usually — means
          * the payment has not begun, and it is dropped rather than made later
@@ -527,10 +545,14 @@
       sentSentAmt: this.money(sats).main,
       sentFeeAmt: this.money(this._lastFee || 0).main,
       // the money stays on screen through the strike and past it — DONE clears it
-      sentStack: this.fitStack(H => this.satsStack(sats, 'in', H)),
+      /* (not under BANK ACCOUNT's words, once sent: they take its room, 26q-bank.js) */
+      sentStack: (sendPhase === 'done' || sendPhase === 'settled') && this.bankNow && this.bankNow() ? ''
+        : this.fitStack(H => this.satsStack(sats, 'in', H)),
       sentToLabel: s.recvPending ? 'DELIVERING TO'
         : (sendPhase === 'done' || sendPhase === 'settled') ? 'DELIVERED TO' : 'SENDING TO',
-      sentTo: s.recipientKind === 'email' ? (s.recipient || '').toUpperCase() : this.shortId(s.recipient || ''),
+      // (an invoice River made for BANK ACCOUNT is said as theirs: 26q-bank.js)
+      sentTo: s.recipientKind === 'email' ? (s.recipient || '').toUpperCase()
+        : (this.bankNow && this.bankNow() === 'river') ? 'YOUR RIVER ACCOUNT' : this.shortId(s.recipient || ''),
       sentBg: (sendPhase === 'done' || sendPhase === 'settled')
         ? "var(--acc)" : 'var(--bg)',
       sentGrid: (sendPhase === 'done' || sendPhase === 'settled') ? 'transparent' : 'rgba(var(--ink-rgb),.05)',
@@ -550,6 +572,8 @@
             // (a payment from a card ends here too: home is out of its flow)
             screen: 'home', stack: [], amount: '', asset: '', network: '', unit: 'USD', sendFrom: '',
             flow: 'receive', recipient: '', emailDraft: '', sendPhase: null, sendExit: false,
+            // and BANK ACCOUNT's payment is over (26q-bank.js)
+            bank: null, bankShort: false,
           });
         }, 380);
       },
@@ -919,12 +943,15 @@
      * crosses was quoted on PAY FROM, whose quote is what said it covers it. */
     const src = this.pfReqSource ? this.pfReqSource(req) : null;
     const crossFee = (src && src.plan) ? Math.max(0, Math.round(Number(src.plan.feeSats) || 0)) : 0;
+    /* Paid from the other balance at this mint, swapped first (26l-pay-from.js `pfSwapSource`): PAY FROM's quote said it
+     * covers it, so nothing here is judged short; a SWAP row says from what, and what the swap costs. */
+    const swapSrc = (src && src.swap && src.swap.e) ? src.swap : null;
     const want = paidAt;
     const judgeAt = src ? src.mint : want;
     const atHere = !judgeAt || this.requestHere({ mints: [judgeAt] });
     const thereHas = (!atHere && !usdReq && W && W.balanceAt) ? Math.round(Number(W.balanceAt(judgeAt)) || 0) : null;
     let lack = null;
-    if (sats > 0 && W && W.sendShortfall && !(src && src.plan)) {
+    if (sats > 0 && W && W.sendShortfall && !(src && src.plan) && !swapSrc) {
       if (atHere || ((thereHas == null || thereHas < sats) && !src)) {
         lack = usdReq ? W.sendShortfall(sats, { unit: 'usd', locked: lockedNow }) : W.sendShortfall(sats, { locked: lockedNow });
       } else if (thereHas != null && thereHas >= sats) {
@@ -987,7 +1014,7 @@
       : fig(n));
     const rows = (byTap ? [] : [this.cfRow('DELIVERED TO', to, siteHost ? { sub: siteHost } : undefined)]).concat([
       // (the source chosen on PAY FROM, its mint and balance: 26l-pay-from.js)
-      this.cfRow('PAYING FROM', src && this.pfLabel ? this.pfLabel(src.mint, 'sat') : (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
+      this.cfRow('PAYING FROM', src && this.pfLabel ? this.pfLabel(src.mint, src.unit || 'sat') : (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
       this.cfRow('NETWORK', 'CASHU', { half: true }),
       // not in the accent: the accent on this screen belongs to the code, and
       // two orange things is one too many to look at
@@ -1000,7 +1027,8 @@
        * payer's, and the row says whose. */
       this.cfRow('FEE', held ? 'CHECKING…' : fig(crossFee > 0 ? crossFee : lack && lack.fee > 0 ? lack.fee : 0).main,
         { half: true, sub2: held ? '' : 'You pay the mint\u2019s fees' }),
-    ] : []).concat(usdReq ? [this.cfRow('FROM', 'DOLLARS')] : agreed ? agreedRows() : this.peerRateRow());
+    ] : []).concat(swapSrc ? [this.cfRow('SWAP', this.pfSwapText(swapSrc.e, swapSrc.q), { sub2: 'Swapped at the mint, then paid' })] : [])
+      .concat(usdReq ? (swapSrc ? [] : [this.cfRow('FROM', 'DOLLARS')]) : agreed ? agreedRows() : this.peerRateRow());
     /* Short with the fee counted, as the send itself counts it. The balance
      * alone let a 980-sat request through on a phone holding 979, to be
      * refused after SEND.
@@ -1024,7 +1052,7 @@
       };
     }
     // (not this mint's balance where the payment is made from another, or crosses from one: judged above)
-    const shortBy = (src && src.plan) || (lack && lack.there) ? 0 : lack && lack.short ? lack.need - lack.have
+    const shortBy = (src && src.plan) || swapSrc || (lack && lack.there) ? 0 : lack && lack.short ? lack.need - lack.have
       : Math.max(0, sats - (usdReq ? this.unitBalance('usd') : (s.balSats || 0)));
     const short = shortBy > 0;
     if (short) {
@@ -1066,12 +1094,12 @@
       /* COLLECTING… while a move to that mint, paid and not yet collected, is
        * collected first (`makeTokenForRequest`): PAY stayed live under it for
        * up to 45 seconds, with nothing on screen to say anything was running. */
-      cta: held ? 'CHECKING…' : s.reqCollecting ? 'COLLECTING\u2026'
+      cta: held ? 'CHECKING…' : s.reqCollecting ? 'COLLECTING\u2026' : s.reqSwapping ? 'SWAPPING\u2026'
         : s.reqBusy ? (d ? (d.kind === 'tap' ? 'SENDING\u2026' : 'PAYING\u2026') : 'MAKING\u2026')
         : d ? (d.kind === 'tap' ? 'SEND ' : 'PAY ') + head(sats).main
         : 'GENERATE ECASH TOKEN',
       ctaTone: 'go',
-      ctaBusy: held || !!s.reqBusy || !!s.reqCollecting,
-      go: (held || s.reqCollecting) ? () => {} : () => this.makeTokenForRequest(),
+      ctaBusy: held || !!s.reqBusy || !!s.reqCollecting || !!s.reqSwapping,
+      go: (held || s.reqCollecting || s.reqSwapping) ? () => {} : () => this.makeTokenForRequest(),
     };
   }

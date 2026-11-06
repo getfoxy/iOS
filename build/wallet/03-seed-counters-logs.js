@@ -564,6 +564,8 @@
     if (seedChanged) {
       secretEpoch++;
       dropLockPool();
+      // and the Cashu ID shown for the seed that went (08e-cashu-id.js)
+      cidForget();
     }
     if (seedGone) nativeSeedKnown = false;
   }
@@ -636,8 +638,11 @@
       if (!b || !o.secret || !o.secret.length || typeof o.blindingFactor !== 'bigint') return null;
       var amount = Number(String(b.amount));
       if (!(amount > 0) || !isFinite(amount)) return null;
-      return { amount: amount, id: String(b.id || ''), B_: String(b.B_ || ''),
-               secret: hexOf(o.secret), r: o.blindingFactor.toString(16) };
+      var row = /** @type {any} */ ({ amount: amount, id: String(b.id || ''), B_: String(b.B_ || ''),
+               secret: hexOf(o.secret), r: o.blindingFactor.toString(16) });
+      // NUT-28: the throwaway key's public half the proof must carry, or the receiver cannot open it
+      if (typeof o.ephemeralE === 'string' && /^0[23][0-9a-f]{64}$/i.test(o.ephemeralE)) row.pe = o.ephemeralE.toLowerCase();
+      return row;
     } catch (e) { return null; }
   }
 
@@ -650,7 +655,30 @@
     var bytes = new window.Uint8Array(hex.length / 2);
     for (var i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
     return new C.OutputData({ amount: C.Amount.from(row.amount), B_: row.B_, id: row.id },
-                            BigInt('0x' + String(row.r)), bytes);
+                            BigInt('0x' + String(row.r)), bytes, row.pe ? String(row.pe) : undefined);
+  }
+
+  /* NUT-28's throwaway keys for a payment whose lock is blinded (`blindKeys`), by
+   * the lock key they are for: a payment to a Cashu ID makes them from its own
+   * seed (08e-cashu-id.js, `cidPieceKeys`), so that the same words find them
+   * again. Without one, cashu-ts makes each at random, as for any other wallet. */
+  var p2bkSources = Object.create(null);
+
+  function p2bkKeyFor(p2pk) {
+    if (!p2pk || !p2pk.blindKeys || p2pk.sigFlag === 'SIG_ALL') return undefined;
+    var key = String(Array.isArray(p2pk.pubkey) ? p2pk.pubkey[0] : p2pk.pubkey || '').toLowerCase();
+    var next = p2bkSources[key];
+    return typeof next === 'function' ? next() : undefined;
+  }
+
+  function p2bkOutputs(C, p2pk, amount, keyset, customSplit) {
+    if (!p2pk || !p2pk.blindKeys || p2pk.sigFlag === 'SIG_ALL'
+        || typeof p2bkSources[String(Array.isArray(p2pk.pubkey) ? p2pk.pubkey[0] : p2pk.pubkey || '').toLowerCase()] !== 'function') {
+      return C.OutputData.createP2PKData(p2pk, amount, keyset, customSplit);
+    }
+    return C.splitAmount(amount, keyset.keys, customSplit).map(function (a) {
+      return C.OutputData.createSingleP2PKData(p2pk, a, keyset.id, p2bkKeyFor(p2pk));
+    });
   }
 
   function nativeOutputCreator(ns) {
@@ -680,10 +708,10 @@
         return C.OutputData.createSingleRandomData(amount, keysetId);
       },
       createP2PKData: function (p2pk, amount, keyset, customSplit) {
-        return sawLockedOutputs(C.OutputData.createP2PKData(p2pk, amount, keyset, customSplit));
+        return sawLockedOutputs(p2bkOutputs(C, p2pk, amount, keyset, customSplit));
       },
-      createSingleP2PKData: function (p2pk, amount, keysetId) {
-        return sawLockedOutputs(C.OutputData.createSingleP2PKData(p2pk, amount, keysetId));
+      createSingleP2PKData: function (p2pk, amount, keysetId, eBytes) {
+        return sawLockedOutputs(C.OutputData.createSingleP2PKData(p2pk, amount, keysetId, eBytes || p2bkKeyFor(p2pk)));
       },
     };
     nativeCreators.set(ns, made);
@@ -712,10 +740,10 @@
         return C.OutputData.createSingleRandomData(amount, keysetId);
       },
       createP2PKData: function (p2pk, amount, keyset, customSplit) {
-        return sawLockedOutputs(C.OutputData.createP2PKData(p2pk, amount, keyset, customSplit));
+        return sawLockedOutputs(p2bkOutputs(C, p2pk, amount, keyset, customSplit));
       },
-      createSingleP2PKData: function (p2pk, amount, keysetId) {
-        return sawLockedOutputs(C.OutputData.createSingleP2PKData(p2pk, amount, keysetId));
+      createSingleP2PKData: function (p2pk, amount, keysetId, eBytes) {
+        return sawLockedOutputs(C.OutputData.createSingleP2PKData(p2pk, amount, keysetId, eBytes || p2bkKeyFor(p2pk)));
       },
     };
     return plainCreator;
@@ -873,6 +901,8 @@
           nativeSeedKnown = true;
           adoptedCandidates[candidate] = secretEpoch;
           console.log('[foxy] the phone adopted the restored seed');
+          // the Cashu ID the words give may be in somebody's contacts: listened for at once (08e-cashu-id.js)
+          try { cidRestored(); } catch (x) {}
           return true;
         }
         if (j.adopted === false && j.same === true) {
@@ -1672,12 +1702,25 @@
    * next. The wallet says how many of the three came from here
    * (`foxyLoadCached`). A connect that fails, and a mint that does not answer,
    * forget the info (11-routing.js `connect`, 98-mint-health.js). */
+  /* And each of them asked again on another circuit when the one it went on
+   * says nothing, at the pace a quote is asked again (`askedAgain`: five
+   * seconds, three at a mint seen answering, longer at one whose answers are
+   * slow), inside `within`, the connect's own allowance (thirty seconds). A
+   * switch to a mint took 13.5 s on a phone where every other switch took
+   * 2.2 s: one circuit that went nowhere, and nothing asked again elsewhere.
+   * Whichever circuit answers first is the answer, and the only one used; the
+   * keysets and keys are remembered from that circuit. A mint that answers
+   * nothing still fails at the connect's deadline, and no asking is planned
+   * past it. */
   var KEY_CHAIN_READ = /\/v1\/keys(ets)?(\/[A-Za-z0-9_%.-]+)?$/;
   var INFO_READ = /\/v1\/info$/;
-  function loadMintOnOne(w, sessionInfo) {
+  function loadMintOnOne(w, sessionInfo, within) {
     var mint = w && w.mint;
     if (!mint || mint._request !== FoxyWallet.nativeRequest) return w.loadMint();
     var label = newCircuitLabel();
+    var began = Date.now();
+    var allowed = Number(within) > 0 ? Number(within) : 30000;
+    var at = String(mint.mintUrl || '');
     var fromHere = 0;
     try { w.foxyLoadCached = 0; } catch (e0) { /* a wallet that takes no field: nothing to say */ }
     mint._request = function (o) {
@@ -1690,9 +1733,13 @@
         try { w.foxyLoadCached = fromHere; } catch (e1) { /* as above */ }
         return FoxyWallet.nativeRequest(o);
       }
-      return FoxyWallet.nativeRequest(Object.assign({}, o, { foxyCircuit: label })).then(function (r) {
-        if (shared) shareKeyBody(u, label);
-        return r;
+      var what = hostOf(at || u).split('/')[0] + '\u2019s ' + (info ? 'info' : /\/v1\/keysets/.test(path) ? 'keysets' : 'keys');
+      var left = Math.max(1, allowed - (Date.now() - began));
+      return askedAgain({ mintUrl: at, label: label }, what, function (via) {
+        return FoxyWallet.nativeRequest(Object.assign({}, o, { foxyCircuit: via.label }));
+      }, function () { return { mintUrl: at, label: newCircuitLabel() }; }, left).then(function (won) {
+        if (shared) shareKeyBody(u, won.w.label);
+        return won.got;
       });
     };
     var done = function () { mint._request = FoxyWallet.nativeRequest; };

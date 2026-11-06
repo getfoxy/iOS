@@ -87,7 +87,7 @@
   flTextOf(lines, view) {
     const head = 'Foxy ' + (view === 'bad' ? 'errors' : view === 'net' ? 'connection diary' : 'log') + ', '
       + lines.length + ' line' + (lines.length === 1 ? '' : 's')
-      + ', newest first. Tokens, invoices, payment requests, onion addresses and '
+      + ', newest first. Tokens, invoices, payment requests, Lightning addresses, onion addresses and '
       + 'keys are already removed; mint hosts and amounts are not.';
     // back to oldest first for reading: a log is a story
     const body = lines.slice().reverse()
@@ -161,7 +161,7 @@
       tone: 'ask',
       title: 'COPY YOUR LOGS?',
       reason: 'Everything Foxy has been doing goes to the clipboard, on this phone only, '
-        + 'for two minutes. Tokens, invoices and keys are already left out; mint hosts '
+        + 'for two minutes. Tokens, invoices, Lightning addresses and keys are already left out; mint hosts '
         + 'and amounts are not.',
       retry: 'COPY',
       go: () => {

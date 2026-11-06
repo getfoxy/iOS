@@ -425,10 +425,13 @@
      * in the gate), and with a network under it `up` is not offline at all. */
     const noNet = !!p && p.network === 'none';
     const making = offline && !noNet && (p.tor === 'connecting' || p.tor === 'stuck');
+    // their own choice, kept while Tor is up: said so, rather than offering a retry of nothing
+    const keptOffline = offline && !noNet && !!p.offlineChosen && p.tor === 'up';
     return {
       torBannerShown: secure || off || offline,
       torBannerText: offline
         ? (noNet ? 'OFFLINE - NO CONNECTION'
+           : keptOffline ? 'WORKING OFFLINE \u2014 TAP TO GO ONLINE'
            : making ? 'SECURING YOUR CONNECTION' : 'CANNOT CONNECT \u2014 TAP TO RETRY')
         : exposed ? 'IP Address Exposed'
         : viaOrbot ? 'Connected Via Orbot'
@@ -473,7 +476,13 @@
       : (p && p.network === 'none') ? 'offline'
       : (p && (p.tor === 'failed' || p.tor === 'stopped')) ? 'cannot'
       : 'securing';
-    const route = blank || (st === 'making' ? 'securing'
+    /* Tor up, and asked for new circuits because none it had carried anything since Foxy came back (the wallet's
+     * `torRebuilding`): the securing look, with words that say that, until a mint answers. */
+    const rebuilding = st === 'secure' && !!W && typeof W.torRebuilding === 'function' && !!W.torRebuilding();
+    /* And after those, no host answering anything, Tor's connections started again (`torRestarting`): its listener is
+     * down for a moment then, and the route may say it is being made; the same look, with those words. */
+    const restarting = (st === 'secure' || st === 'making') && !!W && typeof W.torRestarting === 'function' && !!W.torRestarting();
+    const route = blank || (rebuilding || restarting || st === 'making' ? 'securing'
       : st === 'noNet' ? 'offline'
       : (st === 'orbot' || st === 'vpn') ? 'tunnel'
       : st);
@@ -511,7 +520,7 @@
        * word or none, the sentence the word stood for. */
       shieldLabel: state === 'mint' ? 'CONNECTING TO ' + pendHost
         : state === 'mintDown' ? pendHost + ' IS NOT ANSWERING'
-        : state === 'securing' ? 'SECURING YOUR CONNECTION'
+        : state === 'securing' ? (restarting ? 'RESTARTING TOR CIRCUITS' : rebuilding ? 'BUILDING NEW TOR CIRCUITS' : 'SECURING YOUR CONNECTION')
         : state === 'secure' ? 'Connected Over Tor'
         /* a blank banner has no words of its own; the banner's for these, short of TAP TO RETRY, which is the
          * offline tap's promise and not this one's (`torBanner` opens the connection card here) */
@@ -573,7 +582,8 @@
        * the currency the till was opened with, and nowhere else. Behind the lock, as opening the till was. */
       amtCodeShown: tillHere && !!(this.tillRole && this.tillRole() === 'keeper'),
       amtCodePath: 'M3.5 3.5h7v7h-7zM13.5 3.5h7v7h-7zM3.5 13.5h7v7h-7zM13.5 13.5h3v3h-3zM20.5 13.5v3M17.5 20.5h3M13.5 20.5h1',
-      amtCodeTap: () => this.tillGate(() => this.tillPassShow(), 'To show a cashier code.'),
+      // (the list of codes: several cashiers at once, and the codes that have ended, 26p-till-tips.js)
+      amtCodeTap: () => this.tillGate(() => this.tillCodesShow(), 'To show the cashier codes.'),
       nextFur: (val > 0 && !sendOver)
         ? "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),"
           + "rgba(255,240,220,0) 62%),"
@@ -605,6 +615,7 @@
       // the till's own screen is named for what it is (either role)
       amountTitle: tillHere ? 'POS MODE'
         : s.flow === 'cardSuNoPin' ? 'NO PIN AMOUNT?'
+        : s.flow === 'tillTip' ? 'TIP'
         : (s.flow === 'cardSuTap' || (s.flow === 'cardLimit' && this._fcLimitTap && this.fcPacedNow && this.fcPacedNow())) ? 'MAX SPEND PER SECOND'
         : 'SET AMOUNT',
       amountSubtitle: s.flow === 'onchain'
@@ -623,8 +634,14 @@
         : s.flow === 'cardSuTap' ? 'What is the most this card should pay each second?'
         : s.flow === 'receive' ? 'How much to receive?'
         : s.flow === 'swap' ? 'How much to swap?'
+        // a contact's Cashu ID (26o-cashu-id.js)
+        : (s.flow === 'send' && s.recipientKind === 'cashuid') ? this.cidAmountQuestion()
+        // an exchange's account, from SEND > BANK ACCOUNT (26q-bank.js)
+        : (s.flow === 'send' && this.bankNow && this.bankNow()) ? this.bankAmountQuestion()
         // a till cap, from SETTINGS (26j-till-caps.js)
         : s.flow === 'tillCap' ? (this.tillCapQuestion ? this.tillCapQuestion() : 'How much?')
+        // the till's OTHER tip (26p-till-tips.js)
+        : s.flow === 'tillTip' ? 'How much is the tip?'
         : 'How much to send?',
       // a swap's rate, under the question, before anything is typed (26i-swap.js, `swapRateLine`)
       swapRateLine: s.flow === 'swap' && this.swapRateLine ? this.swapRateLine() : '',
@@ -644,24 +661,34 @@
        * limit at all, which is how one is removed (26f-flashcard.js). */
       /* And a swap's: the whole of the balance it leaves (26i-swap.js). */
       /* And a card's set-up's two amounts: SKIP, for none (26j-card-wheel.js, `fcSuSkip`). */
-      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit' || s.flow === 'swap' || s.flow === 'tillCap' || s.flow === 'cardSuNoPin' || s.flow === 'cardSuTap',
+      /* And BANK ACCOUNT's, where it went straight to the address kept: CHANGE EXCHANGE, back to the list (26q-bank.js). */
+      amtAlt: s.flow === 'cardWd' || s.flow === 'cardLimit' || s.flow === 'swap' || s.flow === 'tillCap' || s.flow === 'cardSuNoPin' || s.flow === 'cardSuTap'
+        || (this.bankShortHere && this.bankShortHere()),
       // (a card of software 1.23: all of the currency chosen, `fcUnit`)
       amtAltLabel: s.flow === 'cardWd' ? 'ALL OF IT (' + this.fcPrice(s.fc ? (this.fcHeld ? this.fcHeld(s.fc, this.fcUnit()) : s.fc.balance || 0) : 0, this.fcUnit ? this.fcUnit() : s.fc && s.fc.unit) + ')'
         : s.flow === 'cardLimit' ? 'NO LIMIT'
         : (s.flow === 'cardSuNoPin' || s.flow === 'cardSuTap') ? 'SKIP'
         : s.flow === 'swap' ? 'ALL OF IT (' + this.unitFigure(this.swapHave ? this.swapHave(this.swapUnits().from) : this.unitBalance(this.swapUnits().from), this.swapUnits().from) + ')'
-        : s.flow === 'tillCap' && this.tillCapDefaultLabel ? this.tillCapDefaultLabel() : '',
+        : s.flow === 'tillCap' && this.tillCapDefaultLabel ? this.tillCapDefaultLabel()
+        : (this.bankShortHere && this.bankShortHere()) ? 'CHANGE EXCHANGE' : '',
       amtAltTap: () => {
         if (this.state.flow === 'cardWd') this.fcWithdrawPin(0);
         else if (this.state.flow === 'cardLimit') this.fcLimitConfirm(0);
         else if (this.state.flow === 'cardSuNoPin' || this.state.flow === 'cardSuTap') this.fcSuSkip();
         else if (this.state.flow === 'swap') this.swapNext(true);
         else if (this.state.flow === 'tillCap') this.tillCapSet(0);
+        else if ((this.bankShortHere && this.bankShortHere())) this.bankChange();
       },
       next: () => {
         // a card's amount: the screens that asked for it take it from here (26f-flashcard.js)
         if (/^card/.test(String(this.state.flow))) { this.fcAmountNext(); return; }
         if (this.state.flow === 'transfer') { this.trNext(); return; }
+        // the till's OTHER tip, in cents (26p-till-tips.js)
+        if (this.state.flow === 'tillTip') {
+          if (val <= 0) { this.toast('Type an amount first.', true); return; }
+          this.tillTipOtherSet(this.centsTyped());
+          return;
+        }
         // a till cap, kept in sats (26j-till-caps.js)
         if (this.state.flow === 'tillCap') {
           if (val <= 0) { this.toast('Type an amount first.', true); return; }
@@ -677,6 +704,12 @@
          * which is the same wall the split screen's minimum was. */
         if (sendOver) return;
         if (val <= 0) { this.toast('Type an amount first.', true); return; }
+        // a contact's Cashu ID: its own confirmation (26o-cashu-id.js)
+        if (this.state.flow === 'send' && this.state.recipientKind === 'cashuid') {
+          if (this.keypadWallet) this.keypadWallet();
+          this.cidNext();
+          return;
+        }
         /* One wallet holding one asset, so there is nothing to pick: a send
          * goes straight to its confirmation, anything else opens a Lightning
          * invoice.
@@ -754,7 +787,8 @@
       // paste button below it is 56px plus a 10px gap, so the padding absorbs
       // the difference when it is not there
       // NEXT sits where SHARE does on the receive invoice screen
-      amtPad: s.flow !== 'send' ? '7px 28px 26px' : '7px 28px 70px',
+      // (CHANGE EXCHANGE takes the room under NEXT that a send leaves: 26q-bank.js)
+      amtPad: s.flow !== 'send' ? '7px 28px 26px' : (this.bankShortHere && this.bankShortHere()) ? '7px 28px 4px' : '7px 28px 70px',
       pasteVis: parseFloat(s.amount) > 0 ? 'hidden' : 'visible',
       pastePE: parseFloat(s.amount) > 0 ? 'none' : 'auto',
       ecashInk: !(parseFloat(s.amount) > 0) ? 'var(--ink)' : 'rgba(var(--ink-rgb),.3)',

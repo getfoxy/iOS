@@ -258,6 +258,11 @@
       var tu = unitOf(opts.unit) || 'sat';
       var tuNo = tu === 'sat' ? null : unitRefusal(tu, from);
       if (tuNo) return Promise.reject(tuNo);
+      /* `o.toUnit`: what the far mint issues, sats as always or dollars at a mint that issues them (a payment brought home
+       * from a mint this phone does not use, 08e-cashu-id.js `bringHome`): the far mint's invoice is then asked for in its
+       * cents, `want` and `moving` are cents there, and the source melts its own unit into it at its own price. */
+      var du = unitOf(opts.toUnit) || 'sat';
+      if (du !== 'sat' && du !== 'usd') return Promise.reject(new Error('Foxy does not bring money home in ' + unitName(du) + '.'));
       if (!to) return Promise.reject(new Error('No mint is connected to move it to.'));
       if (!from) return Promise.reject(new Error('No mint to move it from.'));
       if (from === to) return Promise.reject(new Error('That is the mint it is already at.'));
@@ -265,7 +270,7 @@
       if (!window.CashuTS) return Promise.reject(new Error('cashu-ts.js did not load.'));
 
       var src = newWallet(from, tu === 'sat' ? undefined : { unit: tu });
-      var dest = newWallet(to);
+      var dest = newWallet(to, du === 'sat' ? undefined : { unit: du });
       /* The source's fee quote is of the far mint's invoice, so it cannot be asked first; but its circuit can be built
        * while the invoice is made, and that was most of its two seconds. Opened now (`quoteRoad`), beside the two loads,
        * and the quote goes on it the moment the invoice lands. */
@@ -289,6 +294,11 @@
             var sets = [];
             try { sets = (src.keyChain && src.keyChain.getKeysets) ? src.keyChain.getKeysets() : []; } catch (eK) { sets = []; }
             if (!sets || !sets.length) throw new Error(hostOf(from) + ' does not issue ' + unitName(tu) + ' ecash.');
+          }
+          if (du !== 'sat') {
+            var dsets = [];
+            try { dsets = (dest.keyChain && dest.keyChain.getKeysets) ? dest.keyChain.getKeysets() : []; } catch (eD) { dsets = []; }
+            if (!dsets || !dsets.some(function (k) { return k && k.active !== false; })) throw new Error(hostOf(to) + ' does not issue ' + unitName(du) + ' ecash.');
           }
           if (opts.land) {
             /* Padded on the generous side, and deliberately.
@@ -355,7 +365,7 @@
              * only as FEE on the crossing card, and less is a move that lands
              * short of the payment it was for. */
             // (in dollars the quote's amount is the source's cents for it, its price: nothing to compare)
-            if (tu === 'sat' && satsOf(xq.amount) !== issue) {
+            if (tu === 'sat' && du === 'sat' && satsOf(xq.amount) !== issue) {
               console.warn('[foxy] transfer: asked', hostOf(to), 'for', issue, 'and its invoice is for', satsOf(xq.amount));
               throw new Error(hostOf(to) + ' gave an invoice for ' + satsOf(xq.amount) + ' sats, not the ' + issue
                 + ' asked for. Nothing was moved.');
@@ -373,13 +383,14 @@
             if (mn && mn.ok) owed = mn.need;
             if (mn && !mn.ok) {
               owed = mn.need;
-              /** @type {Error & { foxyFits?: number, foxyHave?: number }} */
+              /** @type {Error & { foxyFits?: number, foxyHave?: number, foxyNeed?: number }} */
               var short = new Error(tu === 'sat'
                 ? 'Moving ' + want + ' sats costs up to ' + owed + ' with the mint\u2019s fees, and you hold ' + have + ' at ' + hostOf(from) + '.'
                 : 'Moving ' + want + ' sats costs up to ' + moneyWords(owed, tu) + ' with the mint\u2019s fees, and you hold '
                   + moneyWords(have, tu) + ' at ' + hostOf(from) + '.');
               // (what would fit is worked out in sats; in dollars the screen asks again with a smaller figure)
-              if (tu !== 'sat') { short.foxyFits = 0; short.foxyHave = have; throw short; }
+              // (and what it would take, so a payment brought home can ask for less in proportion: `carryPlan`)
+              if (tu !== 'sat' || du !== 'sat') { short.foxyFits = 0; short.foxyHave = have; short.foxyNeed = owed; throw short; }
               /* And what would fit, so the screen can offer it.
                *
                * The fee is only knowable by asking, and it is asked after the
@@ -411,8 +422,10 @@
               try { msatIn = Number(FoxyWallet.msatOf(mq.request)) || 0; } catch (eM) { msatIn = 0; }
               var rq = rateFrom(satsOf(xq.amount), msatIn || issue * 1000);
               return {
-                from: from, to: to, unit: tu,
-                balance: have, gross: owed, moving: issue, net: want, padSats: pad, inPadSats: 0,
+                from: from, to: to, unit: tu, toUnit: du === 'sat' ? undefined : du,
+                balance: have, gross: owed, moving: issue, net: want, padSats: pad,
+                // the source's fee for spending pieces it has not issued yet, in its own unit, as for sats below
+                inPadSats: opts.quoteOnly ? (feeForInputs(src, 32) ? feeForInputs(src, 32) + 1 : 0) : 0,
                 // the fee in sats is not this pile's to say: the cents are (`feeUnit`)
                 feeSats: 0, feeMax: 0, feeMin: 0, feeUnit: owed - satsOf(xq.amount),
                 amountUnit: satsOf(xq.amount), reserve: reserve, margin: 0,
@@ -421,7 +434,7 @@
               };
             }
             return {
-              from: from, to: to,
+              from: from, to: to, toUnit: du === 'sat' ? undefined : du,
               balance: have, gross: owed,
               /* `moving` is what the far mint issues and `net` what the person
                * asked for. They are the same number on an ordinary transfer and
@@ -438,8 +451,10 @@
                * fee for spending them is the payer's, like every other. */
               inPadSats: opts.quoteOnly
                 ? (feeForInputs(src, 32) ? feeForInputs(src, 32) + 1 : 0) : 0,
-              feeSats: owed - want,
-              feeMax: owed - want,
+              // (into dollars at the far mint, the fee is what leaves less what the invoice itself costs here)
+              feeSats: du === 'sat' ? owed - want : owed - satsOf(xq.amount),
+              feeMax: du === 'sat' ? owed - want : owed - satsOf(xq.amount),
+              amountUnit: du === 'sat' ? undefined : satsOf(xq.amount),
               feeMin: 0,
               reserve: reserve,
               margin: 0,
@@ -483,6 +498,9 @@
        *
        * Added to the others, not written over them (`moveNotes`). */
       var quoteId = plan.mintQuote.quote;
+      /* What the far mint issues (`plan.toUnit`): sats, or dollars at a mint that issues them, claimed by its dollar wallet
+       * and written on the note so that `finishMove` claims it the same way. */
+      var landUnit = unitOf(plan.toUnit) || 'sat';
       liveMove[quoteId] = true;
       var notLive = function () { delete liveMove[quoteId]; };
       try { putMoveNote({
@@ -490,9 +508,10 @@
         quote: quoteId,
         // the invoice the melt pays: a melt given back takes its note with it (`dropMoveNoteFor`)
         request: plan.mintQuote.request,
-        amount: plan.moving,
+        amount: quoteAmountOf(plan.mintQuote) || plan.moving,
         // the quote's NUT-20 key, written before the melt like the quote itself
         lock: plan.mintQuote.foxyLock || null,
+        unit: landUnit === 'sat' ? undefined : landUnit,
         at: Date.now(),
       }, true); } catch (eNote) { notLive(); return Promise.reject(eNote); }
 
@@ -509,7 +528,12 @@
        * Any other refusal is the claim's answer, as before. */
       var claimTimes = { first: true, polls: 0, ms: 0 };
       var pollMs = Number(FoxyWallet._claimPollMs) > 0 ? Number(FoxyWallet._claimPollMs) : 1000;
-      var claimOnce = function () { return FoxyWallet.claimQuote(quoteId, plan.moving, plan.mintQuote.foxyLock); };
+      // what the far mint's quote is for, which is what it mints (`mintAmountOf`): the figure asked, unless its quote said otherwise
+      var claimOnce = function () {
+        var amt = quoteAmountOf(plan.mintQuote) || plan.moving;
+        if (landUnit === 'sat') return FoxyWallet.claimQuote(quoteId, amt, plan.mintQuote.foxyLock);
+        return unitWalletOn(need(), landUnit).then(function (uw) { return FoxyWallet.claimQuote(quoteId, amt, plan.mintQuote.foxyLock, { w: uw }); });
+      };
       var claimWhenPaid = function () {
         var began = Date.now();
         return claimOnce().catch(function (e) {
@@ -625,7 +649,8 @@
             var left = sumProofs(load(K.proofs + '.' + plan.from, []));
             if (left) console.log('[foxy]', left, 'sats change left at', hostOf(plan.from));
             return {
-              sats: sats, feeSats: plan.feeSats, mint: plan.to,
+              // (cents, where the far mint issued dollars: `unit`)
+              sats: sats, feeSats: plan.feeSats, mint: plan.to, unit: landUnit,
               name: w && w.name, leftBehind: left, from: plan.from,
             };
           });
@@ -656,9 +681,19 @@
                   net: Math.round(Number(terms.net) || 0), ask: Math.round(Number(terms.ask) || 0),
                   at: Date.now(), state: 'asked' };
       try { putCarryJob(job, true); } catch (e) { return Promise.reject(e); }
-      return FoxyWallet.connect(terms.from, null, null, { remember: false }).then(function () { return job.id; }, function (e) {
-        dropCarryJob(job.id);
-        throw e;
+      /* A lease on the visit (`visitTake`): once any background visit is home, and none sets out while the phone is
+       * at their mint for this tap. An earlier tap's is this one's to replace: there is one tap screen, and its
+       * asking has been superseded (26d-tap.js `mine`). */
+      tapVisitEnd('');
+      return visitTake('tap', { lease: true, mint: terms.from, job: job.id }).then(function (v) {
+        return FoxyWallet.connect(terms.from, null, null, { remember: false }).then(function () {
+          v.going = false;
+          return job.id;
+        }, function (e) {
+          visitEnd(v);
+          dropCarryJob(job.id);
+          throw e;
+        });
       });
     },
 
@@ -667,12 +702,13 @@
     carryEnd: function (id, stay) {
       var job = carryJob(id);
       if (job && job.state === 'asked') dropCarryJob(id);
-      // `stay`: another asking has taken the phone where it needs to be
-      if (stay) return Promise.resolve();
-      return carryGoHome(job ? job.home : '');
+      /* `stay`: another asking has taken the phone where it needs to be. And so has one whose lease is not this
+       * job's: going home then took the phone off the mint the newer tap's request names. */
+      var other = !!(visitAway && visitAway.lease && visitAway.job !== id);
+      if (stay || other) return Promise.resolve();
+      var mine = visitAway && visitAway.lease ? visitAway : null;
+      return carryGoHome(job ? job.home : '').then(function () { visitEnd(mine); });
     },
-
-    carryJobsOpen: function () { return carryJobs(); },
 
     /* Bring one home. `plan` is the way home quoted when it was asked for;
      * without it a fresh one is quoted. `opts.less`: the person has agreed to
@@ -693,6 +729,36 @@
      *
      * The phone is at its own mint when this resolves, whatever happened. */
     carryHome: function (id, plan, onStage, opts) {
+      /* A visit (`visitTake`), and the tap's lease handed over to it when this is that tap's walk home. */
+      // (one already being brought home is said to be, at once, rather than after its walk)
+      var was = carryJob(id);
+      if (was && carryBusy[id]) return Promise.resolve({ state: 'busy', job: was });
+      tapVisitEnd(id);
+      return visitTake('carry').then(function (v) {
+        var walked = FoxyWallet._carryHomeNow(id, plan, onStage, opts);
+        walked.then(function () { visitEnd(v); }, function () { visitEnd(v); });
+        return walked;
+      });
+    },
+
+    carryJobsOpen: function () { return carryJobs(); },
+
+    /* Send one back to the payer: the person's own choice, where bringing it
+     * home would cost more than was paid for or cannot be done. A visit, as
+     * bringing it home is. */
+    carryRefund: function (id) {
+      var was = carryJob(id);
+      if (was && carryBusy[id]) return Promise.resolve({ state: 'busy', job: was });
+      tapVisitEnd(id);
+      return visitTake('carry').then(function (v) {
+        var walked = FoxyWallet._carryRefundNow(id);
+        walked.then(function () { visitEnd(v); }, function () { visitEnd(v); });
+        return walked;
+      });
+    },
+
+    // `carryHome` inside its visit
+    _carryHomeNow: function (id, plan, onStage, opts) {
       var job = carryJob(id);
       if (!job) return Promise.resolve({ state: 'none' });
       /* Only a payment is carried, and the one that was paid.
@@ -728,9 +794,8 @@
       return walk;
     },
 
-    /* Send one back to the payer: the person's own choice, where bringing it
-     * home would cost more than was paid for or cannot be done. */
-    carryRefund: function (id) {
+    // `carryRefund` inside its visit
+    _carryRefundNow: function (id) {
       var job = carryJob(id);
       if (!job) return Promise.resolve({ state: 'none' });
       if (carryBusy[id]) return Promise.resolve({ state: 'busy', job: job });
@@ -758,40 +823,54 @@
       if (carrying) return carrying;
       var jobs = carryJobs();
       if (!jobs.length || !wallet || !routeOpen()) return Promise.resolve([]);
-      var home = canonicalMint(load(K.mint, '') || mintUrl || '');
-      var looked = false;
-      var run = jobs.reduce(function (chain, j) {
-        return chain.then(function (out) {
-          var job = carryJob(j.id);
-          if (!job || carryBusy[job.id]) return out;
-          looked = true;
-          carryBusy[job.id] = true;
-          var done = function () { delete carryBusy[job.id]; };
-          var step = carryStep(job);
-          step.then(done, done);
-          return step.then(function (r) {
-            if (r) {
-              out.push(r);
-              if (r.state !== 'asked' && r.state !== 'arrived' && typeof FoxyWallet._onCarry === 'function') {
-                try { FoxyWallet._onCarry(r); } catch (x) { console.warn('[foxy] carry watcher:', x && x.message); }
+      /* A visit (`visitTake`), when a job may take the phone to a payer's mint: it waits for any other visit to be
+       * over, and holds what a person starts until it is home. A pass whose jobs are all only noted, or all in
+       * somebody else's hands, goes nowhere and holds nothing. */
+      var walks = jobs.some(function (j) { return !carryBusy[j.id] && j.state !== 'asked' && j.state !== 'arrived'; });
+      // the pass itself, once any other visit is over: the jobs as they are by then
+      var carryPass = function (held) {
+        var home = canonicalMint(load(K.mint, '') || mintUrl || '');
+        var looked = false;
+        return carryJobs().reduce(function (chain, j) {
+          return chain.then(function (out) {
+            var job = carryJob(j.id);
+            if (!job || carryBusy[job.id]) return out;
+            // (with no visit taken, none is made: a job freed since the pass began waits for the next)
+            if (!held && job.state !== 'asked' && job.state !== 'arrived') return out;
+            looked = true;
+            carryBusy[job.id] = true;
+            var done = function () { delete carryBusy[job.id]; };
+            var step = carryStep(job);
+            step.then(done, done);
+            return step.then(function (r) {
+              if (r) {
+                out.push(r);
+                if (r.state !== 'asked' && r.state !== 'arrived' && typeof FoxyWallet._onCarry === 'function') {
+                  try { FoxyWallet._onCarry(r); } catch (x) { console.warn('[foxy] carry watcher:', x && x.message); }
+                }
               }
-            }
-            return out;
-          }, function (e) {
-            console.warn('[foxy] a payment to bring home was not looked at:', e && e.message);
-            return out;
+              return out;
+            }, function (e) {
+              console.warn('[foxy] a payment to bring home was not looked at:', e && e.message);
+              return out;
+            });
           });
+        }, Promise.resolve([])).then(function (out) {
+          /* Home again, if this pass took the phone anywhere. With every job
+           * in somebody else's hands it took it nowhere, and going "home" then
+           * pulled the wallet off the payer's mint under the walk that was on
+           * it: the melt was made there and written down as this mint's
+           * (`logTx` names the mint the wallet is on), so two mints' entries
+           * each stopped adding up (tools/live/offline-cross-scenarios.js
+           * `rev-po` on a loaded machine). */
+          if (!looked) return out;
+          return carryGoHome(home).then(function () { return out; });
         });
-      }, Promise.resolve([])).then(function (out) {
-        /* Home again, if this pass took the phone anywhere. With every job
-         * in somebody else's hands it took it nowhere, and going "home" then
-         * pulled the wallet off the payer's mint under the walk that was on
-         * it: the melt was made there and written down as this mint's
-         * (`logTx` names the mint the wallet is on), so two mints' entries
-         * each stopped adding up (tools/live/offline-cross-scenarios.js
-         * `rev-po` on a loaded machine). */
-        if (!looked) return out;
-        return carryGoHome(home).then(function () { return out; });
+      };
+      var run = (walks ? visitTake('carry') : Promise.resolve(null)).then(function (v) {
+        var passed = carryPass(!!v);
+        passed.then(function () { visitEnd(v); }, function () { visitEnd(v); });
+        return passed;
       });
       carrying = run;
       var free = function () { carrying = null; };
@@ -869,9 +948,15 @@
                   });
                 }
                 /* Never paid, nothing held that could still pay it, and an
-                 * hour old: the melt it was written for did not happen. */
+                 * hour old: the melt it was written for did not happen.
+                 * Where the far mint names its invoice's expiry, not before
+                 * that either: a melt given back as UNPAID can still land
+                 * until the invoice expires (`sweepMelts` keeps the note for
+                 * it), and the note's key is the only way to claim it. */
                 var held = load(K.melting, []).length > 0;
-                if (state === 'UNPAID' && !held && Date.now() - (Number(m.at) || 0) > 3600000) {
+                var expiresMs = Number(q && q.expiry) > 0 ? Number(q.expiry) * 1000 : 0;
+                if (state === 'UNPAID' && !held && Date.now() - (Number(m.at) || 0) > 3600000
+                    && (!expiresMs || Date.now() > expiresMs)) {
                   dropMoveNote(m.quote);
                   console.log('[foxy] a crossing note whose invoice was never paid is dropped');
                 }

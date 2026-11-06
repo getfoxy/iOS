@@ -85,6 +85,24 @@ function page(o) {
            * pieces before it answers. */
           if (L.liar) {
             const lie = () => { L.log.push('M6 422 (a lie)'); reply(w, m.id, JSON.stringify({ v: 2, ok: false, code: 422, why: L.liar.why })); };
+            /* `half`: it redeems the largest piece alone, sends back half of what was paid out of it, locked to the payer's
+             * key for that payment, and keeps the rest of that piece; the other pieces it never touches. The refund comes
+             * over the link at once, or (`late`) is only kept, for the test to hand over as a code. */
+            if (L.liar.half) {
+              const j = JSON.parse(L.lastBody);
+              const big = j.proofs.slice().sort((a, b) => b.amount - a.amount)[0];
+              const paid = j.proofs.reduce((n, pr) => n + pr.amount, 0);
+              L.half = { big: big.amount, paid, back: Math.floor(paid / 2) };
+              const one = L.receiver.window.CashuTS.getEncodedToken({ mint: j.mint, proofs: [big], unit: 'sat' });
+              L.receiver.W.receiveToken(one)
+                .then(() => L.receiver.W.sendToken(L.half.back, { unit: 'sat', lockTo: j.changeTo }))
+                .then((made) => {
+                  L.half.token = made.token;
+                  lie();
+                  if (!L.liar.late) setTimeout(() => { L.log.push('M7 (half)'); L.payer.W._tapChange(made.token); }, 20);
+                }, (e) => { L.half.err = e.message; lie(); });
+              return null;
+            }
             if (!L.liar.steal) { setTimeout(lie, 5); return null; }
             const j = JSON.parse(L.lastBody);
             const token = L.receiver.window.CashuTS.getEncodedToken({ mint: j.mint, proofs: j.proofs, unit: 'sat' });
@@ -488,6 +506,67 @@ async function run() {
        JSON.stringify(got).slice(0, 80) + ' | ' + JSON.stringify({ refunded: row().refunded, taken: row().taken }));
     ok(t.payer.said.some((x) => x.state === 'refunded' && x.hash === hash && x.sats === paid),
        'and the payer is told how much of it came back', JSON.stringify(t.payer.said));
+  }
+
+  console.log('\nE. a refund for part of it (2026-11-04)');
+  /* A short refund used to end the wait as though it were the whole answer, and a late one struck every piece of the
+   * payment with no question asked: the pieces the receiver had not spent stayed theirs to redeem. Now the mint is
+   * asked which of the pieces are spent; those are struck, the rest come back, and the entry is what the receiver
+   * kept. */
+  {
+    const t = await pair();
+    t.L.liar = { why: 'No.', half: true };
+    const had = await t.payer.W.balanceSats();
+    const r = await t.pay(100, { req: { asks: false, lockTo: '' } });
+    await settle(900);
+    const h = t.L.half || {};
+    const kept = h.big - h.back;
+    const back = r.e && r.e.foxyRefunded;
+    ok(!r.made && !!back && back.short === true && back.partial === true && back.sats === h.back && back.recovered === h.paid - h.big && h.big >= h.back,
+       'a refund for half while the payer waits is kept, and is not the whole answer: the pieces they did not spend come back too',
+       r.why + ' | ' + JSON.stringify({ back, half: { big: h.big, paid: h.paid, back: h.back, err: h.err } }));
+    ok((await t.payer.W.balanceSats()) === had - kept && !t.payer.W.atRisk().length,
+       'the payer is down only what the receiver kept of the piece it spent, and nothing is left at risk',
+       (await t.payer.W.balanceSats()) + ' of ' + had + ', expected ' + (had - kept));
+    const row = history(t.payer).filter((e) => /partly returned/.test(String(e.memo || '')))[0] || {};
+    ok(row.state === 'success' && row.sats === kept && row.taken === true && row.refunded === true,
+       'its entry is what they kept: the piece they spent, less the refund', JSON.stringify({ sats: row.sats, state: row.state, memo: row.memo, taken: row.taken }));
+    const j = JSON.parse(t.L.lastBody);
+    const rest = j.proofs.filter((pr) => pr.amount !== h.big || pr === undefined);
+    const seen = t.rx.window.CashuTS.getEncodedToken({ mint: j.mint, proofs: rest.length ? rest : j.proofs, unit: 'sat' });
+    const late = await t.rx.W.receiveToken(seen).then(() => 'took it', (e) => 'refused: ' + e.message);
+    ok(/^refused/.test(late), 'and the pieces they did not spend are worth nothing to them now', late.slice(0, 90));
+  }
+  {
+    // the payer offline as it hears no; the half refund comes later, as a code, still with no route
+    const t = await pair({ refundWaitMs: 300 });
+    t.L.liar = { why: 'No.', half: true, late: true };
+    goOffline(t.payer);
+    const had = await t.payer.W.balanceSats();
+    const r = await t.pay(100, { req: { asks: false, lockTo: '', theirRoute: true } });
+    await settle(900);
+    const h = t.L.half || {};
+    ok(!r.made && r.e && r.e.foxyAtRisk && !r.e.foxyRefunded && t.payer.W.atRisk().length === 1 && !!h.token,
+       'offline, refused, nothing back in time: the payment is at risk', r.why + ' | ' + JSON.stringify(h.err || ''));
+    const got = await t.payer.W.receiveToken(h.token).then((x) => x, (e) => ({ why: e.message }));
+    await settle();
+    const risk = t.payer.W.atRisk();
+    ok(!got.why && risk.length === 1 && risk[0].sats === h.paid,
+       'a refund for half, scanned with no route, strikes nothing: the mint has not been asked which pieces were spent',
+       JSON.stringify(got).slice(0, 80) + ' | ' + JSON.stringify(risk.map((g) => g.sats)));
+    goOnline(t.payer);
+    await t.payer.W.connect(MINT, null, null, { remember: true });
+    await t.payer.W.claimUnclaimed();
+    await t.payer.W.settleAtRisk();
+    await settle(600);
+    const kept = h.big - h.back;
+    ok(!t.payer.W.atRisk().length && t.payer.W.balanceAt(MINT) === had - kept && t.payer.W.unclaimedSats() === 0,
+       'with a route the mint is asked: the piece they spent is struck, the rest are taken back, and the refund is spendable',
+       t.payer.W.balanceAt(MINT) + ' of ' + had + ', expected ' + (had - kept) + '; at risk ' + JSON.stringify(t.payer.W.atRisk().map((g) => g.sats)));
+    // the refund came as a code, so it has an entry of its own: the payment's is the piece they spent
+    const row = history(t.payer).filter((e) => /refused|taken/.test(String(e.memo || '')))[0] || {};
+    ok(row.sats === h.big && row.state === 'success' && row.taken === true,
+       'and the payment’s entry is the piece they spent, beside the refund’s own', JSON.stringify({ sats: row.sats, state: row.state, memo: row.memo }));
   }
 
   console.log(failed ? '\n' + failed + ' counter-refusal check(s) failed' : '\nall counter-refusal checks pass');

@@ -345,6 +345,21 @@
      * with the mint, and the phone keeps Tor on the network while it is. */
     /** @type {((on: boolean) => void) | null} */
     _putAway: null,
+    /* Foxy has left the screen: no question waiting to be asked again on a fresh circuit is (`askedAgain`, `statesOf`). */
+    _stopAskingAgain: function () {
+      torSilentAway();                        // the askings unanswered are counted from the return (`torSilentAsked`)
+      var held = askAgainStops.splice(0, askAgainStops.length);
+      held.forEach(function (letGo) { try { letGo(); } catch (e) {} });
+      return held.length;
+    },
+    /* Tor was asked for new circuits after askings unanswered since a return, and no mint has answered since
+     * (`torSilentAsked`): for the shield on the money card. */
+    torRebuilding: function () { return torSilent.until > Date.now(); },
+    /* And it went on unanswered after those, with no host answering anything: Tor's connections are being started
+     * again (network off and on), for the shield's words. */
+    torRestarting: function () { return torSilent.restarting && torSilent.until > Date.now(); },
+    // for the tests: the count of askings unanswered in a row since the return, and whether one is counted at all
+    _torSilent: function () { return { armed: torSilent.armed, count: torSilent.count }; },
     _tidying: false,
     /** @type {any} */
     _topUp: null,
@@ -523,6 +538,7 @@
         return msg;
       }
       var run = ask(o.foxyCircuit ? String(o.foxyCircuit) : '').then(function answered(text) {
+        torCarried();
         var s = String(text || '');
         var nl = s.indexOf('\n');
         var code = Number(s.slice(0, nl)) || 0;
@@ -577,6 +593,16 @@
           if (badKey) { console.warn('[foxy]', badKey); throw new Error(badKey); }
           // a mint's own description of itself, for the next wallet to ask
           if (keyUrl) rememberKeyBody(keyUrl, raw);
+          /* An answer about another quote than the one asked, or in another unit or amount: refused whole, before
+           * anything reads it (`quoteAnswerProblem`), and said once. */
+          var badQuote = o.foxyText ? '' : quoteAnswerProblem(o.method, o.endpoint, o.requestBody, parsed);
+          if (badQuote) {
+            console.warn('[foxy] ' + hostOf(String(o.endpoint || '')).split('/')[0] + ' answered about a quote other than the one asked ('
+              + badQuote + '); refused, and nothing was done with it');
+            var wrongQuote = /** @type {any} */ (new Error('The mint’s answer was not about the quote asked, so it was not used. Nothing was done.'));
+            wrongQuote.foxyQuoteRefused = true;
+            throw wrongQuote;
+          }
           return parsed;
         }
         /* The errors cashu-ts throws itself, not a plain Error.

@@ -85,8 +85,10 @@ async function snapshot(W) {
     W.balanceSats(),
     W.transactions(200),
   ]);
+  /* And the inputs of a swap whose answer may be lost (`holdInputs`): out of the balance with no entry until the mint
+   * says. A 5xx on a swap is such an answer since 2026-11-04, where it used to leave them in the pile. */
   const held = (W.pendingMelts() || [])
-    .reduce((n, e) => n + (Number(e.amount) || 0), 0);
+    .reduce((n, e) => n + (Number(e.amount) || 0), 0) + (W.heldSats ? Number(W.heldSats()) || 0 : 0);
   return { balance, log: log || [], held };
 }
 

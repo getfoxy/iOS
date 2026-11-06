@@ -29,7 +29,9 @@ import Foundation
 /// (`deliveryFor`, build/wallet/07-request-delivery.js).
 ///
 /// One at a time, made and ended on the main queue. The till's inboxes are
-/// the exception, up to four beside it (FoxyBridge+Till.swift).
+/// the exception, up to eight beside it (FoxyBridge+Till.swift), and the Cashu
+/// ID's (FoxyBridge+CashuID.swift), whose key is derived from the words on
+/// purpose: it is a name the person gives out, and lasts as long as it.
 final class NostrInbox {
 
     /// The relays this inbox listens on, and which its `nprofile` names. The
@@ -46,14 +48,36 @@ final class NostrInbox {
     /// distinct wrap; the page decides whether it answers a request it knows.
     let onPayment: (_ body: String) -> Void
 
-    private let secret: [UInt8]
+    private var secret: [UInt8]
     /// Internal, not private, so that a test can wrap a payment for this inbox.
     let pubkey: [UInt8]
-    private var sockets: [(task: URLSessionWebSocketTask, session: URLSession)] = []
+    private var sockets: [NostrRelaySocket] = []
+    /// How a socket to one relay is opened, on the circuit named: over Tor (`Route.startSocket`), or a test's stand-in.
+    var connect: (URL, String) -> NostrRelaySocket? = { url, circuit in
+        Route.startSocket(url, circuit: circuit).map { URLSessionRelaySocket(task: $0.task, session: $0.session) }
+    }
+    /// The circuit every socket of this inbox leaves on; nil: each socket a circuit of its own (MintCircuit.label(nil)).
+    var circuit: String?
+    /// The relays `open` goes to; nil: `relays`, at most `mostRelays`. One contact's messages go to one relay
+    /// (CashuMsgListen.swift).
+    var listensOn: [String]?
+    /// Told once, on the main queue, when every relay that was listening has gone (a socket that dies is not opened
+    /// again in this listen).
+    var onDropped: (() -> Void)?
+    /// True when the last `open` found no route at all: no socket could be made to any relay (Tor not running), so
+    /// no relay was tried.
+    private(set) var noRoute = false
     private var seen = Set<String>()
     private var closed = false
     /// Internal, not private, so that a test can hand `took` a relay's message.
     let subscription: String
+    /// The inbox on many keys at once (`init(keys:)`, the messages between Cashu IDs): each key's private half by
+    /// its x-only public half in hex, and who is told of each rumor that opens, with the key it was addressed to. Empty
+    /// and nil for an inbox on one key.
+    private var keyed: [String: [UInt8]] = [:]
+    let onRumor: ((_ pubkey: String, _ rumor: NostrEvent.Event) -> Void)?
+    /// Every key this inbox asks the relays for, in order: one, or `keyed`'s.
+    private(set) var pubkeys: [[UInt8]] = []
     /// What the log calls this inbox. The request's keeps the words it always
     /// had; a till's says which, so four of them closing are not one line four times.
     let label: String
@@ -64,6 +88,20 @@ final class NostrInbox {
     /// as opened before the set is emptied.
     private let limit: Int
     private let seenCap: Int
+    /// How many pages one relay is asked for, back to `since` (1: one answer and no more).
+    let pages: Int
+    /// Per relay, by its place in `open`'s list: what the page being read has held,
+    /// the oldest `created_at` in it, the `until` it was asked with, and how many
+    /// pages have been asked. A test reads it; `took` writes it.
+    struct Paging: Equatable {
+        var count = 0
+        var oldest = Int.max
+        var until: Int? = nil
+        var asked = 1
+    }
+    private(set) var paging: [Int: Paging] = [:]
+    /// Where the next page's ask goes: the socket at that place, or a test's hand.
+    var sendAsk: ((_ relay: Int, _ ask: String) -> Void)?
 
     /// nil when a key could not be made, which means secp256k1 is unavailable
     /// and nothing here could work anyway.
@@ -78,6 +116,9 @@ final class NostrInbox {
         self.since = nil
         self.limit = 64
         self.seenCap = 128
+        self.pages = 1
+        self.onRumor = nil
+        self.pubkeys = [p]
     }
 
     /// An inbox on a key that was made earlier and kept: a cashier code's,
@@ -96,7 +137,11 @@ final class NostrInbox {
     /// arrive again after the set was emptied.
     ///
     /// nil for a secret that is not a secp256k1 key.
-    init?(secret: [UInt8], since: Int, label: String, onPayment: @escaping (_ body: String) -> Void) {
+    /// `pages`: how many answers of `limit` wraps one relay is asked for, each
+    /// reaching back from the oldest wrap the last one held (`until`), until one
+    /// holds fewer than `limit` or `since` is reached (the Cashu ID's, whose window
+    /// is thirty-two days: FoxyBridge+CashuID.swift).
+    init?(secret: [UInt8], since: Int, label: String, pages: Int = 1, onPayment: @escaping (_ body: String) -> Void) {
         guard secret.count == 32, let p = try? NostrCrypto.publicKey(of: secret) else { return nil }
         self.secret = secret
         self.pubkey = p
@@ -105,7 +150,42 @@ final class NostrInbox {
         self.label = label
         self.since = since
         self.limit = 500
-        self.seenCap = 2048
+        self.seenCap = 4096
+        self.pages = max(1, pages)
+        self.askSince = since
+        self.onRumor = nil
+        self.pubkeys = [p]
+    }
+
+    /// An inbox on many keys at once, in one REQ (`askMany`): the keys one contact's next messages may come to
+    /// (CashuMsg.swift, CashuMsgListen.swift: one such inbox a contact, never two contacts' keys in one), each used for
+    /// one message and never again. A wrap is opened by the key its
+    /// `p` tag names and by no other, and `onRumor` is told the rumor and that key; nothing reaches `onPayment`. One
+    /// answer of `limit` per filter, no pages: a key used once holds one message. nil when there is no key or one is
+    /// not a secp256k1 key.
+    init?(keys: [[UInt8]], since: Int, label: String, onRumor: @escaping (_ pubkey: String, _ rumor: NostrEvent.Event) -> Void) {
+        guard !keys.isEmpty else { return nil }
+        var map = [String: [UInt8]]()
+        var order = [[UInt8]]()
+        for k in keys {
+            guard k.count == 32, let p = try? NostrCrypto.publicKey(of: k) else { return nil }
+            let name = NostrEvent.hex(p)
+            if map[name] == nil { order.append(p) }
+            map[name] = k
+        }
+        self.secret = keys[0]
+        self.pubkey = order[0]
+        self.onPayment = { _ in }
+        self.onRumor = onRumor
+        self.keyed = map
+        self.pubkeys = order
+        self.subscription = NostrEvent.hex((try? NostrCrypto.newKey())?.prefix(8).map { $0 } ?? [0, 1, 2, 3])
+        self.label = label
+        self.since = since
+        self.limit = 500
+        self.seenCap = 4096
+        self.pages = 1
+        self.askSince = since
     }
 
     /// What the payment request names: this inbox's key and its relays.
@@ -120,7 +200,7 @@ final class NostrInbox {
     func open(_ done: @escaping (Bool) -> Void) {
         dispatchPrecondition(condition: .onQueue(.main))
         guard !closed else { done(false); return }
-        let urls = NostrDelivery.relays(Array(Self.relays.prefix(Self.mostRelays)))
+        let urls = NostrDelivery.relays(Array((listensOn ?? Self.relays).prefix(Self.mostRelays)))
         guard !urls.isEmpty else { done(false); return }
 
         /* Only gift wraps, and only ones addressed to this key.
@@ -142,11 +222,15 @@ final class NostrInbox {
          * proofs it has seen and takes each once (`_tillArrived`). */
         let backdating = 172_800                            // NIP-59's two days
         let since = self.since ?? (Int(Date().timeIntervalSince1970) - backdating - 3600)
-        let filter = "{\"kinds\":[1059],\"#p\":[\"\(NostrEvent.hex(pubkey))\"],\"since\":\(since),\"limit\":\(limit)}"
-        let ask = "[\"REQ\",\"\(subscription)\",\(filter)]"
+        let ask = keyed.isEmpty
+            ? Self.ask(subscription: subscription, pubkey: pubkey, since: since, until: nil, limit: limit)
+            : Self.askMany(subscription: subscription, pubkeys: pubkeys, since: since, limit: limit)
+        askSince = since
 
         var answered = false
         var left = urls.count
+        var made = 0
+        noRoute = false
         let report: (Bool) -> Void = { [weak self] ok in
             guard let self, !self.closed else { return }
             if ok, !answered { answered = true; done(true); return }
@@ -154,57 +238,173 @@ final class NostrInbox {
             if left == 0, !answered { answered = true; done(false) }
         }
 
-        for relay in urls {
-            guard let socket = Route.startSocket(relay, circuit: MintCircuit.label(nil)) else {
+        for (place, relay) in urls.enumerated() {
+            guard let socket = connect(relay, circuit ?? MintCircuit.label(nil)) else {
                 DispatchQueue.main.async { report(false) }
                 continue
             }
+            made += 1
             sockets.append(socket)
-            socket.task.send(.string(ask)) { [weak self] error in
+            paging[place] = Paging()
+            if sendAsk == nil {
+                sendAsk = { [weak self] at, text in
+                    guard let self, !self.closed, let open = self.relaySockets[at] else { return }
+                    open.sendText(text) { _ in }
+                }
+            }
+            relaySockets[place] = socket
+            socket.sendText(ask) { [weak self] error in
                 DispatchQueue.main.async {
                     guard let self, !self.closed else { return }
                     if let error {
-                        #if DEBUG
-                        print("[foxy] \(self.label): \(relay.host ?? "?") would not take the ask: \(error.localizedDescription)")
-                        #endif
+                        /* Given up for this listen, at once and once: the socket and
+                         * its session are let go, nothing is asked of it again, and
+                         * the other relays go on. A socket whose connection never
+                         * opened fails its first send; when Tor could not reach the
+                         * relay (nos.lol, whose host Tor's exits could not connect
+                         * to), that failure reads "bad URL" (`whyNot`). */
+                        print("[foxy] \(self.label): \(LogRedaction.host(relay.host)) \(Self.whyNot(error)); left for this listen")
+                        self.drop(socket, relay: place)
                         report(false)
                         return
                     }
-                    self.listen(on: socket)
+                    self.listen(on: socket, relay: place)
                     report(true)
                 }
             }
         }
+        if made == 0 { noRoute = true }
+    }
+
+    /// The REQ for gift wraps addressed to `pubkey`, from `since`, and up to
+    /// `until` for a page after the first.
+    static func ask(subscription: String, pubkey: [UInt8], since: Int, until: Int?, limit: Int) -> String {
+        let upTo = until.map { ",\"until\":\($0)" } ?? ""
+        let filter = "{\"kinds\":[1059],\"#p\":[\"\(NostrEvent.hex(pubkey))\"],\"since\":\(since)\(upTo),\"limit\":\(limit)}"
+        return "[\"REQ\",\"\(subscription)\",\(filter)]"
+    }
+
+    /// The REQ for gift wraps addressed to any of `pubkeys`, from `since`: one filter for each hundred keys
+    /// (CashuMsg.keysPerFilter), so that no relay is handed a filter longer than it takes.
+    ///
+    ///     ["REQ", <sub>, {"kinds":[1059],"#p":[<up to 100 hex>],"since":<s>,"limit":<n>}, …]
+    static func askMany(subscription: String, pubkeys: [[UInt8]], since: Int, limit: Int, perFilter: Int = 100) -> String {
+        var filters = [String]()
+        var at = 0
+        while at < pubkeys.count {
+            let slice = pubkeys[at..<min(at + max(1, perFilter), pubkeys.count)]
+            let keys = slice.map { "\"" + NostrEvent.hex($0) + "\"" }.joined(separator: ",")
+            filters.append("{\"kinds\":[1059],\"#p\":[\(keys)],\"since\":\(since),\"limit\":\(limit)}")
+            at += max(1, perFilter)
+        }
+        return "[\"REQ\",\"\(subscription)\"," + filters.joined(separator: ",") + "]"
+    }
+
+    private var askSince = 0
+    private var relaySockets: [Int: NostrRelaySocket] = [:]
+
+    /// How many relays this inbox still has a socket to. A test reads it.
+    var relaysListening: Int { sockets.count }
+
+    /// Let go of one relay's socket for the rest of this listen.
+    private func drop(_ socket: NostrRelaySocket, relay: Int) {
+        socket.end()
+        sockets.removeAll { $0 === socket }
+        if relaySockets[relay] === socket { relaySockets[relay] = nil }
+        paging[relay] = nil
+    }
+
+    /// Why a relay's socket failed, in words. URLSession reports a SOCKS
+    /// proxy's refusal to connect, which is what Tor answers when no exit
+    /// could reach the relay, as NSURLErrorBadURL: the address is fine, the
+    /// relay could not be reached through Tor (NostrInboxTests proves the
+    /// mapping against a proxy that refuses).
+    static func whyNot(_ error: Error) -> String {
+        let e = error as NSError
+        if e.domain == NSURLErrorDomain, e.code == NSURLErrorBadURL {
+            return "could not be reached through Tor (the proxy refused the connection)"
+        }
+        if e.domain == NSURLErrorDomain, e.code == NSURLErrorTimedOut {
+            return "did not answer through Tor in time"
+        }
+        return "failed: \(e.localizedDescription)"
+    }
+
+    /// The relay at `relay` said EOSE: when the page it just sent was full and
+    /// reached back no further than `since`, the next page is asked for, up to
+    /// before its oldest wrap (the same second once more, if a whole page sat in
+    /// it), at most `pages` in all. Returns the ask sent, for a test.
+    @discardableResult
+    func pageEnded(relay: Int) -> String? {
+        guard relay >= 0, var p = paging[relay] else { return nil }
+        defer { paging[relay] = p }
+        let full = p.count >= limit
+        let oldest = p.oldest
+        p.count = 0
+        p.oldest = Int.max
+        guard full, p.asked < pages, oldest != Int.max, oldest > askSince else { return nil }
+        // a page whose wraps all sat in one second is asked past it, or the same page comes back for ever
+        let until = (p.until.map { oldest >= $0 } ?? false) ? oldest - 1 : oldest
+        guard until > askSince else { return nil }
+        p.until = until
+        p.asked += 1
+        let next = Self.ask(subscription: subscription, pubkey: pubkey, since: askSince, until: until, limit: limit)
+        sendAsk?(relay, next)
+        return next
     }
 
     /// Read from one relay until it stops or this inbox closes.
-    private func listen(on socket: (task: URLSessionWebSocketTask, session: URLSession)) {
-        socket.task.receive { [weak self] result in
+    private func listen(on socket: NostrRelaySocket, relay: Int) {
+        socket.receiveText { [weak self] result in
             guard let self else { return }
-            guard case .success(let answer) = result else { return }   // a dead socket is simply done
-            let text: String
-            switch answer {
-            case .string(let s): text = s
-            case .data(let d): text = String(decoding: d, as: UTF8.self)
-            @unknown default: text = ""
+            guard case .success(let text) = result else {
+                // a dead socket is done, and let go: never opened again in this listen
+                DispatchQueue.main.async {
+                    guard !self.closed else { return }
+                    self.drop(socket, relay: relay)
+                    if self.sockets.isEmpty, let gone = self.onDropped { self.onDropped = nil; gone() }
+                }
+                return
             }
-            DispatchQueue.main.async { self.took(text) }
-            self.listen(on: socket)
+            DispatchQueue.main.async { self.took(text, relay: relay) }
+            self.listen(on: socket, relay: relay)
         }
     }
 
     /// One line from a relay. `["EVENT", <sub>, <event>]` is the only kind that
-    /// carries anything; everything else (EOSE, NOTICE, CLOSED) is ignored.
-    func took(_ text: String) {
+    /// carries anything; an EOSE for this subscription may ask for the next page
+    /// (`pageEnded`); everything else (NOTICE, CLOSED) is ignored. `relay`: the
+    /// relay's place in `open`'s list, -1 where no page is followed.
+    func took(_ text: String, relay: Int = -1) {
         dispatchPrecondition(condition: .onQueue(.main))
         guard !closed, text.utf8.count <= Self.largestPayment,
               let data = text.data(using: .utf8),
               let parts = (try? JSONSerialization.jsonObject(with: data)) as? [Any],
-              parts.count >= 3, (parts[0] as? String) == "EVENT",
-              (parts[1] as? String) == subscription,
+              parts.count >= 2, (parts[1] as? String) == subscription else { return }
+        /* A relay that closes this subscription (rate-limited:, auth-required:, restricted:) is not serving it: for
+         * an inbox whose holder asked to be told (`onDropped`, one contact's at one relay), that relay is let go as a
+         * dead socket would be, so the holder tries another. The others keep their sockets and the relays left. */
+        if (parts[0] as? String) == "CLOSED", onDropped != nil, relay >= 0, let socket = relaySockets[relay] {
+            print("[foxy] \(label): a relay closed the request; left for this listen")
+            drop(socket, relay: relay)
+            if sockets.isEmpty, let gone = onDropped { onDropped = nil; gone() }
+            return
+        }
+        if (parts[0] as? String) == "EOSE" {
+            if pages > 1 { pageEnded(relay: relay) }
+            return
+        }
+        guard parts.count >= 3, (parts[0] as? String) == "EVENT",
               let object = parts[2] as? [String: Any],
               let json = try? JSONSerialization.data(withJSONObject: object),
               let wrap = NostrEvent.parse(String(decoding: json, as: UTF8.self)) else { return }
+        // counted for the page whether or not it opens: the relay's limit counts every wrap it sends
+        if relay >= 0, pages > 1 {
+            var p = paging[relay] ?? Paging()
+            p.count += 1
+            p.oldest = min(p.oldest, wrap.createdAt)
+            paging[relay] = p
+        }
 
         // every relay sends the same wrap, and the payer sent it to all of them:
         // one that has opened is not opened again. An id is remembered only
@@ -213,7 +413,16 @@ final class NostrInbox {
         // cannot make the genuine one from every other relay drop as a copy.
         guard !wrap.id.isEmpty, !seen.contains(wrap.id) else { return }
 
-        guard let rumor = NostrEvent.unwrap(wrap, to: secret) else {
+        // an inbox on many keys opens a wrap only by the key it names
+        var key = secret
+        var addressed = NostrEvent.hex(pubkey)
+        if !keyed.isEmpty {
+            guard let p = wrap.tags.first(where: { $0.count >= 2 && $0[0] == "p" })?[1].lowercased(),
+                  let k = keyed[p] else { return }
+            key = k
+            addressed = p
+        }
+        guard let rumor = NostrEvent.unwrap(wrap, to: key) else {
             #if DEBUG
             print("[foxy] \(label): a wrap did not open, or did not check out")
             #endif
@@ -221,6 +430,11 @@ final class NostrInbox {
         }
         if seen.count >= seenCap { seen.removeAll() }
         seen.insert(wrap.id)
+        if let onRumor {
+            print("[foxy] \(label): a message arrived")
+            onRumor(addressed, rumor)
+            return
+        }
         print("[foxy] \(label): a payment arrived")
         onPayment(rumor.content)
     }
@@ -231,14 +445,46 @@ final class NostrInbox {
     func close() {
         guard !closed else { return }
         closed = true
-        for socket in sockets {
-            socket.task.cancel(with: .goingAway, reason: nil)
-            socket.session.invalidateAndCancel()
-        }
+        for socket in sockets { socket.end() }
         sockets.removeAll()
+        relaySockets.removeAll()
+        sendAsk = nil
+        onDropped = nil
         seen.removeAll()
+        for name in Array(keyed.keys) { NUT13.wipe(&keyed[name]!) }
+        keyed.removeAll()
+        NUT13.wipe(&secret)
         print("[foxy] \(label) closed")
     }
 
-    deinit { if !closed { sockets.forEach { $0.session.invalidateAndCancel() } } }
+    deinit { if !closed { sockets.forEach { $0.end() } } }
+}
+
+/// One relay's socket, as NostrInbox uses it: send a line, read a line, let go.
+protocol NostrRelaySocket: AnyObject {
+    func sendText(_ text: String, _ done: @escaping (Error?) -> Void)
+    func receiveText(_ done: @escaping (Swift.Result<String, Error>) -> Void)
+    func end()
+}
+
+/// The real one: a websocket over Tor and the session made for it alone.
+final class URLSessionRelaySocket: NostrRelaySocket {
+    let task: URLSessionWebSocketTask
+    let session: URLSession
+    init(task: URLSessionWebSocketTask, session: URLSession) { self.task = task; self.session = session }
+    func sendText(_ text: String, _ done: @escaping (Error?) -> Void) { task.send(.string(text), completionHandler: done) }
+    func receiveText(_ done: @escaping (Swift.Result<String, Error>) -> Void) {
+        task.receive { result in
+            switch result {
+            case .failure(let error): done(.failure(error))
+            case .success(.string(let s)): done(.success(s))
+            case .success(.data(let d)): done(.success(String(decoding: d, as: UTF8.self)))
+            case .success: done(.success(""))
+            }
+        }
+    }
+    func end() {
+        task.cancel(with: .goingAway, reason: nil)
+        session.invalidateAndCancel()
+    }
 }

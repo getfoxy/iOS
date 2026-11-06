@@ -300,7 +300,7 @@
     const W = window.FoxyWallet;
     return !!((W && W.proofLockDepth && W.proofLockDepth() > 0)
       || this._sendRun || this._watching || this._chasingChange
-      || this.state.nmBusy || this.state.reqBusy || this._swapRun || this._homeGoing);
+      || this.state.nmBusy || this.state.reqBusy || this.state.reqSwapping || this._swapRun || this._homeGoing);
   }
 
   /* Every mint switch a person starts asks here first. The wallet's own

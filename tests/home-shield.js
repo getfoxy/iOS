@@ -78,6 +78,10 @@ function mount() {
 // ---- the stand-in wallet: a route each check sets, and one balance or two -------------------------
 const MINT = 'https://mint.minibits.cash/Bitcoin';
 let route = {};
+// the wallet's `torRebuilding`: Tor asked for new circuits after askings unanswered since a return
+let rebuilding = false;
+// and its `torRestarting`: after those, no host answering anything, Tor's network switched off and on
+let restarting = false;
 const ROUTE = (over) => Object.assign({ tor: 'up', progress: 100, everUp: true, unprotected: false, offline: false,
   network: 'wifi', orbot: 'none', vpn: false, orbotKey: false }, over || {});
 function wallet(two) {
@@ -94,6 +98,8 @@ function wallet(two) {
     unitName: (u) => String(u).toUpperCase(),
     balances: () => [{ unit: 'sat', amount: 250000, mint: MINT }],
     privacy: () => route,
+    torRebuilding: () => rebuilding,
+    torRestarting: () => restarting,
     lastToken: () => null, clearLastToken() {}, tagsFor: () => ({}), tag() {},
     mintDown: () => null, quarantinedSats: () => 0, quarantinedUnknown: () => 0,
     tokensNotClaimed: () => Promise.resolve([]), amountOf: () => null, classify: () => 'unknown',
@@ -113,6 +119,17 @@ const STATES = [
     bg: 'var(--frost-chip)', ink: '#BFE3EC', mark: '', label: 'SECURING YOUR CONNECTION' },
   { name: 'SECURING, working offline while Tor is at it', route: ROUTE({ tor: 'connecting', progress: 0, offline: true }), state: 'securing',
     bg: 'var(--frost-chip)', ink: '#BFE3EC', mark: '', label: 'SECURING YOUR CONNECTION' },
+  // Tor up and carrying nothing since the return, and asked for new circuits: the ring turns, and says why
+  { name: 'SECURING, Tor up and building new circuits', route: ROUTE(), rebuilding: true, state: 'securing',
+    bg: 'var(--frost-chip)', ink: '#BFE3EC', mark: '', label: 'BUILDING NEW TOR CIRCUITS' },
+  // new circuits were not enough and no host answered: Tor's connections started again, and the words say that
+  { name: 'SECURING, Tor up and restarting its connections', route: ROUTE(), rebuilding: true, restarting: true, state: 'securing',
+    bg: 'var(--frost-chip)', ink: '#BFE3EC', mark: '', label: 'RESTARTING TOR CIRCUITS' },
+  // the wallet's flag says nothing over a route that is not up: Tor's own state first
+  { name: 'SECURING, Tor connecting, the restart flag left over', route: ROUTE({ tor: 'connecting', progress: 40, everUp: false }), rebuilding: true,
+    restarting: true, state: 'securing', bg: 'var(--frost-chip)', ink: '#BFE3EC', mark: '', label: 'SECURING YOUR CONNECTION' },
+  { name: 'SECURING, Tor connecting, the flag left over', route: ROUTE({ tor: 'connecting', progress: 40, everUp: false }), rebuilding: true,
+    state: 'securing', bg: 'var(--frost-chip)', ink: '#BFE3EC', mark: '', label: 'SECURING YOUR CONNECTION' },
   { name: 'OFFLINE, no network', route: ROUTE({ tor: 'connecting', progress: 0, offline: true, network: 'none' }), state: 'offline',
     bg: '#E6D8A8', ink: '#3A2F0B', mark: 'M6 18.5 18 5.5', label: 'OFFLINE - NO CONNECTION' },
   { name: 'CANNOT CONNECT', route: ROUTE({ tor: 'failed', progress: 0, offline: true }), state: 'cannot',
@@ -156,6 +173,8 @@ const STATES = [
   for (const two of [false, true]) {
     for (const s of STATES) {
       route = s.route;
+      rebuilding = !!s.rebuilding;
+      restarting = !!s.restarting;
       await home(two);
       const v = V();
       const at = s.name + (two ? ', two balances' : ', one balance');
@@ -172,6 +191,8 @@ const STATES = [
         at + ': no banner at the bottom of the screen saying it in words');
     }
   }
+  rebuilding = false;
+  restarting = false;
   // the banner made no claim while Tor connected; the shield is there all the same, so the corner never jumps
   route = ROUTE({ tor: 'connecting', progress: 40, everUp: false });
   await home(false);
@@ -425,7 +446,7 @@ const STATES = [
       'and is headed by the name alone, with no MINT under it and no chevron', fcBlock);
   }
 
-  // ---- 8. CARD at the top left of home, HOME at the top left of the card's screen, HISTORY first in each MENU; no pill, no snow ----
+  // ---- 8. CHAT at the top left of home (CARD was there), HOME at the top left of the card's screen, FOXY CARD then HISTORY in home's MENU; no pill, no snow ----
   {
     route = ROUTE();
     w.FoxyWallet = wallet(false);
@@ -435,24 +456,39 @@ const STATES = [
     const click = (el) => el.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
     const CARD_ICON = 'M4.6 5.5h14.8a2.1 2.1 0 0 1 2.1 2.1v8.8a2.1 2.1 0 0 1-2.1 2.1H4.6a2.1 2.1 0 0 1-2.1-2.1V7.6a2.1 2.1 0 0 1 2.1-2.1ZM2.5 10h19M6 15h4';
     const CLOCK = 'M12 7v5l3.5 2M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.5 8.5 0 0 0 12 3.5Z';
-    const cardBtn = q('[aria-label="Card"]');
-    ok(!!cardBtn && cardBtn.style.left === '22px' && cardBtn.style.top === '56px' && !!cardBtn.querySelector('path[d="' + CARD_ICON + '"]') && !q('[aria-label="History"]'),
-      'home: the round button at the top left is CARD, with the card drawing the menu had, and there is no HISTORY button there', cardBtn ? cardBtn.innerHTML : 'none');
+    const chatBtn = q('[data-chat-button]');
+    ok(!!chatBtn && chatBtn.style.left === '22px' && chatBtn.style.top === '56px' && !q('[aria-label="Card"]') && !q('[aria-label="History"]'),
+      'home: the round button at the top left is CHAT (26p-cashu-msg.js), and there is no CARD or HISTORY button there', chatBtn ? chatBtn.innerHTML : 'none');
     const went = [];
     const realGo = A.goFlashcard;
     A.goFlashcard = function () { went.push([...arguments]); };
-    click(cardBtn);
-    A.goFlashcard = realGo;
-    ok(went.length === 1 && went[0].length === 0, 'CARD opens the card’s screen as a card’s address does (`goFlashcard`, which asks for the tap)', JSON.stringify(went));
     const v = V();
-    ok(v.menuItems[0].label === 'HISTORY' && v.menuItems[0].path === CLOCK && !v.menuItems.some((m) => m.label === 'FLASHCARD'),
-      'home’s MENU starts with HISTORY, with the clock, and has no FLASHCARD row', v.menuItems.map((m) => m.label).join());
-    ok(v.menuItems[0].ringInk === v.histRingInk && v.menuItems[0].ring === v.histRing && (v.menuRing === v.histRing || v.menuRing === 'foxyRing 1.15s linear infinite'),
+    const fcRow = v.menuItems[1], histRow = v.menuItems.find((m) => m.label === 'HISTORY');
+    fcRow.tap();
+    A.goFlashcard = realGo;
+    ok(v.menuItems[0].label === 'WALLET' && fcRow.label === 'FOXY CARD' && fcRow.path === CARD_ICON && went.length === 1 && went[0].length === 0,
+      'FOXY CARD, the first row of WALLET in home’s MENU with the card drawing, opens the card’s screen as a card’s address does (`goFlashcard`, which asks for the tap)', JSON.stringify(went));
+    ok(!!histRow && histRow.path === CLOCK && !v.menuItems.some((m) => m.label === 'FLASHCARD'),
+      'HISTORY, with the clock, and no FLASHCARD row', v.menuItems.map((m) => m.label).join());
+    ok(histRow.ringInk === v.histRingInk && histRow.ring === v.histRing && (v.menuRing === v.histRing || v.menuRing === 'foxyRing 1.15s linear infinite'),
       'and HISTORY carries the ring the history button had, as does the menu button where the backup’s ring is not on it');
+    /* The ring points at history, and history shows one mint's rows: a token waiting to be redeemed at another mint is not
+     * in the list it points at, so it does not turn the ring. */
+    const realWatched = w.FoxyWallet.watchedTokens;
+    w.FoxyWallet.watchedTokens = () => [{ hash: 'a', mint: 'https://other.example.com', sats: 21, unit: 'sat', amount: 21 }];
+    A.setState({ menuTick: Date.now() }); await settle();
+    ok(V().histRingInk === 'transparent' && V().histRing === 'none', 'a token watched at another mint leaves the history ring still', V().histRingInk);
+    w.FoxyWallet.watchedTokens = () => [{ hash: 'b', mint: MINT + '/', sats: 21, unit: 'sat', amount: 21 }];
+    A.setState({ menuTick: Date.now() + 1 }); await settle();
+    ok(V().histRingInk === '#F7931A', 'and one watched at this mint (written with a trailing slash) turns it amber', V().histRingInk);
+    w.FoxyWallet.watchedTokens = realWatched;
+    A.setState({ menuTick: Date.now() + 2 }); await settle();
     A.setState({ open0: true });
     await settle();
-    const firstRow = [...w.document.querySelectorAll('div')].find((d) => d.style.height === '60px' && d.style.borderRadius === '18px');
-    ok(!!firstRow && /HISTORY/.test(firstRow.textContent), 'drawn as the first row of the drawer', firstRow ? firstRow.textContent : 'none');
+    const drawerRows = [...w.document.querySelectorAll('div')].filter((d) => d.style.height === '60px' && d.style.borderRadius === '18px');
+    const firstRow = drawerRows.find((d) => d.textContent.trim() === 'HISTORY');
+    ok(/WALLET/.test((drawerRows[0] || {}).textContent || '') && /FOXY CARD/.test((drawerRows[1] || {}).textContent || '') && !!firstRow,
+      'drawn in the drawer under WALLET and FOXY CARD', firstRow ? firstRow.textContent : 'none');
     click(firstRow);
     await settle();
     ok(A.state.screen === 'history' && !A.state.open0, 'and it opens history, and closes the menu', A.state.screen);
@@ -460,15 +496,13 @@ const STATES = [
      * if the card is lost (`fcRestoreLost`). With no card on file it says so; with cards, RESTORE CARD (the design). */
     A.setState({ screen: 'home', stack: [], open0: false });
     await settle();
-    // (under SETTINGS since the till took the rows after HISTORY: the drawer is opened with SETTINGS open to find it)
-    A.setState({ menuSettingsOpen: true });
-    await settle();
+    // (under SETTINGS, open as every section is)
     const labels = V().menuItems.map((m) => m.label);
     const rv = V().menuItems.find((m) => m.label === 'RESTORE LOST CARD');
-    ok(!!rv && labels.indexOf('RESTORE LOST CARD') > labels.indexOf('SETTINGS') && labels.indexOf('RESTORE') === labels.indexOf('RESTORE LOST CARD') + 1
+    ok(!!rv && labels.indexOf('RESTORE LOST CARD') > labels.indexOf('SETTINGS') && labels.indexOf('RESTORE LOST CARD') === labels.indexOf('RESTORE') + 1
        && /^M/.test(rv.path) && rv.path !== CARD_ICON && rv.path !== CLOCK && rv.indent === '10px'
        && V().menuItems.filter((m) => /RESTORE LOST CARD/.test(m.label)).length === 1,
-      'home’s MENU has RESTORE LOST CARD under SETTINGS, before RESTORE, with a drawing of its own', labels.join());
+      'home’s MENU has RESTORE LOST CARD under SETTINGS, after RESTORE, with a drawing of its own', labels.join());
     const said = [];
     const realBlocked = A.blockedCard;
     A.blockedCard = function (kind, spec) { said.push([kind, spec]); };

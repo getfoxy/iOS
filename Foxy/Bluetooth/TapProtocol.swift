@@ -623,6 +623,16 @@ enum TapPlace {
         holder == nil && listening && !linked && !early
     }
 
+    /// Whether every write in a batch is the holder's own word on the input
+    /// characteristic. CoreBluetooth hands a write as an array and one answer
+    /// covers the whole array, so the check made on the first request alone let
+    /// a batch from the holder carry another phone's word along behind it; every
+    /// request is checked, and one that is not the holder's refuses them all.
+    static func allFromHolder(_ writes: [(central: UUID, onInput: Bool)], holder: UUID?) -> Bool {
+        guard let holder = holder, !writes.isEmpty else { return false }
+        return writes.allSatisfy { $0.onInput && $0.central == holder }
+    }
+
     /* And how the place is given back.
      *
      * A first word is all it takes to hold the place, so it has to be given

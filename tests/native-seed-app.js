@@ -95,6 +95,8 @@ function standIn(over) {
     setBackedUp: rec('setBackedUp', true),
     reason: (e) => String((e && e.message) || e),
     proofLockDepth: () => 0,
+    // the menu's sections are drawn open now, so OTHER MINTS asks for the remembered answers on every home draw
+    cashuIdChoices: () => [],
     showSeedNative: rec('showSeedNative', () => Promise.resolve({ verified: true, revealed: true })),
     enterSeedNative: rec('enterSeedNative', () => Promise.resolve('candidate-1')),
     forgetSeedCandidate: rec('forgetSeedCandidate', () => Promise.resolve(true)),

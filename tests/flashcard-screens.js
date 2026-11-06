@@ -183,8 +183,11 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   holder.fcAdd();
   ok(!pad(holder) && holder.state.screen === 'amount' && holder.state.flow === 'cardAdd' && holder.state.unit === 'SATS' && holder.state.stack.slice(-1)[0] === 'flashcard',
      'ADD FUNDS asks how much on the SET AMOUNT screen (in sats here: this phone has no price to say dollars at)');
+  // (with a connection, more than the phone holds is asked for by invoice: the DEPOSIT section below)
+  holder.offline = true;
   keyIn(holder, 99999);
-  ok(!pad(holder) && holder.state.screen === 'amount' && holder.toasts.indexOf('You have ₿6,000.') >= 0, 'more than the phone holds goes no further');
+  ok(!pad(holder) && holder.state.screen === 'amount' && holder.toasts.indexOf('You have ₿6,000.') >= 0, 'with no connection, more than the phone holds goes no further');
+  holder.offline = false;
   {
     /* The card's room, asked of the wallet for the card read a moment ago: the keypad refuses an amount the card has no room for
      * (`fcLoadFits`), at NEXT in the wallet's own words, and the card is not asked, nor any money made. FLASHCARD from the send
@@ -3419,6 +3422,103 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       await settle();
       ok(list(a).mintRows[1].text === 'FEE ABOUT $ 0.03 \u00b7 AS BITCOIN', 'its fee in dollars, and that it lands as bitcoin', list(a).mintRows[1].text);
     }
+  }
+
+  /* ---- DEPOSIT above what this phone holds (2026-11-04) -------------------------------------------------------------------
+   * Decided: DEPOSIT, an amount, and where it is more than the phone holds, RECEIVE's own invoice for the whole of it; once the
+   * money is in, TAP THE CARD AGAIN to put it on. The phone's own balance is not touched. LATER keeps the money on the phone, and
+   * its history row says so; two minutes with no tap, the same. */
+  {
+    const { makeCard } = require('./flashcard-card');
+    const DH = await funded({}, 3000);
+    const dep = appOn(DH);
+    await dep.refreshBalance();
+    const dc = makeCard({ window: DH.window, format: 4 });
+    await DH.W.cardSetUp(dc, { pin: '1234' });
+    DH.nfc = dc;
+    dep.goFlashcard();
+    await until('the deposit card to be read', () => !!dep.state.fc && dep.state.screen === 'flashcard');
+    await settle();
+    const opened = [];
+    dep.openReceive = () => opened.push({ screen: dep.state.screen, flow: dep.state.flow, amount: dep.state.amount, unit: dep.state.unit,
+      wallet: dep.state.wallet, network: dep.state.network, top: dep.state.stack.slice(-1)[0] });
+    // the money for an invoice, in as RECEIVE's watch lands it: claimed, and PAID up over the invoice
+    const comesIn = async (sats) => {
+      const inv = await DH.W.invoice(sats, '');
+      await DH.W.claim(inv.hash);
+      await dep.refreshBalance();
+      const prev = Object.assign({}, dep.state);
+      dep.setState((p) => ({ screen: 'paid', stack: p.stack.concat([p.screen]), paidUnit: 'sat', paidAmount: sats, invoiceHash: inv.hash, payOut: false }));
+      dep.syncFcDep(prev);
+      await settle();
+      return inv.hash;
+    };
+    const toCard = async (n) => {
+      if (pad(dep)) pad(dep).type('1234');
+      await until('the deposit to be on the card', () => dc.balance() === n && !!dep.state.fc && dep.state.fc.balance === n && !dep._fcAdding);
+      await settle();
+      await dep.refreshBalance();
+    };
+
+    dep.fcAdd();
+    ok(dep.state.screen === 'amount' && dep.state.flow === 'cardAdd', 'DEPOSIT asks how much, as before');
+    keyIn(dep, 5000);
+    const o = opened[0] || {};
+    ok(opened.length === 1 && o.screen === 'confirm' && o.flow === 'receive' && o.amount === '5000' && o.unit === 'SATS' && o.wallet === 'sat'
+       && o.network === 'LIGHTNING' && o.top === 'flashcard' && !pad(dep) && !card(dep),
+       '₿ 5,000 with ₿ 3,000 on the phone: RECEIVE’s invoice for the whole ₿ 5,000, in the card’s currency, with the card behind it', JSON.stringify(opened));
+    ok(dep.have === 3000 && dc.balance() === 0 && DH.W.cardOwed().length === 0, 'and nothing has moved: the phone still holds its ₿ 3,000', String(dep.have));
+    const h1 = await comesIn(5000);
+    let k = card(dep);
+    ok(!!k && k.title === 'TAP THE CARD AGAIN' && k.reason === '₿5,000 came in on this phone. Tap the card to put it on.' && k.has('TAP CARD') && k.has('LATER')
+       && dep.state.screen === 'flashcard', 'the money in: the card’s screen, and TAP THE CARD AGAIN over it', k && k.all);
+    k.press('TAP CARD');
+    await toCard(5000);
+    ok(dc.balance() === 5000 && dep.have === 3000 && !card(dep) && dep.state.screen === 'flashcard',
+       'TAP CARD: the ₿ 5,000 typed is on the card, and the phone holds the ₿ 3,000 it held before', JSON.stringify({ card: dc.balance(), phone: dep.have }));
+    ok(!((DH.W.tagsFor(h1) || {}).note), 'and the money’s own row is not marked as kept');
+
+    // LATER: the money stays on the phone, and the history says so
+    dep.fcAdd();
+    keyIn(dep, 4000);
+    ok(opened.length === 2 && opened[1].amount === '4000', '₿ 4,000 with ₿ 3,000: the invoice again, for the whole of it', JSON.stringify(opened[1]));
+    const h2 = await comesIn(4000);
+    k = card(dep);
+    dep.toasts.length = 0;
+    k.press('LATER');
+    await settle();
+    ok(!card(dep) && dc.balance() === 5000 && dep.have === 7000 && (DH.W.tagsFor(h2) || {}).note === 'For the card · kept on this phone'
+       && dep.toasts.indexOf('₿4,000 stays on this phone. DEPOSIT puts it on the card.') >= 0,
+       'LATER: the ₿ 4,000 stays on this phone, its history row says so, and the card is untouched', JSON.stringify({ toasts: dep.toasts, note: (DH.W.tagsFor(h2) || {}).note }));
+
+    // two minutes with no tap: the same, by itself
+    dep.FC_DEP_HOLD_MS = 1500;
+    dep.fcAdd();
+    keyIn(dep, 9000);
+    const h3 = await comesIn(9000);
+    ok(!!card(dep) && card(dep).title === 'TAP THE CARD AGAIN', 'the ask is up');
+    await new Promise((r) => setTimeout(r, 1800));
+    await settle();
+    ok(!card(dep) && (DH.W.tagsFor(h3) || {}).note === 'For the card · kept on this phone' && dc.balance() === 5000,
+       'left with no tap past its hold: closed, the money kept on this phone and said so');
+    dep.FC_DEP_HOLD_MS = 120000;
+
+    // not the deposit: money of another amount, or the invoice left, lets it go and asks nothing
+    dep.fcAdd();
+    keyIn(dep, 30000);
+    ok(!!dep._fcDep, 'an invoice up for ₿ 30,000');
+    dep.setState({ screen: 'flashcard', stack: [] });
+    dep.syncFcDep({ screen: 'confirm' });
+    ok(!dep._fcDep, 'the invoice left with nothing in: the deposit is let go');
+
+    // a deposit the phone covers is as it was: no invoice, the PIN and the tap
+    const before = opened.length;
+    dep.setState({ screen: 'flashcard', stack: ['home'] });
+    dep.fcAdd();
+    keyIn(dep, 1000);
+    ok(opened.length === before && !dep._fcDep, 'a deposit within what the phone holds asks for no invoice');
+    await toCard(6000);
+    ok(dc.balance() === 6000 && dep.have === 15000, 'and goes on from the phone’s own balance, as before', JSON.stringify({ card: dc.balance(), phone: dep.have }));
   }
 
   console.log('\n' + (failed ? failed + ' flashcard-screens check(s) failed' : 'all flashcard-screens checks pass'));

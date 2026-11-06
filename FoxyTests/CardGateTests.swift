@@ -97,12 +97,15 @@ final class CardGateTests: XCTestCase {
     func testNothingIsSaidToACardBeforeTheAppletAnswers() {
         let verify = bytes("b04000000431323334")
         XCTAssertFalse(CardGate.allows(verify, selected: false), "a PIN is not sent to a card that has not been chosen")
-        // the time and the owner's grant are the applet's too: carried only once it has answered that it was chosen
-        for command in [bytes("b035000006" + "01020304" + "0000"), bytes("b0360000" + "50" + String(repeating: "ab", count: 80) + "04"),
+        // the clock's note and the owner's grant are the applet's too: carried only once it has answered that it was chosen
+        // (a time under a signature, 0x35, is not among them: nothing in the page or the phone sends it, the gate carries
+        // no such instruction, and a card of 1.15 and on answers it 6D00, so it is refused below instead)
+        for command in [bytes("b0360000" + "50" + String(repeating: "ab", count: 80) + "04"),
                         bytes("b0370000" + "04" + "6ac9dc75"), bytes("b0450000" + "03" + "300100"), bytes("b044000010"), bytes("b0420000" + "02" + "0102")] {
             XCTAssertFalse(CardGate.allows(command, selected: false), "\(CardGate.hex(command)) before the applet is chosen")
             XCTAssertTrue(CardGate.allows(command, selected: true), "\(CardGate.hex(command)) after")
         }
+        XCTAssertFalse(CardGate.allows(bytes("b035000006" + "01020304" + "0000"), selected: true), "a time under a signature (0x35) is refused even then")
         XCTAssertFalse(CardGate.allows(bytes("b0500000de"), selected: true), "locking is refused even then")
         XCTAssertTrue(CardGate.allows(bytes(select), selected: false))
         XCTAssertTrue(CardGate.allows(verify, selected: true))

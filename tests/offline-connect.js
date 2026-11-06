@@ -264,6 +264,67 @@ async function run() {
   ok(nr.W.mintUrl === MINT, 'while still connecting to the one asked for',
      String(nr.W.mintUrl));
 
+  // ---- a route comes back to a wallet built from storage: one connect at a time ----
+  /* The page's route watcher runs `connectForRealOnceOnline` and
+   * `claimWhenRouteReturns` back to back. The first connects to the phone's
+   * mint for real; the second's claim and catch-up visit the mints the
+   * payments are at, which is another connect. `connect` sets the wallet's
+   * globals when it finishes, so the last to finish won. The page's own
+   * methods, on a wallet whose connect lands only when the test says. */
+  {
+    const fs = require('fs');
+    const path = require('path');
+    const appSrc = fs.readFileSync(path.join(__dirname, '..', 'build', 'foxy-app.js'), 'utf8');
+    const method = (sig) => {
+      const start = appSrc.indexOf('\n  ' + sig);
+      if (start < 0) throw new Error('missing ' + sig);
+      let i = appSrc.indexOf('{', start), depth = 0;
+      for (; i < appSrc.length; i++) {
+        if (appSrc[i] === '{') depth++;
+        else if (appSrc[i] === '}') { depth--; if (depth === 0) break; }
+      }
+      return appSrc.slice(start + 3, i + 1);
+    };
+    const lifted = new Function('window', 'return {' + ['connectForRealOnceOnline() {', 'claimWhenRouteReturns() {'].map(method).join(',\n') + '}');
+    const order = [];
+    let land = null, cached = true;
+    const W = {
+      mintUrl: 'https://home.test',
+      connected: true,
+      fromCache: () => cached,
+      privacy: () => ({ tor: 'up', network: 'wifi' }),
+      reason: (e) => String(e && e.message),
+      connect: () => { order.push('connect'); return new Promise((res) => { land = () => { cached = false; order.push('landed'); res({}); }; }); },
+      crossingsWaiting: () => true,
+      catchUpCrossings: () => { order.push('crossings'); return Promise.resolve(); },
+      trustedWaiting: () => [{ id: 't' }],
+      unclaimedSats: () => 300,
+      claimUnclaimed: () => { order.push('claim'); return Promise.resolve(0); },
+    };
+    const a = Object.assign(lifted({ FoxyWallet: W }), {
+      refreshBalance() {}, loadHistory() {}, offerQuarantine() {},
+    });
+    // the route watcher, as bootWallet wires it (06-wallet-boot-and-restore.js)
+    a.connectForRealOnceOnline();
+    a.claimWhenRouteReturns();
+    await new Promise((r) => setTimeout(r, 20));
+    const before = order.slice();
+    // and the route flaps while the connect is out: asked again
+    a.connectForRealOnceOnline();
+    a.claimWhenRouteReturns();
+    await new Promise((r) => setTimeout(r, 20));
+    const flapped = order.slice();
+    if (land) land();
+    await new Promise((r) => setTimeout(r, 20));
+    ok(before.join(',') === 'connect' && flapped.join(',') === 'connect',
+       'a wallet built from storage leaves the claim and the catch-up to its real connect: nothing else connects while it is out',
+       'before it lands: ' + flapped.join(','));
+    const after = order.slice(order.indexOf('landed') + 1);
+    ok(order.indexOf('landed') === 1 && after.indexOf('claim') >= 0 && after.indexOf('crossings') >= 0
+       && after.filter((x) => x === 'claim').length === 1,
+       'and once it has landed they are asked for, once', order.join(','));
+  }
+
   console.log('\n' + (failed ? failed + ' offline-connect check(s) failed'
     : 'all offline-connect checks pass'));
   process.exit(failed ? 1 : 0);

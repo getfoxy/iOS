@@ -37,6 +37,7 @@ const DELIVERY = read('Foxy/Bridge/FoxyBridge+Delivery.swift');
 const TAP = read('Foxy/Bridge/FoxyBridge+Tap.swift');
 const CARD = read('Foxy/Bridge/FoxyBridge+Flashcard.swift');
 const TILL = read('Foxy/Bridge/FoxyBridge+Till.swift');
+const CASHUID = read('Foxy/Bridge/FoxyBridge+CashuID.swift');
 const DOC = read('docs/THREAT-MODEL.md');
 
 /* The tokens the table may use, and the Swift each one means. A token with no
@@ -56,6 +57,8 @@ const TOKENS = {
   'expiry': /expirationDate/,
   'reasons': /biometricReason/,
   'kinds': /case "sent"/,
+  // the reminder after fifteen days away: only the fixed number of days is taken, and the words are the phone's own (Reminder.swift)
+  'fixed days': /Reminder\.parse\(/,
   'rect limits': /let sane =/,
   // and over one of the page's own paste buttons, asked in a content world the page's scripts cannot change
   'paste button': /PasteAffordance\.check\(/,
@@ -68,6 +71,8 @@ const TOKENS = {
   'till id': /Self\.tillID\(/,
   // and how far back the relays are asked: the page's start, held to the last twelve days (`tillSince`)
   'till window': /Self\.tillSince\(/,
+  // the Cashu ID's inbox (FoxyBridge+CashuID.swift): how far back the relays are asked, held to the last twelve days
+  'cashu id window': /Self\.cashuIdSince\(/,
   // the screen kept lit: the flag is the only thing this action touches
   'screen only': /isIdleTimerDisabled = on/,
   // tap to pay over Bluetooth (FoxyBridge+Tap.swift)
@@ -114,7 +119,7 @@ for (const m of BRIDGE.matchAll(/"([A-Za-z][A-Za-z0-9]*)": FoxyBridge\.([A-Za-z]
 
 /* A Swift function body, by brace matching from its declaration. */
 function body(name) {
-  for (const source of [BRIDGE, SEED, DELIVERY, TAP, CARD, TILL]) {
+  for (const source of [BRIDGE, SEED, DELIVERY, TAP, CARD, TILL, CASHUID]) {
     const at = source.search(new RegExp('\\n {4}(?:private )?(?:static )?func ' + name + '\\('));
     if (at < 0) continue;
     let depth = 0;

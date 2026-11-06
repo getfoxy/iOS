@@ -7,6 +7,7 @@ interface Window {
   FoxyWallet: any;       // this file's own export
   FoxyGate: any;         // Web/foxy-tor-gate.js
   webkit: any;           // WKWebView's message handlers, present only in the app
+  __foxyTestHooks?: boolean;  // set by tests/harness.js before the wallet loads; never in the app
   __foxyUptime: any;     // set by the native side: seconds up and a process marker
   __foxyCardHoldSecs?: number; // a Debug test build only: a shorter hold on a card's pieces; absent, thirty days
   __foxyRequestIdHosts?: string[]; // a Debug build's -FoxyRequestIdHosts: the test mints sent a request mark

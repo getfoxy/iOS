@@ -691,9 +691,11 @@ final class TapReceiver: NSObject, CBPeripheralManagerDelegate {
                           linked: linked, early: early) {
             takePlace(first.central)
         }
-        guard first.characteristic.uuid == inId, first.central.identifier == talkingTo else {
+        // every request, not only the first: one answer covers the whole array
+        let allHeld = TapPlace.allFromHolder(requests.map { ($0.central.identifier, $0.characteristic.uuid == inId) }, holder: talkingTo)
+        guard first.characteristic.uuid == inId, first.central.identifier == talkingTo, allHeld else {
             // said, so a word from a payer this phone no longer counts as its own is in the diary
-            print("[tap] receive: a write from \(first.central.identifier == talkingTo ? "the payer on another characteristic" : "a central that is not the payer"); refused")
+            print("[tap] receive: a write from \(first.central.identifier == talkingTo ? "the payer on another characteristic" : "a central that is not the payer"); \(requests.count) in the batch; refused")
             p.respond(to: first, withResult: .insufficientAuthorization)
             return
         }

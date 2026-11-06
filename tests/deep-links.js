@@ -366,8 +366,8 @@ function link(hash, opts) {
   ok(hooks.every((i) => i > 0 && !inDebug(i)) && recvs.every((i) => i > 0 && !inDebug(i)),
     'a Release build takes a universal link both ways SwiftUI hands one over, as a URL and as a browsing-web activity');
   const delivery = read('Foxy', 'Flashcard', 'CardTapDelivery.swift');
-  ok(/func received\(_ url: URL\?\) \{\s*guard CardAddress\.isCard\(url\) else \{ return \}\s*cardTapped\(\)/.test(delivery),
-    'and both end where the card\'s address is the only thing let through, and anything else is dropped without a word');
+  ok(/func received\(_ url: URL\?\) \{\s*if CardAddress\.isCard\(url\) \{\s*if !arrive\(\.card\) \{ cardTapped\(\) \}\s*return\s*\}\s*guard firstRun, let url else \{ return \}/.test(delivery),
+    'and both end where the card\'s address is the only thing let through (a tap, or on a first run an arrival), and anything else is dropped without a word off a first run');
 
   // the entitlement that lets iOS hand the address over
   const ent = strip(read('tools', 'flashcard.entitlements'));
@@ -405,7 +405,7 @@ function screensInTheSource() {
   return Array.from(names).sort();
 }
 // where nothing is in progress, and where a payment, an amount being typed, a confirmation or anything else is
-const FREE_SCREENS = ['change', 'contacts', 'fcRestore', 'fieldLog', 'flashcard', 'history', 'home', 'switchMint', 'txDetail'];
+const FREE_SCREENS = ['change', 'contacts', 'fcRestore', 'fieldLog', 'flashcard', 'history', 'home', 'inbox', 'switchMint', 'txDetail'];
 const BUSY_SCREENS = ['amount', 'bkStart', 'confirm', 'crossConfirm', 'depConfirm', 'fcLimitConfirm', 'fcLimits', 'fcMoveConfirm', 'fcName', 'fcSpeed', 'fcWelcome', 'fcXmConfirm', 'fcXlConfirm', 'fcOuConfirm', 'feeTooLow',
   'importSeed', 'newMint', 'ocConfirm', 'paid', 'priceConfirm', 'reqOffer', 'rsConfirm', 'sendConfirm', 'sendDone', 'sendFail',
   'sendHow', 'sendScan', 'sendType', 'spAllPaid', 'spAmount', 'spAssign', 'spPayer', 'spShares', 'spWaiting', 'spWays', 'tokenOut',
@@ -415,7 +415,13 @@ const BUSY_SCREENS = ['amount', 'bkStart', 'confirm', 'crossConfirm', 'depConfir
   // PAY FROM: which mint's balance pays, a payment in progress (26l-pay-from.js)
   'payFrom',
   // and SWAP's confirmation and SWAPPED: a swap being decided, and one just made
-  'swapConfirm', 'swapDone'];
+  'swapConfirm', 'swapDone',
+  // a Cashu ID payment being decided (26o-cashu-id.js)
+  'cidConfirm',
+  // a contact's messages, where one may be half written (26p-cashu-msg.js)
+  'cidChat',
+  // SEND > BANK ACCOUNT's username or River's invoice being given (26q-bank.js)
+  'bankAsk'];
 
 /* What the page logs for a card tap (one line per outcome), taken off the console as it goes. */
 const cardLines = [];

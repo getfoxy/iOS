@@ -298,6 +298,27 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     delete window.FoxyWallet;
   }
 
+  /* A retry that names a screen and no `go` (CHANGE AMOUNT, PASTE AGAIN) lands on it with that screen's own entry gone from the
+   * stack, as if the person had walked back to it: left there, the first press of the back arrow popped an entry that changed
+   * nothing on screen. */
+  {
+    document.body.innerHTML = '';
+    const nav = Object.assign({}, app, { state: { screen: 'sendFail', stack: ['home', 'sendHow', 'amount'] } });
+    nav.setState = function (o) { Object.assign(this.state, typeof o === 'function' ? o(this.state) : o); };
+    nav._blockedEl = null; nav._cardQueue = [];
+    nav.blockedCard('sendFail', { title: 'PAYMENT FAILED', reason: 'r', retry: 'CHANGE AMOUNT', back: 'amount' });
+    press('CHANGE AMOUNT');
+    check('a retry that names a screen drops that screen\'s own stack entry',
+      nav.state.screen === 'amount' && JSON.stringify(nav.state.stack) === '["home","sendHow"]', JSON.stringify(nav.state));
+    await wait(400);
+    nav.state = { screen: 'badAddress', stack: ['home', 'amount'] };
+    nav.blockedCard('badAddress', { title: "THAT WON'T WORK", reason: 'r', retry: 'PASTE AGAIN', back: 'sendHow' });
+    press('PASTE AGAIN');
+    check('and a screen that is not on the stack leaves the stack as it was',
+      nav.state.screen === 'sendHow' && JSON.stringify(nav.state.stack) === '["home","amount"]', JSON.stringify(nav.state));
+    await wait(400);
+  }
+
   results.forEach(r => console.log(r));
   const failed = results.filter(r => r.startsWith('FAIL')).length;
   console.log(failed ? failed + ' card check(s) failed' : 'all card checks pass');

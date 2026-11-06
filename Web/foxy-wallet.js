@@ -103,6 +103,14 @@
     }
   }());
 
+  /* Two stores an earlier test build kept for features Foxy no longer has, read by nothing now: removed at every boot
+   * (two lookups, nothing once they are gone). Not a schema step, so a phone can still go back to a build that knows
+   * fewer steps. The lock-key rows those codes were filed under stay: their keys are the seed's. */
+  (function dropRetiredStores() {
+    if (storageNewer) return;
+    try { localStorage.removeItem('foxy.wake'); localStorage.removeItem('foxy.lnurl.codes'); } catch (e) {}
+  }());
+
   var K = {
     mint: 'foxy.cashu.mint',
     proofs: 'foxy.cashu.proofs',
@@ -171,6 +179,25 @@
     // the keeper's till while it runs: the mints it takes payments at, and the default among them (`tillKeeperOpen`)
     tillKeeper: 'foxy.till.keeper',
     tillOutbox: 'foxy.till.outbox',
+    /* Tips at the till (08f-till-tips.js): the keeper's answer as its till opened (whether, and to whom); every code
+     * made, kept to list under PAST after its row and keys are gone; the tips being passed on to Cashu IDs, each a
+     * payment still to make from the keeper's balance; what is too small to send yet, per ID; and the sales whose tip
+     * was passed on already, so a sale is never tipped twice. */
+    tillTips: 'foxy.till.tips',
+    tillPassLog: 'foxy.till.passes.log',
+    tillTipJobs: 'foxy.till.tips.jobs',
+    tillTipCarry: 'foxy.till.tips.carry',
+    tillTipSales: 'foxy.till.tips.sales',
+    /* The Cashu ID (08e-cashu-id.js): what this phone sent to a contact, locked to a one-time key of theirs with a
+     * refund key of its own, until the mint says it was collected or its locktime brings it back (money: mustSave);
+     * the secrets of what came in (hashed), so a delivery read twice is taken once; and what came while it could not be taken. */
+    cidOutbox: 'foxy.cid.outbox',
+    cidSeen: 'foxy.cid.seen',
+    cidInbox: 'foxy.cid.inbox',
+    /* and what came at a mint this phone does not use too small to be worth crossing home, waiting for more there; and when
+     * this phone last asked such a mint about a delivery, five an hour */
+    cidOffers: 'foxy.cid.offers',
+    cidForeign: 'foxy.cid.foreign',
   };
 
   /* A day. Bitcoin seldom moves more than a few percent in one; past that the
@@ -406,6 +433,70 @@
   function homeFirst(run) {
     if (!claimAway) return run();
     return claimAway.then(function () { return homeFirst(run); });
+  }
+  /* The other visits take the same hold.
+   *
+   * Bringing a payment home (`carryResume`, `carryHome`, `carryRefund`) goes
+   * to the payer's mint and back as the late claim does, and held nothing: an
+   * invoice asked for while it was there was made there, and a catch-up that
+   * set out while the late claim was away left from the mint the claim was
+   * visiting, the two moving `wallet` and `mintUrl` under each other
+   * (tests/away-claim.js). A visit now waits for any other to be over
+   * (`visitBusy`: the late claim's walk, a card's visit, another of these) and
+   * then holds what a person starts, as the walk does, until it ends
+   * (`visitTake`, `visitEnd`). Its own calls say so as the walk's do
+   * (`walkCalling`). It is still the one wallet moved about; a visit with a
+   * wallet of its own, so the globals never move, is the proper fix and a
+   * larger one.
+   *
+   * A cross-mint tap's visit (`carryBegin`) is a lease and not a hold: the
+   * request it makes and the payment it takes are made at the payer's mint on
+   * purpose, by the screen the person is looking at, so nothing they start is
+   * held by it. The background visits queue behind it all the same, and it
+   * behind them. It ends when its walk home takes over (`carryHome`), when it
+   * is given up (`carryEnd`), when another tap's begins, when the phone is no
+   * longer at that mint, or after TAP_VISIT_MS, whichever is first: a tap
+   * whose payer walked away says nothing at all, and a lease that never ended
+   * would hold every visit after it. */
+  var visitAway = /** @type {any} */ (null);
+  var TAP_VISIT_MS = 130000;
+  function visitEnd(v) {
+    if (!v || v.over) return;
+    v.over = true;
+    if (v.timer) clearTimeout(v.timer);
+    if (visitAway === v) visitAway = null;
+    if (claimAway === v.finished) claimAway = null;
+    v.done();
+  }
+  // a promise to wait on before a visit sets out, or null when none is away
+  function visitBusy() {
+    var t = visitAway;
+    if (t && t.lease && !t.going && canonicalMint(mintUrl || '') !== t.mint) visitEnd(t);
+    if (claimAway) return claimAway;
+    if (claimingLate) return claimingLate;
+    if (cardAway) return cardAway.finished;
+    if (!visitAway) return null;
+    // a lease is looked at again each second, for a phone that has left that mint since
+    if (visitAway.lease) return Promise.race([visitAway.finished, new Promise(function (r) { setTimeout(r, 1000); })]);
+    return visitAway.finished;
+  }
+  /* Once every other visit is over: resolves the visit, ended by `visitEnd`.
+   * `o.lease`: the tap's, at `o.mint`, for `o.job`. */
+  function visitTake(what, o) {
+    var busy = visitBusy();
+    if (busy) return Promise.resolve(busy).then(null, function () { return null; }).then(function () { return visitTake(what, o); });
+    var done = /** @type {any} */ (null);
+    var finished = new Promise(function (res) { done = res; });
+    var v = /** @type {any} */ ({ what: what, job: (o && o.job) || '', mint: canonicalMint((o && o.mint) || ''), lease: !!(o && o.lease),
+                                   going: !!(o && o.lease), finished: finished, done: done, over: false, timer: null });
+    visitAway = v;
+    if (v.lease) v.timer = setTimeout(function () { visitEnd(v); }, TAP_VISIT_MS);
+    else claimAway = finished;
+    return Promise.resolve(v);
+  }
+  // the tap's lease for job `id`, handed over or given up
+  function tapVisitEnd(id) {
+    if (visitAway && visitAway.lease && (!id || visitAway.job === id)) visitEnd(visitAway);
   }
   /* Crossings this page is in the middle of, by quote, and payments being
    * brought home, by job. `finishMove` and `carryResume` leave them alone:
@@ -826,12 +917,39 @@
    * within one. */
   var COUNTER_SKIPS = [10, 50, 100];
 
+  /* The mint refusing the keyset a request's outputs were set out on: NUT error 12001 (not known) or 12002 (inactive),
+   * cashu-ts's StaleKeysetError for either, or the words a mint gives them. A mint that rotated its keys answers this to
+   * every request built on the keyset it retired, until the wallet reads its keysets again. */
+  function keysetRefused(e) {
+    var code = Number(e && (e.code || (e.response && e.response.code)));
+    if (code === 12001 || code === 12002) return true;
+    if (e && e.name === 'StaleKeysetError') return true;
+    var why = String((e && (e.message || e.detail)) || e || '');
+    return /keyset/i.test(why) && /inactive|unknown|not known|not found|stale/i.test(why) && !(e && e.noCounters);
+  }
+
   // quotePaid: for a claim, resolves true while the mint still calls the quote PAID
   /** @param {(function(): *)=} quotePaid */
   function onceMoreIfSigned(w, label, run, quotePaid) {
     var tries = 0;
+    var keysetsRead = false;
     function attempt() {
       return run().catch(function (e) {
+        /* A keyset the mint has retired: its keysets read once more from the mint itself (what this session remembers of
+         * them dropped first, `forgetMintKeys`, or cashu-ts's own refresh is answered from it: its `repaired` is not a
+         * read of the mint), and the request set out again, on whatever keyset is active now, once. A second refusal is
+         * the answer, as before. Nothing was signed: the mint refuses the keyset before it looks further. */
+        if (!keysetsRead && keysetRefused(e) && w && typeof w.loadMint === 'function') {
+          keysetsRead = true;
+          console.warn('[foxy] ' + label + ': the mint refused the keyset (' + String((e && e.message) || e).slice(0, 60)
+            + '); reading its keysets again and setting the request out once more');
+          var at = '';
+          try { at = mintOf(w); forgetMintKeys(at); } catch (x) {}
+          return Promise.resolve().then(function () { return w.loadMint(true); }).then(function () {
+            try { if (at) mintCacheSave(at, w); } catch (x) {}
+            return attempt();
+          }, function () { throw e; });
+        }
         var used = alreadySigned(e)
           ? Promise.resolve(true)
           : (quotePaid && mintSaysPaidOrPending(e))
@@ -1011,9 +1129,83 @@
    * asked again every five seconds. An `another()` that gives nothing ends
    * the asking again there: a fee quote whose asker has stopped listening
    * (`quoteFee`, `opts.stop`). */
+  /* The askings again still waiting on a timer, each as the function that lets go of its timer. iOS runs no page script
+   * while Foxy is in the background, so a timer left over from a question asked just before would fire on the way back
+   * and ask a mint again about something the person has left: Foxy being put away lets go of them all
+   * (`_stopAskingAgain`, from the app's `putAway`). The question itself is not settled by this: it is still answered by
+   * the askings already out, or by the caller's own deadline. */
+  var askAgainStops = [];
+
+  /* Tor up and carrying nothing, after a return from the background.
+   *
+   * A phone back after 44 seconds had Tor's circuit up, and every request to the mint went unanswered for about a
+   * hundred seconds, through ten askings on other circuits, until Tor rebuilt on its own: every fresh circuit was
+   * built through the same guards. So the askings again (`askedAgain`, `statesOf`) are counted here, in a row since
+   * Foxy came back, and any answer from a mint puts the count back to none. Each one is told to the phone
+   * (`torRebuild`), which decides: at its number (three) it asks Tor once for new circuits, never a restart, at most
+   * once per return and not within a minute of the last. While Tor is at it, and until a mint answers or
+   * `TOR_REBUILD_SHOWN_MS` passes, the shield on the money card turns its ring and says so (`torRebuilding`).
+   *
+   * New circuits are built through the guards Tor already holds, and a phone whose guards went down, up and down
+   * again was not helped by them. So the count goes on past three, and the phone decides the second stage too: three
+   * more unanswered within twenty seconds, with no host at all answering anything since the return, and it switches
+   * Tor's network off and on, every connection closed and made again (at most once per return, never within five
+   * minutes of the last, never with a swap out). It answers "restarting" then, and the shield says that instead
+   * (`torRestarting`). A question out at that moment fails as it does when the route drops, and is asked again by
+   * its own rules; what is asked again here (quotes, lookups, checks of pieces) commits to nothing.
+   *
+   * Counted only after Foxy has been put away once (`armed`, from `_stopAskingAgain`): a launch has its own
+   * screens for a Tor still connecting. */
+  var TOR_REBUILD_SHOWN_MS = 30000;
+  var torSilent = { armed: false, count: 0, until: 0, restarting: false, timer: /** @type {any} */ (null) };
+  function torSilentAway() {
+    torSilent.armed = true;
+    torSilent.count = 0;
+    torSilentShown(0);
+  }
+  function torSilentShown(ms) {
+    var was = torSilent.until > Date.now();
+    clearTimeout(torSilent.timer);
+    torSilent.timer = null;
+    torSilent.until = ms > 0 ? Date.now() + ms : 0;
+    if (!(ms > 0)) torSilent.restarting = false;
+    if (ms > 0) torSilent.timer = setTimeout(function () { torSilent.timer = null; torSilentShown(0); }, ms);
+    var now = torSilent.until > Date.now();
+    if (now !== was && FoxyWallet._onPrivacy) {
+      try { FoxyWallet._onPrivacy(FoxyWallet.privacy()); } catch (e) { console.error('[foxy] privacy watcher:', e && e.message); }
+    }
+  }
+  // a mint answered, whatever it said: Tor is carrying
+  function torCarried() {
+    torSilent.count = 0;
+    if (torSilent.until) torSilentShown(0);
+  }
+  // one asking again on another circuit, the one before it unanswered
+  function torSilentAsked() {
+    if (!torSilent.armed || !bridged()) return;
+    torSilent.count += 1;
+    var n = torSilent.count;
+    bridgeAsk('torRebuild', { silent: n }, 5000).then(function (said) {
+      var what = String(said);
+      if (what !== 'rebuilding' && what !== 'restarting') return;
+      console.log('[foxy] ' + n + ' askings in a row unanswered since the return: '
+        + (what === 'restarting' ? 'Tor\u2019s connections are started again' : 'Tor is asked for new circuits'));
+      if (torSilent.count < n) return;
+      // the words change while the ring is already turning: pushed as a change all the same
+      var turn = what === 'restarting' && !torSilent.restarting && torSilent.until > Date.now();
+      torSilent.restarting = what === 'restarting';
+      torSilentShown(TOR_REBUILD_SHOWN_MS);
+      if (turn && FoxyWallet._onPrivacy) {
+        try { FoxyWallet._onPrivacy(FoxyWallet.privacy()); } catch (e) { console.error('[foxy] privacy watcher:', e && e.message); }
+      }
+    }, function () {});
+  }
+
   function askedAgain(w, what, ask, another, within) {
     return new Promise(function (ok, no) {
-      var settled = false, asked = 0, failed = 0, again = null;
+      var settled = false, asked = 0, failed = 0, again = null, quit = false;
+      var letGo = function () { quit = true; clearTimeout(again); again = null; };
+      askAgainStops.push(letGo);
       var began = Date.now();
       var allowed = Number(within) > 0 ? Number(within) : 30000;
       var at = w && ((w.mint && w.mint.mintUrl) || w.mintUrl);
@@ -1024,7 +1216,11 @@
       // the first asking may come sooner: at a mint, whose wait is the five-second floor, with no wait set outright
       var sooner = !set && !!at && ms === ASK_AGAIN_LEAST_MS;
       var next = typeof another === 'function' ? another : function () { return onCircuit(w); };
-      var stop = function () { settled = true; clearTimeout(again); again = null; };
+      var stop = function () {
+        settled = true; clearTimeout(again); again = null;
+        var at = askAgainStops.indexOf(letGo);
+        if (at >= 0) askAgainStops.splice(at, 1);
+      };
       var yes = function (via) {
         return function (r) { if (settled) return; stop(); ok({ got: r, w: via }); };
       };
@@ -1044,15 +1240,16 @@
         again = null;
         var look = early ? QUICK_AGAIN_MS : wait;
         // every extra circuit asked, or the next would go when the caller has given up: no timer at all
-        if (settled || asked > most || Date.now() - began + look >= allowed) return;
+        if (settled || quit || asked > most || Date.now() - began + look >= allowed) return;
         again = setTimeout(function () {
           again = null;
-          if (settled) return;
+          if (settled || quit) return;
           if (early && askAgainWait(at, 0, true) !== QUICK_AGAIN_MS) { askAgainLater(wait - QUICK_AGAIN_MS); return; }
           var other;
           try { other = next(); } catch (e) { other = null; }
           if (!other) return;
           console.log('[foxy] ' + what + ' has not answered in ' + Math.round((Date.now() - began) / 1000) + 's; asking again on another circuit');
+          torSilentAsked();
           send(other);
           askAgainLater(ms);
         }, look);
@@ -1077,19 +1274,29 @@
       : askAgainWait((w && ((w.mint && w.mint.mintUrl) || w.mintUrl)) || '', 6000);
     var asked = new Promise(function (ok, no) {
       var settled = false, second = false, failed = 0;
-      var yes = function (r) { if (settled) return; settled = true; clearTimeout(again); ok(r); };
+      var letGo = function () { clearTimeout(again); };
+      askAgainStops.push(letGo);
+      var done = function () {
+        settled = true; clearTimeout(again);
+        var at = askAgainStops.indexOf(letGo);
+        if (at >= 0) askAgainStops.splice(at, 1);
+      };
+      var yes = function (r) { if (settled) return; done(); ok(r); };
       var bad = function (e) {
         failed += 1;
         if (settled || (second && failed < 2)) return;
-        settled = true; clearTimeout(again); no(e);
+        done(); no(e);
       };
       var again = setTimeout(function () {
         if (settled) return;
+        var gone = askAgainStops.indexOf(letGo);
+        if (gone >= 0) askAgainStops.splice(gone, 1);
         second = true;
         console.log('[foxy] the mint\u2019s proof check has not answered in ' + Math.round(wait / 1000) + 's; asking again on another circuit');
         var other;
         try { other = onCircuit(w, 'check-again:' + Date.now()); } catch (e) { other = null; }
         if (!other || !other.checkProofsStates) { second = false; return; }
+        torSilentAsked();
         Promise.resolve().then(function () { return other.checkProofsStates(list); }).then(yes, bad);
       }, wait);
       Promise.resolve().then(function () { return w.checkProofsStates(list); }).then(yes, bad);
@@ -1357,6 +1564,79 @@
     return (typeof p === 'string' && /^[0-9a-f]{64}$/i.test(p)) ? p.toLowerCase() : '';
   }
 
+  /* Whether a mint's answer about a quote is about the quote asked, at the
+   * one door every request to a mint goes by (`nativeRequest`). '' when it
+   * is, or what is wrong with it.
+   *
+   * Foxy keeps its invoices and its payments by quote id and asks about each
+   * by that id, and what comes back decides whether an invoice is claimed or a
+   * payment's held pieces are struck or given back. So an answer is used only
+   * when it is about what was asked:
+   *
+   *   a quote's state (GET .../quote/{method}/{id}): the answer's `quote` is
+   *   that id; and for an invoice of this phone's, its unit is the invoice's
+   *   and its amount the one the mint named when the invoice was made (the
+   *   record's `quoted`), where the answer says one;
+   *   several quotes' states in one ask (POST .../quote/{method}/check): one
+   *   answer for each quote asked, in the order asked, each as above, or the
+   *   whole answer is refused;
+   *   a new quote (POST .../quote/{method}): in the unit asked for.
+   *
+   * The library checks the ids and a batch's count and order itself; this
+   * holds them whatever library is under it, and adds the unit and amount of
+   * an invoice the phone already holds, which the library cannot know: a
+   * check that called a 100 sat invoice paid at 150, or paid in dollars, was
+   * claimed. */
+  var QUOTE_PATH = /\/v1\/(mint|melt)\/quote\/([A-Za-z0-9_-]+)(?:\/([^\/?#]+))?\/?(?:[?#].*)?$/;
+  function quoteAnswerProblem(method, endpoint, requestBody, parsed) {
+    var m = QUOTE_PATH.exec(String(endpoint || ''));
+    if (!m) return '';
+    var side = m[1], how = m[2], last = '';
+    try { last = m[3] ? decodeURIComponent(m[3]) : ''; } catch (e) { last = String(m[3]); }
+    var verb = String(method || 'GET').toUpperCase();
+    var short = function (q) { return String(q).slice(0, 12) + (String(q).length > 12 ? '…' : ''); };
+    // an invoice of this phone's, by its id, from its record
+    var mine = function (id) {
+      if (side !== 'mint') return null;
+      var lists = [load(K.quotes, []), load(K.quotesOld, [])];
+      for (var i = 0; i < lists.length; i++) {
+        for (var j = 0; j < (lists[i] || []).length; j++) if (lists[i][j] && lists[i][j].quote === id) return lists[i][j];
+      }
+      return null;
+    };
+    var one = function (asked, got) {
+      if (!got || typeof got !== 'object') return 'no record for quote ' + short(asked);
+      if (String(got.quote) !== String(asked)) return 'quote ' + short(asked) + ' asked, ' + short(got.quote) + ' answered';
+      var rec = mine(asked);
+      if (!rec) return '';
+      if (rec.unit && typeof got.unit === 'string' && got.unit && got.unit.toLowerCase() !== String(rec.unit).toLowerCase()) {
+        return 'quote ' + short(asked) + ' answered in ' + got.unit + ', not ' + rec.unit;
+      }
+      if (how === 'bolt11' && rec.quoted && got.amount != null && satsOf(got.amount) !== Number(rec.quoted)) {
+        return 'quote ' + short(asked) + ' answered for ' + satsOf(got.amount) + ', not ' + rec.quoted;
+      }
+      return '';
+    };
+    if (verb === 'GET' && last && last !== 'check') return one(last, parsed);
+    if (verb !== 'POST') return '';
+    var b = requestBody || {};
+    if (last === 'check') {
+      var asked = Array.isArray(b.quotes) ? b.quotes.map(String) : [];
+      if (!Array.isArray(parsed)) return 'a batch of ' + asked.length + ' asked, no list answered';
+      if (parsed.length !== asked.length) return 'a batch of ' + asked.length + ' asked, ' + parsed.length + ' answered';
+      for (var k = 0; k < asked.length; k++) {
+        var why = one(asked[k], parsed[k]);
+        if (why) return 'a batch of ' + asked.length + ': ' + why;
+      }
+      return '';
+    }
+    if (!last && parsed && typeof parsed === 'object' && typeof b.unit === 'string' && b.unit
+        && typeof parsed.unit === 'string' && parsed.unit && parsed.unit.toLowerCase() !== b.unit.toLowerCase()) {
+      return 'a ' + side + ' quote in ' + b.unit + ' asked, one in ' + parsed.unit + ' answered';
+    }
+    return '';
+  }
+
   function quoteLock(w) {
     try {
       var CT = window.CashuTS;
@@ -1406,6 +1686,13 @@
       }
       return made.q;
     }).then(function (q) {
+      /* The invoice is for what the quote says, and that is what is minted (`mintAmountOf`): one for another amount than
+       * the one asked, past rounding, is refused before it is shown or paid. */
+      var said = quoteAmountOf(q);
+      if (said && Math.abs(said - Math.round(Number(amount) || 0)) > QUOTE_ROUNDING) {
+        console.warn('[foxy] asked ' + (host || 'the mint') + ' for an invoice for ' + amount + ' and its quote is for ' + said);
+        throw new Error((host || 'The mint') + ' made its invoice for ' + said + ', not the ' + amount + ' asked for. Nothing was paid.');
+      }
       /* The invoice names the mint's node (05-paying-this-mint.js) — but only
        * a sat invoice. A mint with a dollar balance can have its dollar
        * invoices made by somebody else's node (Forge's come from Flash's node,
@@ -1421,11 +1708,28 @@
     });
   }
 
-  // `lock` is anything carrying { pubkey, privkey } — a stored invoice, a move note
+  /* A mint quote's own amount (NUT-04 `amount`), or 0 where it names none. A quote further from the amount asked than
+   * this is refused when it is made (`createQuote`): a unit of rounding, as a mint quoting cents may round. */
+  var QUOTE_ROUNDING = 1;
+  function quoteAmountOf(q) {
+    var n = q && q.amount != null ? satsOf(q.amount) : NaN;
+    return Number.isSafeInteger(n) && n > 0 ? n : 0;
+  }
+
+  /* What a claim mints: the quote's own amount where its record kept one (`quoted`, written with the quote, 08c-units.js
+   * `keepQuote`; a move note's, 14-moving-between-mints.js), and the amount asked for otherwise. A mint signs for the
+   * amount its quote is for, and a claim for another is refused. */
+  function mintAmountOf(rec, asked) {
+    var n = rec && Number(rec.quoted);
+    return Number.isSafeInteger(n) && n > 0 ? n : asked;
+  }
+
+  // `lock` is anything carrying { pubkey, privkey } — a stored invoice, a move note — and maybe `quoted` (`mintAmountOf`)
   function mintQuoteProofs(w, amount, quoteId, lock) {
+    var n = mintAmountOf(lock, amount);
     return lock && lock.privkey && lock.pubkey
-      ? w.mintProofsBolt11(amount, { quote: quoteId, pubkey: lock.pubkey }, { privkey: lock.privkey })
-      : w.mintProofsBolt11(amount, quoteId);
+      ? w.mintProofsBolt11(n, { quote: quoteId, pubkey: lock.pubkey }, { privkey: lock.privkey })
+      : w.mintProofsBolt11(n, quoteId);
   }
 
   /* What a mint charges to spend `count` pieces, without holding any yet.
@@ -1465,6 +1769,33 @@
     } catch (e2) {}
     if (!isFinite(n) || n < 0) n = 0;
     return Math.ceil(n);
+  }
+
+  /* What a send's swap cost, held to what the mint charges for the pieces that went in.
+   *
+   * It was worked out by subtraction: what went in, less the token, less what was kept. A piece of change that went
+   * missing between the swap and the pile was booked as fee that way, and the books still added up, so a real loss
+   * would have read as a dear swap and nothing would have said so. The fee is the mint's charge for those inputs
+   * (`swapFeeFor`); when the sum says otherwise the mismatch is logged, and `off` and the two figures go on the entry
+   * so it says what really went in and what came back. The payment is never refused over it: by now the token exists.
+   *
+   * `have`: the pile the swap was made from; `split`: { send, keep }, where `keep` holds the pieces of `have` that were
+   * not used beside the change. Resolves { fee, wentIn, cameBack, off }, `off` the sats the sum is short (or over). */
+  function swapCost(w, have, split) {
+    var kept = {};
+    ((split && split.keep) || []).forEach(function (p) { if (p && p.secret) kept[String(p.secret)] = true; });
+    var inputs = (have || []).filter(function (p) { return p && p.secret && !kept[String(p.secret)]; });
+    var untouched = (have || []).filter(function (p) { return p && p.secret && kept[String(p.secret)]; });
+    var wentIn = sumProofs(inputs);
+    var cameBack = sumProofs((split && split.send) || []) + sumProofs((split && split.keep) || []) - sumProofs(untouched);
+    var fee = inputs.length ? swapFeeFor(w, inputs) : 0;
+    var off = wentIn - cameBack - fee;
+    if (off !== 0) {
+      console.warn('[foxy] a send\u2019s swap does not add up: ' + wentIn + ' went in, ' + cameBack + ' came back, and the mint '
+        + 'charges ' + fee + ' as its fee for those ' + inputs.length + ' piece(s); ' + Math.abs(off)
+        + (off > 0 ? ' is missing' : ' more came back than was paid') + '. The fee is booked as charged.');
+    }
+    return { fee: fee, wentIn: wentIn, cameBack: cameBack, off: off };
   }
 
   function swapFeeFor(w, list) {
@@ -1823,8 +2154,9 @@
    *   trimmable  what the trim at its tightest frees (`trimPlan`, what `trimStore` writes);
    *   sent       the text of tokens this phone sent that nobody is known to have claimed (kept by clearing history: it
    *              can be the only copy of money), and `sentTokens` the texts;
-   *   cardLoads  the text of loads put onto cards, kept until every piece is in the card's file (`cardLoadOnFile`): how a
-   *              lost card's money is taken back after its date; `cardTokens` the texts;
+   *   cardLoads  the text of loads put onto cards, kept until every piece is in the card's file (`cardLoadOnFile`) or the
+   *              mint says every piece is spent (`cardLoadsSpent`, after a connect): how a lost card's money is taken back
+   *              after its date; `cardTokens` the texts;
    *   money      the ecash and the records that bring it back; cards the cards' files; reserve; other the rest. */
   function storageReport() {
     var out = { total: 0, cap: storeCap(), reserve: reserveBytes(), clearable: 0, trimmable: 0, sent: 0, sentCount: 0,
@@ -2058,7 +2390,9 @@
    *     (`cardLoadOnFile`), which is what a lost card's take-back is rebuilt
    *     from (`cardRemember`, a must-write): its text becomes `kept`, shown as
    *     before and let go with the rest. Being on the card (`carded`) is not
-   *     enough, and a load whose pieces are on no file keeps its text.
+   *     enough, and a load whose pieces are on no file keeps its text here
+   *     (the sweep after a connect lets it go once the mint says every piece
+   *     is spent: `cardLoadsSpent`, 08a-flashcard.js).
    *     Any other token nobody has claimed (`token`) is never touched: it can
    *     be the only copy of money.
    *   foxy.cashu.audit (what each payment consumed and produced, read by the
@@ -2992,6 +3326,10 @@
      * path monitor's first word, is not an accusation that the phone is off the
      * air. */
     if (privacy.network === 'none') return false;
+    /* Working offline by the holder's choice is no route, even over a Tor that
+     * is up: the wallet acts on what it holds until they say otherwise.
+     * Going unprotected is the louder, deliberate act and wins over it. */
+    if (privacy.offline && privacy.offlineChosen && !privacy.unprotected) return false;
     return privacy.tor === 'up' || privacy.unprotected;
   }
 
@@ -3050,6 +3388,8 @@
   function routeComing() {
     if (!bridged() || routeOpen()) return false;
     if (privacy.network === 'none' || privacy.unprotected) return false;
+    // the holder chose to wait for nothing: no connection is "on its way" for them
+    if (privacy.offlineChosen) return false;
     return privacy.tor === 'connecting' || privacy.tor === 'stuck';
   }
 
@@ -3790,6 +4130,8 @@
     if (seedChanged) {
       secretEpoch++;
       dropLockPool();
+      // and the Cashu ID shown for the seed that went (08e-cashu-id.js)
+      cidForget();
     }
     if (seedGone) nativeSeedKnown = false;
   }
@@ -3862,8 +4204,11 @@
       if (!b || !o.secret || !o.secret.length || typeof o.blindingFactor !== 'bigint') return null;
       var amount = Number(String(b.amount));
       if (!(amount > 0) || !isFinite(amount)) return null;
-      return { amount: amount, id: String(b.id || ''), B_: String(b.B_ || ''),
-               secret: hexOf(o.secret), r: o.blindingFactor.toString(16) };
+      var row = /** @type {any} */ ({ amount: amount, id: String(b.id || ''), B_: String(b.B_ || ''),
+               secret: hexOf(o.secret), r: o.blindingFactor.toString(16) });
+      // NUT-28: the throwaway key's public half the proof must carry, or the receiver cannot open it
+      if (typeof o.ephemeralE === 'string' && /^0[23][0-9a-f]{64}$/i.test(o.ephemeralE)) row.pe = o.ephemeralE.toLowerCase();
+      return row;
     } catch (e) { return null; }
   }
 
@@ -3876,7 +4221,30 @@
     var bytes = new window.Uint8Array(hex.length / 2);
     for (var i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
     return new C.OutputData({ amount: C.Amount.from(row.amount), B_: row.B_, id: row.id },
-                            BigInt('0x' + String(row.r)), bytes);
+                            BigInt('0x' + String(row.r)), bytes, row.pe ? String(row.pe) : undefined);
+  }
+
+  /* NUT-28's throwaway keys for a payment whose lock is blinded (`blindKeys`), by
+   * the lock key they are for: a payment to a Cashu ID makes them from its own
+   * seed (08e-cashu-id.js, `cidPieceKeys`), so that the same words find them
+   * again. Without one, cashu-ts makes each at random, as for any other wallet. */
+  var p2bkSources = Object.create(null);
+
+  function p2bkKeyFor(p2pk) {
+    if (!p2pk || !p2pk.blindKeys || p2pk.sigFlag === 'SIG_ALL') return undefined;
+    var key = String(Array.isArray(p2pk.pubkey) ? p2pk.pubkey[0] : p2pk.pubkey || '').toLowerCase();
+    var next = p2bkSources[key];
+    return typeof next === 'function' ? next() : undefined;
+  }
+
+  function p2bkOutputs(C, p2pk, amount, keyset, customSplit) {
+    if (!p2pk || !p2pk.blindKeys || p2pk.sigFlag === 'SIG_ALL'
+        || typeof p2bkSources[String(Array.isArray(p2pk.pubkey) ? p2pk.pubkey[0] : p2pk.pubkey || '').toLowerCase()] !== 'function') {
+      return C.OutputData.createP2PKData(p2pk, amount, keyset, customSplit);
+    }
+    return C.splitAmount(amount, keyset.keys, customSplit).map(function (a) {
+      return C.OutputData.createSingleP2PKData(p2pk, a, keyset.id, p2bkKeyFor(p2pk));
+    });
   }
 
   function nativeOutputCreator(ns) {
@@ -3906,10 +4274,10 @@
         return C.OutputData.createSingleRandomData(amount, keysetId);
       },
       createP2PKData: function (p2pk, amount, keyset, customSplit) {
-        return sawLockedOutputs(C.OutputData.createP2PKData(p2pk, amount, keyset, customSplit));
+        return sawLockedOutputs(p2bkOutputs(C, p2pk, amount, keyset, customSplit));
       },
-      createSingleP2PKData: function (p2pk, amount, keysetId) {
-        return sawLockedOutputs(C.OutputData.createSingleP2PKData(p2pk, amount, keysetId));
+      createSingleP2PKData: function (p2pk, amount, keysetId, eBytes) {
+        return sawLockedOutputs(C.OutputData.createSingleP2PKData(p2pk, amount, keysetId, eBytes || p2bkKeyFor(p2pk)));
       },
     };
     nativeCreators.set(ns, made);
@@ -3938,10 +4306,10 @@
         return C.OutputData.createSingleRandomData(amount, keysetId);
       },
       createP2PKData: function (p2pk, amount, keyset, customSplit) {
-        return sawLockedOutputs(C.OutputData.createP2PKData(p2pk, amount, keyset, customSplit));
+        return sawLockedOutputs(p2bkOutputs(C, p2pk, amount, keyset, customSplit));
       },
-      createSingleP2PKData: function (p2pk, amount, keysetId) {
-        return sawLockedOutputs(C.OutputData.createSingleP2PKData(p2pk, amount, keysetId));
+      createSingleP2PKData: function (p2pk, amount, keysetId, eBytes) {
+        return sawLockedOutputs(C.OutputData.createSingleP2PKData(p2pk, amount, keysetId, eBytes || p2bkKeyFor(p2pk)));
       },
     };
     return plainCreator;
@@ -4099,6 +4467,8 @@
           nativeSeedKnown = true;
           adoptedCandidates[candidate] = secretEpoch;
           console.log('[foxy] the phone adopted the restored seed');
+          // the Cashu ID the words give may be in somebody's contacts: listened for at once (08e-cashu-id.js)
+          try { cidRestored(); } catch (x) {}
           return true;
         }
         if (j.adopted === false && j.same === true) {
@@ -4898,12 +5268,25 @@
    * next. The wallet says how many of the three came from here
    * (`foxyLoadCached`). A connect that fails, and a mint that does not answer,
    * forget the info (11-routing.js `connect`, 98-mint-health.js). */
+  /* And each of them asked again on another circuit when the one it went on
+   * says nothing, at the pace a quote is asked again (`askedAgain`: five
+   * seconds, three at a mint seen answering, longer at one whose answers are
+   * slow), inside `within`, the connect's own allowance (thirty seconds). A
+   * switch to a mint took 13.5 s on a phone where every other switch took
+   * 2.2 s: one circuit that went nowhere, and nothing asked again elsewhere.
+   * Whichever circuit answers first is the answer, and the only one used; the
+   * keysets and keys are remembered from that circuit. A mint that answers
+   * nothing still fails at the connect's deadline, and no asking is planned
+   * past it. */
   var KEY_CHAIN_READ = /\/v1\/keys(ets)?(\/[A-Za-z0-9_%.-]+)?$/;
   var INFO_READ = /\/v1\/info$/;
-  function loadMintOnOne(w, sessionInfo) {
+  function loadMintOnOne(w, sessionInfo, within) {
     var mint = w && w.mint;
     if (!mint || mint._request !== FoxyWallet.nativeRequest) return w.loadMint();
     var label = newCircuitLabel();
+    var began = Date.now();
+    var allowed = Number(within) > 0 ? Number(within) : 30000;
+    var at = String(mint.mintUrl || '');
     var fromHere = 0;
     try { w.foxyLoadCached = 0; } catch (e0) { /* a wallet that takes no field: nothing to say */ }
     mint._request = function (o) {
@@ -4916,9 +5299,13 @@
         try { w.foxyLoadCached = fromHere; } catch (e1) { /* as above */ }
         return FoxyWallet.nativeRequest(o);
       }
-      return FoxyWallet.nativeRequest(Object.assign({}, o, { foxyCircuit: label })).then(function (r) {
-        if (shared) shareKeyBody(u, label);
-        return r;
+      var what = hostOf(at || u).split('/')[0] + '\u2019s ' + (info ? 'info' : /\/v1\/keysets/.test(path) ? 'keysets' : 'keys');
+      var left = Math.max(1, allowed - (Date.now() - began));
+      return askedAgain({ mintUrl: at, label: label }, what, function (via) {
+        return FoxyWallet.nativeRequest(Object.assign({}, o, { foxyCircuit: via.label }));
+      }, function () { return { mintUrl: at, label: newCircuitLabel() }; }, left).then(function (won) {
+        if (shared) shareKeyBody(u, won.w.label);
+        return won.got;
       });
     };
     var done = function () { mint._request = FoxyWallet.nativeRequest; };
@@ -5744,12 +6131,47 @@
   function moveNote(quoteId) {
     return moveNotes().filter(function (n) { return n.quote === quoteId; })[0] || null;
   }
+  /* How many transfers may be in flight at once, and how large their list may grow.
+   *
+   * Both lists below (crossings' notes and payments being carried home) were cut to their last 20 on every write, the
+   * oldest dropped without a word. A note or a job is the only way back to a payment that has been made and not yet
+   * claimed, so the one dropped was money paid at the far mint that nothing could claim. Now a list holds up to 200
+   * rows or 256 KB; past that, only a row that holds no money (`settledRow`) is let go, oldest first, and a NEW
+   * transfer that would need more room is refused before anything is paid (`unsent`). A row already on file, or one
+   * written as money arrives, is never refused for room: it is written, over the bound if it has to be. */
+  var IN_FLIGHT_MOST = 200;
+  var IN_FLIGHT_BYTES = 256 * 1024;
+  /* `say(n)`: the refusal's words, for a list whose rows are not transfers (the handed-on list, 07-request-delivery.js). */
+  function boundedRows(l, fresh, settledRow, must, what, say) {
+    var over = function () {
+      if (l.length > IN_FLIGHT_MOST) return true;
+      try { return JSON.stringify(l).length > IN_FLIGHT_BYTES; } catch (e) { return false; }
+    };
+    while (over()) {
+      var at = -1;
+      for (var i = 0; i < l.length - 1; i++) { if (settledRow(l[i])) { at = i; break; } }
+      if (at < 0) break;
+      l.splice(at, 1);
+    }
+    if (over() && fresh && must) {
+      var e = /** @type {any} */ (new Error(typeof say === 'function' ? say(l.length - 1)
+        : (l.length - 1) + ' ' + what + ' are still waiting to finish, and Foxy keeps the only way '
+        + 'to claim each. It will not start another until some of them have finished: connect, let them finish, and try again.'));
+      e.unsent = true;
+      e.inFlightFull = true;
+      throw e;
+    }
+    return l;
+  }
   /* `must`: the note is the only way back to a payment about to be made, so
-   * a write that is refused has to stop it (mustSave). */
+   * a write that is refused has to stop it (mustSave). A note is dropped only
+   * when its crossing is finished (`dropMoveNote`), so none on file is settled. */
   function putMoveNote(note, must) {
-    var l = moveNotes().filter(function (n) { return n.quote !== note.quote; });
+    var had = moveNotes();
+    var l = had.filter(function (n) { return n.quote !== note.quote; });
+    var fresh = l.length === had.length;
     l.push(note);
-    l = l.slice(-20);
+    l = boundedRows(l, fresh, function () { return false; }, must, 'transfers between mints');
     if (must) mustSave(K.move, l, true); else save(K.move, l);
   }
   /* The melt for this invoice was given back: it was not paid and will not
@@ -5801,10 +6223,14 @@
   function carryJob(id) {
     return carryJobs().filter(function (j) { return j.id === id; })[0] || null;
   }
+  /* A job still 'asked' holds nothing: no payment has come for it, and one that comes later is written down afresh
+   * (`carryArrived`). Every other state is money at a mint this person did not choose, and is never let go for room. */
   function putCarryJob(job, must) {
-    var l = carryJobs().filter(function (j) { return j.id !== job.id; });
+    var had = carryJobs();
+    var l = had.filter(function (j) { return j.id !== job.id; });
+    var fresh = l.length === had.length;
     l.push(job);
-    l = l.slice(-20);
+    l = boundedRows(l, fresh, function (j) { return j.state === 'asked'; }, must, 'payments being brought home');
     if (must) mustSave(K.carry, l, true); else save(K.carry, l);
   }
   function dropCarryJob(id) {
@@ -5884,6 +6310,7 @@
       var job = carryJobs().filter(function (j) { return j.quote && j.quote === note.quote; })[0] || null;
       if (job) {
         dropCarryJob(job.id);
+        if (job.cid) { try { cidCameHome(job, note.quote, sats, null); } catch (x) {} }
         if (typeof FoxyWallet._onCarry === 'function') {
           FoxyWallet._onCarry({ state: 'home', sats: Number(sats) || 0, job: job, late: true, quote: note.quote });
         }
@@ -5902,19 +6329,35 @@
    * route that has become dearer since is not this phone's to make up out of
    * its own pocket without being asked. Stepped down until it fits;
    * `lands` is what would arrive. */
+  /* In units: a job taken in dollars (`job.unit`, a payment to this phone's
+   * Cashu ID at a mint it does not use, 08e-cashu-id.js `bringHome`) melts its
+   * dollars there, and lands as `job.toUnit` at home, dollars at a home that
+   * issues them and sats at one that does not. The budget is in the job's unit
+   * and what lands in the other, so a step down across units is in proportion,
+   * from the figure the crossing was first quoted at (`job.guess`). */
   function carryPlan(job) {
+    var ju = unitOf(job.unit) || 'sat', du = unitOf(job.toUnit) || 'sat';
     var budget = Math.max(0, (Number(job.kept) || Number(job.ask) || 0) - (Number(job.lost) || 0));
-    var want = Number(job.net) > 0 ? Number(job.net) : budget;
+    var want = Number(job.net) > 0 ? Number(job.net) : Number(job.guess) > 0 ? Number(job.guess) : budget;
+    var how = { to: job.home };
+    if (ju !== 'sat') how.unit = ju;
+    if (du !== 'sat') how.toUnit = du;
+    var less = function (amount, cost) {
+      return ju === du ? amount - (cost - budget) : Math.min(amount - 1, Math.floor(amount * budget / cost));
+    };
     var step = function (amount, n) {
       if (!(amount > 0)) return Promise.reject(new Error('Bringing it home costs more than it is worth.'));
-      return FoxyWallet.transferQuote(job.from, amount, { to: job.home }).then(function (plan) {
+      return FoxyWallet.transferQuote(job.from, amount, how).then(function (plan) {
         var over = Math.max(0, Number(plan.gross) - budget);
-        if (over > 0 && n < 4) return step(amount - over, n + 1);
+        if (over > 0 && n < 4) return step(less(amount, Number(plan.gross)), n + 1);
         if (over > 0) throw new Error('The cost of bringing it home kept changing. Try again in a moment.');
         return { plan: plan, lands: amount };
       }, function (e) {
         var fits = Number(e && e.foxyFits) || 0;
         if (fits > 0 && fits < amount && n < 4) return step(fits, n + 1);
+        // across units, what it would take, and a step down in proportion
+        var needs = Number(e && e.foxyNeed) || 0;
+        if (needs > budget && n < 4 && (ju !== 'sat' || du !== 'sat')) return step(less(amount, needs), n + 1);
         throw e;
       });
     };
@@ -5945,18 +6388,28 @@
         return { state: 'retry', why: carryWhy(e), job: job };
       });
     };
+    var ju = unitOf(job.unit) || 'sat';
     var run = function (pl, lands, again) {
-      var before = sumProofs(proofs(canonicalMint(job.from)));
+      var before = sumProofs(proofs(canonicalMint(job.from), ju));
       job.state = 'moving';
       job.quote = pl.mintQuote.quote;
       job.invoice = pl.mintQuote.request;
       job.lands = lands;
+      // across units: what the invoice cost at the source, in its unit, for the fee its row says (`cidCameHome`)
+      if (pl.amountUnit != null) job.priceUnit = Number(pl.amountUnit) || 0;
       delete job.short;
       putCarryJob(job);
       return carryVisit(job.from).then(function () {
-        return FoxyWallet.moveRun(pl, onStage, { visit: true });
+        /* The visit's own payment, made while it holds what a person starts (`visitTake`): `moveRun` calls `pay`
+         * before it returns, and `pay` reads this mark as it is called, as the late claim's own claim does. */
+        var was = walkCalling;
+        walkCalling = true;
+        try { return FoxyWallet.moveRun(pl, onStage, { visit: true }); }
+        finally { walkCalling = was; }
       }).then(function (done) {
         dropCarryJob(id);
+        // a payment to this phone's Cashu ID at a mint it does not use: its row at home says so, with the fee (08e-cashu-id.js)
+        if (job.cid) { try { cidCameHome(job, pl.mintQuote.quote, Number(done && done.sats) || lands, done); } catch (x) {} }
         return { state: 'home', sats: Number(done && done.sats) || lands, done: done, job: job, quote: pl.mintQuote.quote };
       }, function (e) {
         var why = carryWhy(e);
@@ -5970,7 +6423,7 @@
         }
         /* Nothing is on its way: what was to be melted is back in the pile,
          * less whatever a split that was made and not used cost. */
-        var after = sumProofs(proofs(canonicalMint(job.from)));
+        var after = sumProofs(proofs(canonicalMint(job.from), ju));
         if (after < before) job.lost = (Number(job.lost) || 0) + (before - after);
         job.state = 'paid';
         delete job.quote; delete job.invoice;
@@ -6140,7 +6593,7 @@
     /* Still there to bring? Moved by hand from the mint screen, or spent,
      * it is no longer this job's to carry, and bringing "it" home would take
      * whatever else this phone holds at that mint. */
-    var there = sumProofs(proofs(canonicalMint(job.from)));
+    var there = sumProofs(proofs(canonicalMint(job.from), unitOf(job.unit) || 'sat'));
     var owed = Math.max(1, (Number(job.kept) || 0) - (Number(job.lost) || 0));
     if (there < owed) {
       console.log('[foxy] a payment that was to be brought home is no longer at ' + hostOf(job.from)
@@ -6489,9 +6942,29 @@
      * "Foxy is not connected to Tor." matched /tor/ and held 16,384 sats out
      * of a balance for a swap the mint never saw. */
     if (neverSent(e)) return false;
+    /* A 5xx is a server between here and the mint, or the mint itself, failing
+     * after the request reached it: a 500 mid-swap, a 502 or 503 from a proxy
+     * that may have passed it on, a 504 whose answer was lost on the way back.
+     * Any of them may come after the mint did the work. (A 4xx, or a coded mint
+     * error, is a refusal, and `mintRefused` has already said so above.) "The
+     * mint answered 502." matched no word below, and the pieces stayed in the
+     * pile, spendable, until a sweep. */
+    var status = Number(e.status || (e.response && e.response.status)) || 0;
+    if (status >= 500 && status < 600) return true;
     var m = String(e.message || e.detail || e);
-    return /network|fetch|load failed|connection|did not answer|timed out|timeout|tor|no answer|abort/i.test(m);
+    return LOST_ON_THE_WIRE.test(m);
   }
+  /* What a request cut short on the wire is called by the phone's network
+   * (URLSession), by a browser's fetch, by Tor, and by this page's own timers.
+   * Specific phrases, not words: a bare /tor/ matched "storage", "history" and
+   * "restore", and so any message that held one of those. */
+  var LOST_ON_THE_WIRE = new RegExp([
+    'network connection was lost', 'network ?error', 'networkerror', 'failed to fetch', 'fetch failed', 'load failed',
+    'connection (was |has been )?(lost|reset|closed|dropped|interrupted|aborted)', 'private connection was rebuilt',
+    'socket', 'econnreset', 'epipe', 'did not answer', 'timed out', 'timeout', 'no answer', 'aborted', 'aborterror',
+    'over tor', 'tor circuit', 'circuit (was )?(closed|failed|destroyed)', 'stream (was )?(closed|failed|reset)',
+    'the answer was lost', 'cancell?ed',
+  ].join('|'), 'i');
 
   function holdInputs(rec, e) {
     if (e !== undefined && !answerLost(e)) return 0;
@@ -6832,14 +7305,24 @@
    * Held here instead, as the app opens, with or without a
    * route, until `recoverSwaps` has the mint's word on it. Only locked sends:
    * theirs is the swap where the value leaves, so theirs are the pieces that
-   * must not be shown or spent on a guess. */
+   * must not be shown or spent on a guess.
+   *
+   * Every mint the phone holds pieces at, not only the one it connects to
+   * (`at`, kept for the callers): a locked send cut short at another mint
+   * left its pieces in that mint's pile, spendable from there (a payment
+   * from it, a card loaded from it) while the mint may have spent them.
+   * Each record's pieces are taken from its own mint's pile (`holdInputs`),
+   * and `recoverSwaps` asks each mint about them, the away ones with a
+   * wallet made for them. */
   function holdUnanswered(at) {
-    var here = canonicalMint(at);
     var sats = 0;
+    var mints = {};
+    if (at) mints[canonicalMint(at)] = true;
+    loadSwaps().forEach(function (r) { if (r && r.mint) mints[canonicalMint(r.mint)] = true; });
     // a send that finished, all but its record's drop, holds nothing back (`swapFinished`)
-    dropFinishedSwaps(at);
+    Object.keys(mints).forEach(function (m) { dropFinishedSwaps(m); });
     loadSwaps().forEach(function (r) {
-      if (canonicalMint(r.mint) !== here || liveSwap[r.id]) return;
+      if (!r || !r.mint || liveSwap[r.id]) return;
       if (r.kind !== 'send' || !(r.locked && r.locked.length) || r.freeInputs || heldHas(r.id)) return;
       sats += holdInputs(r);
     });
@@ -9198,6 +9681,30 @@
     return encodeToken(tok.mint, keep, tok.unit || 'sat');
   }
 
+  /* Whether this phone has already swapped a waiting row's pieces into its pile.
+   *
+   * A claimed row is struck off the list with a write the store may refuse, and the money is in the pile by then
+   * (`dropUnclaimed`). Within the page that swapped it the row is left out of the balance as landed (`arrivingNow`),
+   * but that is memory: after a relaunch the row was back on the list and counted again beside the pile, the same
+   * payment twice until a later write happened to land. What this phone swaps in is noted by its pieces when it
+   * lands (`noteTaken`), and the pieces a row would be claimed with are the token's less any handed on
+   * (`withoutHandedOn`): when those are noted as taken, the row is the pile's. The decode is remembered by the token,
+   * since a balance is asked for many times a second; the next claim pass lets such a row go (the mint calls its
+   * pieces spent and `takenBefore` says by whom). */
+  var unclaimedPieces = {};
+  function rowSwappedIn(row) {
+    var text = row && typeof row.token === 'string' ? row.token : '';
+    if (!text) return false;
+    var list = unclaimedPieces[text];
+    if (list === undefined) {
+      try { list = (FoxyWallet.tokenInfo(text) || {}).proofs || []; } catch (e) { list = []; }
+      unclaimedPieces[text] = list;
+    }
+    var handed = handedList();
+    var rest = list.filter(function (pr) { return pr && handed.indexOf(String(pr.secret || '')) < 0; });
+    return rest.length > 0 && !!takenBefore(rest);
+  }
+
   /* The mint a waiting payment is at: written on the row, and read from the
    * token for a row kept before that was. Remembered by the token, since a
    * balance is asked for many times a second and a token does not change. */
@@ -9239,6 +9746,8 @@
       if (!row || recordUnit(row) !== want) continue;
       // a payment being swapped in is counted as arriving (`arrivingIn`), or is in the pile already: not here as well
       if (arrivingNow && arrivingNow[ids[i]]) continue;
+      // swapped in by this phone already, with its strike-off refused before a relaunch: the pile counts it
+      if (rowSwappedIn(row)) continue;
       var n = amountOfRecord(row);
       if (!(n > 0)) continue;
       if (here) {
@@ -9259,7 +9768,7 @@
    * comes back.
    *
    * Kept in sats, at the phone's last bitcoin price when the person set them
-   * (SETTINGS › OFFLINE, PER PAYER and OFFLINE, TOTAL). Never set, each is its
+   * (SETTINGS › OFFLINE LIMITS › PER PERSON and TOTAL). Never set, each is its
    * dollar default at the phone's last price, worked out when it is asked, so
    * the default follows the price until somebody picks a figure.
    *
@@ -9616,9 +10125,9 @@
    * proofs are in the pile, which inverts the rule above. A throw here would
    * turn a receive that worked into a failure — the claim's rejection answers
    * the payer 422 — for money the mint has already handed over. What a refused
-   * drop costs is a stale entry: `unclaimedSats` counts it twice until a write
-   * lands, and `claimUnclaimed` tries a token the mint has taken and drops it
-   * on "already spent". `save` rather than a bare try, so a store a newer Foxy
+   * drop costs is a stale row: `unclaimedSats` leaves it out once its pieces
+   * are in the pile (`rowSwappedIn`), and `claimUnclaimed` tries a token the
+   * mint has taken and drops it on "already spent". `save` rather than a bare try, so a store a newer Foxy
    * wrote is still left alone (storageNewer). */
   /* Secrets this phone has signed and given away.
    *
@@ -9628,10 +10137,27 @@
    * the same reason the unclaimed store is: a note that does not land would let
    * exactly that happen.
    *
-   * Bounded, because it grows for ever otherwise. Two hundred is far more than a
-   * phone hands on between swaps, and an entry that falls off the end names a
-   * proof the mint has long since marked spent — so a repeat is refused by the
-   * mint rather than here, which is a worse message but not a worse outcome. */
+   * Bounded as the in-flight lists are (`boundedRows`: 200 entries or 256 KB). It
+   * was cut to its last 200 on every write, oldest first, and the oldest are
+   * exactly the ones whose row may still name them: a piece handed on while its
+   * row could not be rewritten (`takeFromUnclaimed`) stays in that row's token,
+   * and once its secret fell off the end the phone offered it again and handed it
+   * to a second person.
+   *
+   *   holds money  a secret some row on the unclaimed list still names. Dropped,
+   *                this phone would offer that piece again (`lockedPieces`,
+   *                `lockedProofsFlat`) and claim it (`withoutHandedOn`). Never
+   *                let go here.
+   *   settled      a secret no waiting row names: the piece is off every row,
+   *                so nothing on this phone can offer it again. What is left is
+   *                the same ecash arriving a second time, and that is refused by
+   *                the mint rather than here, which is a worse message but not a
+   *                worse outcome. These go first, oldest first.
+   *
+   * A hand-on that would need more room than letting settled entries go can make
+   * is refused before anything is signed (`handedRoom`). An entry written once
+   * the token exists is never refused for room: it is written, over the bound if
+   * it has to be. */
   var HANDED = 'foxy.req.handedon';
 
   function handedList() {
@@ -9643,13 +10169,60 @@
     return handedList().indexOf(String(secret || '')) >= 0;
   }
 
+  // the secrets every row on the unclaimed list still names, read once for a whole pass over the handed-on list
+  function namedByRows() {
+    var named = {};
+    var all = unclaimed();
+    Object.keys(all).forEach(function (id) {
+      var row = all[id];
+      if (!row || typeof row.token !== 'string') return;
+      var tok = null;
+      try { tok = FoxyWallet.tokenInfo(row.token); } catch (e) { tok = null; }
+      ((tok && tok.proofs) || []).forEach(function (pr) { if (pr && pr.secret) named[String(pr.secret)] = true; });
+    });
+    return named;
+  }
+
+  var HANDED_SAY = function (n) {
+    return n + ' pieces of ecash this phone handed on are still on payments waiting to be claimed, and Foxy keeps the '
+      + 'only note that stops each going out twice. It will not hand on more until some of them have been claimed: '
+      + 'connect, let them finish, and try again.';
+  };
+
+  /* Room on the list for `count` more, or the refusal `boundedRows` gives (`inFlightFull`, `unsent`), before anything
+   * is signed. Asks only: nothing is written. */
+  function handedRoom(count) {
+    var n = Math.max(0, Math.round(Number(count) || 0));
+    if (!n) return;
+    var named = namedByRows();
+    var l = handedList().slice();
+    var room = {};
+    for (var i = 0; i < n; i++) { var k = '\u0000room-' + i; room[k] = true; l.push(k); }
+    boundedRows(l, true, function (sec) { return !room[sec] && !named[String(sec)]; }, true, 'pieces handed on', function () {
+      // (what is left once the settled ones are let go, less the room asked for)
+      return HANDED_SAY(l.filter(function (sec) { return !room[sec]; }).length);
+    });
+  }
+
+  // how many pieces the rows of a hand-on carry, for `handedRoom`
+  function piecesOfRows(rows) {
+    return (rows || []).reduce(function (n, row) {
+      var tok = null;
+      try { tok = FoxyWallet.tokenInfo(String((row && row.token) || '')); } catch (e) { tok = null; }
+      return n + (((tok && tok.proofs) || []).length);
+    }, 0);
+  }
+
   function rememberHandedOn(proofs) {
     var all = handedList();
     (proofs || []).forEach(function (pr) {
       var sec = String((pr && pr.secret) || '');
       if (sec && all.indexOf(sec) < 0) all.push(sec);
     });
-    mustSave(HANDED, all.slice(-200));
+    // the token is written by now: settled entries let go to make room, and nothing refused (`handedRoom` asked first)
+    var named = namedByRows();
+    all = boundedRows(all, false, function (sec) { return !named[String(sec)]; }, false, 'pieces handed on');
+    mustSave(HANDED, all);
   }
 
   /* The unclaimed row holding exactly this token, gone.
@@ -10259,7 +10832,7 @@
       if (!mine.length) return;
       var amt = sumProofs(mine);
       out.push({ hash: h, unit: u, amount: amt, sats: u === 'sat' ? amt : 0, at: Number(g.at) || 0, req: g.req || '',
-                 mint: g.mint, why: g.why || '', pieces: mine });
+                 mint: g.mint, why: g.why || '', pieces: mine, refund: Math.max(0, Number(g.refund) || 0) });
     });
     return out;
   }
@@ -10279,8 +10852,10 @@
    * pieces go into the pile again, flagged. Only plain pieces; a token with
    * ecash locked to this phone in it stays on its entry and is taken back
    * whole (`takeBackToken`). Resolves the sats flagged. */
+  /* `refund`: what a short refund already brought back (`refundArrived`), in the payment's unit. The group carries it, so
+   * that once the mint says which pieces the receiver spent the entry is what they took less what they sent back. */
   /** @returns {Promise<any>} */
-  function atRiskAdd(made, reqId, why) {
+  function atRiskAdd(made, reqId, why, refund) {
     return withProofs('atRisk', function () {
       var info = FoxyWallet.tokenInfo(made.token);
       var list = usableProofs((info && info.proofs) || []).map(function (pr) {
@@ -10296,6 +10871,7 @@
       all[made.hash] = { secrets: list.map(function (pr) { return pr.secret; }), unit: u, amount: sumProofs(list),
                          at: Date.now(), req: reqId || '', mint: at, why: String(why || '').slice(0, 200) };
       if (u === 'sat') all[made.hash].sats = sumProofs(list);
+      if (Number(refund) > 0) all[made.hash].refund = Math.round(Number(refund));
       // the flag first, and it must land: unflagged in the pile they would be ordinary money
       mustSave(K.atRisk, all);
       addOwnProofs(list, at, wallet, u === 'sat' ? undefined : u, true);
@@ -10323,12 +10899,29 @@
    * not counted, so the payment's entry becomes what it cost); 'row' when it
    * was taken in as a payment of its own (its row is counted, so the entry
    * stays the whole payment). */
+  /* `short`: the refund is well under what was paid. It is then not the whole answer, and nothing is struck on its word:
+   * the pieces stay in the pile, flagged, the refund is written on their group, and the mint is asked (`settleAtRisk`,
+   * check-state) which of them the receiver spent. Those come out and the entry becomes what they took less what came
+   * back; the rest are swapped back as a refusal's are. Resolves 'partial' then. A group already settled as taken
+   * (its pieces asked about and gone) is struck as before. */
   /** @returns {Promise<any>} */
-  function atRiskRefunded(hash, net, how) {
+  function atRiskRefunded(hash, net, how, short) {
     return withProofs('atRisk', function () {
       var all = atRiskAll();
       var g = all[hash];
       if (!g) return Promise.resolve(false);
+      // not said by the caller (a refund scanned as a code): short by the same measure `checkRefund` uses
+      var want = amountOfRecord(g);
+      if (short === undefined) short = Math.round(Number(net) || 0) < want - Math.max(6, Math.ceil(want / 100));
+      if (short && !g.taken && Array.isArray(g.secrets) && g.secrets.length) {
+        /* Taken as change (`how` 'change'), the refund has no row of its own, so the entry comes down by it once the
+         * mint has answered; taken as a row of its own ('row'), that row already counts it. */
+        if (how === 'change') g.refund = (Number(g.refund) || 0) + Math.max(0, Math.round(Number(net) || 0));
+        mustSave(K.atRisk, all);
+        try { FoxyWallet.tag(hash, { refundedPart: true }); } catch (e) {}
+        console.log('[foxy] part of a refused payment came back; the mint is asked which of its pieces were spent before any is struck');
+        return Promise.resolve('partial');
+      }
       var gone = {};
       (g.secrets || []).forEach(function (sec) { gone[String(sec)] = true; });
       var gu = recordUnit(g);
@@ -10415,6 +11008,13 @@
       FoxyWallet.tapChangeKept(true).catch(function () {});
       console.log('[foxy] a refused payment came back, locked to this phone: ' + moneyWords(chk.amount, refundUnit) + how
         + (chk.short ? ' — less than the ' + moneyWords(paid, refundUnit) + ' that was paid' : ''));
+      if (wait && chk.short) {
+        /* Short: not the whole answer. The entry is left to the at-risk path (`afterRefusal`), which asks the mint
+         * which of the original pieces were spent before it strikes any; the refund is carried there. */
+        try { FoxyWallet.tag(hash, { refundedPart: true, inflight: false }); } catch (x) {}
+        wait.done({ net: net, sats: chk.sats, unit: refundUnit, amount: chk.amount, short: true });
+        return;
+      }
       if (wait) {
         try {
           amendTx(hash, { settled: true, state: 'success', refunded: true, memo: 'ecash, refused and returned' });
@@ -10425,10 +11025,13 @@
         wait.done({ net: net, sats: chk.sats, unit: refundUnit, amount: chk.amount, short: chk.short });
         return;
       }
-      atRiskRefunded(hash, net, 'change').then(function () {
+      atRiskRefunded(hash, net, 'change', chk.short).then(function (how) {
         if (typeof FoxyWallet._onAtRisk === 'function') {
-          try { FoxyWallet._onAtRisk({ state: 'refunded', hash: hash, sats: refundUnit === 'sat' ? net : 0, unit: refundUnit, amount: net }); } catch (x) {}
+          try { FoxyWallet._onAtRisk({ state: 'refunded', hash: hash, sats: refundUnit === 'sat' ? net : 0, unit: refundUnit, amount: net,
+                                       short: how === 'partial' }); } catch (x) {}
         }
+        // short: the mint is asked now, with a route, which of the pieces were spent (and on every connection after)
+        if (how === 'partial' && routeOpen() && FoxyWallet.settleAtRisk) return FoxyWallet.settleAtRisk();
       }, function () {});
     };
     var no = function (why) {
@@ -10483,13 +11086,22 @@
     if (lockedProofs(list).length) return onEntry();
     var waited = (req && req.viaTap && req.id) ? waitRefund(req.id, made, paid, u) : Promise.resolve(null);
     return waited.then(function (back) {
-      if (back) {
-        e.foxyRefunded = Object.assign(inUnit(back.net), { short: !!back.short, paid: paid });
+      if (back && !back.short) {
+        e.foxyRefunded = Object.assign(inUnit(back.net), { short: false, paid: paid });
         throw e;
       }
-      return atRiskAdd(made, req && req.id, e && e.message).then(function (flagged) {
-        if (!(flagged > 0)) return onEntry();
+      /* A short refund is kept, and is not the whole answer: the original pieces go into the pile flagged as any
+       * refusal's do, and the mint says which were spent (`_settleAtRiskOnce`). Those are struck and the entry is what
+       * they took less the refund; the rest come back. It used to end the wait, with the pieces the receiver had not
+       * spent left for them to redeem whenever they liked. */
+      var part = back || null;
+      return atRiskAdd(made, req && req.id, e && e.message, part ? part.net : 0).then(function (flagged) {
+        if (!(flagged > 0)) {
+          if (part) { e.foxyRefunded = Object.assign(inUnit(part.net), { short: true, paid: paid }); throw e; }
+          return onEntry();
+        }
         e.foxyAtRisk = Object.assign(inUnit(flagged), { onEntry: false });
+        if (part) e.foxyRefunded = Object.assign(inUnit(part.net), { short: true, partial: true, paid: paid, recovered: 0 });
         /* With a route there is nothing to wait for: the pieces are swapped
          * now, while the person is still looking at the screen. They were
          * left for "the first connection", and a payer that already had one
@@ -10503,6 +11115,10 @@
             if (!r || r.hash !== made.hash) return;
             if (r.state === 'safe') { e.foxyAtRisk.safe = true; Object.assign(e.foxyAtRisk, inUnit(amountOfRecord(r))); }
             if (r.state === 'taken') { e.foxyAtRisk.taken = true; Object.assign(e.foxyAtRisk, inUnit(amountOfRecord(r))); }
+            // a short refund: what came back besides it, from the pieces the receiver did not spend
+            if (part && e.foxyRefunded) {
+              e.foxyRefunded.recovered = r.state === 'safe' ? amountOfRecord(r) : Math.max(0, Number(r.recovered) || 0);
+            }
           });
         }, function (x) {
           console.warn('[foxy] the refused pieces could not be swapped just now; on the next connection:', x && x.message);
@@ -10891,8 +11507,9 @@
     if (!(id in all)) return;
     delete all[id];
     if (!save(UNCLAIMED, all)) {
+      // counted once all the same: as landed in this page, and by its pieces noted as taken after a relaunch (`rowSwappedIn`)
       console.warn('[foxy] the claimed payment could not be struck off the unclaimed list;'
-        + ' it is counted twice until a write lands');
+        + ' it is counted in the pile alone, and the next claim pass lets the row go');
       return;
     }
     arrivingRowGone(id);
@@ -11079,6 +11696,9 @@
     ids.forEach(function (id) {
       // not a cashier code's: its row serves every payment by that code, and goes with the code (08d-till.js, `tillForget`)
       if (/^till-/.test(id)) return;
+      /* nor ANY WALLET's (08e-cashu-id.js, `cidAnyRequest`): its code may be paid again by a second payer, and that
+       * payment is found by the row rather than by a walk of the seed; the ID's inbox takes each delivery once (`cidSeenAdd`) */
+      if (/^cid-any-/.test(id)) return;
       if (want[lockPubOf(all[id])]) { delete all[id]; gone += 1; }
     });
     if (gone) save(LOCK_KEYS, all);
@@ -14124,6 +14744,109 @@
   function cardsOnFile() {
     var all = load(CARDS, {});
     return (all && typeof all === 'object' && !Array.isArray(all)) ? all : {};
+  }
+
+  /* ---- card loads whose pieces the mint says are spent --------------------------------------------------------------
+   *
+   * A card top-up's note keeps its token (`token`) until every piece is in its card's file (`cardLoadOnFile`), because
+   * until then the text may be all a lost card's take-back has. A load for a card that has no row on this phone (made
+   * before the file existed, or for a card since set up again with new keys) can never meet that rule, and on a phone
+   * whose store filled, 90 such loads held 2 MB, 88 of them for pieces long since spent at their mints.
+   *
+   * So, after a connect has settled (`connect`'s sweeps, never in front of them), the loads still kept at the mint just
+   * connected to are asked about (NUT-07: reads and changes nothing), at most CARD_LOADS_BATCH Ys a request, on a
+   * circuit of this sweep's own, at most once an hour a mint (a note in memory, not in storage). A load the mint says is
+   * spent in every piece keeps only its showing copy (`kept`, as a claimed token's: `forgetClaimedToken`), which the
+   * kept tokens' budget bounds (`trimKeptTokens`). Anything unspent, pending, missing or unasked keeps its text and is
+   * asked again another time; an answer that is not one state for each Y asked, by its Y, is refused whole; a load
+   * whose change is still owed stays; a load at another mint is not asked about here; a load on file is let go by
+   * the trim without asking.
+   *
+   * Asking about sent tokens at every connect was taken out because it told a mint who paid whom: the sender asks about
+   * pieces the receiver then redeems. A card load has no other party. The payer and the receiver are this phone, and
+   * the mint saw these very pieces made by this phone's swap to the card's key; asking now tells it only that this
+   * phone still has a note of them. A mint that wrongly said SPENT would cost only the showing copy's place in a
+   * lost card's take-back, and a take-back of pieces is the mint's to honour or refuse in any case.
+   * Resolves how many loads were let go. */
+  var CARD_LOADS_BATCH = 400;
+  var CARD_LOADS_AGAIN_MS = 60 * 60 * 1000;
+  var cardLoadsAskedAt = /** @type {Object<string, number>} */ ({});
+  var cardLoadsGoing = /** @type {Object<string, Promise<number>|undefined>} */ ({});
+  /** @returns {Promise<number>} */
+  function cardLoadsSpent(w, at) {
+    var here = canonicalMint(at || '');
+    if (!w || !here || !routeOpen()) return Promise.resolve(0);
+    if (cardLoadsGoing[here]) return /** @type {Promise<number>} */ (cardLoadsGoing[here]);
+    if (Date.now() - (cardLoadsAskedAt[here] || 0) < CARD_LOADS_AGAIN_MS) return Promise.resolve(0);
+    var meta = load('foxy.txmeta', {});
+    var asks = /** @type {Array<{hash: string, token: string, ys: Array<string>}>} */ ([]);
+    Object.keys(meta || {}).forEach(function (h) {
+      var m = meta[h];
+      if (!m || m.to !== 'card' || m.owedChange || typeof m.token !== 'string' || !m.token) return;
+      var info = null;
+      try { info = FoxyWallet.tokenInfo(m.token); } catch (e) { info = null; }
+      if (!info || !Array.isArray(info.proofs) || !info.proofs.length || canonicalMint(info.mint || '') !== here) return;
+      // on file: the trim lets it go without asking (`trimPlan`)
+      if (cardLoadOnFile(m.token)) return;
+      var ys = info.proofs.map(function (p) { return lookupOf(p); });
+      if (ys.some(function (y) { return !y; })) return;
+      asks.push({ hash: h, token: m.token, ys: ys });
+    });
+    // nothing to ask is no question asked, and no hour's wait
+    if (!asks.length) return Promise.resolve(0);
+    cardLoadsAskedAt[here] = Date.now();
+    var all = /** @type {Array<string>} */ ([]);
+    asks.forEach(function (a) { all = all.concat(a.ys); });
+    var size = Math.max(1, Math.min(CARD_LOADS_BATCH, mintArrayCap(w)));
+    var parts = /** @type {Array<Array<string>>} */ ([]);
+    for (var i = 0; i < all.length; i += size) parts.push(all.slice(i, i + size));
+    var circuit = circuitFor('cardload:' + here + ':' + Date.now());
+    var said = /** @type {Object<string, string>} */ ({});
+    var answered = 0;
+    var going = parts.reduce(function (chain, part) {
+      return chain.then(function () {
+        if (!routeOpen()) return null;
+        return withTimeout(FoxyWallet.nativeRequest({
+          endpoint: here + '/v1/checkstate', method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          requestBody: { Ys: part }, foxyCircuit: circuit,
+        }), 30000, 'the mint’s word on card loads').then(function (j) {
+          var states = j && Array.isArray(j.states) ? j.states : null;
+          // one state for each Y asked, by its Y, or none of the answer is taken
+          if (!states || states.length !== part.length) return null;
+          var got = /** @type {Object<string, string>} */ ({});
+          states.forEach(function (st) { if (st && typeof st.Y === 'string') got[st.Y] = String(st.state || '').toUpperCase(); });
+          if (!part.every(function (y) { return Object.prototype.hasOwnProperty.call(got, y); })) return null;
+          part.forEach(function (y) { said[y] = got[y]; });
+          answered += 1;
+          return null;
+        }, function () { /* not answered: kept, and asked another time */ return null; });
+      });
+    }, Promise.resolve(/** @type {any} */ (null))).then(function () {
+      // nothing answered (no route, no word): the next connect asks again
+      if (!answered) delete cardLoadsAskedAt[here];
+      var spent = asks.filter(function (a) { return a.ys.every(function (y) { return said[y] === 'SPENT'; }); });
+      var now = load('foxy.txmeta', {});
+      var gone = 0, bytes = 0;
+      spent.forEach(function (a) {
+        var m = now[a.hash];
+        // only as it was asked about: a note changed meanwhile is left for the next time
+        if (!m || m.to !== 'card' || m.owedChange || m.token !== a.token) return;
+        m.kept = m.token;
+        delete m.token;
+        gone += 1;
+        bytes += a.token.length;
+      });
+      if (gone) {
+        trimKeptTokens(now);
+        try { save('foxy.txmeta', now); } catch (e) { console.warn('[foxy] card: the loads the mint says are spent could not be let go:', e && e.message); return 0; }
+      }
+      console.log('[foxy] card: ' + gone + ' loads whose pieces the mint says are spent let go, ' + Math.round(bytes / 1024) + ' KB; '
+        + (asks.length - gone) + ' kept');
+      return gone;
+    }).then(function (n) { delete cardLoadsGoing[here]; return n; }, function () { delete cardLoadsGoing[here]; return 0; });
+    cardLoadsGoing[here] = going;
+    return going;
   }
 
   /* A refund key for this card, from the phone's words: the one already on
@@ -20174,8 +20897,10 @@
       var joined = cardAway;
       return joined.ready.then(function () { return handle(joined); }, function (e) { return cardVisitEnd(joined).then(function () { throw e; }); });
     }
-    if (claimAway || claimingLate) {
-      return Promise.resolve(claimAway || claimingLate).then(null, function () { return null; }).then(function () { return cardVisit(at); });
+    // and any other visit (`visitBusy`: a payment being brought home, a tap at a payer's mint)
+    var busy = visitBusy();
+    if (busy) {
+      return Promise.resolve(busy).then(null, function () { return null; }).then(function () { return cardVisit(at); });
     }
     var home = canonicalMint(mintUrl || '');
     if (!home || home === to) return Promise.resolve(handle(null));
@@ -20899,7 +21624,9 @@
      * left whole, the change, and what was too little to come back. The sat
      * names are not kept on such a row, so nothing that reads sats finds
      * cents there. */
-    [['grossSats', 'grossAmount'], ['changeSats', 'changeAmount'], ['dustSats', 'dustAmount']].forEach(function (pair) {
+    // (and a send whose swap did not add up: what went in and what came back, `swapCost`)
+    [['grossSats', 'grossAmount'], ['changeSats', 'changeAmount'], ['dustSats', 'dustAmount'],
+     ['swapInSats', 'swapInAmount'], ['swapOutSats', 'swapOutAmount']].forEach(function (pair) {
       if (!(pair[0] in out)) return;
       var v = out[pair[0]];
       delete out[pair[0]];
@@ -21208,6 +21935,8 @@
     var pending = load(K.quotes, []);
     var rec = /** @type {any} */ ({
       quote: q.quote, amount: amount, memo: memo || '', at: Date.now(),
+      // the quote's own amount, which is what its claim mints (`mintAmountOf`); `createQuote` refused one far from `amount`
+      quoted: quoteAmountOf(q) || undefined,
       unit: unitOf(unit) || 'sat',
       expiry: Number(q.expiry) || null,
       // which mint issued it: asking another mint about this quote is a
@@ -21810,7 +22539,14 @@
    * (`tillListenNow`), so the whole week is inside what they are asked for. */
   var TILL_LISTEN_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
   var TILL_SEND_UNTIL_MS = TILL_LISTEN_AFTER_MS;
-  var TILL_PASSES_MAX = 4;
+  /* Eight codes at most, live or ended within the week a payment by one may
+   * still arrive in, and the phone listens on all of them (TillInboxes.most in
+   * FoxyBridge+Till.swift says the same): a keeper may have several cashiers
+   * at once, each by a code of their own (CASHIER CODE's list, 26m-till.js). */
+  var TILL_PASSES_MAX = 8;
+  // the most a cashier code's label holds, and the list of codes kept to show under PAST
+  var TILL_LABEL_MAX = 24;
+  var TILL_LOG_MAX = 40;
   var TILL_SEEN_MAX = 2000;
   /* What the keeper keeps of a delivery it cannot take yet (at another mint,
    * or with no route): fifty, and a megabyte in all. Only ecash the mint
@@ -21905,7 +22641,13 @@
     var nowS = Math.floor(Date.now() / 1000);
     if (j.exp <= nowS) return { why: 'That cashier code has expired. Ask for a new one.' };
     if (j.exp > nowS + TILL_PASS_MS / 1000 + TILL_PASS_SLACK_S) return bad;
-    return { pass: { v: 1, id: j.id, mint: mints[0], mints: mints, unit: j.unit, main: main, lock: j.lock, to: j.to, exp: j.exp } };
+    /* Whether the cashier's till offers tips: true or nothing. Who they go to is
+     * not in the code (the keeper's phone keeps that, on its row of the code),
+     * so a code at a counter names nobody's Cashu ID. */
+    if (j.tips !== undefined && typeof j.tips !== 'boolean') return bad;
+    var out = { v: 1, id: j.id, mint: mints[0], mints: mints, unit: j.unit, main: main, lock: j.lock, to: j.to, exp: j.exp };
+    if (j.tips === true) out.tips = true;
+    return { pass: out };
   }
 
   /* A till's mints as a list Foxy can hold it to: each a mint address Foxy
@@ -21951,6 +22693,8 @@
     var body = { v: 1, id: p.id, mint: mints[0] || p.mint, mints: mints, unit: p.unit };
     if (p.unit === 'both') body.main = p.main === 'usd' ? 'usd' : 'sat';
     body.lock = p.lock; body.to = p.to; body.exp = p.exp;
+    // `tips` only on a code whose till offers them (`tillTipsOn`): a code without reads as it always did
+    if (tillTipsOn(p)) body.tips = true;
     return TILL_URL + tillB64(JSON.stringify(body));
   }
 
@@ -22155,6 +22899,7 @@
   function tillKeeperForget() {
     tillClear(K.tillKeeper);
     tillClear(K.tillKeeperHome);
+    tillClear(K.tillTips);
   }
 
   /* The keeper's till while it is open (`tillKeeperOpen`): { mints, def }, the
@@ -22205,7 +22950,7 @@
   function tillLiveNewest(unit, mints, main) {
     var now = Date.now();
     var live = tillPrune().filter(function (r) {
-      return Number(r.exp) * 1000 > now && (!unit || r.unit === unit) && (!mints || tillSameMints(tillMintsOf(r), mints))
+      return Number(r.exp) * 1000 > now && !r.endedAt && (!unit || r.unit === unit) && (!mints || tillSameMints(tillMintsOf(r), mints))
         && (!main || r.unit !== 'both' || tillMainOf(r) === main);
     }).sort(function (a, b) { return Number(a.made) - Number(b.made); });
     return live.length ? live[live.length - 1] : null;
@@ -22239,12 +22984,17 @@
       return Promise.reject(new Error('A cashier code takes payments at the mint this phone is on, and at mints Foxy can use.'));
     }
     var mainWant = opts && (opts.main === 'usd' || opts.main === 'sat') ? opts.main : '';
-    var live = tillLiveNewest(want, named, mainWant);
+    /* `opts.fresh`: another code, for another cashier, whatever is live (CASHIER CODE's ADD); a code
+     * with tips asked of it apart from the till's is one too. Otherwise a live code for this till is
+     * answered again, as it always was. */
+    var fresh = !!(opts && (opts.fresh || opts.tips !== undefined));
+    var live = fresh ? null : tillLiveNewest(want, named, mainWant);
     if (live) {
       Promise.resolve().then(function () { return FoxyWallet.tillListen(); }).then(null, function () {});
-      return Promise.resolve({ text: tillPassText(live), id: live.id, exp: live.exp, mints: tillMintsOf(live), main: tillMainOf(live) });
+      return Promise.resolve({ text: tillPassText(live), id: live.id, exp: live.exp, mints: tillMintsOf(live), main: tillMainOf(live),
+                               tips: tillTipsOn(live), label: String(live.label || '') });
     }
-    if (tillMaking) return tillMaking;
+    if (tillMaking && !fresh) return tillMaking;
     var run = tillPassMakeNew(opts);
     tillMaking = run;
     var done = function () { if (tillMaking === run) tillMaking = null; };
@@ -22270,6 +23020,17 @@
     if (unit !== 'sat' && unitsOf(at).indexOf('usd') < 0) return Promise.reject(new Error(hostOf(at) + ' does not issue dollars.'));
     var mintsNo = tillMintsProblem(mints);
     if (mintsNo) return Promise.reject(new Error(mintsNo));
+    /* Its tips: asked of this code (`o.tips`), or the open till's (`tillTipsNow`). Who they go to stays on
+     * this phone's row; the code carries only whether there are any. */
+    var tips;
+    try { tips = o.tips !== undefined ? tipsCheck(o.tips) : tillTipsNow(); } catch (eT) { return Promise.reject(eT); }
+    var label = tillLabelClean(o.label);
+    // eight at most, and only a code run out makes room (below): with eight not run out, no ninth
+    var nowCheck = Date.now();
+    var kept = tillPrune();
+    if (kept.length >= TILL_PASSES_MAX && !kept.some(function (r) { return Number(r.exp) * 1000 <= nowCheck; })) {
+      return Promise.reject(new Error(TILL_PASSES_MAX + ' cashier codes are out already. A new one can be made once one of them runs out.'));
+    }
     var raw = new Uint8Array(8);
     (window.crypto || window.msCrypto).getRandomValues(raw);
     var id = hexOf(raw);
@@ -22284,17 +23045,20 @@
                     exp: Math.floor((now + TILL_PASS_MS) / 1000), made: now };
         // a till in both: the main its screen chose (`opts.main`), sats where none was
         if (unit === 'both') row.main = o.main === 'usd' ? 'usd' : 'sat';
+        row.tips = tips;
+        if (label) row.label = label;
         // a code no phone could read back (its mints' addresses too long between them) is not handed out
         if (tillPassText(row).length > TILL_TEXT_MAX) {
           tillForget(row);
           throw new Error('The till’s mints’ addresses are too long for one cashier code. Take fewer mints.');
         }
         var rows = tillPrune().concat([row]);
-        /* Four at most, and only ever an ended one goes, oldest first, with
-         * its keys. None other is live (a live one is answered again,
-         * above), and with one live at a time four reach back past the week
-         * a code is listened for after it ends, so this drops nothing that
-         * could still arrive. */
+        /* Eight at most, and only ever one run out goes, oldest first, with
+         * its keys: never one still live, nor one ended by hand (END) whose
+         * cashier may still be taking payments by it until it runs out. One
+         * run out within the week is listened for no longer: what its cashier
+         * still had to send stays in that cashier's outbox, locked to this
+         * phone, and is found by walking the seed. */
         var gone = [];
         while (rows.length > TILL_PASSES_MAX) {
           var ended = rows.filter(function (r) { return r !== row && Number(r.exp) * 1000 <= now; });
@@ -22306,11 +23070,13 @@
         try { mustSave(K.tillPasses, rows); }
         catch (e) { tillForget(row); throw e; }
         gone.forEach(tillForget);
+        // and on the list of codes, which outlives the rows and their keys (PAST, `tillPassList`)
+        tillLogAdd(row);
         console.log('[foxy] till: a cashier code was made, ' + unit + ' at ' + hostOf(at)
           + (mints.length > 1 ? ' and ' + (mints.length - 1) + ' other mint(s)' : '') + ', for 72 hours');
         // and the phone listens for it from now on
         Promise.resolve().then(function () { return FoxyWallet.tillListen(); }).then(null, function () {});
-        return { text: tillPassText(row), id: id, exp: row.exp, mints: mints, main: tillMainOf(row) };
+        return { text: tillPassText(row), id: id, exp: row.exp, mints: mints, main: tillMainOf(row), tips: tillTipsOn(row), label: label };
       }, function (e) {
         dropLockKey('till-' + id);
         throw e;
@@ -22562,6 +23328,14 @@
       tillSeenAdd(proofs);
       tillInboxDrop(at);
       console.log('[foxy] till: a payment from a cashier was taken in');
+      /* Its tip, where the code offers tips: the cashier says how much of it was the tip (`tip`, in
+       * its unit), and this phone's own row of the code says who it goes to (08f-till-tips.js). Never
+       * more than what came in. */
+      var tip = tillTipOfBody(j, r, unit);
+      if (tip > 0 && tillTipsOn(pass)) {
+        try { tipForward({ tips: pass.tips, amount: tip, unit: unit, mint: mint, hash: (r && r.hash) || '', from: 'cashier' }); }
+        catch (eTip) { console.warn('[foxy] till: a cashier’s tip could not be passed on; it stays here:', (eTip && eTip.message) || eTip); }
+      }
       return 'taken';
     }, function (e) {
       var why = String((e && e.message) || e);
@@ -22679,6 +23453,9 @@
     var row = { n: n, passId: String(o.passId || ''), to: String(o.to || ''), mint: canonicalMint(o.mint || ''),
                 unit: unitOf(o.unit) || 'sat', amount: Math.round(satsOf(o.amount)), proofs: o.proofs,
                 hash: String(o.hash || ''), exp: Number(o.exp) || 0, at: Date.now(), sentAt: null, tries: 0 };
+    // the part of it that was a tip, said to the keeper with the payment (`tip`): never more than the payment
+    var tip = Math.round(Number(o.tip) || 0);
+    if (tip > 0) row.tip = Math.min(tip, row.amount);
     rows.push(row);
     mustSave(K.tillOutbox, rows);
     return row;
@@ -22749,7 +23526,10 @@
             return null;
           }
           if (!routeOpen()) { tillTried(r); return null; }
-          var body = JSON.stringify({ id: 'till:' + r.passId + ':' + r.n, mint: r.mint, unit: r.unit, proofs: r.proofs, memo: 'till' });
+          var sends = { id: 'till:' + r.passId + ':' + r.n, mint: r.mint, unit: r.unit, proofs: r.proofs, memo: 'till' };
+          // and how much of it was a tip, for the keeper to pass on (`tillTipOfBody`)
+          if (Number(r.tip) > 0) sends.tip = Math.round(Number(r.tip));
+          var body = JSON.stringify(sends);
           return deliverOverNostr(r.to, body).then(function () {
             var rows = tillOutboxRows();
             rows.forEach(function (x) { if (x.passId === r.passId && x.n === r.n) x.sentAt = Date.now(); });
@@ -22933,7 +23713,7 @@
       var hash = 'till-' + p.id;
       try {
         tillOutboxAdd({ proofs: p.proofs, mint: p.mint, unit: pu, amount: kept, to: open.tillTo, passId: open.tillPass,
-                        exp: open.tillExp, hash: hash });
+                        exp: open.tillExp, hash: hash, tip: Number(open.tillTip) || 0 });
       } catch (e) {
         console.error('[foxy] till: a payment could not be written down; refusing it:', (e && e.message) || e);
         return no(422, 'This phone could not write the payment down, so it was not taken. Try again.');
@@ -22979,7 +23759,7 @@
     });
     var asked;
     try {
-      asked = Promise.resolve(w.mintProofsBolt11(entry.amount,
+      asked = Promise.resolve(w.mintProofsBolt11(mintAmountOf(entry, entry.amount),
         entry.pubkey ? { quote: quoteId, pubkey: entry.pubkey } : { quote: quoteId },
         entry.privkey ? { privkey: entry.privkey } : undefined,
         { type: 'p2pk', options: { pubkey: String(entry.lockPub).toLowerCase() } }));
@@ -23008,7 +23788,7 @@
       already = tillOutboxHolds(fresh);
       if (!already) {
         tillOutboxAdd({ proofs: fresh, mint: at, unit: unit, amount: got, to: entry.tillTo, passId: entry.tillPass,
-                        exp: entry.tillExp, hash: quoteId });
+                        exp: entry.tillExp, hash: quoteId, tip: Number(entry.tillTip) || 0 });
       }
     } finally { free(); }
     drop();
@@ -23140,7 +23920,7 @@
   /* ---- listening, joining, leaving ---- */
 
   /* The keeper's phone told to listen on every code whose payments can still
-   * arrive, newest four (the phone takes no more), then what was kept for this
+   * arrive, newest eight (the phone takes no more), then what was kept for this
    * mint taken. Shared while it runs; called again, it asks the phone again,
    * which closes the set it had and opens this one: so a call after the phone
    * closed them for the background opens them again. */
@@ -23319,6 +24099,7 @@
     var home = load(K.tillKeeperHome, null);
     tillClear(K.tillKeeperHome);
     tillClear(K.tillKeeper);
+    tillClear(K.tillTips);
     var to = home && typeof home.mint === 'string' ? canonicalMint(home.mint) : '';
     if (!to || to === canonicalMint(mintUrl || '')) return Promise.resolve({ mint: canonicalMint(mintUrl || ''), moved: false });
     // home at once from the keys on file, and its mint asked behind it (`lazy`)
@@ -23346,6 +24127,3560 @@
       return { left: true, mint: canonicalMint(mintUrl || ''), home: false };
     });
   }
+  /* ---- the Cashu ID: a name another wallet pays, with no server ---------------
+   *
+   * docs/CASHU-ID.md is the whole of it. In short: the phone derives the ID key
+   * and the delivery key from the seed at their own paths (Foxy/Keychain/CashuID.swift),
+   * and MY CASHU ID shows their public halves, with the ID key's signature binding
+   * them, as one string, `foxyid1…`. Another Foxy pastes or scans it and keeps it
+   * in its contacts. To pay it, that Foxy locks the ecash to the ID by NUT-28
+   * (pay-to-blinded-key), exactly as cashu-ts does with `blindKeys`: for each
+   * piece a throwaway key e, E = e·G on the proof (`p2pk_e`), and every key of
+   * the lock blinded by its slot,
+   *
+   *     rᵢ = SHA-256("Cashu_P2BK_v1" ‖ x(e·P) ‖ i),   P′ = P + rᵢ·G
+   *
+   * the ID at slot 0 and the payer's refund key at slot 1, with a locktime about
+   * thirty days out. It gift-wraps the token to the delivery key over Nostr
+   * (NIP-17). The mint sees keys nobody has seen before, never the ID and never
+   * the refund key, and nothing but this phone's seed opens them (d·E has the
+   * same x as e·ID).
+   *
+   * The phone never answers a one-time key. With an e of its own a page could
+   * take the ID key out of it (d = k − r₀), so the phone signs instead:
+   * `cashuIdSign` gives NUT-11's signature for each piece whose lock key is the
+   * ID blinded by that piece's E. The sender keeps the token, locked, in an
+   * outbox until the mint says it is spent (collected) or the locktime has
+   * passed, when the sender's own refund key brings it home. */
+
+  var CID_PREFIX = 'foxyid1';
+  /* Version 2: 1 + 33 + 32 bytes, the ID key's BIP-340 signature over
+   * SHA-256("foxy-cashu-id-bind-v1" ‖ ID ‖ delivery key) (64), and four of
+   * checksum: 179 characters of base64url. Version 1 (no signature) is refused
+   * like any string that is not an ID: nothing in it said the delivery key was
+   * the ID's own. */
+  var CID_VERSION = 2;
+  var CID_BYTES_V2 = 134;
+  var CID_TEXT = /^foxyid1[A-Za-z0-9_-]{179}$/;
+  var CID_BIND = 'foxy-cashu-id-bind-v1';
+  var CID_HEX33 = /^0[23][0-9a-f]{64}$/;
+  var CID_HEX32 = /^[0-9a-f]{64}$/;
+  var CID_SIG = /^[0-9a-f]{128}$/;
+  /* The suites' switches (`_cashuIdLockS`, `_cashuIdRetryMs` and the arithmetic
+   * with a fixed key) are honoured only on a page a test loaded and marked as
+   * it did (tests/harness.js, `__foxyTestHooks`), read once as the wallet loads.
+   * A page in the app never has it, so nothing set later can shorten a lock. */
+  var CID_TESTS = !!(typeof window !== 'undefined' && window.__foxyTestHooks === true);
+  /* How long a payment waits for its contact: past it, the payer's refund key can
+   * take it back, and does (`cidWatch`). The locktime is the day thirty days on,
+   * at a random second of it (`cidLocktime`), so it does not say to the second
+   * when the payment was made. The receiver takes nothing that falls within a
+   * day (`LOCKTIME_MARGIN_S`). */
+  var CID_LOCK_S = 30 * 24 * 60 * 60;
+  var CID_DAY_S = 24 * 60 * 60;
+  // the most one delivery may be, in text and in pieces, before anything is read out of it
+  var CID_BODY_MAX = 64 * 1024;
+  var CID_PROOFS_MAX = 100;
+  var CID_NOTE_MAX = 140;
+  var CID_NAME_MAX = 40;
+  var CID_SEEN_MAX = 4000;
+  /* What is kept of deliveries at a mint this phone uses that cannot be taken yet
+   * (no route, the mint's keys to fetch), and only while their locktime is more
+   * than a day out: a kept row goes a day before it, when its payer could take
+   * the money back. */
+  var CID_INBOX_MAX = 50;
+  var CID_INBOX_BYTES = 1024 * 1024;
+  /* Deliveries at a mint this phone does not use are the receiver's to decide
+   * (`cidForeign`): brought home, kept there, or sent back. At most five such
+   * deliveries an hour make this phone ask a mint it does not use anything, the
+   * count kept in storage so a restart does not reset it (`K.cidForeign`). What
+   * waits for an answer, or is smaller than its crossing's fee, waits
+   * (`K.cidOffers`), unasked again: at most ten, the oldest dropped, a quarter
+   * of a megabyte in all. */
+  var CID_OFFERS_MAX = 10;
+  var CID_OFFERS_BYTES = 256 * 1024;
+  var CID_OFFER_RATE = 5;
+  var CID_OFFER_RATE_MS = 60 * 60 * 1000;
+  /* A copy of each payment to a contact goes to this phone's own recovery key
+   * (m/129373'/20'/3'/0'/0') once a relay has taken the payment, between one and
+   * thirty minutes later at a random second (`cidCopyDelay`), so the relays do not
+   * see the two in the same second. A restore from the words listens on that key
+   * for a week (`CID_RECOVER_MS`), back the same thirty-two days, and rebuilds the
+   * outbox from the copies (`cidCopyArrived`). */
+  var CID_COPY_MIN_MS = 60 * 1000;
+  var CID_COPY_MAX_MS = 30 * 60 * 1000;
+  var CID_RECOVER = 'foxy.cid.recover';
+  var CID_RECOVER_MS = 7 * 24 * 60 * 60 * 1000;
+  /* A mint of this phone's whose keys could not be fetched is asked again no
+   * sooner than a minute after, then two, four… and never more than once an hour. */
+  var CID_BACKOFF_MIN_MS = 60 * 1000;
+  var CID_BACKOFF_MAX_MS = 60 * 60 * 1000;
+  /* A delivery the relays took is sent again once a day until the mint says it
+   * is spent or its locktime has passed: a relay that drops it costs a day. */
+  var CID_RESEND_MS = 24 * 60 * 60 * 1000;
+  var CID_RETRY_MS = 60000;
+  var CID_TRIES_FAST = 30;
+  var CID_RETRY_SLOW = 15;
+  /* The relays are asked for wraps from thirty-two days back: a payment waits
+   * thirty for its receiver, and NIP-59 backdates a wrap up to two. The phone
+   * reads them page by page (FoxyBridge+CashuID.swift). */
+  var CID_SINCE_S = 32 * 24 * 60 * 60;
+  /* A listen this recent is not opened again by a connect's catch-up or by the route coming up (`cidListenNow`,
+   * `ifClosed`): what was kept is taken from the inbox that is open. Every open closes the one before and asks the
+   * relays for the whole window again, which left a phone deaf for two seconds on every return and read each of the
+   * month's payments once more. A return from the background always opens it again: the phone closed it. */
+  var CID_FRESH_MS = 60 * 1000;
+  /* Deliveries read while the wallet is still the one built from storage, held in memory until the mint is connected
+   * for real (`cidHoldEarly`): at most this many, and this much. The relays hold every one of them. */
+  var CID_EARLY_MAX = 20;
+  var CID_EARLY_BYTES = 512 * 1024;
+  /* The most pieces one payment's throwaway keys are made for: more than any
+   * split of an amount, with a retried swap's second set. */
+  var CID_PIECES_MAX = 256;
+
+  /* ---- the string ---- */
+
+  function cidB64(bytes) {
+    var bin = '';
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function cidUnB64(text) {
+    var t = String(text || '').replace(/-/g, '+').replace(/_/g, '/');
+    while (t.length % 4) t += '=';
+    var bin = atob(t);
+    var out = [];
+    for (var i = 0; i < bin.length; i++) out.push(bin.charCodeAt(i));
+    return out;
+  }
+
+  function cidHexBytes(hex) { return Array.prototype.slice.call(bytesOfHex(hex)); }
+  function cidUtf8(text) { return Array.prototype.slice.call(new TextEncoder().encode(String(text))); }
+
+  /* What the ID key signs once to bind its delivery key: SHA-256(prefix ‖ ID ‖ delivery key), hex. */
+  function cidBindDigest(idHex, nostrHex) {
+    return hexOf(sha256(cidUtf8(CID_BIND).concat(cidHexBytes(idHex), cidHexBytes(nostrHex))));
+  }
+
+  function cidBound(idHex, nostrHex, sigHex) {
+    try { return window.CashuTS.schnorrVerifyDigest(String(sigHex), cidBindDigest(idHex, nostrHex), String(idHex)) === true; }
+    catch (e) { return false; }
+  }
+
+  /* The ID string for an ID key, a delivery key and the ID key's signature
+   * binding them, all lowercase hex: version 2. With no signature the suites'
+   * version 1, which `cidRead` refuses. */
+  function cidEncode(idHex, nostrHex, sigHex) {
+    var sig = sigHex && CID_SIG.test(String(sigHex)) ? cidHexBytes(sigHex) : null;
+    var body = [sig ? 2 : 1].concat(cidHexBytes(idHex), cidHexBytes(nostrHex), sig || []);
+    return CID_PREFIX + cidB64(body.concat(sha256(body).slice(0, 4)));
+  }
+
+  /* Whether `text` is shaped like an ID string at all, before its checksum is
+   * read: what `classify` calls 'cashuid', so a mistyped one is refused as an
+   * ID and not as "not a payment". */
+  function cidShape(text) {
+    return CID_TEXT.test(String(text || '').trim());
+  }
+
+  /* { id, nostr, sig, version } from an ID string, or { why } in words. Never throws. */
+  function cidRead(text) {
+    var bad = { why: 'That is not a Cashu ID.' };
+    var t = String(text || '').trim();
+    if (!CID_TEXT.test(t)) return bad;
+    var bytes;
+    try { bytes = cidUnB64(t.slice(CID_PREFIX.length)); } catch (e) { return bad; }
+    if (bytes.length !== CID_BYTES_V2) return bad;
+    var body = bytes.slice(0, bytes.length - 4);
+    var sum = sha256(body).slice(0, 4);
+    for (var i = 0; i < 4; i++) if (sum[i] !== bytes[bytes.length - 4 + i]) return bad;
+    if (body[0] > CID_VERSION) return { why: 'That Cashu ID is from a newer Foxy. Update Foxy and try again.' };
+    if (body[0] !== 2) return bad;
+    var id = hexOf(body.slice(1, 34));
+    var nostr = hexOf(body.slice(34, 66));
+    var sig = hexOf(body.slice(66, 130));
+    // both keys points on the curve: a payment to one that is not could never be opened
+    try {
+      var CT = window.CashuTS;
+      CT.pointFromHex(id);
+      CT.pointFromHex('02' + nostr);
+    } catch (e) { return bad; }
+    if (!CID_HEX33.test(id) || !CID_HEX32.test(nostr)) return bad;
+    // the ID key itself said this delivery key is its own
+    if (!cidBound(id, nostr, sig)) return bad;
+    return { id: id, nostr: nostr, sig: sig, version: body[0] };
+  }
+
+  /* ---- this phone's own ---- */
+
+  // the public keys from the phone, once a page load and again after the seed changes (`clearNativeSecrets`)
+  var cidMineCache = null;
+  // the recovery key's x-only public half, from the same answer: the copies go to it and it is said nowhere else
+  var cidRecoveryKey = '';
+
+  function cidForget() { cidMineCache = null; cidRecoveryKey = ''; }
+
+  function cidMine() {
+    if (cidMineCache) return cidMineCache;
+    var run = nativeJson('cashuIdPublic', {}, 60000).then(function (j) {
+      var id = String((j && j.id) || '').toLowerCase();
+      var nostr = String((j && j.nostr) || '').toLowerCase();
+      var sig = String((j && j.sig) || '').toLowerCase();
+      var recovery = String((j && j.recovery) || '').toLowerCase();
+      if (!CID_HEX33.test(id) || !CID_HEX32.test(nostr)) throw new Error('the phone’s Cashu ID was not a pair of keys');
+      if (!CID_SIG.test(sig) || !cidBound(id, nostr, sig)) throw new Error('the phone’s Cashu ID did not come with its own signature');
+      // the recovery key goes nowhere but the copies' address (`cidCopyAll`): not on what the screens are given
+      cidRecoveryKey = CID_HEX32.test(recovery) && recovery !== nostr ? recovery : '';
+      return { id: id, nostr: nostr, sig: sig, text: cidEncode(id, nostr, sig) };
+    });
+    cidMineCache = run;
+    run.then(null, function () { if (cidMineCache === run) cidMineCache = null; });
+    return run;
+  }
+
+  /* Whether this phone's ID is in use: MY CASHU ID was shown on it, or its
+   * words were restored (`cidRestored`). Until then it does not listen, and it
+   * names itself to nobody it pays (`cidBody`). */
+  var CID_SHOWN = 'foxy.cid.shown';
+
+  function cidInUse() {
+    try { return !!localStorage.getItem(CID_SHOWN); } catch (e) { return false; }
+  }
+
+  function cidMarkInUse() {
+    try { if (!localStorage.getItem(CID_SHOWN)) localStorage.setItem(CID_SHOWN, String(Date.now())); } catch (e) {}
+  }
+
+  /* Words restored (`adoptCandidate`): the ID they give may be in somebody's
+   * contacts, with money on its way, so this phone listens for it from now on
+   * without MY CASHU ID being opened, and derives it at once. */
+  function cidRestored() {
+    cidForget();
+    cidMarkInUse();
+    // and for a week it reads back the copies of what this seed paid and nobody has collected (`cidCopyArrived`)
+    try { mustSave(CID_RECOVER, Date.now()); } catch (e) { console.warn('[foxy] cashu id: the restore could not be noted for the copies:', (e && e.message) || e); }
+    cidMine().then(function () { return cidListenNow(); }).then(null, function (e) {
+      console.warn('[foxy] cashu id: the restored seed’s ID was not read yet:', (e && e.message) || e);
+    });
+  }
+
+  /* ---- NUT-28's arithmetic, the payer's half ---- */
+
+  var CID_N = null;
+  function cidOrder() {
+    if (CID_N === null) CID_N = window.CashuTS.pointFromHex('0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798').constructor.Fn.ORDER;
+    return CID_N;
+  }
+
+  /* Piece j's throwaway key from a payment's base (CashuID.payBase):
+   * SHA-256(base ‖ j as two bytes), once more with 0xFF appended when that is 0
+   * or not below n. 64 hex. */
+  function cidPieceKey(baseHex, j) {
+    var head = cidHexBytes(baseHex).concat([(j >> 8) & 255, j & 255]);
+    var n = cidOrder();
+    var e = hexOf(sha256(head));
+    var v = BigInt('0x' + e);
+    if (v === BigInt(0) || v >= n) { e = hexOf(sha256(head.concat([255]))); v = BigInt('0x' + e); }
+    if (v === BigInt(0) || v >= n) throw new Error('No throwaway key could be made for that payment.');
+    return e;
+  }
+
+  /* The keys of a payment to `idHex` with `refundHex` as cashu-ts makes them,
+   * for a piece's throwaway key `eHex`: { E, L, R } (the ID blinded at slot 0,
+   * the refund key at slot 1). */
+  function cidBlind(idHex, eHex, refundHex) {
+    var keys = refundHex ? [String(idHex).toLowerCase(), String(refundHex).toLowerCase()] : [String(idHex).toLowerCase()];
+    var got = window.CashuTS.deriveP2BKBlindedPubkeys(keys, bytesOfHex(eHex));
+    return { E: got.Ehex, L: got.blinded[0], R: got.blinded[1] || '' };
+  }
+
+  /* NIP-19's nprofile for a delivery key, naming no relays: the phone then
+   * sends to its own three (NostrDelivery.fallbackRelays), which are the three
+   * the receiver's inbox listens on. */
+  /* `relays` (ANY WALLET's request, `cidAnyRequest`): each as NIP-19's TLV 1, so a wallet that is not Foxy knows where
+   * to send. The ID's own nprofile names none. */
+  function cidNprofile(xonlyHex, relays) {
+    var CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+    var data = [0, 32].concat(cidHexBytes(xonlyHex));
+    (Array.isArray(relays) ? relays : []).forEach(function (r) {
+      var b = cidUtf8(String(r));
+      if (b.length > 0 && b.length < 256) data = data.concat([1, b.length], b);
+    });
+    var five = [], acc = 0, bits = 0;
+    for (var i = 0; i < data.length; i++) {
+      acc = (acc << 8) | data[i]; bits += 8;
+      while (bits >= 5) { bits -= 5; five.push((acc >> bits) & 31); }
+    }
+    if (bits) five.push((acc << (5 - bits)) & 31);
+    var hrp = 'nprofile';
+    var mod = b32Polymod(b32Expand(hrp).concat(five, [0, 0, 0, 0, 0, 0])) ^ 1;
+    var sum = [];
+    for (var k = 0; k < 6; k++) sum.push((mod >>> (5 * (5 - k))) & 31);
+    return hrp + '1' + five.concat(sum).map(function (v) { return CHARSET.charAt(v); }).join('');
+  }
+
+  /* ---- contacts ---- */
+
+  function cidContactsNow() {
+    return (FoxyWallet.book() || []).filter(function (c) { return c && c.cid && CID_HEX33.test(String(c.cid.id || '')); });
+  }
+
+  function cidContactOf(idHex) {
+    var want = String(idHex || '').toLowerCase();
+    var hit = cidContactsNow().filter(function (c) { return c.cid.id === want; })[0];
+    return hit || null;
+  }
+
+  function cidCleanName(name) {
+    return String(name || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, CID_NAME_MAX);
+  }
+
+  /* The contact for an ID string, written: a contact with the same ID is
+   * updated where it is in the list, never written twice. Its delivery key
+   * changes only on the ID's own signature, which every string `cidRead` takes
+   * carries. */
+  function cidKeep(read, name) {
+    if (!read || !read.sig || !cidBound(read.id, read.nostr, read.sig)) throw new Error('That is not a Cashu ID.');
+    var list = FoxyWallet.book() || [];
+    var text = cidEncode(read.id, read.nostr, read.sig);
+    var clean = cidCleanName(name) || 'Cashu ID';
+    var cid = /** @type {any} */ ({ id: read.id, nostr: read.nostr, sig: read.sig });
+    var row = { handle: text, name: clean, at: Date.now(), cid: cid };
+    var at = -1;
+    list.forEach(function (c, i) { if (at < 0 && c && c.cid && c.cid.id === read.id) at = i; });
+    if (at >= 0) list[at] = Object.assign({}, list[at], row);
+    else list.unshift(row);
+    // the same ID under a handle written before, once more, goes: one contact per ID
+    var seen = false;
+    list = list.filter(function (c) {
+      if (!(c && c.cid && c.cid.id === read.id)) return true;
+      if (seen) return false;
+      seen = true;
+      return true;
+    });
+    mustSave('foxy.contacts', list.slice(0, 50));
+    return row;
+  }
+
+  /* ---- what arrived ---- */
+
+  // what came in by the Cashu ID, by the first 16 bytes of each secret's SHA-256, so a delivery read twice is taken once
+  function cidSeenKey(secret) { return hexOf(sha256(cidUtf8(secret)).slice(0, 16)); }
+
+  function cidSeenList() {
+    var l = load(K.cidSeen, []);
+    return Array.isArray(l) ? l : [];
+  }
+
+  function cidSeenAdd(proofs) {
+    var have = cidSeenList();
+    (proofs || []).forEach(function (p) {
+      var s = p && typeof p.secret === 'string' ? cidSeenKey(p.secret) : '';
+      if (s && have.indexOf(s) < 0) have.push(s);
+    });
+    save(K.cidSeen, have.slice(-CID_SEEN_MAX));
+  }
+
+  function cidSeenAny(proofs) {
+    var have = cidSeenList();
+    return proofs.some(function (pr) { return have.indexOf(cidSeenKey(pr.secret)) >= 0; });
+  }
+
+  function cidRowsOf(key) {
+    var l = load(key, []);
+    return Array.isArray(l) ? l.filter(function (r) { return r && typeof r.key === 'string' && typeof r.body === 'string'; }) : [];
+  }
+
+  function cidInboxRows() {
+    var now = Date.now();
+    var rows = cidRowsOf(K.cidInbox);
+    // a kept row goes a day before its locktime: its payer may have it back then
+    var left = rows.filter(function (r) { return Number(r.drop) > now; });
+    if (left.length !== rows.length) {
+      save(K.cidInbox, left);
+      console.log('[foxy] cashu id: ' + (rows.length - left.length) + ' kept deliveries let go, a day before their locktime');
+    }
+    return left;
+  }
+
+  /* Kept for later, as the till keeps a delivery (`tillInboxKeep`): once by its
+   * pieces, within a cap, refused past it (the relays still hold it, and the
+   * payer sends it again). `mustSave`: this may be the only copy read. */
+  function cidInboxKeep(key, body, mint, drop) {
+    var rows = cidInboxRows();
+    if (rows.some(function (r) { return r.key === key; })) return;
+    if (rows.length >= CID_INBOX_MAX) throw new Error('the Cashu ID’s inbox holds ' + CID_INBOX_MAX + ' already; the relays still hold this one');
+    var bytes = rows.reduce(function (n, r) { return n + r.body.length; }, 0);
+    if (bytes + String(body).length > CID_INBOX_BYTES) throw new Error('the Cashu ID’s inbox is full; the relays still hold this one');
+    rows.push({ key: key, body: String(body), at: Date.now(), mint: mint, drop: drop });
+    mustSave(K.cidInbox, rows);
+  }
+
+  function cidInboxDrop(key) {
+    var rows = cidRowsOf(K.cidInbox);
+    var left = rows.filter(function (r) { return r.key !== key; });
+    if (left.length !== rows.length) save(K.cidInbox, left);
+  }
+
+  /* ---- a mint this phone does not use: the receiver's choice ---- */
+
+  /* What came at a mint this phone does not use and waits for its receiver: a
+   * card asks (BRING IT HOME, KEEP IT THERE, SEND IT BACK), and until it is
+   * answered the delivery waits here, unasked again, listed in HISTORY, until a
+   * day before its locktime, when its payer may have it back. One smaller than
+   * the fee of crossing it home waits the same way. Each row keeps what the way
+   * home was quoted at (`q`: what would land, in which unit, the fee, or why it
+   * cannot), and the payer's ID where it was proved and this phone knows where
+   * to send it back (`from`). */
+  function cidOfferRows() {
+    var now = Date.now();
+    var rows = cidRowsOf(K.cidOffers);
+    var left = rows.filter(function (r) { return Number(r.drop) > now; });
+    if (left.length !== rows.length) save(K.cidOffers, left);
+    return left;
+  }
+
+  /* A waiting row written, or one already there given its newer quote: the
+   * newest last, the oldest dropped past ten or a quarter of a megabyte.
+   * `mustSave`: it may be the only copy read. */
+  function cidOfferKeep(row) {
+    var rows = cidOfferRows();
+    var had = rows.filter(function (r) { return r.key === row.key; })[0];
+    if (had) {
+      Object.assign(had, { q: row.q || had.q, from: row.from || had.from || '', name: row.name || had.name || '' });
+      mustSave(K.cidOffers, rows);
+      return true;
+    }
+    rows.push(row);
+    while (rows.length > CID_OFFERS_MAX) rows.shift();
+    while (rows.length > 1 && rows.reduce(function (n, r) { return n + r.body.length; }, 0) > CID_OFFERS_BYTES) rows.shift();
+    if (rows.reduce(function (n, r) { return n + r.body.length; }, 0) > CID_OFFERS_BYTES) return false;
+    mustSave(K.cidOffers, rows);
+    return true;
+  }
+
+  function cidOfferDrop(key) {
+    var rows = cidRowsOf(K.cidOffers);
+    var left = rows.filter(function (r) { return r.key !== key; });
+    if (left.length !== rows.length) save(K.cidOffers, left);
+  }
+
+  // the way home, quoted for the whole of what waits at one mint in one unit, written on each of those rows
+  function cidOfferQuoteAll(mint, unit, q) {
+    var rows = cidRowsOf(K.cidOffers);
+    var hit = false;
+    rows.forEach(function (r) { if (r.mint === mint && (unitOf(r.unit) || 'sat') === unit) { r.q = q; hit = true; } });
+    if (hit) save(K.cidOffers, rows);
+  }
+
+  /* What HISTORY and the card show of one: no token. `back`: SEND IT BACK can
+   * be offered (its payer proved who it is, and this phone knows where to send
+   * it). `lands`, `toUnit`, `fee` (in the delivery's unit): the way home as it
+   * was quoted for everything waiting at that mint in that unit (`total`, of
+   * `others` more); `why`: why BRING IT HOME cannot be done now. */
+  function cidOfferView(r) {
+    var unit = unitOf(r.unit) || 'sat';
+    var q = (r.q && typeof r.q === 'object') ? r.q : {};
+    var same = cidOfferRows().filter(function (x) { return x.mint === r.mint && (unitOf(x.unit) || 'sat') === unit; });
+    var total = same.reduce(function (n, x) { return n + (satsOf(x.amount) || 0); }, 0) || satsOf(r.amount) || 0;
+    return { key: r.key, name: String(r.name || ''), mint: r.mint, host: hostOf(r.mint), unit: unit, amount: satsOf(r.amount) || 0,
+             at: r.at, drop: Number(r.drop) || 0, back: !!(r.from && cidBackTo(r.from)),
+             lands: Math.max(0, Math.round(Number(q.lands) || 0)), toUnit: unitOf(q.toUnit) || unit, fee: Math.max(0, Math.round(Number(q.fee) || 0)),
+             why: String(q.why || (q.lands > 0 ? '' : 'The way home has not been quoted yet.')), small: !!q.small,
+             others: Math.max(0, same.length - 1), total: total, choice: cidChoiceOf(r.mint) };
+  }
+
+  /* What the receiver chose for a mint, remembered by the card's tick ("Always
+   * do this for <mint>"): 'home' (brought home by itself, as every one was
+   * before there was a card), 'keep' or 'back'. By host, one key each. Cleared
+   * from SETTINGS > OTHER MINTS (26o-cashu-id.js). */
+  var CID_CHOICE = 'foxy.cid.choice.';
+  var CID_CHOICES = { home: 1, keep: 1, back: 1 };
+  function cidChoiceKey(mint) { return CID_CHOICE + hostOf(canonicalMint(String(mint || ''))); }
+  function cidChoiceOf(mint) {
+    var v = load(cidChoiceKey(mint), '');
+    return Object.prototype.hasOwnProperty.call(CID_CHOICES, v) ? v : '';
+  }
+  function cidChoiceSet(mint, choice) {
+    if (!Object.prototype.hasOwnProperty.call(CID_CHOICES, choice) || !canonicalMint(String(mint || ''))) return;
+    save(cidChoiceKey(mint), choice);
+  }
+  function cidChoiceList() {
+    var out = [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i) || '';
+        if (k.indexOf(CID_CHOICE) !== 0) continue;
+        var v = load(k, '');
+        if (Object.prototype.hasOwnProperty.call(CID_CHOICES, v)) out.push({ host: k.slice(CID_CHOICE.length), choice: v });
+      }
+    } catch (e) {}
+    return out.sort(function (a, b) { return a.host < b.host ? -1 : a.host > b.host ? 1 : 0; });
+  }
+  // one host's, or every one with none named
+  function cidChoiceClear(host) {
+    var h = String(host || '');
+    cidChoiceList().forEach(function (c) {
+      if (!h || c.host === h) { try { localStorage.removeItem(CID_CHOICE + c.host); } catch (e) {} }
+    });
+  }
+
+  /* Where a payment can be sent back to: its payer's ID, with the delivery key
+   * to wrap it for, from the contacts or from what this phone has paid that ID
+   * before. null when this phone does not know where. */
+  function cidBackTo(idHex) {
+    var id = String(idHex || '').toLowerCase();
+    if (!CID_HEX33.test(id)) return null;
+    var c = cidContactOf(id);
+    if (c && CID_HEX32.test(String(c.cid.nostr || ''))) return { id: id, nostr: c.cid.nostr, name: c.name || '' };
+    var out = cidOutboxRows().filter(function (r) { return r.contact === id && CID_HEX32.test(String(r.to || '')); }).pop();
+    return out ? { id: id, nostr: out.to, name: cidCleanName(out.name) === 'a Cashu ID' ? '' : cidCleanName(out.name) } : null;
+  }
+
+  /* Who sent a delivery, as far as it can be proved: `name` a contact's (the
+   * authenticated-from rule, `cidFromName`), and `back` where its payer proved
+   * its ID by the tag and this phone knows where to send it (`cidBackTo`).
+   * Never rejects. */
+  function cidWho(got) {
+    var none = { name: '', back: null };
+    if (!got.from || !got.tag || !CID_HEX33.test(got.E)) return Promise.resolve(none);
+    if (!got.proofs.some(function (pr) { return String(pr.p2pk_e || '').toLowerCase() === got.E; })) return Promise.resolve(none);
+    var to = cidBackTo(got.from);
+    if (!to) return Promise.resolve(none);
+    return nativeJson('cashuIdTag', { peer: got.from, e: got.E }, 60000).then(function (j) {
+      var tag = String((j && j.tag) || '').toLowerCase();
+      if (!tag || tag !== got.tag) { console.warn('[foxy] cashu id: a delivery named a payer without proving it'); return none; }
+      var c = cidContactOf(got.from);
+      return { name: c ? c.name : '', back: to };
+    }, function () { return none; });
+  }
+
+  /* Whether this phone may ask one more mint it does not use about a delivery
+   * this hour, and if so, counted. Five an hour, kept in storage so that
+   * starting Foxy again does not start the count again. */
+  function cidForeignSpend() {
+    var now = Date.now();
+    var l = load(K.cidForeign, []);
+    var times = (Array.isArray(l) ? l : []).map(Number).filter(function (t) { return t > now - CID_OFFER_RATE_MS && t <= now + 60000; });
+    if (times.length >= CID_OFFER_RATE) return false;
+    times.push(now);
+    save(K.cidForeign, times);
+    return true;
+  }
+
+  /* ---- the mints this phone uses ---- */
+
+  /* Whether `mint` is one this phone uses: the one it is on, the one it calls
+   * home, every mint it has connected to or used, and the till's. A delivery
+   * at any other is the receiver's to decide (`cidForeign`). */
+  function cidListedMint(mint) {
+    var m = canonicalMint(String(mint || ''));
+    if (!m) return false;
+    var mine = [mintUrl || '', load(K.mint, '')];
+    try { mine = mine.concat(tillPinnedMints()); } catch (e) {}
+    if (mine.some(function (u) { return canonicalMint(String(u || '')) === m; })) return true;
+    /* A mint this phone first met by bringing a payment home from it (`cidBringHome`) is in its lists from that visit,
+     * and is still not one it uses: what comes there later is brought home too. */
+    if (cidBroughtFrom(m)) return false;
+    var list = [];
+    var a = load(K.mints, []), b = load(K.mintsUsed, []);
+    if (Array.isArray(a)) list = list.concat(a);
+    if (Array.isArray(b)) list = list.concat(b);
+    return list.some(function (u) { return canonicalMint(String(u || '')) === m; });
+  }
+
+  // the mints this phone visited only to bring a Cashu ID payment home, by `cidBringHome`, at most fifty
+  var CID_BROUGHT = 'foxy.cid.brought';
+  function cidBroughtFrom(m) {
+    var l = load(CID_BROUGHT, []);
+    return Array.isArray(l) && l.indexOf(m) >= 0;
+  }
+  function cidBroughtNote(m) {
+    if (cidBroughtFrom(m)) return;
+    var l = load(CID_BROUGHT, []);
+    save(CID_BROUGHT, (Array.isArray(l) ? l : []).concat([m]).slice(-50));
+  }
+
+  /* KEEP IT THERE, or money that could not be sent back: from now on a mint
+   * this phone uses, in its lists like any other (SWITCH MINT), no longer one
+   * it only brought money home from, and what arrives there is taken as at any
+   * of its mints. */
+  function cidUseMint(m) {
+    var c = canonicalMint(String(m || ''));
+    if (!c) return;
+    var l = load(CID_BROUGHT, []);
+    if (Array.isArray(l) && l.indexOf(c) >= 0) save(CID_BROUGHT, l.filter(function (x) { return x !== c; }));
+    rememberMint(c);
+    console.log('[foxy] cashu id: ' + hostOf(c) + ' is a mint this phone uses now');
+  }
+
+  // a mint of this phone's whose keys would not come: { next, wait } by host, for this page load
+  var cidBackoff = Object.create(null);
+
+  function cidBackedOff(mint) {
+    var b = cidBackoff[canonicalMint(mint)];
+    return !!b && b.next > Date.now();
+  }
+
+  function cidBackOff(mint) {
+    var m = canonicalMint(mint);
+    var b = cidBackoff[m];
+    var wait = b ? Math.min(b.wait * 2, CID_BACKOFF_MAX_MS) : CID_BACKOFF_MIN_MS;
+    cidBackoff[m] = { next: Date.now() + wait, wait: wait };
+    console.warn('[foxy] cashu id: the keys of ' + hostOf(m) + ' did not come; asked again in ' + Math.round(wait / 60000) + ' min at the soonest');
+  }
+
+  /* ---- reading a delivery ---- */
+
+  // the same ecash by two doors at once (the relays send one wrap from each of three): one is taken, the other waits for it
+  var cidInFlight = Object.create(null);
+
+  function cidHold(proofs) {
+    var secrets = proofs.map(function (p) { return String(p.secret); });
+    if (secrets.some(function (s) { return cidInFlight[s]; })) return null;
+    secrets.forEach(function (s) { cidInFlight[s] = true; });
+    return function () { secrets.forEach(function (s) { delete cidInFlight[s]; }); };
+  }
+
+  // the locktime a proof's secret names, in seconds, 0 for none, -1 for one that is not a number
+  function cidLocktimeOf(pr) {
+    try {
+      var tags = JSON.parse(pr.secret)[1].tags || [];
+      var t = tags.filter(function (x) { return Array.isArray(x) && x[0] === 'locktime'; })[0];
+      if (!t) return 0;
+      var n = Number(t[1]);
+      return Number.isSafeInteger(n) && n > 0 ? n : -1;
+    } catch (e) { return -1; }
+  }
+
+  /* Why a proof is not one a delivery may carry, or ''. Only shape: what the
+   * mint and the phone say comes after. Its E must be a point (NUT-28's
+   * `p2pk_e`) and its DLEQ there (NUT-12), so a forged piece is dropped before
+   * anything is written. */
+  function cidProofProblem(pr) {
+    if (!pr || typeof pr !== 'object') return 'it holds something that is not a proof';
+    if (typeof pr.secret !== 'string' || pr.secret.length > 1024 || typeof pr.C !== 'string' || !CID_HEX33.test(pr.C.toLowerCase())
+        || !(satsOf(pr.amount) > 0)) return 'it holds a proof that is not ecash Foxy can read';
+    var lock = String(lockedTo(pr) || '').toLowerCase();
+    if (!CID_HEX33.test(lock)) return 'it holds a proof that is not locked to a key';
+    var e = typeof pr.p2pk_e === 'string' ? pr.p2pk_e.toLowerCase() : '';
+    if (!CID_HEX33.test(e)) return 'it holds a proof that carries no one-time key';
+    try { window.CashuTS.pointFromHex(e); } catch (x) { return 'it holds a proof whose one-time key is not a point'; }
+    var d = pr.dleq;
+    if (!d || typeof d !== 'object' || ![d.e, d.s, d.r].every(function (v) { return typeof v === 'string' && /^[0-9a-f]{64}$/i.test(v); })) {
+      return 'it holds a proof without the mint’s proof (DLEQ)';
+    }
+    if (cidLocktimeOf(pr) < 0) return 'it holds a proof whose locktime is not a time';
+    return '';
+  }
+
+  /* A delivery, read: a Foxy's envelope { v: 2, type, token, E, from, tag, note }
+   * or another wallet's NUT-18 PaymentRequestPayload { mint, unit, proofs, memo }
+   * (E on each proof, none on the envelope). { mint, unit, proofs, from, tag, E,
+   * note, token } or { why }. Never throws. */
+  function cidReadDelivery(text, kw) {
+    var j = null;
+    try { j = JSON.parse(text); } catch (e) { j = null; }
+    if (!j || typeof j !== 'object' || Array.isArray(j)) return { why: 'it is not a payment' };
+    var out = /** @type {any} */ ({ from: '', tag: '', E: '', note: '' });
+    if (j.type === 'foxy-cashu-id' || j.v !== undefined) {
+      if (j.v === 1) return { why: 'it is from an earlier test build of Foxy' };
+      if (j.v !== 2 || j.type !== 'foxy-cashu-id' || typeof j.token !== 'string') return { why: 'it is from a newer Foxy' };
+      var d = null;
+      try {
+        var t = FoxyWallet.unwrap(j.token);
+        d = window.CashuTS.getDecodedToken(t, keysetIdsFor(kw || wallet));
+      } catch (e1) { d = null; }
+      if (!d) {
+        var info = null;
+        try { info = FoxyWallet.tokenInfo(j.token); } catch (e2) { info = null; }
+        if (!info) return { why: 'it holds no token' };
+        d = { mint: info.mint, unit: info.unit, proofs: info.proofs };
+      }
+      out.mint = d.mint; out.unit = d.unit; out.proofs = d.proofs; out.token = j.token;
+      out.E = typeof j.E === 'string' ? j.E.toLowerCase() : '';
+      out.from = typeof j.from === 'string' && CID_HEX33.test(j.from.toLowerCase()) ? j.from.toLowerCase() : '';
+      out.tag = typeof j.tag === 'string' && CID_HEX32.test(j.tag.toLowerCase()) ? j.tag.toLowerCase() : '';
+      out.note = typeof j.note === 'string' ? j.note : '';
+    } else if (typeof j.mint === 'string' && Array.isArray(j.proofs)) {
+      out.mint = j.mint; out.unit = typeof j.unit === 'string' ? j.unit : 'sat'; out.proofs = j.proofs;
+      out.note = typeof j.memo === 'string' ? j.memo : '';
+    } else {
+      return { why: 'it is not a payment' };
+    }
+    out.proofs = (Array.isArray(out.proofs) ? out.proofs : []).map(function (pr) {
+      if (!pr || typeof pr !== 'object') return pr;
+      var c = Object.assign({}, pr);
+      if (c.amount !== undefined && typeof c.amount !== 'number') c.amount = satsOf(c.amount);
+      return c;
+    });
+    return out;
+  }
+
+  /* The proofs as the mint is to see them: no E (NUT-28 strips it before a
+   * spend), and the witness the phone signed for. */
+  function cidForMint(proofs, sigs) {
+    return proofs.map(function (pr, i) {
+      var c = Object.assign({}, pr);
+      delete c.p2pk_e;
+      if (sigs) c.witness = JSON.stringify({ signatures: [String(sigs[i])] });
+      return c;
+    });
+  }
+
+  var cidArriving = Promise.resolve();
+
+  /* One at a time, as the till takes them: two copies of one delivery read in
+   * the same second are otherwise both past the seen check. */
+  function cidArrived(body, opts) {
+    var o = opts || {};
+    // this phone's own ID, to know a delivery paid to it unblinded (`cidBare`); '' when it cannot be read
+    var run = cidArriving.then(function () {
+      return cidMine().then(function (m) { return String((m && m.id) || ''); }, function () { return ''; });
+    }).then(function (me) { o.me = me; return cidArriveOne(body, o); });
+    cidArriving = run.then(function () {}, function () {});
+    return run;
+  }
+
+  /* The name a delivery's payer gave, proved (H1): `from` and `tag` are only
+   * believed when the tag is SHA-256("foxy-cashu-id-from-v1" ‖ x(d·from) ‖ E),
+   * worked out by this phone from its own ID key, with E one of the proofs'.
+   * The contact's name, or '' for anyone else. Never rejects. */
+  function cidFromName(got) {
+    if (!got.from || !got.tag || !CID_HEX33.test(got.E)) return Promise.resolve('');
+    if (!got.proofs.some(function (pr) { return String(pr.p2pk_e || '').toLowerCase() === got.E; })) return Promise.resolve('');
+    var who = cidContactOf(got.from);
+    if (!who) return Promise.resolve('');
+    return nativeJson('cashuIdTag', { peer: got.from, e: got.E }, 60000).then(function (j) {
+      var tag = String((j && j.tag) || '').toLowerCase();
+      if (tag && tag === got.tag) return who.name;
+      console.warn('[foxy] cashu id: a delivery named a contact as its payer without proving it');
+      return '';
+    }, function () { return ''; });
+  }
+
+  /* What a payer sent, checked and taken: 'taken', 'kept' (for when this phone
+   * can take it), 'waiting' (at a mint this phone does not use: for its
+   * receiver to decide, or smaller than the fee to bring it home), 'away'
+   * (taken at a mint this phone does not use, on its way home: `carryResume`
+   * finishes it), 'there' (taken and kept at that mint, now one this phone
+   * uses), 'back' (taken there and paid back to its payer), 'seen' (taken
+   * already) or 'refused'. Never rejects. `opts.choice`: the receiver's answer
+   * on the card ('home', 'keep', 'back', `cidDecide`).
+   *
+   * Anyone holding this phone's ID can write to it, so nothing is kept, nothing
+   * is asked of any mint and the phone signs nothing until the delivery is
+   * shown to be shaped like money (an E and a DLEQ on every piece); and nothing
+   * is taken until it is the mint's own ecash: of a keyset of its unit, every
+   * DLEQ verifying, no piece twice, and small. Then the phone signs only for
+   * pieces whose lock is the ID blinded by their own E. At a mint this phone
+   * does not use, the mint is asked only within the hourly cap and outside its
+   * backoff, and the money is taken only once the way home has been quoted
+   * (`cidForeign`). */
+  function cidArriveOne(body, opts, loaded) {
+    var o = opts || {};
+    var key = '';
+    var refuse = function (why) {
+      console.warn('[foxy] cashu id: a delivery was not taken: ' + why);
+      if (key) cidInboxDrop(key);
+      // for a card's answer (`cidDecide`): what to say
+      o.said = String(why || '');
+      return 'refused';
+    };
+    var text = typeof body === 'string' ? body : (body && typeof body === 'object' ? JSON.stringify(body) : '');
+    if (!text || text.length > CID_BODY_MAX) return Promise.resolve(refuse('it is larger than any payment'));
+    var first = cidReadDelivery(text, null);
+    if (first.why) return Promise.resolve(refuse(first.why));
+    var mint = canonicalMint(String(first.mint || ''));
+    if (!mint || mintUrlProblem(mint)) return Promise.resolve(refuse('its mint is not one Foxy would use'));
+    var unit = unitOf(first.unit);
+    if (unit !== 'sat' && unit !== 'usd') return Promise.resolve(refuse('it is in a unit Foxy does not take'));
+    var kw0 = tillKeysAt(mint, unit);
+    var got = kw0 ? cidReadDelivery(text, kw0) : first;
+    if (got.why) return Promise.resolve(refuse(got.why));
+    var proofs = got.proofs;
+    if (!proofs.length || proofs.length > CID_PROOFS_MAX) return Promise.resolve(refuse('it holds no usable proofs'));
+    /* Paid to the ID key itself, unblinded: never signed for by itself. The receiver is asked (`cidBare`). */
+    var me = String(o.me || '').toLowerCase();
+    var bare = CID_HEX33.test(me) ? proofs.filter(function (pr) { return cidIsBare(pr, me); }).length : 0;
+    if (bare && bare < proofs.length) return Promise.resolve(refuse('it mixes pieces locked to the ID key itself with others'));
+    if (bare) return cidBare({ text: text, got: got, proofs: proofs, mint: mint, unit: unit, refuse: refuse, opts: o });
+    /* ANY WALLET's request answered (`cidAnyRequest`): no E anywhere, every piece locked to one of this seed's lock
+     * keys, taken as any locked ecash is (`cidPoolTake`). */
+    if (cidPoolShaped(got, proofs)) return cidPoolTake({ got: got, proofs: proofs, mint: mint, unit: unit, refuse: refuse });
+    for (var i = 0; i < proofs.length; i++) {
+      var no = cidProofProblem(proofs[i]);
+      if (no) return Promise.resolve(refuse(no));
+    }
+    if (repeatedProof(proofs)) return Promise.resolve(refuse('it names the same ecash more than once'));
+    var at = 'cid:' + piecesFingerprint(proofs);
+    if (cidSeenAny(proofs)) {
+      cidInboxDrop(at);
+      cidOfferDrop(at);
+      console.log('[foxy] cashu id: a delivery taken already, read again; nothing more taken');
+      return Promise.resolve('seen');
+    }
+    var amount = proofs.reduce(function (n, pr) { return n + satsOf(pr.amount); }, 0);
+    var locktimes = proofs.map(cidLocktimeOf);
+    var soonest = locktimes.some(function (t) { return t === 0; }) ? 0 : Math.min.apply(null, locktimes);
+    /* At a mint this phone does not use: brought home, or, smaller than the fee
+     * of that, waiting for more there. */
+    if (!cidListedMint(mint)) {
+      return cidForeign({ text: text, got: got, mint: mint, unit: unit, proofs: proofs, at: at, amount: amount, soonest: soonest,
+                          kw: kw0, loaded: !!loaded, refuse: refuse, opts: o });
+    }
+    /* Kept (H2) only while its payer cannot have it back: every piece with a
+     * locktime more than a day out. The row goes a day before the soonest. */
+    var keep = function (why) {
+      if (!(soonest > 0) || soonest * 1000 - CID_DAY_S * 1000 <= Date.now()) {
+        return refuse('it cannot be taken now and has no locktime far enough out to keep it for (' + why + ')');
+      }
+      try { cidInboxKeep(at, text, mint, soonest * 1000 - CID_DAY_S * 1000); }
+      catch (e) { return refuse('it could not be written down (' + ((e && e.message) || e) + ')'); }
+      console.log('[foxy] cashu id: a delivery is kept until ' + why);
+      return 'kept';
+    };
+    var kw = kw0;
+    var sets = kw ? keysetsOf(mint, kw) : null;
+    var known = !!sets && proofs.every(function (pr) { return typeof pr.id === 'string' && !!keysetUnit(mint, pr.id, kw, sets); });
+    if (!kw || !known) {
+      var here = !!wallet && canonicalMint(mintUrl || '') === mint;
+      // a mint's keys are fetched for a delivery at a mint this phone uses, and never in a backoff
+      if (!loaded && !here && wallet && routeOpen() && !cidBackedOff(mint)) {
+        return tillMintLoad(mint, !!kw).then(function () {
+          delete cidBackoff[mint];
+          return cidArriveOne(text, o, true);
+        }, function () {
+          cidBackOff(mint);
+          return keep('the keys of ' + hostOf(mint) + ' can be had');
+        });
+      }
+      if (here || loaded) return Promise.resolve(refuse('its pieces are not of ' + hostOf(mint) + '’s keysets'));
+      return Promise.resolve(keep('this phone can fetch the keys of ' + hostOf(mint)));
+    }
+    // from here every check is the mint's own keys': one that fails drops a kept copy
+    key = at;
+    var bad = cidMintProblem(mint, unit, kw, sets, proofs);
+    if (bad) return Promise.resolve(refuse(bad));
+    key = '';
+    if (!wallet || !routeOpen() || claimAway) return Promise.resolve(keep('this phone is online'));
+    return cidTakeIn({ got: got, proofs: proofs, mint: mint, unit: unit, at: at }).then(function (t) {
+      if (t.taken) return 'taken';
+      if (t.later) return keep(t.later);
+      key = t.drop ? at : '';
+      return t.seen ? 'seen' : refuse(t.why);
+    });
+  }
+
+  /* The checks by the mint's own keys, in hand: every piece of a keyset of the
+   * delivery's unit, and every DLEQ verifying. Why not, or ''. */
+  function cidMintProblem(mint, unit, kw, sets, proofs) {
+    if (!proofs.every(function (pr) { return keysetUnit(mint, pr.id, kw, sets) === unit; })) {
+      return 'its pieces are not of ' + hostOf(mint) + '’s ' + unit + ' keysets';
+    }
+    if (dleqAudit(kw, proofs).invalid || !mintSigned(kw, proofs)) return 'the mint’s signature on it does not check out';
+    return '';
+  }
+
+  /* One delivery whose every check by the mint's keys has passed, signed for by
+   * the phone and swapped in at its mint (`receiveToken`, away from the mint the
+   * phone is on where it is another). Resolves { taken, r, name }, or { later }
+   * (it may be taken later: the words why), or { why, drop, seen } (never). */
+  function cidTakeIn(d) {
+    var proofs = d.proofs, mint = d.mint, unit = d.unit, at = d.at, got = d.got;
+    var held = cidHold(proofs);
+    if (!held) return Promise.resolve({ seen: true, why: 'it is being taken already' });
+    var free = held;
+    var pieces = proofs.map(function (pr) { return { secret: pr.secret, e: String(pr.p2pk_e).toLowerCase() }; });
+    return nativeJson('cashuIdSign', { pieces: pieces }, 60000).then(function (signedBy) {
+      var sigs = Array.isArray(signedBy && signedBy.sigs) ? signedBy.sigs : [];
+      if (sigs.length !== proofs.length) throw new Error('the phone’s signatures were not for what was asked');
+      // locked to its own blinded key alone, its locktime far enough out to take it now, and nothing else asked of it
+      if (!proofs.every(function (pr) { return onlyLockedTo(pr, lockedTo(pr), { swapNow: true }); })) {
+        return { why: 'it is not locked to one key alone, or its time lock is too near', drop: true };
+      }
+      var CT = window.CashuTS;
+      var signed = cidForMint(proofs, sigs);
+      if (!signed.every(function (pr) { try { return CT.isP2PKSpendAuthorised(pr) === true; } catch (e) { return false; } })) {
+        throw new Error('the phone’s signatures did not check out');
+      }
+      return cidFromName(got).then(function (name) {
+        var token = encodeToken(mint, signed, unit);
+        var memo = name ? 'From ' + name : 'From a Cashu ID';
+        var away = canonicalMint(mintUrl || '') !== mint;
+        /* Said at once as arriving: every check this phone can make has passed (the mint's keys and DLEQs, the lock, its
+         * own signatures), and the mint's swap is what is left. Not counted anywhere until that lands, and never said as
+         * received before it (`_onCashuIdPaid`). Not for one being brought home, which is said once it is home. */
+        if (!d.quiet) {
+          var coming = proofs.reduce(function (n, pr) { return n + satsOf(pr.amount); }, 0);
+          console.log('[foxy] cashu id: a payment checked on this phone; the mint is swapping it');
+          if (typeof FoxyWallet._onCashuIdArriving === 'function') {
+            try { FoxyWallet._onCashuIdArriving({ unit: unit, amount: coming, name: name, mint: mint }); } catch (x) {}
+          }
+        }
+        return FoxyWallet.receiveToken(token, { memo: memo, away: away }).then(function (r) {
+          cidSeenAdd(proofs);
+          cidInboxDrop(at);
+          cidOfferDrop(at);
+          if (r && r.hash) {
+            // and, where the payer proved to be a contact, whose it was, for INBOX (`cmsgPaymentsNow`)
+            try { amendTx(r.hash, name ? { memo: memo, cid: 'in', cidPeer: String(got.from).toLowerCase() } : { memo: memo, cid: 'in' }); } catch (x) {}
+            var note = got.note ? cidCleanName(String(got.note).slice(0, CID_NOTE_MAX)) : '';
+            if (note) { try { FoxyWallet.tag(r.hash, { note: note }); } catch (x) {} }
+          }
+          console.log('[foxy] cashu id: a payment was taken in at ' + hostOf(mint));
+          return { taken: true, r: r, name: name };
+        }, function (e) {
+          var why = String((e && e.message) || e);
+          if (/already|spent/i.test(why)) {
+            cidSeenAdd(proofs);
+            cidOfferDrop(at);
+            return { why: 'the mint has it as spent already', drop: true };
+          }
+          if (tillMintSaidNo(e)) { cidOfferDrop(at); return { why: 'the mint refused it (' + why.slice(0, 120) + ')', drop: true }; }
+          return { later: 'it can be taken (' + why.slice(0, 80) + ')' };
+        });
+      });
+    }, function (e) {
+      var why = String((e && e.message) || e);
+      // the phone's own no: not locked to the key this seed derives for that E, which nothing will change
+      if (/not locked to this Cashu ID|not a payment to this Cashu ID|bad request/i.test(why)) {
+        cidOfferDrop(at);
+        return { why: 'it is not locked to the key this phone works out from it (' + why.slice(0, 80) + ')', drop: true };
+      }
+      return { later: 'the phone can sign for it (' + why.slice(0, 80) + ')' };
+    }).then(function (r) {
+      free();
+      // a payment being brought home is said once it is home (`cidCameHome`)
+      if (r && r.taken && !d.quiet && typeof FoxyWallet._onCashuIdPaid === 'function') {
+        try { FoxyWallet._onCashuIdPaid({ unit: unit, amount: r.r && r.r.amount, sats: r.r && r.r.sats, hash: r.r && r.r.hash, name: r.name, mint: mint }); } catch (x) {}
+      }
+      return r;
+    }, function (e) { free(); throw e; });
+  }
+
+  /* ---- a mint this phone does not use: the receiver's choice ----
+   *
+   * The money there is this phone's to take, and where it goes is its
+   * receiver's to say. Before anything is signed or swapped the way home is
+   * quoted (`cidHomeQuote`), and a card asks (26o-cashu-id.js):
+   *
+   *   BRING IT HOME   taken there and crossed to the default mint by the road a
+   *                   payment taken at a payer's mint takes (`bringHome`,
+   *                   `carryHome`, 04-lost-answers.js): sats as sats, dollars as
+   *                   dollars at a default mint that issues them and as sats at
+   *                   one that does not;
+   *   KEEP IT THERE   taken there, and that mint is one this phone uses from now
+   *                   on (`cidUseMint`);
+   *   SEND IT BACK    taken there and paid straight back to its payer's ID, at the
+   *                   same mint, as any payment to a contact (`cidSendBack`), where
+   *                   the payer proved who it is and this phone knows where to send.
+   *
+   * Until it is answered it waits (`K.cidOffers`), listed in HISTORY. The card's
+   * tick remembers the answer for that mint (`cidChoiceOf`), and a remembered one
+   * runs without a card: "home" is what every one did before there was a card. A
+   * mint whose way home cannot be quoted (a fake one, one that does not answer)
+   * is backed off; a remembered "home" then takes nothing, and a card says BRING
+   * IT HOME cannot be done and why. One smaller than its crossing's fee waits
+   * until a later one at the same mint, in the same unit, makes the whole worth
+   * crossing; its card still offers the other two. */
+  function cidForeign(d) {
+    var refuse = d.refuse, mint = d.mint, unit = d.unit;
+    var o = d.opts || {};
+    // the receiver's own answer, from the card: not counted against the hour's five, nor stopped by a backoff
+    var decided = Object.prototype.hasOwnProperty.call(CID_CHOICES, o.choice) ? o.choice : '';
+    if (!decided && cidOfferRows().some(function (r) { return r.key === d.at; })) return Promise.resolve('waiting');
+    var drop = d.soonest > 0 ? d.soonest * 1000 - CID_DAY_S * 1000 : Date.now() + CID_LOCK_S * 1000;
+    if (!(drop > Date.now())) return Promise.resolve(refuse('its payer can have it back within the day'));
+    var home = canonicalMint(String(load(K.mint, '') || mintUrl || ''));
+    if (!home || home === mint) return Promise.resolve(refuse('this phone has no mint of its own to bring it to'));
+    if (!wallet || !routeOpen() || claimAway) return Promise.resolve(refuse('it is at a mint this phone does not use, and cannot be looked at now (the relays still hold it)'));
+    if (!decided && cidBackedOff(mint)) return Promise.resolve(refuse(hostOf(mint) + ' failed a moment ago and is not asked again yet'));
+    if (!d.loaded) {
+      if (!decided && !cidForeignSpend()) return Promise.resolve(refuse('too many payments at mints this phone does not use have come in the last hour'));
+      return tillMintLoad(mint, true).then(function () {
+        delete cidBackoff[mint];
+        return cidArriveOne(d.text, o, true);
+      }, function (e) {
+        cidBackOff(mint);
+        return refuse('the keys of ' + hostOf(mint) + ' did not come (' + String((e && e.message) || e).slice(0, 80) + ')');
+      });
+    }
+    var kw = d.kw;
+    var sets = kw ? keysetsOf(mint, kw) : null;
+    if (!kw || !sets || !d.proofs.every(function (pr) { return typeof pr.id === 'string' && !!keysetUnit(mint, pr.id, kw, sets); })) {
+      cidBackOff(mint);
+      return Promise.resolve(refuse('its pieces are not of ' + hostOf(mint) + '’s keysets'));
+    }
+    var bad = cidMintProblem(mint, unit, kw, sets, d.proofs);
+    if (bad) { cidBackOff(mint); return Promise.resolve(refuse(bad)); }
+    var item = { text: d.text, got: d.got, proofs: d.proofs, at: d.at, amount: d.amount, opts: o };
+    return cidWho(d.got).then(function (who) {
+      var choice = decided || cidChoiceOf(mint);
+      // a remembered SEND IT BACK for a payer this phone cannot send to: the card asks instead
+      if (choice === 'back' && !who.back) {
+        if (decided) return refuse('its payer did not prove who it is, so it cannot be sent back');
+        choice = '';
+      }
+      if (choice === 'keep') return cidKeepThere(item, mint, unit);
+      if (choice === 'back') return cidSendBack(item, mint, unit, home, who);
+      // what waits at the same mint in the same unit, read again by its keys: the whole is what the way home is quoted for
+      var items = /** @type {any[]} */ ([item]);
+      cidOfferRows().forEach(function (r) {
+        if (r.mint !== mint || r.key === d.at || (unitOf(r.unit) || 'sat') !== unit) return;
+        var g = cidReadDelivery(r.body, kw);
+        var ps = g.why ? [] : g.proofs;
+        if (!ps.length || ps.some(function (pr) { return !!cidProofProblem(pr); }) || cidMintProblem(mint, unit, kw, sets, ps)) {
+          cidOfferDrop(r.key);
+          console.warn('[foxy] cashu id: a payment waiting at ' + hostOf(mint) + ' no longer checks out; let go');
+          return;
+        }
+        items.push({ text: r.body, got: g, proofs: ps, at: r.key, amount: ps.reduce(function (n, pr) { return n + satsOf(pr.amount); }, 0) });
+      });
+      var total = items.reduce(function (n, it) { return n + it.amount; }, 0);
+      var pieces = items.reduce(function (n, it) { return n + it.proofs.length; }, 0);
+      // it waits, with what the way home was quoted at, and the card is raised where nobody has chosen yet
+      var wait = function (q) {
+        var row = { key: d.at, body: d.text, at: Date.now(), mint: mint, unit: unit, amount: d.amount, name: who.name,
+                    from: who.back ? who.back.id : '', drop: drop, q: q };
+        var kept = false;
+        try { kept = cidOfferKeep(row); } catch (e) { kept = false; }
+        if (!kept) return refuse('it could not be written down to wait for its receiver');
+        cidOfferQuoteAll(mint, unit, q);
+        console.log('[foxy] cashu id: a payment at ' + hostOf(mint) + ', a mint this phone does not use, waits'
+          + (q.lands > 0 ? ' for its receiver to choose' : ' (' + q.why + ')'));
+        cidHistoryChanged();
+        if (!choice && typeof FoxyWallet._onCashuIdOffer === 'function') {
+          var mine = cidOfferRows().filter(function (r) { return r.key === d.at; })[0];
+          if (mine) { try { FoxyWallet._onCashuIdOffer(cidOfferView(mine)); } catch (x) {} }
+        }
+        o.said = q.why || '';
+        return 'waiting';
+      };
+      return cidHomeQuote(mint, home, unit, total, pieces, kw).then(function (q) {
+        if (choice === 'home' && q.lands > 0) return cidBringHome(mint, home, items, unit, q);
+        return wait(q);
+      }, function (e) {
+        cidBackOff(mint);
+        var why = 'The way home from ' + hostOf(mint) + ' could not be quoted: ' + String((e && e.message) || e).slice(0, 100);
+        // remembered, or asked for: nothing is taken (the relays still hold it); otherwise the card says why
+        if (choice === 'home' && !decided) return refuse(why + ', so nothing was taken');
+        return wait({ lands: 0, toUnit: '', fee: 0, why: why, at: Date.now() });
+      });
+    });
+  }
+
+  /* The unit a payment in `unit` lands in at `home`: sats as sats, and dollars
+   * as dollars where home issues them on an active keyset, else as sats. */
+  function cidHomeUnit(home, unit) {
+    if ((unitOf(unit) || 'sat') === 'sat') return 'sat';
+    var here = wallet && canonicalMint(mintUrl || '') === canonicalMint(home) ? wallet : undefined;
+    return unitsOf(canonicalMint(home), here).indexOf('usd') >= 0 ? 'usd' : 'sat';
+  }
+
+  var CID_TOO_SMALL = 'Too small to bring home: the fee would take all of it.';
+
+  /* The way home for `total` (in `unit`) taken at `from`, quoted before
+   * anything is signed: what would land at `home` (`lands`, in `toUnit`) after
+   * the crossing's whole cost, which is the invoice's reserve, both mints' fees
+   * for spending the pieces, and the swap that takes them in; and that cost
+   * less what lands is worth, in `unit` (`fee`). Asked of both mints with
+   * nothing in hand (`transferQuote`'s `quoteOnly`), stepped down as
+   * `carryPlan` steps until the cost fits inside the total: by what it is over
+   * in one unit, and in proportion across two, from a first figure in the
+   * landing unit that a quote for 10,000 sats prices. `lands` 0, with `why`,
+   * where it does not fit. Rejects where a mint cannot quote it. */
+  function cidHomeQuote(from, home, unit, total, pieces, kw) {
+    var toUnit = cidHomeUnit(home, unit);
+    var takeFee = 0;
+    try { takeFee = Number(feeForInputs(kw, Math.max(1, pieces))) || 0; } catch (e) { takeFee = 0; }
+    var how = /** @type {any} */ ({ to: home, quoteOnly: true });
+    if (unit !== 'sat') how.unit = unit;
+    if (toUnit !== 'sat') how.toUnit = toUnit;
+    var small = { lands: 0, toUnit: toUnit, fee: 0, why: CID_TOO_SMALL, small: true, at: Date.now() };
+    var step = function (want, n) {
+      if (!(want > 0)) return Promise.resolve(small);
+      return FoxyWallet.transferQuote(from, want, how).then(function (plan) {
+        var cost = Number(plan.gross) + (Number(plan.inPadSats) || 0) + takeFee;
+        var over = cost - total;
+        if (over > 0 && n < 4) return step(unit === toUnit ? want - over : Math.min(want - 1, Math.floor(want * total / cost)), n + 1);
+        if (over > 0) return small;
+        var worth = unit === toUnit ? want : Math.round(Number(plan.amountUnit) || 0);
+        return { lands: want, toUnit: toUnit, fee: Math.max(0, cost - worth), why: '', small: false, at: Date.now() };
+      });
+    };
+    if (!(total - takeFee > 0)) return Promise.resolve(small);
+    if (unit === toUnit) return step(total - takeFee, 0);
+    // dollars to sats: a first figure from what 10,000 sats cost at that mint, in its cents
+    var PROBE = 10000;
+    return FoxyWallet.transferQuote(from, PROBE, how).then(function (plan) {
+      var each = Number(plan.amountUnit) || 0;
+      if (!(each > 0)) throw new Error(hostOf(from) + ' gave no price for the way home');
+      return step(Math.floor((total - takeFee) * PROBE / each), 0);
+    });
+  }
+
+  /* Every item taken at `mint` (signed for, swapped in there, in `unit`), and the
+   * sum carried home as one payment (`bringHome`), whose history row at home says
+   * who sent it, from where, what it landed as, and the fee (`cidCameHome`).
+   * Resolves 'taken' once it is home, 'away' when it is this phone's at that
+   * mint and the walk home is left to `carryResume`, 'refused' when nothing
+   * could be taken. */
+  function cidBringHome(mint, home, items, unit, q) {
+    var before = sumProofs(proofs(mint, unit));
+    // its visit puts it in this phone's lists; it is still not a mint this phone uses (`cidListedMint`)
+    cidBroughtNote(mint);
+    var kept = 0, hash = '', name = '';
+    return items.reduce(function (chain, it) {
+      return chain.then(function () {
+        return cidTakeIn({ got: it.got, proofs: it.proofs, mint: mint, unit: unit, at: it.at, quiet: true }).then(function (t) {
+          if (t.taken) {
+            kept += Math.round(satsOf(t.r && (t.r.amount != null ? t.r.amount : t.r.sats))) || 0;
+            if (!hash && t.r && t.r.hash) hash = t.r.hash;
+            if (!name && t.name) name = t.name;
+            return;
+          }
+          // a waiting one that cannot be taken any more (its payer took it back, or the mint says no) goes
+          if (it.at !== items[0].at) cidOfferDrop(it.at);
+          console.warn('[foxy] cashu id: a payment at ' + hostOf(mint) + ' was not taken: ' + (t.why || t.later || 'it is being taken'));
+        });
+      });
+    }, Promise.resolve()).then(function () {
+      if (!(kept > 0)) return 'refused';
+      return cidCarry({ mint: mint, home: home, unit: unit, toUnit: q && q.toUnit, amount: kept, guess: q && q.lands,
+                        before: before, name: name, hash: hash });
+    });
+  }
+
+  /* `bringHome`: money this phone holds at a mint it does not use, `amount` in
+   * `unit`, carried home to the default mint as one payment, by the carry-home
+   * job (04-lost-answers.js), so a crossing that dies after the melt is finished
+   * on the next launch, connection or return (`carryResume`, `finishMove`). It
+   * lands in `toUnit`: by default dollars as dollars where home issues them, and
+   * everything else as sats. Its row at home is written by `cidCameHome`, with
+   * `name` ("a Cashu ID" without one). Resolves 'taken' once it is home, or
+   * 'away' when it is still at that mint, this phone's, for the walk home to
+   * finish. Never rejects. */
+  function cidCarry(dl) {
+    var mint = canonicalMint(String(dl.mint || ''));
+    var unit = unitOf(dl.unit) || 'sat';
+    var home = canonicalMint(String(dl.home || load(K.mint, '') || mintUrl || ''));
+    var kept = Math.round(satsOf(dl.amount) || 0);
+    if (!mint || !home || mint === home || !(kept > 0)) return Promise.resolve('refused');
+    var toUnit = unitOf(dl.toUnit) || cidHomeUnit(home, unit);
+    var job = /** @type {any} */ ({ id: 'cid' + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36),
+                home: home, from: mint, net: 0, ask: kept, kept: kept, state: 'paid', paidAt: Date.now(), at: Date.now(),
+                unit: unit, hash: String(dl.hash || ''),
+                cid: { name: String(dl.name || ''), before: Number(dl.before) || 0 } });
+    if (toUnit !== 'sat') job.toUnit = toUnit;
+    // across units, the first figure is in the landing unit (`carryPlan`)
+    if (toUnit !== unit && Number(dl.guess) > 0) job.guess = Math.round(Number(dl.guess));
+    var said = function (n, u) { return u === 'usd' ? cidSaid(n, 'usd') : n + ' sats'; };
+    try { putCarryJob(job, true); }
+    catch (e) {
+      console.warn('[foxy] cashu id: ' + said(kept, unit) + ' taken at ' + hostOf(mint) + ' could not be written down to bring home; they stay there');
+      return Promise.resolve('away');
+    }
+    console.log('[foxy] cashu id: ' + said(kept, unit) + ' taken at ' + hostOf(mint) + ', a mint this phone does not use; bringing them home'
+      + (toUnit !== unit ? ' as ' + (toUnit === 'usd' ? 'dollars' : 'sats') : ''));
+    return FoxyWallet.carryHome(job.id, null, function () {}, {}).then(function (r) {
+      var state = String((r && r.state) || '');
+      if (state === 'home') return 'taken';
+      console.warn('[foxy] cashu id: the payment from ' + hostOf(mint) + ' is not home yet (' + state + (r && r.why ? ': ' + String(r.why).slice(0, 80) : '') + ')');
+      return 'away';
+    }, function () { return 'away'; });
+  }
+
+  // an amount in words for a history row: "3,901 sats", "1 sat", "$2.94"
+  function cidSaid(n, unit) {
+    var v = Math.round(Number(n) || 0);
+    if ((unitOf(unit) || 'sat') === 'usd') {
+      return (v < 0 ? '-$' : '$') + (Math.abs(v) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    return v.toLocaleString('en-US') + (v === 1 ? ' sat' : ' sats');
+  }
+
+  /* A payment taken at another mint has landed at home (`carryGo`, or late by
+   * `moveLanded`): its row at home says who sent it, where it came from, and
+   * what bringing it cost, in the unit it left in: what it was, less any change
+   * the route's reserve left at that mint, less what landed was worth there (the
+   * same figure in one unit; across two, what the invoice cost at that mint).
+   * Sats that land as sats keep the row they always had ("…, fee 2 sats"); a
+   * crossing from dollars says what it landed as ("…, as 3,901 sats, fee $0.06"). */
+  function cidCameHome(job, quote, sats, done) {
+    var c = job && job.cid;
+    if (!c) return;
+    var ju = unitOf(job.unit) || 'sat', tu = unitOf(job.toUnit) || 'sat';
+    var kept = Math.round(Number(job.kept) || 0);
+    var landed = Math.round(Number(sats) || 0);
+    var left = done ? sumProofs(proofs(canonicalMint(job.from), ju)) : 0;
+    var base = done ? Math.round(Number(c.before) || 0) : 0;
+    var worth = ju === tu ? landed : Math.round(Number(job.priceUnit) || 0);
+    var fee = Math.max(0, base + kept - (done ? left : 0) - worth);
+    var who = c.name || 'a Cashu ID';
+    var memo = ju === 'sat' && tu === 'sat'
+      ? 'From ' + who + ', came home from ' + hostOf(job.from) + ', fee ' + fee + (fee === 1 ? ' sat' : ' sats')
+      : 'From ' + who + ', came home from ' + hostOf(job.from) + ' as ' + cidSaid(landed, tu) + ', fee ' + cidSaid(fee, ju);
+    try { amendTx(quote, { memo: memo, cid: 'in' }); } catch (x) {}
+    if (job.hash) { try { amendTx(job.hash, { memo: 'From ' + who + ', brought home', cid: 'in' }); } catch (x) {} }
+    console.log('[foxy] cashu id: a payment from ' + hostOf(job.from) + ' came home, ' + cidSaid(landed, tu) + ', fee ' + cidSaid(fee, ju));
+    cidHistoryChanged();
+    if (typeof FoxyWallet._onCashuIdPaid === 'function') {
+      try {
+        FoxyWallet._onCashuIdPaid({ unit: tu, amount: landed, sats: tu === 'sat' ? landed : 0, hash: quote, name: c.name || '',
+                                    mint: canonicalMint(job.home), fee: fee, feeUnit: ju });
+      } catch (x) {}
+    }
+  }
+
+  /* KEEP IT THERE: the mint becomes one this phone uses (`cidUseMint`), and this
+   * delivery is taken as one at any of its mints is, swapped in there where the
+   * phone is not; so is every other one waiting there. 'there' once taken. */
+  function cidKeepThere(item, mint, unit) {
+    cidUseMint(mint);
+    var took = function (body, at) {
+      return cidArriveOne(body, {}, true).then(function (r) {
+        // taken, kept for when it can be, or refused: no longer for its receiver to decide either way
+        cidOfferDrop(at);
+        return r;
+      });
+    };
+    return took(item.text, item.at).then(function (r) {
+      var others = cidOfferRows().filter(function (x) { return x.mint === mint; });
+      return others.reduce(function (chain, x) { return chain.then(function () { return took(x.body, x.key); }); }, Promise.resolve()).then(function () {
+        cidHistoryChanged();
+        console.log('[foxy] cashu id: a payment at ' + hostOf(mint) + ' is kept there (' + r + ')');
+        return r === 'taken' ? 'there' : r;
+      });
+    });
+  }
+
+  /* SEND IT BACK: taken at that mint, and at once paid back to its payer's ID at
+   * the same mint, as a payment to a contact is (`cidPay`: a one-time key, a
+   * locktime, a refund key, its copy to this seed's recovery key), for what was
+   * taken less what that mint charges to make it (`changeFromPile`). No
+   * crossing, and no fee but the mint's own. A pay-back that fails after the
+   * take leaves the money at that mint, this phone's, and the mint is one it
+   * uses from then on; the row says so. 'back' once it is on its way to them,
+   * 'there' when it stayed. */
+  function cidSendBack(item, mint, unit, home, who) {
+    var o = item.opts || {};
+    var to = who.back;
+    var name = cidCleanName(who.name || to.name) || 'a Cashu ID';
+    return cidTakeIn({ got: item.got, proofs: item.proofs, mint: mint, unit: unit, at: item.at, quiet: true }).then(function (t) {
+      if (!t.taken) {
+        if (t.later) return 'waiting';
+        return t.seen ? 'seen' : 'refused';
+      }
+      cidOfferDrop(item.at);
+      var kept = Math.round(satsOf(t.r && (t.r.amount != null ? t.r.amount : t.r.sats))) || 0;
+      var hash = (t.r && t.r.hash) || '';
+      var from = 'From ' + (t.name || name);
+      // the visit puts it in this phone's lists; it is still not a mint this phone uses, unless the money stays there
+      if (!cidListedMint(mint)) cidBroughtNote(mint);
+      var stayed = function (e) {
+        var why = String(FoxyWallet.reason ? FoxyWallet.reason(e) : ((e && e.message) || e)).slice(0, 120);
+        cidUseMint(mint);
+        if (hash) { try { amendTx(hash, { memo: from + ', kept at ' + hostOf(mint) + ': it could not be sent back', cid: 'in' }); } catch (x) {} }
+        console.warn('[foxy] cashu id: a payment could not be sent back; it stays at ' + hostOf(mint) + ': ' + why);
+        o.said = why;
+        return 'there';
+      };
+      return carryVisit(mint).then(function () {
+        return unit === 'sat' ? wallet : unitWalletLocal(unit);
+      }).then(function (w) {
+        var back = changeFromPile(w, kept, unit);
+        if (!(back > 0)) throw new Error('What came is too small to send back after ' + hostOf(mint) + '’s fee.');
+        return cidPay(to.id, back, { unit: unit, name: name, memo: 'Sent back to ' + name, read: { id: to.id, nostr: to.nostr } });
+      }).then(function () {
+        if (hash) { try { amendTx(hash, { memo: from + ', sent back', cid: 'in' }); } catch (x) {} }
+        console.log('[foxy] cashu id: a payment at ' + hostOf(mint) + ' was sent back to its payer');
+        return 'back';
+      }, stayed).then(function (r) {
+        return carryGoHome(home).then(function () { cidHistoryChanged(); return r; });
+      });
+    });
+  }
+
+  /* The receiver's answer on the card: 'home', 'keep' or 'back' for the waiting
+   * delivery `key`, remembered for its mint with `always`. One at a time, with
+   * the deliveries (`cidArrived`). Resolves { state, why }: the states of
+   * `cidArriveOne`, and 'gone' for one no longer waiting. Never rejects. */
+  function cidDecide(key, choice, always) {
+    var run = cidArriving.then(function () {
+      var row = cidOfferRows().filter(function (r) { return r.key === key; })[0];
+      if (!row) return { state: 'gone', why: 'That payment is no longer waiting.' };
+      if (!Object.prototype.hasOwnProperty.call(CID_CHOICES, choice)) return { state: 'refused', why: 'Foxy does not know that answer.' };
+      if (choice === 'back' && !(row.from && cidBackTo(row.from))) {
+        return { state: 'refused', why: 'Its payer did not say who it is, so it cannot be sent back.' };
+      }
+      if (!wallet || !routeOpen()) return { state: 'later', why: 'This needs a connection. It waits until there is one.' };
+      if (always) cidChoiceSet(row.mint, choice);
+      var o = /** @type {any} */ ({ choice: choice });
+      return cidArriveOne(row.body, o).then(function (state) {
+        cidHistoryChanged();
+        var still = cidOfferRows().filter(function (r) { return r.key === key; })[0];
+        return { state: state, why: String(o.said || (still && still.q && still.q.why) || ''), view: still ? cidOfferView(still) : null };
+      });
+    }).then(null, function (e) {
+      return { state: 'refused', why: String((e && e.message) || e) };
+    });
+    cidArriving = run.then(function () {}, function () {});
+    return run;
+  }
+
+  /* What was kept for later, taken now that there is a route: not a row whose
+   * mint is in its backoff, which would only be kept again. */
+  function cidDrain() {
+    var rows = cidInboxRows();
+    if (!rows.length || !wallet || !routeOpen()) return Promise.resolve(0);
+    var took = 0;
+    return rows.reduce(function (chain, r) {
+      return chain.then(function () {
+        if (r.mint && cidBackedOff(r.mint)) return null;
+        return cidArrived(r.body).then(function (got) { if (got === 'taken') took += 1; });
+      });
+    }, Promise.resolve()).then(function () { return took; });
+  }
+
+  /* ---- ANY WALLET: a standard payment request, for a wallet that cannot blind ----
+   *
+   * MY CASHU ID's second button. A NUT-18 request (`creqA…`) any Cashu wallet pays today: no amount, the unit the
+   * phone is in, this phone's mints that honour a lock (the default first), locked (NUT-11 through `nut10`) to a fresh
+   * key from the seed-derived lock pool (`takeLockKey`, the key a receive request takes, filed as `cid-any-<id>`), and
+   * a Nostr transport to the ID's delivery key, its nprofile naming the three relays its inbox listens on. Every
+   * opening takes a new key, so no two payers lock to the same one and the mint sees a key once; a key handed out
+   * twice (a code shown again, a payer that pays twice) still opens what is locked to it, once per delivery. The
+   * payment arrives on the ID's inbox as a NUT-18 payload with no E, and is taken as any ecash locked to this seed
+   * (`cidPoolTake`, `receiveToken`): a key no row names is found by the walk (`lockKeyMatching`), as after a restore
+   * from the words, at most five such walks an hour. */
+  // NostrDelivery.fallbackRelays, the three the ID's inbox listens on (tests/cashu-id-any.js holds the two the same)
+  var CID_RELAYS = ['wss://relay.damus.io', 'wss://relay.primal.net', 'wss://relay.minibits.cash'];
+  var CID_ANY = 'cid-any-';
+  var CID_ANY_MINTS = 5;
+  var CID_WALKS = 'foxy.cid.walks';
+  var CID_WALKS_MAX = 5;
+
+  /* The mints a request names: the default first, then the one the phone is on and the others it has connected to,
+   * each one this phone uses, that issues the unit and that honours a lock; at most five. */
+  function cidAnyMints(unit) {
+    var home = canonicalMint(String(load(K.mint, '') || mintUrl || ''));
+    var here = canonicalMint(String(mintUrl || ''));
+    var all = [home, here];
+    var known = load(K.mints, []);
+    if (Array.isArray(known)) all = all.concat(known);
+    var out = [];
+    all.forEach(function (u) {
+      var m = canonicalMint(String(u || ''));
+      if (!m || out.indexOf(m) >= 0 || out.length >= CID_ANY_MINTS || mintUrlProblem(m) || !cidListedMint(m)) return;
+      var has = unitsOf(m);
+      if (unit === 'sat' ? (has.length > 0 && has.indexOf('sat') < 0) : has.indexOf(unit) < 0) return;
+      if (!tillMintLocks(m)) return;
+      out.push(m);
+    });
+    return out;
+  }
+
+  /* The request: { text, id, pub, unit, mints, target }. Rejects with the sentence to show. */
+  function cidAnyRequest(opts) {
+    var o = opts || {};
+    var CT = window.CashuTS;
+    var unit = unitOf(o.unit || 'sat');
+    if (unit !== 'sat' && unit !== 'usd') return Promise.reject(new Error('Foxy asks only in sats or dollars.'));
+    if (!CT || !CT.PaymentRequest || !wallet || !mintUrl) return Promise.reject(new Error('Connect to a mint first.'));
+    if (claimAway) return Promise.reject(new Error('Foxy is finishing a payment at another mint. Try again in a moment.'));
+    return cidMine().then(function (mine) {
+      var mints = cidAnyMints(unit);
+      if (!mints.length) {
+        throw new Error(unit === 'usd' ? 'None of your mints takes dollars locked to a key.' : 'None of your mints honours a payment locked to a key.');
+      }
+      return primeLockPool().then(function () {
+        var idBytes = new Uint8Array(4);
+        (window.crypto || window.msCrypto).getRandomValues(idBytes);
+        var id = hexOf(idBytes);
+        var pub = String(takeLockKey(CID_ANY + id, { unit: unit, amount: 0 }) || '').toLowerCase();
+        // and the pool filled behind it, so the next opening has one
+        primeLockPool();
+        if (!CID_HEX33.test(pub)) throw new Error('No key to lock it to could be made. Try again in a moment.');
+        var target = cidNprofile(mine.nostr, CID_RELAYS);
+        var transport = [{ type: CT.PaymentRequestTransportType.NOSTR, target: target, tags: [['n', '17']] }];
+        var text = new CT.PaymentRequest(transport, id, undefined, unit, mints, undefined, true,
+                                         { kind: 'P2PK', data: pub, tags: [] }).toEncodedRequest();
+        // a payment to it comes to the ID's inbox: the phone listens from now on
+        cidMarkInUse();
+        Promise.resolve(cidListenNow()).then(null, function () {});
+        console.log('[foxy] cashu id: ANY WALLET: a request at ' + mints.length + ' mint(s) in ' + unit + ', locked to a fresh key of the pool');
+        return { text: text, id: id, pub: pub, unit: unit, mints: mints, target: target };
+      });
+    });
+  }
+
+  // a proof with no E, P2PK-locked to one key that is not this phone's ID: what a wallet paying ANY WALLET sends
+  function cidPoolShaped(got, proofs) {
+    if (got.E) return false;
+    return proofs.every(function (pr) {
+      return pr && typeof pr === 'object' && !pr.p2pk_e && CID_HEX33.test(String(lockedTo(pr) || '').toLowerCase());
+    });
+  }
+
+  // whether a lock row of this phone's names `pub`
+  function cidPoolNamed(pub) {
+    var all = lockKeys();
+    return Object.keys(all).some(function (k) { return lockPubOf(all[k]) === pub; });
+  }
+
+  // one more walk of the seed for a key no row names, five an hour, kept across a restart (as `cidForeignSpend`)
+  function cidWalkSpend() {
+    var now = Date.now();
+    var l = load(CID_WALKS, []);
+    var times = (Array.isArray(l) ? l : []).map(Number).filter(function (t) { return t > now - CID_OFFER_RATE_MS && t <= now + 60000; });
+    if (times.length >= CID_WALKS_MAX) return false;
+    times.push(now);
+    save(CID_WALKS, times);
+    return true;
+  }
+
+  /* A payment to ANY WALLET's request: at a mint this phone uses, locked to a key of this seed, taken as any locked
+   * ecash (`receiveToken`, away from the mint the phone is on where it is another), once. History: "From another
+   * wallet". Resolves the states of `cidArriveOne`. */
+  function cidPoolTake(d) {
+    var proofs = d.proofs, mint = d.mint, unit = d.unit, refuse = d.refuse;
+    for (var i = 0; i < proofs.length; i++) {
+      var pr = proofs[i];
+      if (typeof pr.secret !== 'string' || pr.secret.length > 1024 || typeof pr.C !== 'string' || !CID_HEX33.test(pr.C.toLowerCase())
+          || typeof pr.id !== 'string' || !(satsOf(pr.amount) > 0)) return Promise.resolve(refuse('it holds a proof that is not ecash Foxy can read'));
+    }
+    if (repeatedProof(proofs)) return Promise.resolve(refuse('it names the same ecash more than once'));
+    if (cidSeenAny(proofs)) { console.log('[foxy] cashu id: a payment from another wallet, taken already, read again'); return Promise.resolve('seen'); }
+    if (!cidListedMint(mint)) return Promise.resolve(refuse('it is at ' + hostOf(mint) + ', a mint this phone does not use, which no request of this phone names'));
+    var lock = String(lockedTo(proofs[0]) || '').toLowerCase();
+    if (!proofs.every(function (x) { return String(lockedTo(x) || '').toLowerCase() === lock; })) return Promise.resolve(refuse('its pieces are locked to more than one key'));
+    if (!wallet || !routeOpen() || claimAway) return Promise.resolve(refuse('this phone cannot reach the mint now (the relays still hold it)'));
+    if (!cidPoolNamed(lock) && !cidWalkSpend()) return Promise.resolve(refuse('no request of this phone’s names its key, and the seed was walked five times this hour'));
+    var hold = cidHold(proofs);
+    if (!hold) return Promise.resolve('seen');
+    var held = hold;
+    var memo = 'From another wallet';
+    var away = canonicalMint(mintUrl || '') !== mint;
+    var token;
+    try { token = encodeToken(mint, cidForMint(proofs, null), unit); }
+    catch (e) { held(); return Promise.resolve(refuse('it would not make a token')); }
+    return FoxyWallet.receiveToken(token, { memo: memo, away: away }).then(function (r) {
+      cidSeenAdd(proofs);
+      if (r && r.hash) {
+        try { amendTx(r.hash, { memo: memo, cid: 'any' }); } catch (x) {}
+        var note = d.got.note ? cidCleanName(String(d.got.note).slice(0, CID_NOTE_MAX)) : '';
+        if (note) { try { FoxyWallet.tag(r.hash, { note: note }); } catch (x) {} }
+      }
+      console.log('[foxy] cashu id: a payment from another wallet (ANY WALLET) was taken in at ' + hostOf(mint));
+      if (typeof FoxyWallet._onCashuIdPaid === 'function') {
+        try { FoxyWallet._onCashuIdPaid({ unit: unit, amount: r && r.amount, sats: r && r.sats, hash: r && r.hash, name: '', mint: mint }); } catch (x) {}
+      }
+      return 'taken';
+    }, function (e) {
+      var why = String((e && e.message) || e);
+      if (/already|spent/i.test(why)) { cidSeenAdd(proofs); return refuse('the mint has it as spent already'); }
+      return refuse('it was not taken (' + why.slice(0, 120) + ')');
+    }).then(function (st) { held(); return st; }, function (e) { held(); throw e; });
+  }
+
+  /* ---- paid to the ID key itself, unblinded ----
+   *
+   * A payer that locks to the ID as it is (a wallet handed the ID's key with no word to blind it) shows the mint the
+   * ID at the claim: every such payment linked there, to this ID. The phone signs nothing for it by itself. The
+   * receiver is asked, once a page load for each delivery (`_onCashuIdUnblinded`, the card PAID TO YOUR ID KEY):
+   * LEAVE IT, the default, drops it (`foxy.cid.left`) and, where it carried a locktime and a refund key, its payer
+   * has it back then; TAKE IT ANYWAY has the ID key itself sign for this delivery alone (`cashuIdSignUnblinded`,
+   * logged on the phone) and takes it as any receipt, "From <name>, unblinded". Only at a mint this phone uses. */
+  var CID_LEFT = 'foxy.cid.left';
+  var CID_LEFT_MAX = 500;
+  var cidBareWaiting = Object.create(null);
+
+  function cidIsBare(pr, me) {
+    var l = String(lockedTo(pr) || '').toLowerCase();
+    return CID_HEX33.test(l) && l.slice(2) === me.slice(2);
+  }
+
+  function cidLeftHas(key) { var l = load(CID_LEFT, []); return Array.isArray(l) && l.indexOf(key) >= 0; }
+  function cidLeftAdd(key) {
+    var l = load(CID_LEFT, []);
+    l = Array.isArray(l) ? l.filter(function (k) { return k !== key; }) : [];
+    save(CID_LEFT, l.concat([key]).slice(-CID_LEFT_MAX));
+  }
+
+  function cidBareView(w) {
+    return { key: w.key, name: w.name, mint: w.mint, host: hostOf(w.mint), unit: w.unit, amount: w.amount, at: w.at, refund: w.refund };
+  }
+
+  function cidBare(d) {
+    var proofs = d.proofs, mint = d.mint, unit = d.unit, refuse = d.refuse, o = d.opts || {};
+    for (var i = 0; i < proofs.length; i++) {
+      var pr = proofs[i];
+      if (typeof pr.secret !== 'string' || pr.secret.length > 1024 || typeof pr.C !== 'string' || !CID_HEX33.test(pr.C.toLowerCase())
+          || typeof pr.id !== 'string' || !(satsOf(pr.amount) > 0)) return Promise.resolve(refuse('it holds a proof that is not ecash Foxy can read'));
+      if (cidLocktimeOf(pr) < 0) return Promise.resolve(refuse('it holds a proof whose locktime is not a time'));
+    }
+    if (repeatedProof(proofs)) return Promise.resolve(refuse('it names the same ecash more than once'));
+    var key = 'cid:' + piecesFingerprint(proofs);
+    if (cidSeenAny(proofs)) return Promise.resolve('seen');
+    if (cidLeftHas(key)) { console.log('[foxy] cashu id: a delivery paid to the ID key itself, left before, read again'); return Promise.resolve('left'); }
+    if (!cidListedMint(mint)) return Promise.resolve(refuse('it is paid to the ID key itself, unblinded, at ' + hostOf(mint) + ', a mint this phone does not use'));
+    var amount = proofs.reduce(function (n, x) { return n + satsOf(x.amount); }, 0);
+    if (!o.bareOk) {
+      if (cidBareWaiting[key]) return Promise.resolve('unblinded');
+      console.warn('[foxy] cashu id: a delivery is locked to the ID key itself, unblinded: nothing signed; its receiver is asked');
+      return cidFromName(d.got).then(function (name) {
+        var refund = proofs.some(function (x) { return cidLocktimeOf(x) > 0; });
+        var w = { key: key, text: d.text, name: name, mint: mint, unit: unit, amount: amount, at: Date.now(), refund: refund };
+        cidBareWaiting[key] = w;
+        if (typeof FoxyWallet._onCashuIdUnblinded === 'function') {
+          try { FoxyWallet._onCashuIdUnblinded(cidBareView(w)); } catch (x) {}
+        }
+        return 'unblinded';
+      });
+    }
+    // TAKE IT ANYWAY, for this delivery alone
+    if (!wallet || !routeOpen() || claimAway) return Promise.resolve(refuse('this phone cannot reach the mint now'));
+    if (!proofs.every(function (x) { return onlyLockedTo(x, lockedTo(x), { swapNow: true }); })) {
+      return Promise.resolve(refuse('it is not locked to the ID key alone, or its time lock is too near'));
+    }
+    var hold = cidHold(proofs);
+    if (!hold) return Promise.resolve('seen');
+    var held = hold;
+    console.warn('[foxy] cashu id: TAKE IT ANYWAY: the ID key itself is asked to sign ' + proofs.length + ' piece(s) of one delivery');
+    return nativeJson('cashuIdSignUnblinded', { secrets: proofs.map(function (x) { return x.secret; }) }, 60000).then(function (j) {
+      var sigs = Array.isArray(j && j.sigs) ? j.sigs : [];
+      if (sigs.length !== proofs.length) throw new Error('the phone’s signatures were not for what was asked');
+      var signed = cidForMint(proofs, sigs);
+      var CT = window.CashuTS;
+      if (!signed.every(function (x) { try { return CT.isP2PKSpendAuthorised(x) === true; } catch (e) { return false; } })) {
+        throw new Error('the phone’s signatures did not check out');
+      }
+      return cidFromName(d.got).then(function (name) {
+        var memo = 'From ' + (name || 'someone') + ', unblinded';
+        var away = canonicalMint(mintUrl || '') !== mint;
+        return FoxyWallet.receiveToken(encodeToken(mint, signed, unit), { memo: memo, away: away }).then(function (r) {
+          cidSeenAdd(proofs);
+          delete cidBareWaiting[key];
+          if (r && r.hash) {
+            try { amendTx(r.hash, { memo: memo, cid: 'bare' }); } catch (x) {}
+            var note = d.got.note ? cidCleanName(String(d.got.note).slice(0, CID_NOTE_MAX)) : '';
+            if (note) { try { FoxyWallet.tag(r.hash, { note: note }); } catch (x) {} }
+          }
+          console.log('[foxy] cashu id: a payment to the ID key itself was taken, on its receiver’s word');
+          if (typeof FoxyWallet._onCashuIdPaid === 'function') {
+            try { FoxyWallet._onCashuIdPaid({ unit: unit, amount: r && r.amount, sats: r && r.sats, hash: r && r.hash, name: name, mint: mint }); } catch (x) {}
+          }
+          return 'taken';
+        }, function (e) {
+          var why = String((e && e.message) || e);
+          if (/already|spent/i.test(why)) { cidSeenAdd(proofs); delete cidBareWaiting[key]; return refuse('the mint has it as spent already'); }
+          return refuse('it was not taken (' + why.slice(0, 120) + ')');
+        });
+      });
+    }, function (e) {
+      return refuse('the phone did not sign for it (' + String((e && e.message) || e).slice(0, 80) + ')');
+    }).then(function (st) { held(); return st; }, function (e) { held(); return refuse(String((e && e.message) || e)); });
+  }
+
+  /* The card's answer for delivery `key`: `take` true is TAKE IT ANYWAY, false LEAVE IT. Resolves { state, why }:
+   * 'taken', 'left', 'gone' (asked no longer), or a state of `cidArriveOne`. Never rejects. */
+  function cidBareDecide(key, take) {
+    var w = cidBareWaiting[key];
+    if (!w) return Promise.resolve({ state: 'gone', why: 'That payment is no longer waiting.' });
+    if (!take) {
+      delete cidBareWaiting[key];
+      cidLeftAdd(key);
+      console.log('[foxy] cashu id: a delivery paid to the ID key itself was left' + (w.refund ? '; its payer has it back after its locktime' : ''));
+      return Promise.resolve({ state: 'left', why: '' });
+    }
+    var o = /** @type {any} */ ({ bareOk: true });
+    return cidArrived(w.text, o).then(function (state) { return { state: state, why: String(o.said || '') }; },
+      function (e) { return { state: 'refused', why: String((e && e.message) || e) }; });
+  }
+
+  /* ---- listening ---- */
+
+  /* ---- read before the mint was connected for real ----
+   *
+   * A launch builds the wallet from what is on file and speaks to the mint behind it (`connectForRealOnceOnline`). A
+   * delivery the inbox reads before that is held here, in memory and unread: nothing is signed, nothing asked of the
+   * mint, nothing counted, and it is taken by every check as ever once the connect lands (`cidOnConnect`). The keysets
+   * on file may be older than the mint's, which would refuse a payment in a new one. Past the cap one is not held:
+   * the relays still have it, and the inbox is opened again after the connect. */
+  var cidEarly = /** @type {string[]} */ ([]);
+  var cidEarlyMissed = false;
+
+  function cidHoldEarly(body) {
+    if (!wallet || !wallet.foxyFromCache || !routeOpen()) return false;
+    var text = typeof body === 'string' ? body : '';
+    if (!text || text.length > CID_BODY_MAX) return false;
+    if (cidEarly.indexOf(text) < 0) {
+      var bytes = cidEarly.reduce(function (n, t) { return n + t.length; }, 0);
+      if (cidEarly.length >= CID_EARLY_MAX || bytes + text.length > CID_EARLY_BYTES) cidEarlyMissed = true;
+      else cidEarly.push(text);
+    }
+    console.log('[foxy] cashu id: a delivery read before the mint was connected; taken once it is');
+    return true;
+  }
+
+  /* A connect has landed for real (11-routing.js): what was held is taken now, one at a time, and the inbox, open
+   * since the route came up, is kept, or opened if it is not, which also takes what was kept. Behind the connect's
+   * answer, not inside it. */
+  function cidOnConnect() {
+    setTimeout(function () {
+      var held = cidEarly;
+      var missed = cidEarlyMissed;
+      cidEarly = [];
+      cidEarlyMissed = false;
+      held.reduce(function (chain, text) {
+        return chain.then(function () { return cidArrived(text).then(null, function () { return 'refused'; }); });
+      }, Promise.resolve()).then(function () {
+        return cidListenNow(missed ? null : { ifClosed: true });
+      }).then(null, function (e) {
+        console.warn('[foxy] cashu id: after the connect:', (e && e.message) || e);
+      });
+    }, 0);
+  }
+
+  /* Whether this phone's words were restored in the last week (`cidRestored`):
+   * then, and only then, it reads back the copies on its recovery key. */
+  function cidRecovering() {
+    var at = Number(load(CID_RECOVER, 0)) || 0;
+    if (!at) return false;
+    if (Date.now() - at < CID_RECOVER_MS) return true;
+    try { localStorage.removeItem(CID_RECOVER); } catch (e) {}
+    return false;
+  }
+
+  /* Only once the ID is in use on this phone (`cidInUse`): an ID nobody was
+   * given has nothing to listen for, and a phone that never showed one tells
+   * no relay it is there. */
+  var cidListenRun = null;
+  // when the phone last said a relay was listening; 0 once it may not be (a return, the route gone, a hush)
+  var cidOpenedAt = 0;
+
+  function cidListenGone() { cidOpenedAt = 0; }
+
+  function cidFreshMs() { return CID_TESTS && Number(FoxyWallet._cashuIdFreshMs) > 0 ? Number(FoxyWallet._cashuIdFreshMs) : CID_FRESH_MS; }
+
+  /* `opts.ifClosed`: an inbox opened less than `CID_FRESH_MS` ago is left open, and only what was kept is taken
+   * (`cidDrain`). Without it (the wake, MY CASHU ID shown, a restore) it is always opened again. */
+  function cidListenNow(opts) {
+    if (cidListenRun) return cidListenRun;
+    if (!cidInUse()) return Promise.resolve(0);
+    if (opts && opts.ifClosed && cidOpenedAt && Date.now() - cidOpenedAt < cidFreshMs()) {
+      return cidDrain().then(function () { return 1; }, function () { return 1; });
+    }
+    var since = Math.floor(Date.now() / 1000) - CID_SINCE_S + 300;
+    var run = bridgeAsk('cashuIdInboxOpen', { since: since }, 70000).then(function (n) {
+      var got = Number(String(n).trim()) || 0;
+      cidOpenedAt = got ? Date.now() : 0;
+      console.log('[foxy] cashu id: ' + (got ? 'listening' : 'no relay is listening'));
+      return got;
+    }, function (e) {
+      cidOpenedAt = 0;
+      console.warn('[foxy] cashu id: the phone did not listen:', (e && e.message) || e);
+      return 0;
+    }).then(function (n) {
+      // after a restore, and for a week: this seed's own copies of what it paid, read back (`cidCopyArrived`)
+      if (!cidRecovering()) return n;
+      return bridgeAsk('cashuIdCopiesOpen', { since: since }, 70000).then(function (c) {
+        console.log('[foxy] cashu id: ' + ((Number(String(c).trim()) || 0) ? 'reading back this seed’s copies' : 'no relay is holding this seed’s copies yet'));
+        return n;
+      }, function (e) {
+        console.warn('[foxy] cashu id: the copies were not read back:', (e && e.message) || e);
+        return n;
+      });
+    }).then(function (n) {
+      return cidDrain().then(function () { return n; }, function () { return n; });
+    }).then(function (n) {
+      // and the messages between Cashu IDs: the contacts' next keys listened on, what waits to go sent (08f-cashu-msg.js)
+      Promise.resolve().then(function () { return cmsgListenNow(); }).then(null, function () {});
+      Promise.resolve().then(function () { return cmsgDeliverAll(); }).then(null, function () {});
+      return n;
+    });
+    cidListenRun = run;
+    var done = function () { if (cidListenRun === run) cidListenRun = null; };
+    run.then(done, done);
+    return run;
+  }
+
+  /* ---- the payer's outbox ---- */
+
+  function cidOutboxRows() {
+    var l = load(K.cidOutbox, []);
+    return Array.isArray(l) ? l.filter(function (r) { return r && typeof r === 'object' && typeof r.id === 'string' && typeof r.token === 'string'; }) : [];
+  }
+
+  function cidOutboxPut(row) {
+    var rows = cidOutboxRows().filter(function (r) { return r.id !== row.id; });
+    rows.push(row);
+    mustSave(K.cidOutbox, rows);
+  }
+
+  function cidOutboxAmend(id, fields) {
+    var rows = cidOutboxRows();
+    var hit = null;
+    rows.forEach(function (r) { if (r.id === id) { Object.assign(r, fields); hit = r; } });
+    if (hit) save(K.cidOutbox, rows);
+    return hit;
+  }
+
+  // rows done with (collected or come back) go a week after, with their tokens
+  var CID_DONE_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+
+  function cidOutboxTidy() {
+    var rows = cidOutboxRows();
+    var now = Date.now();
+    var left = rows.filter(function (r) { return r.state === 'out' || !(Number(r.doneAt) > 0) || Number(r.doneAt) + CID_DONE_KEEP_MS > now; });
+    if (left.length !== rows.length) save(K.cidOutbox, left);
+  }
+
+  function cidHistoryChanged() {
+    if (typeof FoxyWallet._onHistoryChanged === 'function') {
+      try { FoxyWallet._onHistoryChanged(); } catch (x) {}
+    }
+  }
+
+  /* The envelope: the token, the E its tag is bound to, and this phone's ID
+   * with the tag that proves it (`cidFromName`), only where this phone's ID is
+   * in use (M6) and the tag was made. */
+  function cidBody(row) {
+    var j = /** @type {any} */ ({ v: 2, type: 'foxy-cashu-id', token: row.token, E: row.E });
+    if (row.from && row.tag) { j.from = row.from; j.tag = row.tag; }
+    if (row.note) j.note = String(row.note).slice(0, CID_NOTE_MAX);
+    return JSON.stringify(j);
+  }
+
+  // whether a row is due to go: never taken by a relay, or taken a day ago and not collected; and inside its locktime
+  function cidDue(r, now) {
+    if (r.state !== 'out') return false;
+    if (Number(r.lockUntil) * 1000 <= now) return false;
+    return !r.sentAt || now - (Number(r.lastSentAt) || Number(r.sentAt) || 0) >= CID_RESEND_MS;
+  }
+
+  // whether a row is one to ask its mint about: out, and sent, or past its locktime whether a relay took it or not (M3)
+  function cidWatched(r, now) {
+    return r.state === 'out' && (!!r.sentAt || Number(r.lockUntil) * 1000 <= now);
+  }
+
+  var cidSending = null;
+  var cidRetryTimer = null;
+
+  function cidRetryMs() { return CID_TESTS && Number(FoxyWallet._cashuIdRetryMs) > 0 ? Number(FoxyWallet._cashuIdRetryMs) : CID_RETRY_MS; }
+
+  /* Every row due, sent, one at a time. A row is marked sent only once a
+   * relay took it; a failure counts a try. While a row has never been taken by
+   * a relay, once more a minute (a quarter of an hour after thirty tries), and
+   * at once when the route comes back: the till's outbox rules. */
+  function cidDeliverAll() {
+    if (cidSending) return cidSending;
+    var sent = 0;
+    var now = Date.now();
+    var due = cidOutboxRows().filter(function (r) { return cidDue(r, now); });
+    var run = due.reduce(function (chain, r) {
+      return chain.then(function () {
+        if (!routeOpen()) { cidOutboxAmend(r.id, { tries: (Number(r.tries) || 0) + 1 }); return null; }
+        return deliverOverNostr(cidNprofile(r.to), cidBody(r)).then(function () {
+          var at = Date.now();
+          var fields = /** @type {any} */ ({ sentAt: r.sentAt || at, lastSentAt: at });
+          // the first time a relay took it: its copy to this seed's recovery key goes a while later (`cidCopyAll`)
+          if (!r.copyAt && !r.copiedAt) fields.copyAt = at + cidCopyDelay();
+          cidOutboxAmend(r.id, fields);
+          if (r.hash && !r.sentAt) { try { amendTx(r.hash, { cidSent: true }); } catch (x) {} }
+          sent += 1;
+          cidHistoryChanged();
+        }, function (e) {
+          cidOutboxAmend(r.id, { tries: (Number(r.tries) || 0) + 1 });
+          console.warn('[foxy] cashu id: a payment was not sent yet:', (e && e.message) || e);
+        });
+      });
+    }, Promise.resolve()).then(function () {
+      cidRetryArm();
+      cidCopyArm();
+      return sent;
+    }, function (e) {
+      console.warn('[foxy] cashu id: the outbox could not be sent:', (e && e.message) || e);
+      cidRetryArm();
+      cidCopyArm();
+      return sent;
+    });
+    cidSending = run;
+    var done = function () { if (cidSending === run) cidSending = null; };
+    run.then(done, done);
+    return run;
+  }
+
+  function cidRetryArm() {
+    if (cidRetryTimer) { clearTimeout(cidRetryTimer); cidRetryTimer = null; }
+    var left = cidOutboxRows().filter(function (r) { return r.state === 'out' && !r.sentAt && Number(r.lockUntil) * 1000 > Date.now(); });
+    if (!left.length) return;
+    var ms = cidRetryMs();
+    if (left.every(function (r) { return Number(r.tries) >= CID_TRIES_FAST; })) ms *= CID_RETRY_SLOW;
+    cidRetryTimer = setTimeout(function () {
+      cidRetryTimer = null;
+      cidDeliverAll().then(null, function () {});
+    }, ms);
+  }
+
+  /* ---- the copy, to this seed's own recovery key ----
+   *
+   * The outbox is the only copy of an uncollected payment's token, and the
+   * words do not bring storage back. So once a relay has taken a payment, a
+   * copy of its row goes, gift-wrapped (NIP-17) as the payment went, to the
+   * recovery key's own public half (m/129373'/20'/3'/0'/0', never the delivery
+   * key, in no string, and the key of nothing else), between one and thirty
+   * minutes later at a random moment: never in the same second as the payment,
+   * so the relays cannot pair the two by when they came. A restore from the
+   * words reads the copies back (`cidCopyArrived`) and the outbox's watch brings
+   * home what nobody collected. A payment collected before its copy is due
+   * sends none. */
+  var CID_COPY_V = 1;
+  var cidCopyTimer = null;
+  var cidCopying = null;
+
+  function cidCopyDelay() {
+    if (CID_TESTS && Number(FoxyWallet._cashuIdCopyMs) > 0) return Number(FoxyWallet._cashuIdCopyMs);
+    var r = window.CashuTS.createRandomSecretKey();
+    var span = CID_COPY_MAX_MS - CID_COPY_MIN_MS;
+    return CID_COPY_MIN_MS + (((r[0] << 16) | (r[1] << 8) | r[2]) % (span + 1));
+  }
+
+  // what goes to the recovery key: the row, everything a restore needs to watch it and bring it back
+  function cidCopyBody(r) {
+    return JSON.stringify({ v: CID_COPY_V, type: 'foxy-cashu-id-copy', token: r.token, E: r.E, contact: r.contact, to: r.to,
+                            locktime: Number(r.lockUntil), index: Number(r.index), refund: r.refundPub, name: String(r.name || ''),
+                            mint: r.mint, unit: r.unit, amount: r.amount, at: r.at, sentAt: r.sentAt || null });
+  }
+
+  function cidCopyDue(r, now) {
+    return r.state === 'out' && !r.copiedAt && Number(r.copyAt) > 0 && Number(r.copyAt) <= now && Number(r.lockUntil) * 1000 > now;
+  }
+
+  /* Every copy whose moment has come, sent; one no relay took is given another
+   * moment, one to thirty minutes on. */
+  function cidCopyAll() {
+    if (cidCopying) return cidCopying;
+    var now = Date.now();
+    var due = cidOutboxRows().filter(function (r) { return cidCopyDue(r, now); });
+    if (!due.length || !routeOpen()) { cidCopyArm(); return Promise.resolve(0); }
+    var sent = 0;
+    var run = cidMine().then(function () {
+      if (!CID_HEX32.test(cidRecoveryKey)) throw new Error('the phone gave no recovery key');
+      var to = cidNprofile(cidRecoveryKey);
+      return due.reduce(function (chain, r) {
+        return chain.then(function () {
+          return deliverOverNostr(to, cidCopyBody(r)).then(function () {
+            cidOutboxAmend(r.id, { copiedAt: Date.now() });
+            sent += 1;
+          }, function (e) {
+            cidOutboxAmend(r.id, { copyAt: Date.now() + cidCopyDelay(), copyTries: (Number(r.copyTries) || 0) + 1 });
+            console.warn('[foxy] cashu id: a payment’s copy was not sent yet:', (e && e.message) || e);
+          });
+        });
+      }, Promise.resolve());
+    }).then(function () {
+      if (sent) console.log('[foxy] cashu id: ' + sent + ' payment cop' + (sent === 1 ? 'y' : 'ies') + ' sent to this seed’s recovery key');
+      return sent;
+    }, function (e) {
+      console.warn('[foxy] cashu id: the copies could not be sent:', (e && e.message) || e);
+      return sent;
+    });
+    cidCopying = run;
+    var done = function () { if (cidCopying === run) cidCopying = null; cidCopyArm(); };
+    run.then(done, done);
+    return run;
+  }
+
+  // the next copy's moment, kept by one timer (and on every catch-up, for a page that slept through it)
+  function cidCopyArm() {
+    if (cidCopyTimer) { clearTimeout(cidCopyTimer); cidCopyTimer = null; }
+    var next = cidOutboxRows().filter(function (r) { return r.state === 'out' && !r.copiedAt && Number(r.copyAt) > 0; })
+      .map(function (r) { return Number(r.copyAt); }).sort(function (a, b) { return a - b; })[0];
+    if (!next) return;
+    cidCopyTimer = setTimeout(function () {
+      cidCopyTimer = null;
+      cidCopyAll().then(null, function () {});
+    }, Math.max(1000, next - Date.now()));
+  }
+
+  /* ---- a restore: the copies read back ---- */
+
+  var cidCopyChain = Promise.resolve();
+
+  /* A copy from the recovery key's inbox (`cashuIdCopiesOpen`), one at a time.
+   * 'rebuilt', 'seen' (the outbox has it), 'collected' (the mint has it all as
+   * spent: nothing to bring back), or 'refused'. Never rejects.
+   *
+   * Believed only where this seed made it: its refund key is this seed's lock
+   * key at the index it names, and every piece's E is one of the throwaway keys
+   * this seed's paying key gives for that contact, index and locktime, with the
+   * contact's ID blinded by it at slot 0 and the refund key at slot 1. Nobody
+   * without the words can make one of those, so a copy anyone else sends to the
+   * recovery key (its public half is on every wrap a relay holds) is dropped. */
+  function cidCopyArrived(body) {
+    var run = cidCopyChain.then(function () { return cidCopyOne(body); }).then(null, function (e) {
+      console.warn('[foxy] cashu id: a copy could not be read:', (e && e.message) || e);
+      return 'refused';
+    });
+    cidCopyChain = run.then(function () {}, function () {});
+    return run;
+  }
+
+  function cidTokenKey(token) { return hexOf(sha256(cidUtf8(String(token))).slice(0, 16)); }
+
+  function cidCopyOne(body) {
+    var no = function (why) { console.warn('[foxy] cashu id: a copy was dropped: ' + why); return 'refused'; };
+    var text = typeof body === 'string' ? body : '';
+    if (!text || text.length > CID_BODY_MAX) return no('it is larger than any payment');
+    var j = null;
+    try { j = JSON.parse(text); } catch (e) { j = null; }
+    if (!j || typeof j !== 'object' || j.type !== 'foxy-cashu-id-copy' || j.v !== CID_COPY_V) return no('it is not a copy of a payment');
+    var contact = String(j.contact || '').toLowerCase(), to = String(j.to || '').toLowerCase(), refund = String(j.refund || '').toLowerCase();
+    var locktime = Number(j.locktime), index = Number(j.index);
+    if (typeof j.token !== 'string' || !CID_HEX33.test(contact) || !CID_HEX32.test(to) || !CID_HEX33.test(refund)
+        || !Number.isSafeInteger(locktime) || locktime <= 0 || !Number.isInteger(index) || index < 0 || index > 0x7fffffff) {
+      return no('it is not shaped like one');
+    }
+    var tk = cidTokenKey(j.token);
+    if (cidOutboxRows().some(function (r) { return (r.tokenKey || cidTokenKey(r.token)) === tk; })) return 'seen';
+    var info = null;
+    try { info = FoxyWallet.tokenInfo(j.token); } catch (e) { info = null; }
+    var mint = info ? canonicalMint(String(info.mint || '')) : '';
+    var unit = info ? unitOf(info.unit) : '';
+    var ps = (info && info.proofs) || [];
+    if (!mint || mintUrlProblem(mint) || (unit !== 'sat' && unit !== 'usd')) return no('its token is not one Foxy would hold');
+    if (!ps.length || ps.length > CID_PIECES_MAX) return no('its token holds no pieces');
+    var tagOf = function (pr, name) {
+      try { var t = (JSON.parse(pr.secret)[1].tags || []).filter(function (x) { return Array.isArray(x) && x[0] === name; })[0]; return t ? String(t[1]) : ''; }
+      catch (e) { return ''; }
+    };
+    if (!ps.every(function (pr) {
+      return CID_HEX33.test(String(pr.p2pk_e || '').toLowerCase()) && CID_HEX33.test(String(lockedTo(pr) || '').toLowerCase())
+        && Number(tagOf(pr, 'locktime')) === locktime && CID_HEX33.test(tagOf(pr, 'refund').toLowerCase());
+    })) return no('its pieces are not a payment to a contact');
+    // the refund key: this seed's lock key at that index
+    return nativeJson('p2pkPubkeys', { start: index, count: 1 }, 60000).then(function (k) {
+      var pub = String(((k && k.pubkeys) || [])[0] || '').toLowerCase();
+      if (pub !== refund) return no('its refund key is not this seed’s');
+      // and every E this seed's own, for that contact, index and locktime
+      return nativeJson('cashuIdEphemeral', { to: contact, index: index, locktime: locktime }, 60000).then(function (e0) {
+        var base = String((e0 && e0.base) || '').toLowerCase();
+        if (!CID_HEX32.test(base)) return no('the phone gave no keys for it');
+        var want = {};
+        ps.forEach(function (pr) { want[String(pr.p2pk_e).toLowerCase()] = pr; });
+        var left = ps.length;
+        for (var jx = 0; jx < CID_PIECES_MAX && left > 0; jx++) {
+          var b = cidBlind(contact, cidPieceKey(base, jx), refund);
+          var pr = want[b.E];
+          if (!pr) continue;
+          if (String(lockedTo(pr) || '').toLowerCase() !== b.L || tagOf(pr, 'refund').toLowerCase() !== b.R) return no('a piece is not locked as this seed locks');
+          delete want[b.E];
+          left -= 1;
+        }
+        if (left > 0) return no('its pieces were not made by this seed');
+        return cidCopyKeep(j, info, mint, unit, contact, to, refund, locktime, index, tk);
+      });
+    });
+  }
+
+  /* A copy that checks out: into the outbox as the row it was, unless the mint
+   * has every piece as spent already (collected: nothing to bring back). The
+   * watch then does the rest (`cidWatchAll`): resent daily while it waits,
+   * collected, or brought back by the refund key after its locktime. */
+  function cidCopyKeep(j, info, mint, unit, contact, to, refund, locktime, index, tk) {
+    var here = !!wallet && canonicalMint(mintUrl || '') === mint;
+    var asking = !wallet || !routeOpen() ? Promise.reject(new Error('no route'))
+      : (here ? Promise.resolve(wallet) : awayWallet(mint));
+    return asking.then(function (w) { return statesOf(w, info.proofs); }).then(function (states) {
+      return (states || []).length === info.proofs.length && states.every(function (st) { return String(st) === 'SPENT'; });
+    }, function () { return false; }).then(function (collected) {
+      if (collected) { console.log('[foxy] cashu id: a copy of a payment its contact collected; nothing to bring back'); return 'collected'; }
+      if (cidOutboxRows().some(function (r) { return (r.tokenKey || cidTokenKey(r.token)) === tk; })) return 'seen';
+      var now = Date.now();
+      var row = { id: 'cidr' + tk.slice(0, 16), to: to, contact: contact, name: cidCleanName(j.name) || 'a Cashu ID',
+                  E: CID_HEX33.test(String(j.E || '').toLowerCase()) ? String(j.E).toLowerCase() : String(info.proofs[0].p2pk_e).toLowerCase(),
+                  token: j.token, tokenKey: tk, mint: mint, unit: unit, amount: Math.round(satsOf(j.amount) || 0) || sumProofs(info.proofs),
+                  hash: '', at: Number(j.at) || now, lockUntil: locktime, index: index, refundRow: '', refundPub: refund,
+                  from: '', tag: '', note: '', sentAt: Number(j.sentAt) || now, lastSentAt: now, tries: 0, state: 'out',
+                  copiedAt: now, restored: true };
+      cidOutboxPut(row);
+      console.log('[foxy] cashu id: a payment to ' + row.name + ' nobody has collected was found again from this seed’s copy');
+      cidHistoryChanged();
+      if (routeOpen()) cidWatchAll().then(null, function () {});
+      return 'rebuilt';
+    });
+  }
+
+  /* ---- collected, or come back ---- */
+
+  var cidWatching = null;
+
+  /* Every row still out that a relay took, or whose locktime has passed whether
+   * or not one did, asked of its mint (with a route): all spent is collected;
+   * past its locktime with pieces unspent, those come back with this phone's
+   * refund key (`cidTakeBack`). Resolves { collected, back }. */
+  function cidWatchAll() {
+    if (cidWatching) return cidWatching;
+    var out = { collected: 0, back: 0 };
+    var now = Date.now();
+    var rows = cidOutboxRows().filter(function (r) { return cidWatched(r, now); });
+    if (!rows.length || !wallet || !routeOpen()) return Promise.resolve(out);
+    var run = rows.reduce(function (chain, r) {
+      return chain.then(function () {
+        var info = null;
+        try { info = FoxyWallet.tokenInfo(r.token); } catch (e) { info = null; }
+        if (!info || !info.proofs || !info.proofs.length) return null;
+        var due = Number(r.lockUntil) * 1000 <= Date.now();
+        var here = canonicalMint(mintUrl || '') === canonicalMint(String(info.mint || ''));
+        var asking = here ? Promise.resolve(wallet) : awayWallet(canonicalMint(String(info.mint)));
+        return asking.then(function (w) {
+          return statesOf(w, info.proofs).then(function (states) {
+            var spent = states.filter(function (st) { return String(st) === 'SPENT'; }).length;
+            if (spent === info.proofs.length) {
+              cidOutboxAmend(r.id, { state: 'collected', doneAt: Date.now() });
+              if (r.hash) { try { amendTx(r.hash, { cidCollected: true }); FoxyWallet.settleTx(r.hash); FoxyWallet.forgetClaimedToken(r.token); } catch (x) {} }
+              console.log('[foxy] cashu id: a payment to a contact was collected');
+              out.collected += 1;
+              cidHistoryChanged();
+              return null;
+            }
+            if (!due) return null;
+            return cidTakeBack(r, info, states).then(function (n) { if (n) out.back += 1; });
+          });
+        }).then(null, function (e) {
+          console.warn('[foxy] cashu id: a payment out could not be looked at yet:', (e && e.message) || e);
+        });
+      });
+    }, Promise.resolve()).then(function () { cidOutboxTidy(); return out; });
+    cidWatching = run;
+    var done = function () { if (cidWatching === run) cidWatching = null; };
+    run.then(done, done);
+    return run;
+  }
+
+  /* Past its locktime: the pieces still unspent are this phone's again, by its
+   * refund key R (the lock-key index the row kept, or found again from the words
+   * where the row has gone), whose blinding by each piece's E (slot 1) cashu-ts
+   * works out as it signs (`signP2PKProofs`). Taken in as any locked ecash
+   * signed for is. The mint refuses the refund key before the locktime
+   * (NUT-11), so nothing here can take back money the contact can still
+   * collect. Resolves the amount taken back. */
+  function cidTakeBack(r, info, states) {
+    var live = info.proofs.filter(function (pr, i) { return String(states[i]) === 'UNSPENT'; });
+    if (!live.length) return Promise.resolve(0);
+    return lockKeyMatching(String(r.refundPub || ''), FoxyWallet._lockPubOf).then(function (key) {
+      if (!key) throw new Error('this phone’s seed does not give the key that payment comes back to');
+      if (FoxyWallet._lockPubOf(key) !== String(r.refundPub || '').toLowerCase()) throw new Error('the key that payment comes back to is not this seed’s');
+      var CT = window.CashuTS;
+      var signed = CT.signP2PKProofs(live, key).map(function (pr) {
+        var c = Object.assign({}, pr, { witness: typeof pr.witness === 'string' ? pr.witness : JSON.stringify(pr.witness) });
+        delete c.p2pk_e;
+        return c;
+      });
+      if (!signed.every(function (pr) { try { return CT.isP2PKSpendAuthorised(pr) === true; } catch (e) { return false; } })) {
+        throw new Error('the refund key cannot take it back yet');
+      }
+      var memo = 'Came back: ' + r.name + ' did not collect it';
+      var mint = canonicalMint(String(info.mint));
+      var token = encodeToken(mint, signed, unitOf(info.unit) || 'sat');
+      return FoxyWallet.receiveToken(token, { memo: memo, away: canonicalMint(mintUrl || '') !== mint }).then(function (got) {
+        cidOutboxAmend(r.id, { state: 'back', doneAt: Date.now() });
+        if (got && got.hash) { try { amendTx(got.hash, { memo: memo, cid: 'back' }); } catch (x) {} }
+        if (r.hash) { try { amendTx(r.hash, { cidBack: true }); FoxyWallet.forgetClaimedToken(r.token); } catch (x) {} }
+        dropLockKey(r.refundRow);
+        var n = Math.round(satsOf(got && (got.amount != null ? got.amount : got.sats)));
+        console.log('[foxy] cashu id: a payment its contact did not collect came back');
+        cidHistoryChanged();
+        if (typeof FoxyWallet._onTakenBack === 'function') {
+          try { FoxyWallet._onTakenBack({ sats: unitOf(info.unit) === 'usd' ? 0 : n, unit: unitOf(info.unit) || 'sat', amount: n, hash: got && got.hash }); } catch (x) {}
+        }
+        return n;
+      });
+    });
+  }
+
+  /* ---- paying a contact ---- */
+
+  /* The locktime of a payment made now: the day thirty days on, at a random
+   * second of it, so the mint, which reads it at every claim, is not told when
+   * the payment was made to the second (M4). In the suites, `_cashuIdLockS`
+   * seconds on exactly. */
+  function cidLocktime(nowMs) {
+    var now = Math.floor((nowMs || Date.now()) / 1000);
+    if (CID_TESTS && Number(FoxyWallet._cashuIdLockS) > 0) return now + Math.floor(Number(FoxyWallet._cashuIdLockS));
+    var day = Math.floor((now + CID_LOCK_S) / CID_DAY_S) * CID_DAY_S;
+    var r = window.CashuTS.createRandomSecretKey();
+    var offset = ((r[0] << 16) | (r[1] << 8) | r[2]) % CID_DAY_S;
+    return day + offset;
+  }
+
+  // one payment to a contact at a time: its throwaway keys are handed to the send by the contact's key (`p2bkSources`)
+  var cidPaying = null;
+
+  /* `who`: a contact's ID string or its ID key. `amount`: sats, or cents for
+   * dollars (`opts.unit`). Resolves { hash, token, sent, name, lockUntil, row }:
+   * `sent` once a relay has taken it, otherwise it waits in the outbox and goes
+   * as soon as one will. Nothing that unlocks the token is kept here, and its
+   * throwaway keys are the seed's (CashuID.payBase over the contact's ID, the
+   * refund key's index and the locktime), so this phone's words find its E and
+   * its blinded refund key again. */
+  function cidPay(who, amount, opts) {
+    var o = opts || {};
+    var read = /** @type {any} */ (null);
+    var text = String(who || '').trim();
+    // (a payment sent back, `cidSendBack`: the payer's ID and delivery key as this phone knows them, a contact or not)
+    if (o.read && CID_HEX33.test(String(o.read.id || '')) && CID_HEX32.test(String(o.read.nostr || ''))) {
+      read = { id: String(o.read.id), nostr: String(o.read.nostr) };
+    } else if (CID_HEX33.test(text.toLowerCase())) {
+      var c0 = cidContactOf(text);
+      read = c0 ? { id: c0.cid.id, nostr: c0.cid.nostr } : null;
+    } else {
+      var r0 = /** @type {any} */ (cidRead(text));
+      read = r0.id ? r0 : null;
+    }
+    if (!read) return Promise.reject(new Error('That is not a Cashu ID.'));
+    var contact = cidContactOf(read.id);
+    var name = cidCleanName(o.name || (contact && contact.name)) || 'a Cashu ID';
+    var unit = unitOf(o.unit) || 'sat';
+    var want = Math.round(Number(amount) || 0);
+    if (!(want > 0)) return Promise.reject(new Error('Ask for an amount above zero.'));
+    if (!routeOpen()) return Promise.reject(new Error('Paying a Cashu ID needs a connection. Nothing was sent.'));
+    // as a till checks before it makes a code (08d-till.js): a mint that does not honour a lock would let anyone spend it
+    if (!tillMintLocks(mintUrl)) {
+      return Promise.reject(new Error((mintUrl ? hostOf(canonicalMint(mintUrl)) : 'This mint') + ' does not say it honours a lock (NUT-11), so a contact cannot be paid from it. Nothing was sent.'));
+    }
+    if (cidPaying) return Promise.reject(new Error('A payment to a contact is being made. Try again in a moment.'));
+    var rowId = 'cid' + Date.now().toString(36) + hexOf(window.CashuTS.createRandomSecretKey()).slice(0, 8);
+    var refundRow = 'cid-refund-' + rowId;
+    var run = cidMine().then(function (mine) {
+      if (mine.id === read.id) throw new Error('That is your own Cashu ID.');
+      return primeLockPool().then(function () { return mine; });
+    }).then(function (mine) {
+      var refundPub = takeLockKey(refundRow, { unit: unit });
+      if (!refundPub) throw new Error('This phone could not set a key for the money to come back to. Nothing was sent.');
+      var index = Number((lockKeys()[refundRow] || {}).i);
+      if (!Number.isInteger(index) || index < 0) throw new Error('This phone could not set a key for the money to come back to. Nothing was sent.');
+      var lockUntil = cidLocktime();
+      return nativeJson('cashuIdEphemeral', { to: read.id, index: index, locktime: lockUntil }, 60000).then(function (j) {
+        var base = String((j && j.base) || '').toLowerCase();
+        if (!CID_HEX32.test(base)) throw new Error('The phone did not give the keys for that payment. Nothing was sent.');
+        var j0 = 0;
+        var E0 = '';
+        p2bkSources[read.id] = function () {
+          if (j0 >= CID_PIECES_MAX) throw new Error('That payment needs more pieces than one payment to a contact may carry.');
+          var e = cidPieceKey(base, j0);
+          if (j0 === 0) E0 = cidBlind(read.id, e).E;
+          j0 += 1;
+          return bytesOfHex(e);
+        };
+        var sending = FoxyWallet.sendToken(want, { unit: unit, lockTo: read.id, lockUntil: lockUntil, refundTo: refundPub, blindKeys: true });
+        return sending.then(function (made) {
+          delete p2bkSources[read.id];
+          return { made: made, E0: E0 };
+        }, function (e) { delete p2bkSources[read.id]; throw e; });
+      }).then(function (sent) {
+        var made = sent.made;
+        var info = FoxyWallet.tokenInfo(made.token);
+        var proofs = (info && info.proofs) || [];
+        // every piece blinded, its E on it, and no piece locked to the ID or the refund key as they are
+        if (!proofs.length || !proofs.every(function (pr) {
+          var lock = String(lockedTo(pr) || '').toLowerCase();
+          return CID_HEX33.test(String(pr.p2pk_e || '').toLowerCase()) && lock !== read.id && lock !== refundPub;
+        })) {
+          console.error('[foxy] cashu id: a payment was made whose pieces are not blinded; it is kept to come back after its locktime');
+        }
+        var E = proofs.some(function (pr) { return String(pr.p2pk_e || '').toLowerCase() === sent.E0; })
+          ? sent.E0 : String((proofs[0] && proofs[0].p2pk_e) || '').toLowerCase();
+        // the payer's name, proved, only where this phone's ID is in use
+        var naming = cidInUse() && CID_HEX33.test(E)
+          ? nativeJson('cashuIdTag', { peer: read.id, e: E }, 60000).then(function (t) {
+              var tag = String((t && t.tag) || '').toLowerCase();
+              return CID_HEX32.test(tag) ? { from: mine.id, tag: tag } : null;
+            }, function () { return null; })
+          : Promise.resolve(null);
+        return naming.then(function (me) {
+          var row = { id: rowId, to: read.nostr, contact: read.id, name: name, E: E, token: made.token,
+                      mint: canonicalMint(String((info && info.mint) || mintUrl || '')), unit: unit, amount: want,
+                      hash: made.hash || '', at: Date.now(), lockUntil: lockUntil, index: index, refundRow: refundRow, refundPub: refundPub,
+                      from: me ? me.from : '', tag: me ? me.tag : '',
+                      note: o.note ? cidCleanName(String(o.note).slice(0, CID_NOTE_MAX)) : '',
+                      sentAt: null, lastSentAt: null, tries: 0, state: 'out' };
+          cidOutboxPut(row);
+          if (made.hash) {
+            try { amendTx(made.hash, { memo: o.memo ? String(o.memo).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 80) : 'To ' + name, cid: 'out' }); } catch (x) {}
+          }
+          cidHistoryChanged();
+          return cidDeliverAll().then(function () {
+            var now = cidOutboxRows().filter(function (x) { return x.id === rowId; })[0] || row;
+            return { hash: row.hash, token: row.token, sent: !!now.sentAt, name: name, lockUntil: lockUntil, row: rowId };
+          });
+        });
+      }, function (e) {
+        /* The send failed (L5): the refund key's row goes with it, unless the
+         * swap's record was kept to rebuild a locked payment the mint may have
+         * made and could not write down (`keepSentToken`: storage full), whose refund key must still be found. */
+        if (!(e && (e.storageFull || e.definite))) {
+          try { dropLockKey(refundRow); } catch (x) {}
+        }
+        throw e;
+      });
+    }).then(function (r) { cidPaying = null; return r; }, function (e) {
+      cidPaying = null;
+      throw e;
+    });
+    cidPaying = run;
+    return run;
+  }
+
+  /* After a connect, and on the way back from the background: the outbox
+   * goes, rows out are looked at, and the inbox listens. None waits on another. */
+  function cidCatchUp() {
+    try {
+      var now = Date.now();
+      if (cidOutboxRows().some(function (r) { return cidDue(r, now); })) cidDeliverAll().then(null, function () {});
+      if (cidOutboxRows().some(function (r) { return cidWatched(r, now); })) cidWatchAll().then(null, function () {});
+      if (cidOutboxRows().some(function (r) { return cidCopyDue(r, now); })) cidCopyAll().then(null, function () {});
+      else cidCopyArm();
+      Promise.resolve().then(function () { return cidListenNow({ ifClosed: true }); }).then(null, function () {});
+    } catch (e) {
+      console.warn('[foxy] cashu id: catching up failed:', (e && e.message) || e);
+    }
+  }
+
+  /* The route has come back (`_privacy`, 11-routing.js): what waits to go, goes now, and the inbox listens at once.
+   * It listened only at the end of a connect's catch-up, ten to eighteen seconds after Tor was up at a launch: a
+   * payment read before the mint is connected for real is held until it is (`cidHoldEarly`). */
+  function cidOnRoute() {
+    try {
+      Promise.resolve().then(function () { return cidListenNow({ ifClosed: true }); }).then(null, function () {});
+      if (cidOutboxRows().some(function (r) { return cidDue(r, Date.now()); })) setTimeout(function () { cidDeliverAll().then(null, function () {}); }, 0);
+      if (cidOutboxRows().some(function (r) { return cidCopyDue(r, Date.now()); })) setTimeout(function () { cidCopyAll().then(null, function () {}); }, 0);
+      cmsgOnRoute();
+    }
+    catch (e) { console.warn('[foxy] cashu id: sending on the route’s return:', (e && e.message) || e); }
+  }
+  /* ---- BANK ACCOUNT: dollars in the person's own account at an exchange, paid by Lightning -------------------------
+   *
+   * SEND > BANK ACCOUNT (build/app/26q-bank.js). No exchange is asked for anything but what any payer may ask: no
+   * account of Foxy's, no key, no business programme. The person already has an account; Foxy pays it by Lightning, and
+   * the exchange turns the bitcoin into dollars by the person's own setting there.
+   *
+   *   Strike ..... a Lightning address, <username>@strike.me. Looked up at
+   *                https://strike.me/.well-known/lnurlp/<username> before it is kept: a payment record is the account
+   *                found; an answer of 400-499, or an answer that is not a payment record, is no account by that name.
+   *   Cash App ... <cashtag>@cash.app, no $. Looked up the same way at cash.app; whatever stops the lookup there short of
+   *                a refusal by the person is taken as an address that could not be checked, and kept as typed.
+   *   River ...... no Lightning address: the person makes an invoice in River and pastes it. Nothing is looked up.
+   *
+   * The lookup is the well-known request of LUD-16 alone, over the wallet's Tor road and on the same terms as a
+   * Lightning address's lookup when it is paid (`lookupLnurl`, 16-sending.js): asked again on a fresh circuit while it
+   * goes unanswered (`askedAgain`), inside one deadline. Paying goes through `lookupLnurl` and `payLnurl` as any
+   * address does, with their checks (min and max, the invoice's amount to the millisat, what it describes).
+   *
+   * What is kept (`foxy.bank`): the exchange chosen and, for an address, the username; never an invoice. */
+
+  var BANK = {
+    strike: { name: 'Strike', domain: 'strike.me', site: 'strike', by: 'address' },
+    cashapp: { name: 'Cash App', domain: 'cash.app', site: 'cashapp', by: 'address', unchecked: true },
+    river: { name: 'River', domain: 'river.com', site: 'river', by: 'invoice' },
+  };
+  var BANK_KEY = 'foxy.bank';
+
+  /* A username as the person typed or pasted it, made into the one this exchange knows: the address's own domain, a $ in
+   * front of a cashtag and a leading @ come off; a name at another domain is not one. '' for one that is not. */
+  function bankUser(ex, raw) {
+    var b = BANK[ex];
+    if (!b || b.by !== 'address') return '';
+    var t = String(raw || '').trim().replace(/^lightning:/i, '').replace(/^[$@]+/, '');
+    var at = t.lastIndexOf('@');
+    if (at >= 0) {
+      if (t.slice(at + 1).toLowerCase() !== b.domain) return '';
+      t = t.slice(0, at);
+    }
+    t = t.replace(/^\$+/, '').toLowerCase();
+    return /^[a-z0-9._-]{1,64}$/.test(t) && !/^[.]|[.]$/.test(t) ? t : '';
+  }
+
+  /* One GET to an exchange's address server, as `lookupLnurl` asks one: through the phone's Tor road, asked again on a
+   * fresh circuit while it goes unanswered, the first answer the answer, inside one deadline. */
+  function bankGet(url) {
+    var REACH_MS = Number(FoxyWallet._reachMs) > 0 ? Number(FoxyWallet._reachMs) : 45000;
+    if (bridged()) {
+      // `foxyNoPace`: an address's server is no mint, and its answer times pace none (`askAgainWait`)
+      var asked = askedAgain('', 'that address', function (circuit) {
+        return FoxyWallet.nativeRequest({ endpoint: url, method: 'GET', foxyCircuit: circuit, foxyNoPace: true });
+      }, newCircuitLabel, REACH_MS).then(function (won) { return won.got; });
+      return withTimeout(asked, REACH_MS, 'that address');
+    }
+    return withTimeout(fetch(url), REACH_MS, 'that address').then(function (r) {
+      if (!r.ok) {
+        var e = new Error('That address did not answer (' + r.status + ').');
+        /** @type {any} */ (e).status = r.status;
+        throw e;
+      }
+      return r.json();
+    });
+  }
+
+  /* The lookup: { state, ex, user, addr, min, max, why }, `state` one of
+   *   found ...... the exchange answered with a payment record for this name (min and max in sats, 0 where it said none);
+   *   missing .... it answered, and not with one: no account by that name;
+   *   unchecked .. Cash App only: no clear answer, so the address is taken as typed (`why` says what happened).
+   * Rejects for a name that is not one, with no route, when the person said no to contacting the address, and, for
+   * Strike, when no answer came at all: that is a lookup to try again, not an answer. */
+  function bankLookup(ex, raw) {
+    var b = BANK[ex];
+    if (!b || b.by !== 'address') return Promise.reject(new Error('That exchange is not paid to a username.'));
+    var user = bankUser(ex, raw);
+    if (!user) return Promise.reject(new Error('That is not a ' + b.name + ' username.'));
+    try { assertRoute(); } catch (e) { return Promise.reject(e); }
+    var addr = user + '@' + b.domain;
+    var said = function (state, extra) { return Object.assign({ state: state, ex: ex, user: user, addr: addr, min: 0, max: 0, why: '' }, extra || {}); };
+    console.log('[foxy] bank: looking up a ' + b.name + ' username');
+    return bankGet('https://' + b.domain + '/.well-known/lnurlp/' + encodeURIComponent(user)).then(function (meta) {
+      if (meta && meta.tag === 'payRequest' && meta.callback) {
+        return said('found', {
+          min: Number(meta.minSendable) > 0 ? Math.ceil(Number(meta.minSendable) / 1000) : 0,
+          max: Number(meta.maxSendable) > 0 ? Math.floor(Number(meta.maxSendable) / 1000) : 0,
+        });
+      }
+      return b.unchecked ? said('unchecked', { why: 'It did not answer with a payment address.' }) : said('missing');
+    }, function (e) {
+      var msg = String((e && e.message) || e || '');
+      // the person's own no to contacting the address is theirs, not the exchange's answer
+      if (/did not allow Foxy/i.test(msg)) throw e;
+      if (b.unchecked) return said('unchecked', { why: msg });
+      var status = Number(e && e.status) || 0;
+      if (status >= 400 && status < 500) return said('missing');
+      throw e;
+    });
+  }
+
+  /* What BANK ACCOUNT remembers: { ex, user, addr } for an address, { ex } for River; null for nothing, or for what no
+   * longer reads as one. */
+  function bankSaved() {
+    var v = load(BANK_KEY, null);
+    if (!v || typeof v !== 'object' || !BANK[v.ex]) return null;
+    var b = BANK[v.ex];
+    if (b.by !== 'address') return { ex: v.ex, user: '', addr: '' };
+    var user = bankUser(v.ex, v.user);
+    return user ? { ex: v.ex, user: user, addr: user + '@' + b.domain } : null;
+  }
+
+  function bankSave(ex, raw) {
+    var b = BANK[ex];
+    if (!b) return false;
+    if (b.by !== 'address') return save(BANK_KEY, { ex: ex, at: Date.now() });
+    var user = bankUser(ex, raw);
+    return user ? save(BANK_KEY, { ex: ex, user: user, at: Date.now() }) : false;
+  }
+  /* ---- messages between Cashu IDs ----------------------------------------------
+   *
+   * docs/CASHU-ID.md, "Messages", is the whole of it. Two Foxys that hold each
+   * other's ID work out one secret, natively, from their ID keys
+   * (SHA-256("foxy-msg-pair-v1" ‖ x(d_mine·ID_peer)), Foxy/Keychain/CashuMsg.swift),
+   * and from it a chain of keys for each direction: message i from one to the other
+   * goes to the x-only half of k_i = SHA-256("foxy-msg-recv-v1" ‖ secret ‖ dir ‖ i),
+   * a key used once, and its seal is signed by s_i, which only the two can work
+   * out. The relays see gift wraps to keys that never repeat.
+   *
+   * This page never holds the secret or any of the keys. It keeps, per contact:
+   *
+   *   out    the index its next message to them takes;
+   *   base   the lowest index of theirs it has not had, and `got`, the ones above it
+   *          it has had: the phone listens on the next eight it has not had
+   *          (`cmsgWindow`), so a message that arrives moves the window on;
+   *   known  whether they are listening on this phone's chain: false for a contact
+   *          new to messages and after a restore, and again (`resync`) when their
+   *          `next` says they are a window or more behind. While it is false, a
+   *          message goes once to their public delivery key instead, with this
+   *          phone's ID proved (`from`, `tag`, `E`, as a payment names its payer)
+   *          and the index it stands for: "ratchet from now". The receiver's window
+   *          for this phone starts after it. With no answer, every eighth message
+   *          past what they last said they read (`ack`) goes that way too
+   *          (`cmsgFirstDue`), in case their window stopped on messages the relays lost.
+   *
+   * Every message carries `next`, the sender's own `base` for the receiver, so each
+   * side learns how far the other has read. A message is padded to 512, 1,024 or
+   * 2,048 bytes, waits 0 to 20 seconds at random before it goes, and is tried
+   * until a relay takes it (the Cashu ID's outbox rules: once a minute, every
+   * quarter of an hour after thirty tries, at once when the route comes back).
+   *
+   * A restored phone has none of this: its words find its contacts' IDs only once
+   * they are added again. Then it listens from 0 on both chains of each one, its
+   * own messages included (both phones can open both chains), walks forward as
+   * they come, and so resumes where the relays still hold it. It tells each one
+   * where it stands at once, silently (CMSG_STAND, `cmsgStandOut`), and its first
+   * message to each goes by the delivery key. */
+
+  var CMSG_THREADS = 'foxy.msg.threads';
+  var CMSG_OUTBOX = 'foxy.msg.outbox';
+  var CMSG_SEEN = 'foxy.msg.seen';
+  var CMSG_TYPE = 'foxy-msg';
+  // a restored phone's "where I stand" to a contact: by the delivery key only, no text, never a line of a conversation
+  var CMSG_STAND = 'foxy-msg-stand';
+  var CMSG_V = 1;
+  // what one message may say, and the sizes its plaintext is padded to
+  var CMSG_TEXT_MAX = 1000;
+  var CMSG_BUCKETS = [512, 1024, 2048];
+  var CMSG_BODY_MAX = 4096;
+  // the keys listened on past the lowest not yet had, per contact (CashuMsg.window)
+  var CMSG_WINDOW = 8;
+  /* the highest index a message may take: the window of eight above it still fits below 2^32, so a window is never
+   * empty and the phone never names a contact with nothing to listen on */
+  var CMSG_INDEX_MAX = 4294967295 - CMSG_WINDOW;
+  // what is kept: the last 200 messages with each contact, a megabyte in all, ten people who are not contacts
+  var CMSG_PER_PEER = 200;
+  var CMSG_BYTES = 1024 * 1024;
+  var CMSG_STRANGERS = 10;
+  // of the megabyte, what the people who are not contacts may take between them: their oldest go first, before a contact's
+  var CMSG_STRANGER_BYTES = 128 * 1024;
+  // a first message's id, kept with its sender's conversation so that one read again is known
+  var CMSG_FIRSTS = 64;
+  // an `at` further back than the relays keep is brought up to that (CID_SINCE_S, 32 days)
+  var CMSG_PAST_MS = CID_SINCE_S * 1000;
+  var CMSG_PEERS_MAX = 60;
+  var CMSG_SEEN_MAX = 500;
+  var CMSG_OUTBOX_MAX = 100;
+  // a message waits 0 to 20 s at random before it goes, so a relay cannot pair it with a tap on SEND
+  var CMSG_DELAY_MS = 20000;
+  var CMSG_REOPEN_MS = 1500;
+  var CMSG_ID = /^[0-9a-f]{32}$/;
+
+  function cmsgUtf8Len(text) { return cidUtf8(String(text)).length; }
+
+  function cmsgRandom(n) {
+    var out = [];
+    while (out.length < n) {
+      var r = window.CashuTS.createRandomSecretKey();
+      for (var i = 0; i < r.length && out.length < n; i++) out.push(r[i]);
+    }
+    return out;
+  }
+
+  function cmsgNewId() { return hexOf(cmsgRandom(16)); }
+
+  /* The message's text as it is kept and sent: no control characters but line breaks (C0, DEL and C1 become spaces), no
+   * marks that turn the direction of a line (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069 become spaces),
+   * no invisible spaces (U+200B, U+2060, U+FEFF go; the joiners U+200C and U+200D stay, emoji and scripts need them),
+   * trimmed; '' when there is nothing, null when it is longer than a message may be. */
+  function cmsgClean(text) {
+    var t = String(text == null ? '' : text).replace(/\r\n?/g, '\n')
+      .replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, ' ')
+      .replace(/[\u200b\u2060\ufeff]/g, '').trim();
+    if (Array.from(t).length > CMSG_TEXT_MAX) return null;
+    return t;
+  }
+
+  /* The plaintext, padded with random characters to the smallest size that holds it. Throws past the largest. */
+  function cmsgPadded(j) {
+    var o = Object.assign({}, j, { pad: '' });
+    var n = cmsgUtf8Len(JSON.stringify(o));
+    var size = CMSG_BUCKETS.filter(function (b) { return b >= n; })[0];
+    if (!size) throw new Error('That message is too long.');
+    var A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    o.pad = cmsgRandom(size - n).map(function (b) { return A.charAt(b & 63); }).join('');
+    return JSON.stringify(o);
+  }
+
+  function cmsgDelay() {
+    if (CID_TESTS && FoxyWallet._cashuMsgDelayMs !== undefined && Number(FoxyWallet._cashuMsgDelayMs) >= 0) return Number(FoxyWallet._cashuMsgDelayMs);
+    var r = cmsgRandom(3);
+    return ((r[0] << 16) | (r[1] << 8) | r[2]) % (CMSG_DELAY_MS + 1);
+  }
+
+  function cmsgRetryMs() { return CID_TESTS && Number(FoxyWallet._cashuMsgRetryMs) > 0 ? Number(FoxyWallet._cashuMsgRetryMs) : CID_RETRY_MS; }
+
+  /* ---- what is kept ---- */
+
+  // { mine: <this phone's ID when it was written>, threads: { <peer ID hex>: thread } }
+  function cmsgAll() {
+    var a = load(CMSG_THREADS, null);
+    if (!a || typeof a !== 'object' || Array.isArray(a) || !a.threads || typeof a.threads !== 'object') a = { mine: '', threads: {} };
+    return a;
+  }
+
+  function cmsgNewThread(peer) {
+    return { peer: peer, out: 0, base: 0, got: [], known: false, resync: false, ack: 0, unread: 0, msgs: [], card: '', nostr: '', at: 0,
+      lost: cidRecovering(), firsts: [], firstAt: 0 };
+  }
+
+  function cmsgThread(all, peer, make) {
+    var t = all.threads[peer];
+    if (!t && make) { t = cmsgNewThread(peer); all.threads[peer] = t; }
+    return t || null;
+  }
+
+  /* Kept within its caps: 200 messages a contact, the oldest going first; the people who are not contacts within their
+   * own 128 KB, their oldest going first; and a megabyte in all, the oldest message of someone who is not a contact going
+   * first and then the oldest of any. So people nobody added cannot push a contact's messages out. */
+  function cmsgTrim(all) {
+    var strangers = [];
+    Object.keys(all.threads).forEach(function (p) {
+      var t = all.threads[p];
+      if (t.msgs.length > CMSG_PER_PEER) t.msgs = t.msgs.slice(t.msgs.length - CMSG_PER_PEER);
+      if (!cidContactOf(p)) strangers.push(p);
+    });
+    // the oldest message of the threads named, or null
+    var oldestOf = function (peers) {
+      var oldest = /** @type {{ p: string, m: any } | null} */ (null);
+      peers.forEach(function (p) {
+        var m = all.threads[p].msgs[0];
+        if (m && (!oldest || Number(m.at) < Number(oldest.m.at))) oldest = { p: p, m: m };
+      });
+      return oldest;
+    };
+    var bytesOf = function (m) { return cmsgUtf8Len(JSON.stringify(m)) + 1; };
+    var theirs = strangers.reduce(function (a, p) { return a + cmsgUtf8Len(JSON.stringify(all.threads[p].msgs)); }, 0);
+    while (theirs > CMSG_STRANGER_BYTES) {
+      var o = oldestOf(strangers);
+      if (!o) break;
+      theirs -= bytesOf(all.threads[o.p].msgs.shift());
+    }
+    var size = cmsgUtf8Len(JSON.stringify(all));
+    while (size > CMSG_BYTES) {
+      var oldest = oldestOf(strangers) || oldestOf(Object.keys(all.threads));
+      if (!oldest) break;
+      all.threads[oldest.p].msgs.shift();
+      size = cmsgUtf8Len(JSON.stringify(all));
+    }
+    return all;
+  }
+
+  function cmsgSave(all) { return save(CMSG_THREADS, cmsgTrim(all)); }
+
+  function cmsgOutbox() {
+    var l = load(CMSG_OUTBOX, []);
+    return Array.isArray(l) ? l.filter(function (r) { return r && typeof r.id === 'string' && typeof r.body === 'string'; }) : [];
+  }
+
+  function cmsgSeenList() {
+    var l = load(CMSG_SEEN, []);
+    return Array.isArray(l) ? l : [];
+  }
+
+  function cmsgChanged(peer) {
+    if (typeof FoxyWallet._onCashuMsg === 'function') {
+      try { FoxyWallet._onCashuMsg(peer); } catch (x) {}
+    }
+  }
+
+  // the contact's name, or '' for someone who is not one
+  function cmsgNameOf(peer) {
+    var c = cidContactOf(peer);
+    return c ? String(c.name || 'Cashu ID') : '';
+  }
+
+  // their delivery key: the contact's, or from the ID string they sent with their first message
+  function cmsgNostrOf(peer, t) {
+    var c = cidContactOf(peer);
+    if (c && CID_HEX32.test(String(c.cid.nostr || ''))) return c.cid.nostr;
+    return t && CID_HEX32.test(String(t.nostr || '')) ? t.nostr : '';
+  }
+
+  /* The keys to listen on for one thread: their next eight indices this phone has not had, and while they are not
+   * listening on this phone's chain (`known` false: new, or restored), its own next eight, read back. */
+  function cmsgWindow(t) {
+    var inward = [];
+    for (var i = Number(t.base) || 0; inward.length < CMSG_WINDOW && i < 4294967296; i++) {
+      if ((t.got || []).indexOf(i) < 0) inward.push(i);
+    }
+    var outward = [];
+    if (!t.known) for (var j = Number(t.out) || 0; outward.length < CMSG_WINDOW && j < 4294967296; j++) outward.push(j);
+    return { peer: t.peer, in: inward, out: outward };
+  }
+
+  /* ---- a message in ---- */
+
+  /* A message's body, read: the object, or null when it is not one this Foxy writes. `i` the index it came to, or
+   * null for a first message by the delivery key. A "where I stand" (CMSG_STAND) only by the delivery key, and only with
+   * no text: it is never a line of a conversation. No index above CMSG_INDEX_MAX: a window of eight past it would not fit
+   * below 2^32. */
+  function cmsgRead(body, i) {
+    var text = String(body || '');
+    if (text.length > CMSG_BODY_MAX || CMSG_BUCKETS.indexOf(cmsgUtf8Len(text)) < 0) return null;
+    var j = null;
+    try { j = JSON.parse(text); } catch (e) { return null; }
+    if (!j || typeof j !== 'object' || Array.isArray(j)) return null;
+    var stand = j.type === CMSG_STAND && i === null;
+    if (j.v !== CMSG_V || (j.type !== CMSG_TYPE && !stand) || typeof j.id !== 'string' || !CMSG_ID.test(j.id)) return null;
+    if (typeof j.text !== 'string' || cmsgClean(j.text) === null || (stand && j.text !== '')) return null;
+    if (stand && !Number.isInteger(j.next)) return null;
+    if (!Number.isInteger(j.i) || j.i < 0 || j.i > CMSG_INDEX_MAX || (i !== null && j.i !== i)) return null;
+    if (typeof j.at !== 'number' || !isFinite(j.at)) return null;
+    if (j.next !== undefined && (!Number.isInteger(j.next) || j.next < 0)) return null;
+    return j;
+  }
+
+  function cmsgHas(t, id) { return t.msgs.some(function (m) { return m.id === id; }); }
+
+  // a message's time as kept: never ahead of now, never further back than the relays keep
+  function cmsgAt(at, now) { return Math.min(Math.max(now - CMSG_PAST_MS, Number(at) || 0), now); }
+
+  // the newest time of theirs this conversation holds: a first message's, or a message's
+  function cmsgNewestIn(t) {
+    return t.msgs.reduce(function (a, m) { return m.dir === 'in' ? Math.max(a, Number(m.at) || 0) : a; }, Number(t.firstAt) || 0);
+  }
+
+  // what their `next` says: how far they have read this phone's chain, and whether they are a window or more behind
+  function cmsgHeard(t, next) {
+    t.ack = Math.max(Number(t.ack) || 0, next);
+    if ((Number(t.out) || 0) - next >= CMSG_WINDOW) t.resync = true;
+  }
+
+  /* A first message from them to go by the delivery key: theirs did not know this phone's place (`known` false), they
+   * said they are a window behind (`resync`), or this phone is eight, sixteen … past what they last said they read, with
+   * no answer: their window may have stopped on messages the relays lost. */
+  function cmsgFirstDue(t) {
+    var ahead = (Number(t.out) || 0) - (Number(t.ack) || 0);
+    return !t.known || !!t.resync || (ahead >= CMSG_WINDOW && ahead % CMSG_WINDOW === 0);
+  }
+
+  /* Taken into its thread: 'kept' or 'seen'. `first`: it came by the delivery key, and its index starts their chain.
+   *
+   * A first message is known again by its id, kept with its sender's conversation (CMSG_FIRSTS of them, which nobody else
+   * can push out), and never moves the window back when it is read again: below the window, only one newer than all of
+   * theirs this phone holds moves it (a phone of theirs that started its chain again after a restore); an older one never
+   * had (it came late) is kept as a line and the window stays. */
+  function cmsgTakeIn(all, t, j, first) {
+    if (cmsgHas(t, j.id)) return 'seen';
+    var i = j.i;
+    var now = Date.now();
+    if (first) {
+      var fid = j.id.slice(0, 16);
+      t.firsts = Array.isArray(t.firsts) ? t.firsts : [];
+      if (t.firsts.indexOf(fid) >= 0) return 'seen';
+      var newer = Number(j.at) > cmsgNewestIn(t);
+      // older than what is kept of a full conversation: it was had, and let go
+      if (i < t.base && !newer && t.msgs.length >= CMSG_PER_PEER && Number(j.at) < Number(t.msgs[0].at)) return 'seen';
+      t.firsts = t.firsts.concat([fid]).slice(-CMSG_FIRSTS);
+      if (newer) t.firstAt = Math.min(Number(j.at), now);
+      if (i >= t.base) {
+        // "ratchet from now": their next message comes to index i + 1
+        t.base = i + 1;
+        t.got = (t.got || []).filter(function (x) { return x > i; });
+      } else if (newer) {
+        // their chain started again: what was had above it was of the old one
+        t.base = i + 1;
+        t.got = [];
+      }
+      /* a first message says they have this phone in their book, and listen on its chain from their `next`. Not on a
+       * conversation begun in the week after this phone's words were restored (`lost`): one read again from the relays
+       * says nothing of where they listen now, and this phone's own first message goes by the delivery key, saying
+       * where it stands, before the ratchet. */
+      if (!t.lost) t.known = true;
+    } else {
+      if (i < t.base || (t.got || []).indexOf(i) >= 0) return 'seen';
+      t.got = (t.got || []).concat([i]);
+    }
+    cmsgAdvance(t);
+    if (Number.isInteger(j.next)) cmsgHeard(t, j.next);
+    t.msgs.push({ id: j.id, dir: 'in', text: cmsgClean(j.text), at: cmsgAt(j.at, now), i: i });
+    if (first && i < t.base - 1) t.msgs.sort(function (a, b) { return Number(a.at) - Number(b.at); });
+    t.unread = (Number(t.unread) || 0) + 1;
+    t.at = now;
+    cmsgSave(all);
+    return 'kept';
+  }
+
+  /* The window moved past what has come: the lowest index not had is the new base. With eight had above a gap, the gap
+   * is given up (a message the relays lost), so `got` stays short and the window keeps moving. */
+  function cmsgAdvance(t) {
+    t.got = (t.got || []).slice().sort(function (a, b) { return a - b; });
+    if (t.got.length >= CMSG_WINDOW) t.base = Math.max(t.base, t.got[0]);
+    while (t.got.indexOf(t.base) >= 0) {
+      var at = t.base;
+      t.got = t.got.filter(function (x) { return x !== at; });
+      t.base += 1;
+    }
+    t.got = t.got.filter(function (x) { return x > t.base; });
+  }
+
+  var cmsgArriving = Promise.resolve();
+
+  /* One message from the phone, opened by its key and sealed by the right one (`cashuIdMsgOpen`). `way`: 'in' for
+   * theirs, 'out' for this phone's own read back after a restore. 'kept', 'seen' or 'refused'; never rejects. */
+  function cmsgArrived(peer, way, i, body) {
+    var run = cmsgArriving.then(function () {
+      var p = String(peer || '').toLowerCase();
+      if (!CID_HEX33.test(p) || !Number.isInteger(i)) return 'refused';
+      var j = cmsgRead(body, i);
+      if (!j) { console.warn('[foxy] messages: a message was not one Foxy writes'); return 'refused'; }
+      var all = cmsgAll();
+      // a contact's conversation is made when its first message comes, if it was not when the phone was asked to listen
+      var t = cmsgThread(all, p, !!cidContactOf(p));
+      if (!t) return 'refused';
+      var got;
+      if (way === 'out') {
+        // this phone's own, from before a restore: kept as sent, and its chain goes on after it
+        t.out = Math.max(Number(t.out) || 0, i + 1);
+        if (cmsgHas(t, j.id)) { cmsgSave(all); return 'seen'; }
+        t.msgs.push({ id: j.id, dir: 'out', text: cmsgClean(j.text), at: cmsgAt(j.at, Date.now()), i: i, state: 'relay' });
+        t.msgs.sort(function (a, b) { return Number(a.at) - Number(b.at); });
+        cmsgSave(all);
+        got = 'kept';
+      } else {
+        got = cmsgTakeIn(all, t, j, false);
+      }
+      if (got === 'kept') { cmsgReopenSoon(); cmsgChanged(p); }
+      return got;
+    }).then(null, function (e) {
+      console.warn('[foxy] messages: a message could not be read:', (e && e.message) || e);
+      return 'refused';
+    });
+    cmsgArriving = run.then(function () {}, function () {});
+    return run;
+  }
+
+  // a delivery to the public key that is a message, not a payment
+  function cmsgIsFirst(body) {
+    try { var j = JSON.parse(String(body || '')); return !!j && (j.type === CMSG_TYPE || j.type === CMSG_STAND); } catch (e) { return false; }
+  }
+
+  /* A first message, by the delivery key (`_cashuIdArrived`): believed only where its tag is the one this phone works
+   * out from its own ID key, `from` and `E` (as a payment's payer is proved, `cidFromName`), and from someone who is a
+   * contact or sent the ID string that is theirs. At most ten people who are not contacts. 'kept', 'seen' or 'refused'. */
+  function cmsgFirstArrived(body) {
+    var run = cmsgArriving.then(function () {
+      if (!cidInUse()) return 'refused';
+      var j = cmsgRead(body, null);
+      if (!j) return 'refused';
+      var from = typeof j.from === 'string' ? j.from.toLowerCase() : '';
+      var tag = typeof j.tag === 'string' ? j.tag.toLowerCase() : '';
+      var E = typeof j.E === 'string' ? j.E.toLowerCase() : '';
+      if (!CID_HEX33.test(from) || !CID_HEX32.test(tag) || !CID_HEX33.test(E)) return 'refused';
+      if (cmsgSeenList().indexOf(j.id.slice(0, 16)) >= 0) return 'seen';
+      return cidMine().then(function (mine) {
+        if (mine.id === from) return 'refused';
+        return nativeJson('cashuIdTag', { peer: from, e: E }, 60000).then(function (k) {
+          if (String((k && k.tag) || '').toLowerCase() !== tag) {
+            console.warn('[foxy] messages: a first message did not prove who sent it');
+            return 'refused';
+          }
+          var all = cmsgAll();
+          var t = cmsgThread(all, from, false);
+          if (j.type === CMSG_STAND) return cmsgStandIn(all, t, from, j, mine);
+          var card = null;
+          if (typeof j.card === 'string') { var r = cidRead(j.card); if (r.id === from) card = r; }
+          if (!t) {
+            if (!cidContactOf(from)) {
+              if (!card) return 'refused';
+              var strangers = Object.keys(all.threads).filter(function (p) { return !cidContactOf(p); }).length;
+              if (strangers >= CMSG_STRANGERS) { console.warn('[foxy] messages: too many people who are not contacts'); return 'refused'; }
+            }
+            t = cmsgThread(all, from, true);
+          }
+          if (card) { t.card = cidEncode(card.id, card.nostr, card.sig); t.nostr = card.nostr; }
+          all.mine = mine.id;
+          var got = cmsgTakeIn(all, t, j, true);
+          var seen = cmsgSeenList().concat([j.id.slice(0, 16)]);
+          save(CMSG_SEEN, seen.slice(Math.max(0, seen.length - CMSG_SEEN_MAX)));
+          if (got === 'kept') { cmsgReopenSoon(); cmsgChanged(from); }
+          return got;
+        });
+      });
+    }).then(null, function (e) {
+      console.warn('[foxy] messages: a first message could not be read:', (e && e.message) || e);
+      return 'refused';
+    });
+    cmsgArriving = run.then(function () {}, function () {});
+    return run;
+  }
+
+  /* A contact's "where I stand" (a phone of theirs restored from the words, the conversation added back): no line and
+   * nothing unread; what it says is how far they have read this phone's chain, so a window or more behind, this phone's
+   * next message goes by the delivery key. Only from a contact, or someone this phone already has a conversation with. */
+  function cmsgStandIn(all, t, from, j, mine) {
+    if (!t && !cidContactOf(from)) return 'refused';
+    if (!t) t = cmsgThread(all, from, true);
+    var fid = j.id.slice(0, 16);
+    t.firsts = Array.isArray(t.firsts) ? t.firsts : [];
+    if (t.firsts.indexOf(fid) >= 0) return 'seen';
+    t.firsts = t.firsts.concat([fid]).slice(-CMSG_FIRSTS);
+    // what they say now, not the most they ever said: their stored state is gone
+    t.ack = j.next;
+    if ((Number(t.out) || 0) - j.next >= CMSG_WINDOW) t.resync = true;
+    all.mine = mine.id;
+    cmsgSave(all);
+    var seen = cmsgSeenList().concat([fid]);
+    save(CMSG_SEEN, seen.slice(Math.max(0, seen.length - CMSG_SEEN_MAX)));
+    return 'kept';
+  }
+
+  /* ---- listening ---- */
+
+  var cmsgListenRun = null;
+  var cmsgReopenTimer = null;
+
+  /* The phone listens on every contact's next keys, and on those of the people who are not contacts that wrote, in one
+   * request (`cashuIdMsgOpen`), only once this phone's ID is in use. A store written under another ID (the words
+   * changed) is let go first. */
+  function cmsgListenNow() {
+    if (cmsgListenRun) return cmsgListenRun;
+    if (!cidInUse()) return Promise.resolve(0);
+    var run = cidMine().then(function (mine) {
+      var all = cmsgAll();
+      if (all.mine && all.mine !== mine.id) { all = { mine: mine.id, threads: {} }; save(CMSG_OUTBOX, []); }
+      all.mine = mine.id;
+      var added = [];
+      cidContactsNow().forEach(function (c) {
+        if (c.cid.id === mine.id || all.threads[c.cid.id]) return;
+        var t = cmsgThread(all, c.cid.id, true);
+        if (t.lost) added.push(t.peer);
+      });
+      cmsgSave(all);
+      // a contact added back on a phone restored from the words: it is told where this phone stands (`cmsgStandOut`)
+      added.forEach(cmsgStandOut);
+      // a conversation with nothing left to listen on (a window at the very end of its chain) is left out, not refused
+      var list = Object.keys(all.threads).map(function (p) { return all.threads[p]; })
+        .sort(function (a, b) { return (Number(b.at) || 0) - (Number(a.at) || 0); })
+        .slice(0, CMSG_PEERS_MAX)
+        .map(cmsgWindow)
+        .filter(function (w) { return w.in.length + w.out.length > 0; });
+      if (!list.length) return 0;
+      var since = Math.floor(Date.now() / 1000) - CID_SINCE_S + 300;
+      return bridgeAsk('cashuIdMsgOpen', { since: since, peers: list }, 70000).then(function (n) {
+        return Number(String(n).trim()) || 0;
+      }, function (e) {
+        console.warn('[foxy] messages: the phone did not listen:', (e && e.message) || e);
+        return 0;
+      });
+    });
+    cmsgListenRun = run;
+    var done = function () { if (cmsgListenRun === run) cmsgListenRun = null; };
+    run.then(done, done);
+    return run;
+  }
+
+  // a message moved a window on: the phone listens on the next keys, once the messages arriving together are in
+  function cmsgReopenSoon() {
+    if (cmsgReopenTimer) clearTimeout(cmsgReopenTimer);
+    var ms = CID_TESTS && Number(FoxyWallet._cashuMsgReopenMs) > 0 ? Number(FoxyWallet._cashuMsgReopenMs) : CMSG_REOPEN_MS;
+    cmsgReopenTimer = setTimeout(function () {
+      cmsgReopenTimer = null;
+      Promise.resolve(cmsgListenRun).then(function () { return cmsgListenNow(); }).then(null, function () {});
+    }, ms);
+  }
+
+  /* ---- a message out ---- */
+
+  /* Write `text` to `peer` (an ID key, or a contact's ID string): kept in its thread as sent and in the outbox, and
+   * gone after its random wait. { id, i, first }. Rejects in words, and keeps nothing, for no ID in use, someone who is
+   * not a contact and never wrote, a message too long or empty. */
+  function cmsgSend(who, text) {
+    if (!cidInUse()) return Promise.reject(new Error('Open MY CASHU ID first: messages go from your own Cashu ID.'));
+    var clean = cmsgClean(text);
+    if (clean === null) return Promise.reject(new Error('That message is too long. A message is at most ' + CMSG_TEXT_MAX + ' characters.'));
+    if (!clean) return Promise.reject(new Error('Type a message first.'));
+    var w = String(who || '').trim();
+    var peer = CID_HEX33.test(w.toLowerCase()) ? w.toLowerCase() : (cidRead(w).id || '');
+    if (!peer) return Promise.reject(new Error('That is not a Cashu ID.'));
+    return cidMine().then(function (mine) {
+      if (peer === mine.id) throw new Error('That is your own Cashu ID.');
+      var all = cmsgAll();
+      if (all.mine && all.mine !== mine.id) all = { mine: mine.id, threads: {} };
+      all.mine = mine.id;
+      var t = cmsgThread(all, peer, false);
+      if (!t && !cidContactOf(peer)) throw new Error('Add them to your contacts first.');
+      if (!t) t = cmsgThread(all, peer, true);
+      var first = cmsgFirstDue(t);
+      var nostr = cmsgNostrOf(peer, t);
+      if (first && !nostr) throw new Error('Foxy does not know where to reach them yet.');
+      if (cmsgOutbox().length >= CMSG_OUTBOX_MAX) throw new Error('Too many messages are waiting to go. Try again once they have.');
+      var i = Number(t.out) || 0;
+      var j = /** @type {any} */ ({ v: CMSG_V, type: CMSG_TYPE, id: cmsgNewId(), text: clean, at: Date.now(), i: i, next: Number(t.base) || 0 });
+      var named = first ? cmsgProve(peer, mine, j) : Promise.resolve(j);
+      return named.then(function (body) {
+        var text = cmsgPadded(body);
+        // read again: another message may have been written while the tag was made
+        var now = cmsgAll();
+        var tt = cmsgThread(now, peer, true);
+        if ((Number(tt.out) || 0) !== i) { body.i = Number(tt.out) || 0; text = cmsgPadded(body); }
+        tt.out = body.i + 1;
+        if (first) tt.resync = false;
+        var made = tt.msgs.length === 0;
+        tt.msgs.push({ id: body.id, dir: 'out', text: clean, at: body.at, i: body.i, state: 'out' });
+        tt.at = Date.now();
+        now.mine = mine.id;
+        if (!cmsgSave(now)) throw new Error('Foxy could not keep that message: this phone’s storage is full.');
+        var rows = cmsgOutbox();
+        rows.push({ id: body.id, peer: peer, i: body.i, first: first, to: first ? nostr : '', body: text, sendAt: Date.now() + cmsgDelay(), tries: 0 });
+        save(CMSG_OUTBOX, rows);
+        cmsgChanged(peer);
+        cmsgArm();
+        // a conversation new to this phone: its keys are listened on from now
+        if (made) cmsgReopenSoon();
+        return { id: body.id, i: body.i, first: first };
+      });
+    });
+  }
+
+  /* A restored phone's "where I stand" to a contact added back: by the delivery key, proved as a first message is, with
+   * no text and its `next` (how far it has read their chain), so that a contact a window or more ahead goes by the
+   * delivery key to it. It takes no index and leaves `known` as it is: this phone's own next message still goes by the
+   * delivery key. Its body is made when it goes, after the random wait, so `next` says what was read back by then. */
+  function cmsgStandOut(peer) {
+    var rows = cmsgOutbox();
+    if (rows.length >= CMSG_OUTBOX_MAX || rows.some(function (r) { return r.stand && r.peer === peer; })) return;
+    var nostr = cmsgNostrOf(peer, null);
+    if (!nostr) return;
+    rows.push({ id: cmsgNewId(), peer: peer, i: 0, first: true, stand: true, to: nostr, body: '', sendAt: Date.now() + cmsgDelay(), tries: 0 });
+    save(CMSG_OUTBOX, rows);
+    cmsgArm();
+  }
+
+  // the stand's body, as it goes
+  function cmsgStandBody(r) {
+    return cidMine().then(function (mine) {
+      var t = cmsgThread(cmsgAll(), r.peer, false);
+      var j = /** @type {any} */ ({ v: CMSG_V, type: CMSG_STAND, id: r.id, text: '', at: Date.now(), i: t ? Number(t.out) || 0 : 0,
+        next: t ? Number(t.base) || 0 : 0 });
+      return cmsgProve(r.peer, mine, j).then(cmsgPadded);
+    });
+  }
+
+  /* A first message names its sender, proved as a payment's payer is: this phone's ID, a fresh E, the tag
+   * SHA-256("foxy-cashu-id-from-v1" ‖ x(d·their ID) ‖ E) the phone works out, and this phone's ID string so that
+   * someone who has not added it can. */
+  function cmsgProve(peer, mine, j) {
+    var e = window.CashuTS.createRandomSecretKey();
+    var E = hexOf(window.CashuTS.getPubKeyFromPrivKey(e));
+    return nativeJson('cashuIdTag', { peer: peer, e: E }, 60000).then(function (k) {
+      var tag = String((k && k.tag) || '').toLowerCase();
+      if (!CID_HEX32.test(tag)) throw new Error('This phone could not sign the message as yours.');
+      return Object.assign(j, { from: mine.id, tag: tag, E: E, card: mine.text });
+    });
+  }
+
+  var cmsgSending = null;
+  var cmsgTimer = null;
+
+  /* The message of an outbox row, marked as a relay took it: true once that is written (or there is nothing to mark). */
+  function cmsgMarkSent(r) {
+    var all = cmsgAll();
+    var t = cmsgThread(all, r.peer, false);
+    if (!t) return true;
+    // a stand leaves the chain as it is: this phone's next message still goes by the delivery key
+    if (r.first && !r.stand) { t.known = true; t.lost = false; }
+    t.msgs.forEach(function (m) { if (m.id === r.id) m.state = 'relay'; });
+    return cmsgSave(all);
+  }
+
+  // whether an outbox row's message is marked sent already (the row outlived the mark: an app killed between the two)
+  function cmsgMarked(all, r) {
+    var t = all.threads[r.peer];
+    return !!t && t.msgs.some(function (m) { return m.id === r.id && m.state === 'relay'; });
+  }
+
+  /* Every row whose wait is over, one at a time: to the delivery key by `nostrSend` for a first message, to the next
+   * key of the chain by `cashuIdMsgSend` otherwise. A row goes from the outbox only once a relay took it and its message
+   * is marked sent: a relay that took it while the store was full leaves the row `taken`, and only the mark is tried
+   * again, until there is room. */
+  function cmsgDeliverAll() {
+    if (cmsgSending) return cmsgSending;
+    var sent = 0;
+    var now = Date.now();
+    var kept = cmsgAll();
+    var stale = cmsgOutbox().filter(function (r) { return cmsgMarked(kept, r); });
+    if (stale.length) save(CMSG_OUTBOX, cmsgOutbox().filter(function (r) { return !cmsgMarked(kept, r); }));
+    var due = cmsgOutbox().filter(function (r) { return Number(r.sendAt) <= now; })
+      .sort(function (a, b) { return (a.peer === b.peer ? a.i - b.i : Number(a.sendAt) - Number(b.sendAt)); });
+    var run = due.reduce(function (chain, r) {
+      return chain.then(function () {
+        var tried = function (e) {
+          var rows = cmsgOutbox();
+          rows.forEach(function (x) {
+            if (x.id !== r.id) return;
+            x.tries = (Number(x.tries) || 0) + 1;
+            x.sendAt = Date.now() + cmsgRetryMs() * (x.tries >= CID_TRIES_FAST ? CID_RETRY_SLOW : 1);
+          });
+          save(CMSG_OUTBOX, rows);
+          if (e) console.warn('[foxy] messages: a message was not sent yet:', (e && e.message) || e);
+        };
+        // a relay took it, the mark not yet written: the mark again, a retry's wait from now
+        var markLater = function () {
+          var rows = cmsgOutbox();
+          rows.forEach(function (x) { if (x.id === r.id) { x.taken = true; x.sendAt = Date.now() + cmsgRetryMs(); } });
+          save(CMSG_OUTBOX, rows);
+        };
+        if (r.taken) {
+          if (cmsgMarkSent(r)) { save(CMSG_OUTBOX, cmsgOutbox().filter(function (x) { return x.id !== r.id; })); cmsgChanged(r.peer); }
+          else markLater();
+          return null;
+        }
+        if (!routeOpen()) { tried(null); return null; }
+        var body = r.stand && !r.body ? cmsgStandBody(r) : Promise.resolve(r.body);
+        var go = body.then(function (text) {
+          return r.first ? deliverOverNostr(cidNprofile(r.to), text)
+            : bridgeAsk('cashuIdMsgSend', { peer: r.peer, i: r.i, body: text }, 40000);
+        });
+        return go.then(function () {
+          if (cmsgMarkSent(r)) save(CMSG_OUTBOX, cmsgOutbox().filter(function (x) { return x.id !== r.id; }));
+          else markLater();
+          sent += 1;
+          cmsgChanged(r.peer);
+        }, tried);
+      });
+    }, Promise.resolve()).then(function () { cmsgArm(); return sent; }, function (e) {
+      console.warn('[foxy] messages: the outbox could not be sent:', (e && e.message) || e);
+      cmsgArm();
+      return sent;
+    });
+    cmsgSending = run;
+    var done = function () { if (cmsgSending === run) cmsgSending = null; };
+    run.then(done, done);
+    return run;
+  }
+
+  // the next row's moment, armed
+  function cmsgArm() {
+    if (cmsgTimer) { clearTimeout(cmsgTimer); cmsgTimer = null; }
+    var rows = cmsgOutbox();
+    if (!rows.length) return;
+    var next = Math.min.apply(null, rows.map(function (r) { return Number(r.sendAt) || 0; }));
+    cmsgTimer = setTimeout(function () {
+      cmsgTimer = null;
+      Promise.resolve(cmsgSending).then(function () { return cmsgDeliverAll(); }).then(null, function () {});
+    }, Math.max(0, next - Date.now()));
+  }
+
+  // the route has come back: whatever was tried and waits goes now (its random wait is not taken again)
+  function cmsgOnRoute() {
+    try {
+      var rows = cmsgOutbox();
+      if (!rows.some(function (r) { return Number(r.tries) > 0; })) return;
+      var now = Date.now();
+      rows.forEach(function (r) { if (Number(r.tries) > 0) r.sendAt = Math.min(Number(r.sendAt) || now, now); });
+      save(CMSG_OUTBOX, rows);
+      setTimeout(function () { cmsgDeliverAll().then(null, function () {}); }, 0);
+    } catch (e) { console.warn('[foxy] messages: sending on the route’s return:', (e && e.message) || e); }
+  }
+
+  /* ---- for the screens ---- */
+
+  function cmsgMarkWord(m) {
+    if (m.dir !== 'out') return '';
+    // the keeper's words (2026-11-05): "sending…" until a relay has taken it, "sent" after
+    return m.state === 'relay' ? 'sent' : 'sending\u2026';
+  }
+
+  function cmsgView(t) {
+    var name = cmsgNameOf(t.peer);
+    return {
+      peer: t.peer, name: name || 'A Cashu ID', contact: !!name, card: name ? '' : String(t.card || ''),
+      unread: Number(t.unread) || 0,
+      msgs: t.msgs.map(function (m) { return { id: m.id, dir: m.dir, text: m.text, at: Number(m.at) || 0, mark: cmsgMarkWord(m) }; }),
+    };
+  }
+
+  function cmsgThreadsNow() {
+    if (!cidInUse()) return [];
+    var all = cmsgAll();
+    return Object.keys(all.threads).map(function (p) {
+      var t = all.threads[p];
+      var last = t.msgs[t.msgs.length - 1] || null;
+      var name = cmsgNameOf(p);
+      return { peer: p, name: name || 'A Cashu ID', contact: !!name, unread: Number(t.unread) || 0,
+        lastAt: last ? Number(last.at) || 0 : 0, lastText: last ? last.text : '' };
+    }).filter(function (v) { return v.contact || v.lastAt > 0; });
+  }
+
+  /* INBOX's payments (26p-cashu-msg.js `renderInbox`): { peer, dir, unit, amount, at } for each payment to or from a
+   * Cashu ID this phone can put a name to, `at` in milliseconds. Out: every payment to a contact this phone made, which
+   * the outbox keeps (`cidPay`). In: the history rows whose payer proved to be a contact (`cidFromName`), which carry
+   * its ID key as `cidPeer`; a payer who did not prove who they are is no one's. Not only with the ID in use: a contact
+   * can be paid without it. */
+  function cmsgPaymentsNow() {
+    var list = [];
+    cidOutboxRows().forEach(function (r) {
+      var p = String(r.contact || '').toLowerCase();
+      if (!CID_HEX33.test(p)) return;
+      list.push({ peer: p, dir: 'out', unit: unitOf(r.unit) || 'sat', amount: Math.round(satsOf(r.amount)), at: Number(r.at) || 0 });
+    });
+    (load(K.log, []) || []).forEach(function (e) {
+      if (!e || e.cid !== 'in' || e.state === 'failed') return;
+      var p = String(e.cidPeer || '').toLowerCase();
+      if (!CID_HEX33.test(p)) return;
+      var unit = unitOf(e.unit) || 'sat';
+      var amount = satsOf(unit === 'sat' && e.sats != null ? e.sats : e.amount);
+      var at = Number(e.at) || 0;
+      list.push({ peer: p, dir: 'in', unit: unit, amount: Math.round(amount || 0), at: at > 1e11 ? at : at * 1000 });
+    });
+    return list.sort(function (a, b) { return b.at - a.at; });
+  }
+
+  function cmsgRead1(peer) {
+    var all = cmsgAll();
+    var t = cmsgThread(all, String(peer || '').toLowerCase(), false);
+    if (!t || !t.unread) return;
+    t.unread = 0;
+    cmsgSave(all);
+  }
+  /* ---- tips at the till, and the keeper's list of cashier codes ---------------
+   *
+   * The keeper says, as its till opens, whether it takes tips and who they go to
+   * (26m-till.js, 26p-till-tips.js): itself, one Cashu ID, or a group of up to
+   * eight, each with a whole percentage, the percentages adding up to 100. The
+   * answer is `tips`:
+   *
+   *     { on, to: 'self' | 'one' | 'group', ids: [{ id, nostr, name, pct }] }
+   *
+   * `id` the Cashu ID's key (33 bytes, hex), `nostr` its delivery key (32), as a
+   * contact keeps them (08e-cashu-id.js `cidKeep`), so a contact removed later is
+   * still paid. Each CASHIER CODE has its own answer, the till's by default, kept
+   * on this phone's row of the code; the code itself says only whether its till
+   * offers tips (`tips: true`), so nobody's Cashu ID is printed at a counter.
+   *
+   * A payment with a tip is ONE payment for the total. Once it is in, the tip
+   * part is passed on (`tipForward`): to the keeper, nothing more than a word on
+   * the sale's row; to one person, a Cashu ID payment of the whole tip; to a
+   * group, one payment per share. Each share is the tip times its percentage,
+   * rounded down to a whole sat or cent, and what rounding leaves goes to the
+   * first share, so the shares add up to the tip exactly. A share smaller than
+   * `TIP_MIN` waits, kept for that ID (`K.tillTipCarry`), and goes with the next
+   * tip to the same ID at the same mint in the same unit.
+   *
+   * Each payment to a Cashu ID is a job (`K.tillTipJobs`), made from the
+   * keeper's balance at the mint the sale landed at, one at a time, tried again
+   * a minute later while it fails, ten failures at most, and at once when the
+   * route comes back. With no route, or the phone at another mint than the
+   * sale's, it waits and counts no try. A job that gives up, or is still
+   * waiting a week on, leaves the
+   * money where it is, in the keeper's balance, and its sale's row says so.
+   *
+   * `tillTips` is the whole of it as one object, for anything else that takes
+   * payments and passes tips on: `check`, `split`, `forward`,
+   * `jobs`, `run`, `carry`, and the limits. Nothing in it knows which screen
+   * asked. */
+
+  var TIP_IDS_MAX = 8;
+  // the smallest share sent on its own: a sat or a cent less than this rides with the next tip to that ID
+  var TIP_MIN = { sat: 10, usd: 1 };
+  var TIP_TRIES_MAX = 10;
+  var TIP_RETRY_MS = 60000;
+  var TIP_GIVE_UP_MS = 7 * 24 * 60 * 60 * 1000;
+  var TIP_JOBS_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+  var TIP_SALES_MAX = 500;
+
+  // whether a code (a pass, or this phone's row of one) offers tips
+  function tillTipsOn(p) {
+    if (!p) return false;
+    if (p.tips === true) return true;
+    return !!(p.tips && typeof p.tips === 'object' && p.tips.on);
+  }
+
+  function tillLabelClean(label) {
+    return String(label || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, TILL_LABEL_MAX);
+  }
+
+  /* An answer to ACCEPT TIPS? made whole, or a throw that says what is wrong with it in words a
+   * screen can show. Off is { on: false, to: 'self', ids: [] }. */
+  function tipsCheck(t) {
+    var off = { on: false, to: 'self', ids: [] };
+    if (!t || typeof t !== 'object' || !t.on) return off;
+    var to = t.to === 'self' || t.to === 'one' || t.to === 'group' ? t.to : '';
+    if (!to) throw new Error('Tips go to you, to one person, or to a group.');
+    if (to === 'self') return { on: true, to: 'self', ids: [] };
+    var raw = Array.isArray(t.ids) ? t.ids : [];
+    if (!raw.length) throw new Error(to === 'one' ? 'Pick who the tips go to.' : 'Add someone to the group first.');
+    if (to === 'one' && raw.length !== 1) throw new Error('One person takes the tips.');
+    if (raw.length > TIP_IDS_MAX) throw new Error('A group is ' + TIP_IDS_MAX + ' Cashu IDs at most.');
+    var seen = Object.create(null);
+    var ids = raw.map(function (r) {
+      var id = String((r && r.id) || '').toLowerCase();
+      if (!CID_HEX33.test(id)) throw new Error('That is not a Cashu ID.');
+      var nostr = String((r && r.nostr) || '').toLowerCase();
+      if (!CID_HEX32.test(nostr)) {
+        var c = cidContactOf(id);
+        nostr = c ? String(c.cid.nostr || '').toLowerCase() : '';
+      }
+      if (!CID_HEX32.test(nostr)) throw new Error('That Cashu ID is not one of your contacts. Add it first.');
+      var name = cidCleanName(r && r.name);
+      if (!name) throw new Error('Name every Cashu ID that takes tips.');
+      if (seen[id]) throw new Error((to === 'group' ? 'The same Cashu ID is in the group twice' : 'That Cashu ID is there twice') + ' (' + name + ').');
+      seen[id] = true;
+      var pct = to === 'one' ? 100 : Number(r && r.pct);
+      if (!(Math.floor(pct) === pct && pct >= 1 && pct <= 100)) throw new Error('Each share is a whole percentage from 1 to 100 (' + name + ').');
+      return { id: id, nostr: nostr, name: name, pct: pct };
+    });
+    var sum = ids.reduce(function (n, r) { return n + r.pct; }, 0);
+    if (sum !== 100) throw new Error('The shares have to add up to 100%. They add up to ' + sum + '%.');
+    return { on: true, to: to, ids: ids };
+  }
+
+  /* The shares of a tip of `amount` (whole sats or cents): each the tip times its percentage,
+   * rounded down, and what rounding leaves to the first, so they add up to `amount` exactly.
+   * [{ id, nostr, name, pct, amount }], in the group's order. [] for no tip or tips to the keeper. */
+  function tipSplit(tips, amount) {
+    var t;
+    try { t = tipsCheck(tips); } catch (e) { return []; }
+    var n = Math.floor(Number(amount) || 0);
+    if (!t.on || t.to === 'self' || !(n > 0)) return [];
+    var shares = t.ids.map(function (r) { return { id: r.id, nostr: r.nostr, name: r.name, pct: r.pct, amount: Math.floor(n * r.pct / 100) }; });
+    var left = n - shares.reduce(function (s, r) { return s + r.amount; }, 0);
+    shares[0].amount += left;
+    return shares;
+  }
+
+  /* ---- the keeper's own answer, for the till while it is open ---- */
+
+  function tillTipsNow() {
+    var t = load(K.tillTips, null);
+    try { return tipsCheck(t); } catch (e) { return tipsCheck(null); }
+  }
+
+  function tillTipsSet(t) {
+    var clean = tipsCheck(t);
+    mustSave(K.tillTips, clean);
+    console.log('[foxy] till: tips ' + (!clean.on ? 'off' : clean.to === 'self' ? 'on, kept by this phone'
+      : clean.to === 'one' ? 'on, to one Cashu ID' : 'on, split among ' + clean.ids.length + ' Cashu IDs'));
+    return clean;
+  }
+
+  /* ---- the jobs ---- */
+
+  function tipJobRows() {
+    var l = load(K.tillTipJobs, []);
+    return Array.isArray(l) ? l.filter(function (r) { return r && typeof r === 'object' && typeof r.id === 'string' && CID_HEX33.test(String(r.cid || '')); }) : [];
+  }
+
+  function tipJobAmend(id, fields) {
+    var rows = tipJobRows();
+    var hit = null;
+    rows.forEach(function (r) { if (r.id === id) { Object.assign(r, fields); hit = r; } });
+    if (hit) save(K.tillTipJobs, rows);
+    return hit;
+  }
+
+  // done rows (sent or given up) go a week after, so the list does not grow with every tip
+  function tipJobsTidy(rows) {
+    var now = Date.now();
+    return rows.filter(function (r) { return r.state === 'due' || !(Number(r.doneAt) > 0) || Number(r.doneAt) + TIP_JOBS_KEEP_MS > now; });
+  }
+
+  function tipCarryKey(id, unit, mint) { return id + '|' + unit + '|' + canonicalMint(String(mint || '')); }
+
+  function tipCarryRows() {
+    var c = load(K.tillTipCarry, {});
+    return c && typeof c === 'object' && !Array.isArray(c) ? c : {};
+  }
+
+  function tipChanged() {
+    if (typeof FoxyWallet._onHistoryChanged === 'function') {
+      try { FoxyWallet._onHistoryChanged(); } catch (x) {}
+    }
+  }
+
+  function tipSaid(n, unit) { return unit === 'usd' ? '$' + (n / 100).toFixed(2) : n + (n === 1 ? ' sat' : ' sats'); }
+
+  /* A sale's tip, passed on. `o`: { tips, amount, unit, mint, hash, from }: `amount` the tip in whole
+   * sats or cents of `unit`, landed at `mint`, its sale's history row `hash` where there is one. The
+   * row is marked (`tillTip`); tips to the keeper end there. Otherwise one job per share big enough to
+   * send, the rest kept for the next tip. A sale already passed on (by its `hash`) is not passed on
+   * twice. Answers { kept, jobs, waiting, seen }. */
+  function tipForward(o) {
+    var unit = unitOf(o && o.unit) || 'sat';
+    var amount = Math.floor(Number(o && o.amount) || 0);
+    var hash = String((o && o.hash) || '');
+    var mint = canonicalMint(String((o && o.mint) || mintUrl || ''));
+    var out = { kept: 0, jobs: 0, waiting: 0, seen: false };
+    if (!(amount > 0) || !mint) return out;
+    if (hash) {
+      var sales = load(K.tillTipSales, []);
+      if (!Array.isArray(sales)) sales = [];
+      if (sales.indexOf(hash) >= 0) { out.seen = true; return out; }
+      save(K.tillTipSales, sales.concat([hash]).slice(-TIP_SALES_MAX));
+      try { amendTx(hash, { tillTip: amount, tillTipUnit: unit }); } catch (x) {}
+    }
+    var tips;
+    try { tips = tipsCheck(o && o.tips); } catch (e) { tips = tipsCheck(null); console.warn('[foxy] till: a tip’s answer could not be read; the tip stays here:', e.message); }
+    if (!tips.on || tips.to === 'self') {
+      out.kept = amount;
+      console.log('[foxy] till: a tip of ' + tipSaid(amount, unit) + ', kept by this phone');
+      tipChanged();
+      return out;
+    }
+    var shares = tipSplit(tips, amount);
+    var carry = tipCarryRows();
+    var rows = tipJobsTidy(tipJobRows());
+    var now = Date.now();
+    shares.forEach(function (sh, i) {
+      var key = tipCarryKey(sh.id, unit, mint);
+      var total = sh.amount + (Math.floor(Number(carry[key]) || 0));
+      if (!(total > 0)) return;
+      if (total < TIP_MIN[unit]) {
+        carry[key] = total;
+        out.waiting += total;
+        return;
+      }
+      delete carry[key];
+      var rnd = hexOf(window.CashuTS.createRandomSecretKey()).slice(0, 8);
+      rows.push({ id: 'tip' + now.toString(36) + i + rnd, cid: sh.id, nostr: sh.nostr, name: sh.name, unit: unit, mint: mint,
+                  amount: total, sale: hash, from: String((o && o.from) || 'till'), at: now, tries: 0, state: 'due' });
+      out.jobs += 1;
+    });
+    mustSave(K.tillTipJobs, rows);
+    save(K.tillTipCarry, carry);
+    console.log('[foxy] till: a tip of ' + tipSaid(amount, unit) + ' to pass on: ' + out.jobs + ' payment(s)'
+      + (out.waiting ? ', ' + tipSaid(out.waiting, unit) + ' too small to send yet' : ''));
+    tipChanged();
+    if (out.jobs) tipRunSoon();
+    return out;
+  }
+
+  /* A cashier's word of how much of a payment was its tip (`tip` on the delivery, 08d-till.js
+   * `tillDeliverAll`): a whole number above nought, and never more than what came in. 0 otherwise. */
+  function tillTipOfBody(j, r, unit) {
+    var tip = Number(j && j.tip);
+    if (!(Math.floor(tip) === tip && tip > 0)) return 0;
+    var came = 0;
+    if (r && typeof r === 'object') came = unit === 'sat' ? satsOf(r.sats != null ? r.sats : r.amount) : satsOf(r.amount != null ? r.amount : r.sats);
+    var sum = Array.isArray(j.proofs) ? sumProofs(j.proofs) : 0;
+    var most = came > 0 ? Math.min(came, sum || came) : sum;
+    return Math.max(0, Math.min(tip, Math.floor(most) || 0));
+  }
+
+  var tipRunning = null;
+  var tipTimer = null;
+
+  function tipRetryMs() { return CID_TESTS && Number(FoxyWallet._tillTipRetryMs) > 0 ? Number(FoxyWallet._tillTipRetryMs) : TIP_RETRY_MS; }
+
+  function tipRunSoon() { setTimeout(function () { tipRun().then(null, function () {}); }, 0); }
+
+  // a job given up: the money stays in this phone's balance, and the sale's row says so
+  function tipFail(r, why) {
+    tipJobAmend(r.id, { state: 'failed', doneAt: Date.now(), why: String(why || '').slice(0, 160) });
+    if (r.sale) {
+      var sale = (load(K.log, []) || []).filter(function (e) { return e && e.hash === r.sale; })[0] || {};
+      var names = Array.isArray(sale.tillTipFailed) ? sale.tillTipFailed.slice() : [];
+      if (names.indexOf(r.name) < 0) names.push(r.name);
+      try { amendTx(r.sale, { tillTipFailed: names, tillTipLeft: (Math.floor(Number(sale.tillTipLeft) || 0)) + r.amount }); } catch (x) {}
+    }
+    console.warn('[foxy] till: a tip of ' + tipSaid(r.amount, r.unit) + ' for ' + r.name + ' was not sent and stays here: ' + why);
+    tipChanged();
+    return null;
+  }
+
+  function tipOne(r) {
+    if (Date.now() - Number(r.at) > TIP_GIVE_UP_MS) return tipFail(r, 'not sent within a week');
+    // waits, counting nothing: no route, or the phone at another mint than the one the sale landed at
+    if (!wallet || !routeOpen()) return null;
+    if (canonicalMint(mintUrl || '') !== r.mint) return null;
+    var pay;
+    try {
+      pay = FoxyWallet.cashuIdPay(r.cid, r.amount, { unit: r.unit, read: { id: r.cid, nostr: r.nostr }, name: r.name, memo: 'Tip to ' + r.name });
+    } catch (e) { pay = Promise.reject(e); }
+    return Promise.resolve(pay).then(function (res) {
+      tipJobAmend(r.id, { state: 'sent', doneAt: Date.now(), payHash: String((res && res.hash) || ''), relayed: !!(res && res.sent) });
+      if (res && res.hash) { try { amendTx(res.hash, { tillTipTo: r.name, tillTipSale: r.sale || '' }); } catch (x) {} }
+      console.log('[foxy] till: a tip of ' + tipSaid(r.amount, r.unit) + ' went to ' + r.name);
+      tipChanged();
+    }, function (e) {
+      var why = String((e && e.message) || e);
+      // another payment to a contact is being made this moment: the next try, with none counted
+      if (/being made/i.test(why)) return null;
+      var tries = (Number(r.tries) || 0) + 1;
+      // what no number of tries changes: their ID is this phone's own, or not an ID
+      if (tries >= TIP_TRIES_MAX || /your own Cashu ID|not a Cashu ID/i.test(why)) return tipFail(r, why);
+      tipJobAmend(r.id, { tries: tries, why: why.slice(0, 160) });
+      console.warn('[foxy] till: a tip for ' + r.name + ' was not sent yet (' + tries + ' of ' + TIP_TRIES_MAX + '):', why);
+      return null;
+    });
+  }
+
+  /* Every job due, one at a time; shared while it runs. While any is left, again a minute later
+   * (one timer, gone with the last job), and at once when the route comes back (`tipOnRoute`). */
+  function tipRun() {
+    if (tipRunning) return tipRunning;
+    var run = Promise.resolve().then(function () {
+      var due = tipJobRows().filter(function (r) { return r.state === 'due'; });
+      return due.reduce(function (chain, r) { return chain.then(function () { return tipOne(r); }); }, Promise.resolve());
+    }).then(function () {
+      save(K.tillTipJobs, tipJobsTidy(tipJobRows()));
+      tipArm();
+      return tipJobRows().filter(function (r) { return r.state === 'sent'; }).length;
+    }, function (e) {
+      console.warn('[foxy] till: passing tips on failed:', (e && e.message) || e);
+      tipArm();
+      return 0;
+    });
+    tipRunning = run;
+    var done = function () { if (tipRunning === run) tipRunning = null; };
+    run.then(done, done);
+    return run;
+  }
+
+  function tipArm() {
+    if (tipTimer) { clearTimeout(tipTimer); tipTimer = null; }
+    if (!tipJobRows().some(function (r) { return r.state === 'due'; })) return;
+    tipTimer = setTimeout(function () { tipTimer = null; tipRun().then(null, function () {}); }, tipRetryMs());
+  }
+
+  // after a connect, on the way back from the background, and when the route comes back: what is due goes
+  function tipOnRoute() {
+    try { if (tipJobRows().some(function (r) { return r.state === 'due'; })) tipRunSoon(); }
+    catch (e) { console.warn('[foxy] till: tips on the route’s return:', (e && e.message) || e); }
+  }
+
+  /* ---- the keeper's cashier codes, as a list ---- */
+
+  function tillLogRows() {
+    var l = load(K.tillPassLog, []);
+    return Array.isArray(l) ? l.filter(function (r) { return r && typeof r === 'object' && TILL_ID.test(String(r.id)); }) : [];
+  }
+
+  // what a code's tips say on its row: off, to the keeper, or the names
+  function tillTipsBrief(t) {
+    var c;
+    try { c = tipsCheck(t); } catch (e) { c = tipsCheck(null); }
+    return { on: c.on, to: c.to, names: c.ids.map(function (r) { return r.name; }), pcts: c.ids.map(function (r) { return r.pct; }) };
+  }
+
+  function tillLogAdd(row) {
+    var list = tillLogRows().filter(function (r) { return r.id !== row.id; });
+    list.push({ id: row.id, label: String(row.label || ''), unit: row.unit, main: tillMainOf(row), mints: tillMintsOf(row),
+                tips: tillTipsBrief(row.tips), made: Number(row.made) || Date.now(), exp: Number(row.exp) || 0 });
+    save(K.tillPassLog, list.slice(-TILL_LOG_MAX));
+  }
+
+  /* END: the code is off the live list for good, and its row says when. Its cashier is not told
+   * (nothing reaches a cashier but its code), and may go on taking payments by it until the code
+   * runs out; what it sends is this phone's money, locked to it, and is still taken, as for a code
+   * that ran out (the week after). So its key and its listening stay. */
+  function tillPassEnd(id) {
+    var rows = tillPassRows();
+    var now = Date.now();
+    var hit = null;
+    rows.forEach(function (r) { if (r.id === id && !r.endedAt) { r.endedAt = now; hit = r; } });
+    var logged = tillLogRows();
+    var inLog = logged.filter(function (r) { return r.id === id; })[0];
+    if (!hit && !(inLog && !inLog.endedAt && Number(inLog.exp) * 1000 > now)) return false;
+    if (hit) mustSave(K.tillPasses, rows);
+    if (!inLog && hit) { tillLogAdd(hit); logged = tillLogRows(); }
+    logged.forEach(function (r) { if (r.id === id && !r.endedAt) r.endedAt = now; });
+    save(K.tillPassLog, logged);
+    console.log('[foxy] till: a cashier code was ended');
+    return true;
+  }
+
+  /* The codes for the list: { live, past }. Live, newest last: those not run out and not ended,
+   * each with its text for the QR. Past, newest first: ended or run out, with when it ran and how it
+   * ended ('ended' by END, 'expired' by its own time). No figures of what any took: the till keeps
+   * no totals. A code from before the list was kept is read from its row. */
+  function tillPassList() {
+    var now = Date.now();
+    var rows = tillPrune();
+    var log = tillLogRows();
+    rows.forEach(function (r) { if (!log.some(function (l) { return l.id === r.id; })) { tillLogAdd(r); } });
+    log = tillLogRows();
+    var byId = {};
+    rows.forEach(function (r) { byId[r.id] = r; });
+    var view = function (l) {
+      var r = byId[l.id];
+      var ended = Number(l.endedAt) || (r && Number(r.endedAt)) || 0;
+      return { id: l.id, label: l.label || '', unit: l.unit, main: l.main, mints: (l.mints || []).slice(), tips: l.tips || tillTipsBrief(null),
+               made: Number(l.made) || 0, exp: Number(l.exp) || 0, endedAt: ended,
+               how: ended ? 'ended' : 'expired', until: ended || (Number(l.exp) || 0) * 1000,
+               text: r && !ended && Number(r.exp) * 1000 > now ? tillPassText(r) : '' };
+    };
+    var all = log.map(view);
+    var live = all.filter(function (v) { return !!v.text; }).sort(function (a, b) { return a.made - b.made; });
+    var past = all.filter(function (v) { return !v.text; }).sort(function (a, b) { return b.until - a.until; });
+    return { live: live, past: past };
+  }
+
+  var tillTips = {
+    MAX_IDS: TIP_IDS_MAX,
+    MIN: TIP_MIN,
+    check: function (t) { return tipsCheck(t); },
+    split: function (t, amount) { return tipSplit(t, amount); },
+    forward: function (o) { return tipForward(o); },
+    jobs: function () {
+      return tipJobRows().map(function (r) {
+        return { id: r.id, cid: r.cid, name: r.name, unit: r.unit, mint: r.mint, amount: r.amount, sale: r.sale || '', from: r.from || '',
+                 at: r.at, tries: Number(r.tries) || 0, state: r.state, why: r.why || '', payHash: r.payHash || '' };
+      });
+    },
+    carry: function () { return Object.assign({}, tipCarryRows()); },
+    run: function () { return tipRun(); },
+  };
+  /* ---- the reminder after fifteen days away -----------------------------------------------------------------------
+   *
+   * Messages and payments to this phone's Cashu ID wait at the relays until Foxy is opened. So a phone whose ID is in use
+   * (`cidInUse`) can have Foxy remind it, once, fifteen days after Foxy was last in front: a notification made on the
+   * phone (Reminder.swift, the `reminder` action) and sent by nobody. The phone replaces it every time Foxy comes to the
+   * front or goes away, so it fires only after fifteen days away. The words are the phone's own; the page gives none.
+   *
+   * The page keeps two things (REMIND_KEY): `on`, the switch REMIND ME AFTER 15 DAYS in SETTINGS, and `asked`, that the
+   * person has been asked once, the first time the ID is in use. iOS's own question is shown only after a yes.
+   */
+  var REMIND_KEY = 'foxy.remind';
+  var REMIND_DAYS = 15;
+
+  function remindLoad() {
+    var s = load(REMIND_KEY, null);
+    if (!s || typeof s !== 'object' || Array.isArray(s)) s = {};
+    return { on: s.on === true, asked: s.asked === true, owed: s.owed === true };
+  }
+
+  function remindSave(s) { save(REMIND_KEY, { on: s.on === true, asked: s.asked === true, owed: s.owed === true }); }
+
+  // { eligible, on }: the switch shows only with an ID in use
+  function remindView() {
+    var s = remindLoad();
+    return { eligible: cidInUse(), on: s.on };
+  }
+
+  /* Where the reminder stands, asked of the phone only while nobody has been asked:
+   * 'none' (no ID in use, or no phone to ask), 'on', 'off', or 'ask' (the card is due). Notifications already allowed
+   * for payments turn it on with no card; refused in Settings, it is off and the question is over. */
+  function remindStatus() {
+    if (!cidInUse()) return Promise.resolve('none');
+    var s = remindLoad();
+    // a cancel that did not reach the phone is sent again now (the phone would keep reminding)
+    if (s.owed && !s.on) {
+      return bridgeAsk('reminder', { cancel: true }, 20000).then(function () {
+        remindSave({ on: false, asked: true, owed: false });
+        return 'off';
+      }, function () { return 'off'; });
+    }
+    if (s.on) return Promise.resolve('on');
+    if (s.asked) return Promise.resolve('off');
+    return bridgeAsk('reminder', { days: REMIND_DAYS, ask: false }, 20000).then(function (t) {
+      if (t === 'ok') { remindSave({ on: true, asked: true, owed: false }); return 'on'; }
+      if (t === 'needs') return 'ask';
+      remindSave({ on: false, asked: true, owed: false });
+      return 'off';
+    }, function () { return 'none'; });
+  }
+
+  // yes to the card, or the switch turned on: iOS is asked if it never was. Resolves 'on' or 'refused'.
+  function remindTurnOn() {
+    if (!cidInUse()) return Promise.resolve('refused');
+    return bridgeAsk('reminder', { days: REMIND_DAYS }, 60000).then(function (t) {
+      var on = t === 'ok';
+      remindSave({ on: on, asked: true, owed: false });
+      return on ? 'on' : 'refused';
+    });
+  }
+
+  function remindTurnOff() {
+    remindSave({ on: false, asked: true, owed: true });
+    return bridgeAsk('reminder', { cancel: true }, 20000).then(function () {
+      remindSave({ on: false, asked: true, owed: false });
+      return 'off';
+    }, function () { return 'off'; });
+  }
+
+  // NOT NOW: the question is not asked again; the switch is still there
+  function remindNotNow() {
+    var s = remindLoad();
+    remindSave({ on: s.on, asked: true, owed: s.owed });
+  }
+
   var FoxyWallet = {
 
     /* ---- connection ---------------------------------------------------- */
@@ -23476,15 +27811,20 @@
          * `setOffline` and `routeOpen`. All four have to agree or
          * the screens and the wallet argue about what this phone can reach. */
         offline: !!privacy.offline
-          && !(String(next.tor || 'connecting') === 'up'
-               && String(next.network || 'unknown') !== 'none'),
+          && (!!privacy.offlineChosen
+              || !(String(next.tor || 'connecting') === 'up'
+                   && String(next.network || 'unknown') !== 'none')),
+        /* The holder's own choice, as against the automatic one home-first makes
+         * while Tor is still coming up. Only the automatic one is given up when
+         * Tor is really up; this one stays until the holder undoes it. */
+        offlineChosen: !!privacy.offlineChosen && !!privacy.offline,
       };
       // for the connection diary: the moment the route opens or shuts
       noteRouteChange(wasOpen);
       /* The route went from open to shut: Tor drops the circuits it had, the spare's among them (and the phone lets go of the
        * connection it kept for it, Route.dropWarm). Kept, it was handed to the next job on the route's return as ready, and that
        * job rode a circuit Tor no longer had; let go, the return opens a new one. */
-      if (wasOpen && !routeOpen()) dropSpare();
+      if (wasOpen && !routeOpen()) { dropSpare(); cidListenGone(); }
       if (window.FoxyGate && window.FoxyGate._changed) {
         try { window.FoxyGate._changed(FoxyWallet.privacy()); }
         catch (e) { console.error('[foxy] gate:', e && e.message); }
@@ -23527,7 +27867,7 @@
       // and the newest Bitcoin block header is fetched for the cards, if the one kept is old (08b-block-headers.js)
       if (!wasUp && privacy.tor === 'up') headerLater();
       // and what a cashier took and could not send with no route goes now (08d-till.js), not at its next minute
-      if (!wasUp && privacy.tor === 'up' && routeOpen()) tillOnRoute();
+      if (!wasUp && privacy.tor === 'up' && routeOpen()) { tillOnRoute(); cidOnRoute(); tipOnRoute(); }
       return FoxyWallet.privacy();
     },
 
@@ -23545,7 +27885,7 @@
                unprotected: privacy.unprotected, transport: privacy.transport,
                orbot: privacy.orbot, firstSetup: privacy.firstSetup,
                vpn: privacy.vpn, orbotKey: privacy.orbotKey, offline: privacy.offline,
-               network: privacy.network };
+               offlineChosen: !!privacy.offlineChosen, network: privacy.network };
     },
 
     /* The person chose to carry on with no network, or to stop doing so.
@@ -23555,7 +27895,7 @@
      * refusing. This only tells the gate to come down and the screens to say so.
      * Deliberately not `setUnprotected`, which asks iOS to draw a destructive
      * alert because that one really does put traffic on the open internet. */
-    setOffline: function (on) {
+    setOffline: function (on, chosen) {
       /* Refused only when there is a real route to refuse it for.
        *
        * This was `privacy.tor !== 'up'`, and Tor's `up` is a circuit Foxy built
@@ -23569,7 +27909,18 @@
        * anything", so where the two disagree it wins here exactly as it wins in
        * the gate (`noNetwork`). */
       var reallyUp = privacy.tor === 'up' && privacy.network !== 'none';
-      privacy.offline = !!on && !reallyUp;
+      /* The holder's own choice (`chosen`) is the exception, and it sticks.
+       *
+       * A phone had WORK OFFLINE chosen while Tor was up, and twenty seconds
+       * later took a payment to the mint over a connection that carried nothing:
+       * the choice had been refused, or given up on the next push, because Tor
+       * said `up`. What the holder asked for stands until they undo it, and the
+       * banner says so. The automatic offline of home-first (no `chosen`) is the
+       * one that still yields to a route. */
+      privacy.offline = !!on && (!!chosen || !reallyUp);
+      /* Sticky only where it used to be refused: chosen with Tor really up. Chosen while Tor is still coming (the gate's PROCEED
+       * OFFLINE) is the old choice, given up when Tor is up, as the gate's scenarios pin. */
+      privacy.offlineChosen = !!on && !!chosen && reallyUp;
       /* Choosing to work offline puts down the choice to work unprotected.
        *
        * They are opposite intents — one sends nothing, the other sends everything
@@ -23884,7 +28235,7 @@
        * made for this connect (`loadMintOnOne`). */
       var ready = cached
         ? Promise.resolve().then(function () { w.loadMintFromCache(cached.info, cached.keys); })
-        : withTimeout(loadMintOnOne(w, !!(opts && opts.sessionInfo)), 30000, hostOf(u));
+        : withTimeout(loadMintOnOne(w, !!(opts && opts.sessionInfo), 30000), 30000, hostOf(u));
       return ready.then(function () {
         /* A lazy switch's own confirmation (`_confirm`), arriving after the phone had gone elsewhere: let go, and
          * the wallet in hand stays. */
@@ -23969,6 +28320,9 @@
           return ids;
         };
         var owedBefore = owedOut();
+        /* The Cashu ID's: what its inbox read before this connect is taken now, not at the end of the catch-up below
+         * (`cidOnConnect`). Not on a visit. */
+        if (!opts || opts.remember !== false) cidOnConnect();
         /* Anything paid while the app was away is still sitting at the mint;
          * then any melt whose outcome was never learned, and any swap whose
          * answer was lost after the mint made it. One after another, each after
@@ -23981,7 +28335,7 @@
           .then(function () { return tidySentTokens().then(null, function () { return 0; }); })
           .then(sweepPause).then(function () { return FoxyWallet.claimUnclaimed(); })
           // and a till's: what a cashier still has to send, and what a keeper kept for this mint (08d-till.js)
-          .then(function () { tillCatchUp(); })
+          .then(function () { tillCatchUp(); cidCatchUp(); tipOnRoute(); })
           // and a card's pieces it signed for while the mint was not answering (08a-flashcard.js)
           .then(function () { return FoxyWallet.cardTaken().length ? FoxyWallet.cardSettle() : null; })
           // and change due to a card that could not be made when it paid
@@ -24018,6 +28372,9 @@
               try { FoxyWallet._onCaughtUp({ cardOwed: cardOwed }); } catch (x) {}
             }
           })
+          /* And card loads kept at this mint that the mint may say are spent (08a-flashcard.js, `cardLoadsSpent`): started
+           * here and waited for by nothing, on a circuit of its own, at most once an hour a mint. */
+          .then(function () { try { cardLoadsSpent(w, u).then(null, function () { return 0; }); } catch (x) {} })
           /* Then the invoices this phone made at other mints (`_sweepAway`): after, not in front, so a mint that does not
            * answer holds back none of the above. */
           .then(function () { return FoxyWallet._sweepAway(); })
@@ -24583,13 +28940,15 @@
              * (/v1/keysets, already loaded). The wallet above sees only sat
              * keysets; a usd balance another wallet made with the same words
              * sits under the usd ones. Blind-auth keysets are not money and
-             * are not walked. */
+             * are not walked. Nor is a unit Foxy cannot hold (msat, eur): ten
+             * empty batches on each of its keysets is twenty or more requests
+             * over Tor for nothing the wallet could keep or show. */
             var unitIds = {};
             try {
               var listed = w.keyChain && w.keyChain.keysets;
               (Array.isArray(listed) ? listed : Object.values(listed || {})).forEach(function (k) {
                 var u = k && unitOf(k.unit);
-                if (!u || u === 'sat' || u === 'auth' || !k.id) return;
+                if (!u || u === 'sat' || u === 'auth' || !HANDLED_UNITS[u] || !k.id) return;
                 (unitIds[u] = unitIds[u] || []).push(k.id);
               });
             } catch (e) {}
@@ -25226,6 +29585,11 @@
       var tu = unitOf(opts.unit) || 'sat';
       var tuNo = tu === 'sat' ? null : unitRefusal(tu, from);
       if (tuNo) return Promise.reject(tuNo);
+      /* `o.toUnit`: what the far mint issues, sats as always or dollars at a mint that issues them (a payment brought home
+       * from a mint this phone does not use, 08e-cashu-id.js `bringHome`): the far mint's invoice is then asked for in its
+       * cents, `want` and `moving` are cents there, and the source melts its own unit into it at its own price. */
+      var du = unitOf(opts.toUnit) || 'sat';
+      if (du !== 'sat' && du !== 'usd') return Promise.reject(new Error('Foxy does not bring money home in ' + unitName(du) + '.'));
       if (!to) return Promise.reject(new Error('No mint is connected to move it to.'));
       if (!from) return Promise.reject(new Error('No mint to move it from.'));
       if (from === to) return Promise.reject(new Error('That is the mint it is already at.'));
@@ -25233,7 +29597,7 @@
       if (!window.CashuTS) return Promise.reject(new Error('cashu-ts.js did not load.'));
 
       var src = newWallet(from, tu === 'sat' ? undefined : { unit: tu });
-      var dest = newWallet(to);
+      var dest = newWallet(to, du === 'sat' ? undefined : { unit: du });
       /* The source's fee quote is of the far mint's invoice, so it cannot be asked first; but its circuit can be built
        * while the invoice is made, and that was most of its two seconds. Opened now (`quoteRoad`), beside the two loads,
        * and the quote goes on it the moment the invoice lands. */
@@ -25257,6 +29621,11 @@
             var sets = [];
             try { sets = (src.keyChain && src.keyChain.getKeysets) ? src.keyChain.getKeysets() : []; } catch (eK) { sets = []; }
             if (!sets || !sets.length) throw new Error(hostOf(from) + ' does not issue ' + unitName(tu) + ' ecash.');
+          }
+          if (du !== 'sat') {
+            var dsets = [];
+            try { dsets = (dest.keyChain && dest.keyChain.getKeysets) ? dest.keyChain.getKeysets() : []; } catch (eD) { dsets = []; }
+            if (!dsets || !dsets.some(function (k) { return k && k.active !== false; })) throw new Error(hostOf(to) + ' does not issue ' + unitName(du) + ' ecash.');
           }
           if (opts.land) {
             /* Padded on the generous side, and deliberately.
@@ -25323,7 +29692,7 @@
              * only as FEE on the crossing card, and less is a move that lands
              * short of the payment it was for. */
             // (in dollars the quote's amount is the source's cents for it, its price: nothing to compare)
-            if (tu === 'sat' && satsOf(xq.amount) !== issue) {
+            if (tu === 'sat' && du === 'sat' && satsOf(xq.amount) !== issue) {
               console.warn('[foxy] transfer: asked', hostOf(to), 'for', issue, 'and its invoice is for', satsOf(xq.amount));
               throw new Error(hostOf(to) + ' gave an invoice for ' + satsOf(xq.amount) + ' sats, not the ' + issue
                 + ' asked for. Nothing was moved.');
@@ -25341,13 +29710,14 @@
             if (mn && mn.ok) owed = mn.need;
             if (mn && !mn.ok) {
               owed = mn.need;
-              /** @type {Error & { foxyFits?: number, foxyHave?: number }} */
+              /** @type {Error & { foxyFits?: number, foxyHave?: number, foxyNeed?: number }} */
               var short = new Error(tu === 'sat'
                 ? 'Moving ' + want + ' sats costs up to ' + owed + ' with the mint\u2019s fees, and you hold ' + have + ' at ' + hostOf(from) + '.'
                 : 'Moving ' + want + ' sats costs up to ' + moneyWords(owed, tu) + ' with the mint\u2019s fees, and you hold '
                   + moneyWords(have, tu) + ' at ' + hostOf(from) + '.');
               // (what would fit is worked out in sats; in dollars the screen asks again with a smaller figure)
-              if (tu !== 'sat') { short.foxyFits = 0; short.foxyHave = have; throw short; }
+              // (and what it would take, so a payment brought home can ask for less in proportion: `carryPlan`)
+              if (tu !== 'sat' || du !== 'sat') { short.foxyFits = 0; short.foxyHave = have; short.foxyNeed = owed; throw short; }
               /* And what would fit, so the screen can offer it.
                *
                * The fee is only knowable by asking, and it is asked after the
@@ -25379,8 +29749,10 @@
               try { msatIn = Number(FoxyWallet.msatOf(mq.request)) || 0; } catch (eM) { msatIn = 0; }
               var rq = rateFrom(satsOf(xq.amount), msatIn || issue * 1000);
               return {
-                from: from, to: to, unit: tu,
-                balance: have, gross: owed, moving: issue, net: want, padSats: pad, inPadSats: 0,
+                from: from, to: to, unit: tu, toUnit: du === 'sat' ? undefined : du,
+                balance: have, gross: owed, moving: issue, net: want, padSats: pad,
+                // the source's fee for spending pieces it has not issued yet, in its own unit, as for sats below
+                inPadSats: opts.quoteOnly ? (feeForInputs(src, 32) ? feeForInputs(src, 32) + 1 : 0) : 0,
                 // the fee in sats is not this pile's to say: the cents are (`feeUnit`)
                 feeSats: 0, feeMax: 0, feeMin: 0, feeUnit: owed - satsOf(xq.amount),
                 amountUnit: satsOf(xq.amount), reserve: reserve, margin: 0,
@@ -25389,7 +29761,7 @@
               };
             }
             return {
-              from: from, to: to,
+              from: from, to: to, toUnit: du === 'sat' ? undefined : du,
               balance: have, gross: owed,
               /* `moving` is what the far mint issues and `net` what the person
                * asked for. They are the same number on an ordinary transfer and
@@ -25406,8 +29778,10 @@
                * fee for spending them is the payer's, like every other. */
               inPadSats: opts.quoteOnly
                 ? (feeForInputs(src, 32) ? feeForInputs(src, 32) + 1 : 0) : 0,
-              feeSats: owed - want,
-              feeMax: owed - want,
+              // (into dollars at the far mint, the fee is what leaves less what the invoice itself costs here)
+              feeSats: du === 'sat' ? owed - want : owed - satsOf(xq.amount),
+              feeMax: du === 'sat' ? owed - want : owed - satsOf(xq.amount),
+              amountUnit: du === 'sat' ? undefined : satsOf(xq.amount),
               feeMin: 0,
               reserve: reserve,
               margin: 0,
@@ -25451,6 +29825,9 @@
        *
        * Added to the others, not written over them (`moveNotes`). */
       var quoteId = plan.mintQuote.quote;
+      /* What the far mint issues (`plan.toUnit`): sats, or dollars at a mint that issues them, claimed by its dollar wallet
+       * and written on the note so that `finishMove` claims it the same way. */
+      var landUnit = unitOf(plan.toUnit) || 'sat';
       liveMove[quoteId] = true;
       var notLive = function () { delete liveMove[quoteId]; };
       try { putMoveNote({
@@ -25458,9 +29835,10 @@
         quote: quoteId,
         // the invoice the melt pays: a melt given back takes its note with it (`dropMoveNoteFor`)
         request: plan.mintQuote.request,
-        amount: plan.moving,
+        amount: quoteAmountOf(plan.mintQuote) || plan.moving,
         // the quote's NUT-20 key, written before the melt like the quote itself
         lock: plan.mintQuote.foxyLock || null,
+        unit: landUnit === 'sat' ? undefined : landUnit,
         at: Date.now(),
       }, true); } catch (eNote) { notLive(); return Promise.reject(eNote); }
 
@@ -25477,7 +29855,12 @@
        * Any other refusal is the claim's answer, as before. */
       var claimTimes = { first: true, polls: 0, ms: 0 };
       var pollMs = Number(FoxyWallet._claimPollMs) > 0 ? Number(FoxyWallet._claimPollMs) : 1000;
-      var claimOnce = function () { return FoxyWallet.claimQuote(quoteId, plan.moving, plan.mintQuote.foxyLock); };
+      // what the far mint's quote is for, which is what it mints (`mintAmountOf`): the figure asked, unless its quote said otherwise
+      var claimOnce = function () {
+        var amt = quoteAmountOf(plan.mintQuote) || plan.moving;
+        if (landUnit === 'sat') return FoxyWallet.claimQuote(quoteId, amt, plan.mintQuote.foxyLock);
+        return unitWalletOn(need(), landUnit).then(function (uw) { return FoxyWallet.claimQuote(quoteId, amt, plan.mintQuote.foxyLock, { w: uw }); });
+      };
       var claimWhenPaid = function () {
         var began = Date.now();
         return claimOnce().catch(function (e) {
@@ -25593,7 +29976,8 @@
             var left = sumProofs(load(K.proofs + '.' + plan.from, []));
             if (left) console.log('[foxy]', left, 'sats change left at', hostOf(plan.from));
             return {
-              sats: sats, feeSats: plan.feeSats, mint: plan.to,
+              // (cents, where the far mint issued dollars: `unit`)
+              sats: sats, feeSats: plan.feeSats, mint: plan.to, unit: landUnit,
               name: w && w.name, leftBehind: left, from: plan.from,
             };
           });
@@ -25624,9 +30008,19 @@
                   net: Math.round(Number(terms.net) || 0), ask: Math.round(Number(terms.ask) || 0),
                   at: Date.now(), state: 'asked' };
       try { putCarryJob(job, true); } catch (e) { return Promise.reject(e); }
-      return FoxyWallet.connect(terms.from, null, null, { remember: false }).then(function () { return job.id; }, function (e) {
-        dropCarryJob(job.id);
-        throw e;
+      /* A lease on the visit (`visitTake`): once any background visit is home, and none sets out while the phone is
+       * at their mint for this tap. An earlier tap's is this one's to replace: there is one tap screen, and its
+       * asking has been superseded (26d-tap.js `mine`). */
+      tapVisitEnd('');
+      return visitTake('tap', { lease: true, mint: terms.from, job: job.id }).then(function (v) {
+        return FoxyWallet.connect(terms.from, null, null, { remember: false }).then(function () {
+          v.going = false;
+          return job.id;
+        }, function (e) {
+          visitEnd(v);
+          dropCarryJob(job.id);
+          throw e;
+        });
       });
     },
 
@@ -25635,12 +30029,13 @@
     carryEnd: function (id, stay) {
       var job = carryJob(id);
       if (job && job.state === 'asked') dropCarryJob(id);
-      // `stay`: another asking has taken the phone where it needs to be
-      if (stay) return Promise.resolve();
-      return carryGoHome(job ? job.home : '');
+      /* `stay`: another asking has taken the phone where it needs to be. And so has one whose lease is not this
+       * job's: going home then took the phone off the mint the newer tap's request names. */
+      var other = !!(visitAway && visitAway.lease && visitAway.job !== id);
+      if (stay || other) return Promise.resolve();
+      var mine = visitAway && visitAway.lease ? visitAway : null;
+      return carryGoHome(job ? job.home : '').then(function () { visitEnd(mine); });
     },
-
-    carryJobsOpen: function () { return carryJobs(); },
 
     /* Bring one home. `plan` is the way home quoted when it was asked for;
      * without it a fresh one is quoted. `opts.less`: the person has agreed to
@@ -25661,6 +30056,36 @@
      *
      * The phone is at its own mint when this resolves, whatever happened. */
     carryHome: function (id, plan, onStage, opts) {
+      /* A visit (`visitTake`), and the tap's lease handed over to it when this is that tap's walk home. */
+      // (one already being brought home is said to be, at once, rather than after its walk)
+      var was = carryJob(id);
+      if (was && carryBusy[id]) return Promise.resolve({ state: 'busy', job: was });
+      tapVisitEnd(id);
+      return visitTake('carry').then(function (v) {
+        var walked = FoxyWallet._carryHomeNow(id, plan, onStage, opts);
+        walked.then(function () { visitEnd(v); }, function () { visitEnd(v); });
+        return walked;
+      });
+    },
+
+    carryJobsOpen: function () { return carryJobs(); },
+
+    /* Send one back to the payer: the person's own choice, where bringing it
+     * home would cost more than was paid for or cannot be done. A visit, as
+     * bringing it home is. */
+    carryRefund: function (id) {
+      var was = carryJob(id);
+      if (was && carryBusy[id]) return Promise.resolve({ state: 'busy', job: was });
+      tapVisitEnd(id);
+      return visitTake('carry').then(function (v) {
+        var walked = FoxyWallet._carryRefundNow(id);
+        walked.then(function () { visitEnd(v); }, function () { visitEnd(v); });
+        return walked;
+      });
+    },
+
+    // `carryHome` inside its visit
+    _carryHomeNow: function (id, plan, onStage, opts) {
       var job = carryJob(id);
       if (!job) return Promise.resolve({ state: 'none' });
       /* Only a payment is carried, and the one that was paid.
@@ -25696,9 +30121,8 @@
       return walk;
     },
 
-    /* Send one back to the payer: the person's own choice, where bringing it
-     * home would cost more than was paid for or cannot be done. */
-    carryRefund: function (id) {
+    // `carryRefund` inside its visit
+    _carryRefundNow: function (id) {
       var job = carryJob(id);
       if (!job) return Promise.resolve({ state: 'none' });
       if (carryBusy[id]) return Promise.resolve({ state: 'busy', job: job });
@@ -25726,40 +30150,54 @@
       if (carrying) return carrying;
       var jobs = carryJobs();
       if (!jobs.length || !wallet || !routeOpen()) return Promise.resolve([]);
-      var home = canonicalMint(load(K.mint, '') || mintUrl || '');
-      var looked = false;
-      var run = jobs.reduce(function (chain, j) {
-        return chain.then(function (out) {
-          var job = carryJob(j.id);
-          if (!job || carryBusy[job.id]) return out;
-          looked = true;
-          carryBusy[job.id] = true;
-          var done = function () { delete carryBusy[job.id]; };
-          var step = carryStep(job);
-          step.then(done, done);
-          return step.then(function (r) {
-            if (r) {
-              out.push(r);
-              if (r.state !== 'asked' && r.state !== 'arrived' && typeof FoxyWallet._onCarry === 'function') {
-                try { FoxyWallet._onCarry(r); } catch (x) { console.warn('[foxy] carry watcher:', x && x.message); }
+      /* A visit (`visitTake`), when a job may take the phone to a payer's mint: it waits for any other visit to be
+       * over, and holds what a person starts until it is home. A pass whose jobs are all only noted, or all in
+       * somebody else's hands, goes nowhere and holds nothing. */
+      var walks = jobs.some(function (j) { return !carryBusy[j.id] && j.state !== 'asked' && j.state !== 'arrived'; });
+      // the pass itself, once any other visit is over: the jobs as they are by then
+      var carryPass = function (held) {
+        var home = canonicalMint(load(K.mint, '') || mintUrl || '');
+        var looked = false;
+        return carryJobs().reduce(function (chain, j) {
+          return chain.then(function (out) {
+            var job = carryJob(j.id);
+            if (!job || carryBusy[job.id]) return out;
+            // (with no visit taken, none is made: a job freed since the pass began waits for the next)
+            if (!held && job.state !== 'asked' && job.state !== 'arrived') return out;
+            looked = true;
+            carryBusy[job.id] = true;
+            var done = function () { delete carryBusy[job.id]; };
+            var step = carryStep(job);
+            step.then(done, done);
+            return step.then(function (r) {
+              if (r) {
+                out.push(r);
+                if (r.state !== 'asked' && r.state !== 'arrived' && typeof FoxyWallet._onCarry === 'function') {
+                  try { FoxyWallet._onCarry(r); } catch (x) { console.warn('[foxy] carry watcher:', x && x.message); }
+                }
               }
-            }
-            return out;
-          }, function (e) {
-            console.warn('[foxy] a payment to bring home was not looked at:', e && e.message);
-            return out;
+              return out;
+            }, function (e) {
+              console.warn('[foxy] a payment to bring home was not looked at:', e && e.message);
+              return out;
+            });
           });
+        }, Promise.resolve([])).then(function (out) {
+          /* Home again, if this pass took the phone anywhere. With every job
+           * in somebody else's hands it took it nowhere, and going "home" then
+           * pulled the wallet off the payer's mint under the walk that was on
+           * it: the melt was made there and written down as this mint's
+           * (`logTx` names the mint the wallet is on), so two mints' entries
+           * each stopped adding up (tools/live/offline-cross-scenarios.js
+           * `rev-po` on a loaded machine). */
+          if (!looked) return out;
+          return carryGoHome(home).then(function () { return out; });
         });
-      }, Promise.resolve([])).then(function (out) {
-        /* Home again, if this pass took the phone anywhere. With every job
-         * in somebody else's hands it took it nowhere, and going "home" then
-         * pulled the wallet off the payer's mint under the walk that was on
-         * it: the melt was made there and written down as this mint's
-         * (`logTx` names the mint the wallet is on), so two mints' entries
-         * each stopped adding up (tools/live/offline-cross-scenarios.js
-         * `rev-po` on a loaded machine). */
-        if (!looked) return out;
-        return carryGoHome(home).then(function () { return out; });
+      };
+      var run = (walks ? visitTake('carry') : Promise.resolve(null)).then(function (v) {
+        var passed = carryPass(!!v);
+        passed.then(function () { visitEnd(v); }, function () { visitEnd(v); });
+        return passed;
       });
       carrying = run;
       var free = function () { carrying = null; };
@@ -25837,9 +30275,15 @@
                   });
                 }
                 /* Never paid, nothing held that could still pay it, and an
-                 * hour old: the melt it was written for did not happen. */
+                 * hour old: the melt it was written for did not happen.
+                 * Where the far mint names its invoice's expiry, not before
+                 * that either: a melt given back as UNPAID can still land
+                 * until the invoice expires (`sweepMelts` keeps the note for
+                 * it), and the note's key is the only way to claim it. */
                 var held = load(K.melting, []).length > 0;
-                if (state === 'UNPAID' && !held && Date.now() - (Number(m.at) || 0) > 3600000) {
+                var expiresMs = Number(q && q.expiry) > 0 ? Number(q.expiry) * 1000 : 0;
+                if (state === 'UNPAID' && !held && Date.now() - (Number(m.at) || 0) > 3600000
+                    && (!expiresMs || Date.now() > expiresMs)) {
                   dropMoveNote(m.quote);
                   console.log('[foxy] a crossing note whose invoice was never paid is dropped');
                 }
@@ -25886,7 +30330,10 @@
       if (opts && opts.lockPub) {
         try {
           var tp = tillTermsFor(opts.lockPub, unit || 'sat', at);
-          tillExtra = { lockPub: tp.lock, till: true, tillPass: tp.id, tillTo: tp.to, tillExp: tp.exp };
+          tillExtra = /** @type {any} */ ({ lockPub: tp.lock, till: true, tillPass: tp.id, tillTo: tp.to, tillExp: tp.exp });
+          // the part that is a tip, on a code that offers tips (`opts.tillTip`, in the invoice's unit): sent to the keeper with it
+          var tipAsk = Math.round(Number(opts.tillTip) || 0);
+          if (tipAsk > 0 && tp.tips === true) tillExtra.tillTip = Math.min(tipAsk, Math.round(Number(amount) || 0));
         } catch (eTill) { return Promise.reject(eTill); }
       }
 
@@ -26595,8 +31042,15 @@
           }).catch(function (e) {
             // A paid invoice that will not claim used to fail here in silence,
             // and the sats sat at the mint with nothing said. Say it.
+            /* And which of three it was, since they read alike and mean different things: nothing was asked (no route, a
+             * switch under way), so the invoice is as it was; the mint answered no; or the answer was lost and the mint may
+             * have acted, which a later pass settles. Only the last two are a paid invoice not collected. */
+            var kind = (neverSent(e) || (e && (e.foxyElsewhere || e.foxyConnecting || e.offline))) ? 'no route, nothing was asked'
+              : mintRefused(e) ? 'the mint refused'
+              : answerLost(e) ? 'the answer was lost'
+              : 'it failed';
             console.warn('[foxy] could not claim invoice', String(entry.quote).slice(0, 12) + '\u2026',
-              '\u2014', FoxyWallet.reason(e));
+              '\u2014', kind + ':', FoxyWallet.reason(e));
           });
         });
       });
@@ -27257,8 +31711,15 @@
               /* Charged only when the hold really went: a drop that was refused
                * leaves it for the next sweep, which would charge it again. */
               dropMelt(entry.quote);
+              /* The crossing's note stays unless the mint said FAILED. UNPAID two minutes on is
+               * a guess that the melt never arrived, and it can still arrive: the far mint's
+               * invoice is then paid, and the note holds the only copy of that quote and of the
+               * key (NUT-20) that claims it. Dropped here, those sats sat at the far mint with
+               * no key anywhere. `finishMove` lets the note go once the far mint says how its
+               * quote ended (claimed, or UNPAID past its expiry), and runs on every connect and
+               * return to the app. */
               if (unit !== 'sat') { if (meltGone(entry.quote)) meltBackFee(here, unit, entry.splitFee); }
-              else if (meltGone(entry.quote)) { chargeUnsentFee(here, entry.splitFee); dropMoveNoteFor(entry.bolt11); }
+              else if (meltGone(entry.quote)) { chargeUnsentFee(here, entry.splitFee); if (state === 'FAILED') dropMoveNoteFor(entry.bolt11); }
               if (entry.swap) unitSwapLanded(entry.swap, 'melt', 'back');
               settled.push({ quote: entry.quote, paid: false, unit: unit });
               console.log('[foxy] held melt', entry.quote,
@@ -27278,8 +31739,9 @@
                 if (entry.cardOut) cardOutReturn(entry.cardOut, entry.proofs, here, entry.cardHold || { card: entry.card || '', unit: unit }, 0);
                 else addOwnProofs(entry.proofs, here, mw, unit, true);
                 dropMelt(entry.quote);
+                // the crossing's note kept, as on UNPAID above: PENDING is not the mint's last word
                 if (unit !== 'sat') { if (meltGone(entry.quote)) meltBackFee(here, unit, entry.splitFee); }
-              else if (meltGone(entry.quote)) { chargeUnsentFee(here, entry.splitFee); dropMoveNoteFor(entry.bolt11); }
+                else if (meltGone(entry.quote)) chargeUnsentFee(here, entry.splitFee);
                 if (entry.swap) unitSwapLanded(entry.swap, 'melt', 'back');
                 settled.push({ quote: entry.quote, paid: false, unit: unit });
                 console.log('[foxy] held melt', entry.quote, 'left PENDING by the mint but never spent \u2014 returned',
@@ -29046,6 +33508,32 @@
       return sum + unitSwapHeld(u, here);
     },
 
+    /* Pieces handed to a melt the mint has not settled (K.melting), at this mint, in `unit`: out of the pile and on no
+     * row until the melt lands (its row is written then) or comes back (into the pile). On their way, for the history
+     * audit only (16-history-lists.js `histAudit`, `histAuditUsd`), which read "off by" the melt for as long as the mint
+     * took: seconds for a payment, a swap's first leg, a card's payment, and for as long as the mint says PENDING, across
+     * a relaunch too. A swap's leg that `heldIn` already names (`unitSwapHeld`) is left out, so nothing is counted twice.
+     * Not the balance, and not what home says is pending: those are as they were. */
+    meltingIn: function (unit) {
+      var u = unitOf(unit) || 'sat';
+      var here = wallet ? mintOf(wallet) : '';
+      if (!here) return 0;
+      var named = {};
+      if (u !== 'sat') {
+        unitSwaps().forEach(function (r) {
+          if (r.meltQuote && recordUnit({ unit: r.from }) === u && canonicalMint(r.mint) === here) named[r.meltQuote] = true;
+        });
+      }
+      var sum = 0;
+      load(K.melting, []).forEach(function (e) {
+        if (!e || named[e.quote] || recordUnit(e) !== u) return;
+        // a hold that names no mint is from before holds named one, and is the connected mint's (`_sweepMeltsOnce`)
+        if (e.mint && canonicalMint(e.mint) !== here) return;
+        sum += sumProofs(e.proofs || []);
+      });
+      return sum;
+    },
+
     /* What a swap took after Foxy was put away, on its way back (`recoveringSats`). */
     recoveringIn: function (unit) {
       var u = unitOf(unit) || 'sat';
@@ -29289,6 +33777,8 @@
         }
         // asking the mint nothing, it writes all the same: room first, and the last token on its note (as `sendToken`)
         if (withLocked || exact || cover) { roomFor('token'); noteLastToken(); }
+        // and room on the handed-on list for every locked piece going out, before any is signed (`handedRoom`)
+        if (withLocked) handedRoom(piecesOfRows(withLocked.rows));
         if (withLocked) {
           /* Signed now, and only the rows that are really going out; struck
            * off once the token is written down (below), as `sendToken` does. */
@@ -29340,6 +33830,8 @@
               ? { pubkey: lockTo, locktime: Math.floor(o.lockUntil), refundKeys: o.refundTo ? [String(o.refundTo)] : undefined }
               : { pubkey: lockTo } });
             if (o.sigAll) lockOut.options.sigFlag = 'SIG_ALL';
+            // NUT-28: every key of the lock blinded per piece, E on each proof (a payment to a Cashu ID, 08e-cashu-id.js)
+            if (o.blindKeys) lockOut.options.blindKeys = true;
             if (Array.isArray(o.denominations) && o.denominations.length) {
               lockOut.denominations = o.denominations.map(function (d) { return Math.round(Number(d)); });
             }
@@ -29371,9 +33863,10 @@
             ? { memo: CHANGE_NOTE + changeNoteKey + ':' + want } : null);
           var hash = sendHash;
           var sent = sumProofs(split.send);
-          var tokFee = split.swapped
-            ? Math.max(0, sumProofs(have) - sent - sumProofs(split.keep || []))
-            : 0;
+          // what the mint charges for the pieces that went in, not what is left over (`swapCost`, as `sendToken`)
+          var cost = split.swapped ? swapCost(w, have, split) : null;
+          var tokFee = cost ? cost.fee : 0;
+          var costOff = cost && cost.off !== 0 ? { swapInSats: cost.wentIn, swapOutSats: cost.cameBack } : {};
           // the string is the money now: written down before anything else, with the swap's record still standing (`keepSentToken`)
           var handed = {};
           (split.handedOn || []).forEach(function (p) { if (p && p.secret) handed[p.secret] = true; });
@@ -29402,7 +33895,8 @@
             } else {
               logTx(unitRow(u, { dir: 'out', sats: sent - over, grossSats: over > 0 ? sent : undefined,
                                  changeSats: over > 0 ? over : undefined, changeState: over > 0 ? 'owed' : '',
-                                 dustSats: dust || undefined, feeSats: tokFee, settled: true, state: 'success',
+                                 dustSats: dust || undefined, feeSats: tokFee, swapInSats: costOff.swapInSats,
+                                 swapOutSats: costOff.swapOutSats, settled: true, state: 'success',
                                  memo: 'ecash', hash: hash, mint: at }));
             }
             logAudit({ hash: hash, sats: 0, feeSats: 0, unit: u, amount: sent, kind: 'token',
@@ -30577,9 +35071,10 @@
      *
      * The ledger goes first for the common case. The mint is asked only about
      * rows the ledger could not settle. A row the mint reports PAID has money
-     * waiting that nothing claimed, so it is claimed here; ISSUED means the
-     * watcher claimed it before dying. Resolves with the number of rows newly
-     * marked paid. */
+     * waiting that nothing claimed, so it is claimed here; ISSUED means a
+     * claim was made, and the share is ticked only once that claim's ecash is
+     * in the history (recovered here when its answer was lost). Resolves with
+     * the number of rows newly marked paid. */
     splitReconcile: function () {
       /* One walk at a time, however many things ask (see `reconciling`). */
       if (reconciling) return reconciling;
@@ -30662,7 +35157,25 @@
           // each row's invoice on its own circuit
           return onCircuit(w, 'quote:' + r.hash).checkMintQuoteBolt11(r.hash).then(function (q) {
             var state = q && q.state;
-            if (state === 'ISSUED') { mark(r); return; }
+            /* ISSUED says somebody claimed the invoice, not that this phone holds what was claimed.
+             *
+             * It used to tick the share on that word alone. A claim whose answer was lost, a second device on the
+             * same words, or a mint that says ISSUED wrongly all read the same, and the collecting screen said that
+             * person had paid while the sats were in no balance here. The issued-invoice recovery runs first
+             * (`recoverIssued`: the claim's recorded outputs, what the mint signed there and nothing here holds),
+             * and the share is ticked only once a settled entry for its invoice is in the history. ISSUED with no
+             * ecash on record leaves the share owed: the person can still tick it by hand, and a seed restore finds
+             * sats a claim recorded nowhere. */
+            if (state === 'ISSUED') {
+              return FoxyWallet.recoverIssued(r.hash).then(function () {
+                var landed = load(K.log, []).some(function (t) {
+                  return t && t.dir === 'in' && t.settled && t.hash === r.hash;
+                });
+                if (landed) { mark(r); return; }
+                console.warn('[foxy] split: the mint says', String(r.hash).slice(0, 12) + '\u2026',
+                  'was claimed, but no ecash for it is on this phone \u2014 the share stays owed');
+              });
+            }
             if (state === 'PAID') {
               // paid and never claimed: the money is at the mint waiting
               return FoxyWallet.claim(r.hash).then(function () {
@@ -30902,6 +35415,8 @@
       if (already.length) {
         return Promise.reject(new Error('That ecash has already been handed on once.'));
       }
+      // room on the handed-on list before anything is signed (`handedRoom`): a note that cannot be kept stops it here
+      try { handedRoom(mineProofs.length); } catch (eRoom) { return Promise.reject(eRoom); }
       return lockKeyMatching(lockedTo(mineProofs[0]), FoxyWallet._lockPubOf).then(function (key) {
         var mine = '';
         try { mine = key ? FoxyWallet._lockPubOf(key) : ''; } catch (e) { mine = ''; }
@@ -32048,6 +36563,10 @@
       if (withLocked || exact || cover) {
         try { roomFor('token'); noteLastToken(); } catch (eRoom) { return Promise.reject(eRoom); }
       }
+      // and room on the handed-on list for every locked piece going out, asked before any is signed (`handedRoom`)
+      if (withLocked) {
+        try { handedRoom(piecesOfRows(withLocked.rows)); } catch (eHand) { return Promise.reject(eHand); }
+      }
       if (withLocked) {
         /* Signed now, and only the rows that are really going out: signing
          * writes them down as handed on (`rememberHandedOn`) and drops them from
@@ -32160,6 +36679,9 @@
            * (08a-flashcard.js). The flag is part of each piece's secret, and
            * the card can sign for no piece written without it. */
           if (lockTo && opts && opts.sigAll) /** @type {any} */ (lockOut.options).sigFlag = 'SIG_ALL';
+          /* NUT-28 (pay-to-blinded-key): every key of the lock blinded for each piece by a throwaway key of its own,
+           * whose public half goes on the proof (`p2pk_e`). A payment to a Cashu ID (08e-cashu-id.js) is made so. */
+          if (lockTo && opts && opts.blindKeys) /** @type {any} */ (lockOut.options).blindKeys = true;
           if (lockTo && opts && Array.isArray(opts.denominations) && opts.denominations.length) {
             lockOut.denominations = opts.denominations.map(function (d) { return Math.round(Number(d)); });
           }
@@ -32225,14 +36747,16 @@
         var token = encodeToken(at, split.send, 'sat', changeNoteKey && Number(split.over) > 0
           ? { memo: CHANGE_NOTE + changeNoteKey + ':' + want } : null);
         var hash = sendHash;
-        /* What the swap cost. The pile went in, the token and the change came
-         * out, and the difference is the mint's. It was written as 0, so a
-         * 945-sat token that took 956 from the pile left the audit 11 short,
-         * and another phone 4 short over two payments. Exact
+        /* What the swap cost: what the mint charges for the pieces that went
+         * in (`swapCost`). It was written as 0, so a 945-sat token that took
+         * 956 from the pile left the audit 11 short, and another phone 4 short
+         * over two payments. Then it was the difference between what went in
+         * and what came out, which booked a lost piece of change as fee. Exact
          * pieces swap nothing and cost nothing. */
-        var tokFee = split.swapped
-          ? Math.max(0, sumProofs(have) - sumProofs(split.send) - sumProofs(split.keep || []))
-          : 0;
+        var cost = split.swapped ? swapCost(w, have, split) : null;
+        var tokFee = cost ? cost.fee : 0;
+        // the swap that did not add up says so on its entry: what went in and what came back
+        var costOff = cost && cost.off !== 0 ? { swapInSats: cost.wentIn, swapOutSats: cost.cameBack } : {};
 
         /* The string IS the money now — those proofs are out of the balance
          * and exist nowhere else. Written down before anything else can go
@@ -32295,6 +36819,8 @@
             // paid over by too little to come back: said on the entry, counted in what it cost
             dustSats: dust || undefined,
             feeSats: tokFee,
+            swapInSats: costOff.swapInSats,
+            swapOutSats: costOff.swapOutSats,
             // settled as far as this wallet is concerned: the proofs left the
             // balance. Whether anyone claimed the token is the mint's business,
             // and nothing here checks after the fact.
@@ -32598,6 +37124,9 @@
     classify: function (text) {
       // a cashier code (08d-till.js), by its address alone: one that has ended is still named, and refused as one
       if (tillUrlShape(text)) return 'till';
+      /* a Cashu ID (08e-cashu-id.js), by its prefix: one mistyped or cut short is still named, and refused as one
+       * ("That is not a Cashu ID.") rather than as not a payment */
+      if (/^foxyid1[A-Za-z0-9_-]{8,200}$/i.test(String(text || '').trim())) return 'cashuid';
       var t = FoxyWallet.unwrap(text).replace(/^lightning:/i, '');
       if (/^ln(bc|tb|bcrt)\w{20,}$/i.test(t)) return 'invoice';
       if (/^lnurl1[02-9ac-hj-np-z]{10,}$/i.test(t)) return 'lnurl';
@@ -32996,6 +37525,13 @@
       piles().forEach(function (p) { add(p.mint, p.unit, sumProofs(proofs(p.mint, p.unit))); });
       var held = load(K.held, {}) || {};
       Object.keys(held).forEach(function (id) { var h = held[id]; if (h && h.mint) add(h.mint, h.unit, sumProofs(h.proofs || [])); });
+      /* And what a melt the mint has not settled holds (K.melting): the audit counts it as on its way (`meltingIn`), and its
+       * row, written when it lands, takes it out again. Left out, a history cleared while a payment was PENDING said DOES
+       * NOT ADD UP by that melt from the moment it landed, for good. A hold that names no mint is the connected one's. */
+      (load(K.melting, []) || []).forEach(function (e) {
+        var at = (e && e.mint) || mintUrl;
+        if (e && at) add(at, recordUnit(e), sumProofs(e.proofs || []));
+      });
       rows.forEach(function (e) {
         if (e.state === 'failed' || e.failed || e.atRisk) return;
         if (e.dir === 'in' && (e.changeRow || /^(tap|req)-change-/.test(String(e.hash || '')))) return;
@@ -33046,7 +37582,8 @@
       var meta = load('foxy.txmeta', {});
       Object.keys(meta).forEach(function (hash) {
         var t = meta[hash] && meta[hash].token;
-        if (typeof t === 'string' && t && !seen[t]) { seen[t] = true; out.push({ hash: hash, token: t }); }
+        // `card`: a load put onto a card (`to: 'card'`), kept for a lost card's take-back, not a token handed to anyone
+        if (typeof t === 'string' && t && !seen[t]) { seen[t] = true; out.push({ hash: hash, token: t, card: meta[hash].to === 'card' }); }
       });
       var last = load(K.outtok, null);
       if (last && last.token && !seen[last.token]) out.push({ hash: last.hash || null, token: last.token });
@@ -33462,6 +37999,10 @@
           openTill.tillPass = tillPass.id;
           openTill.tillTo = tillPass.to;
           openTill.tillExp = tillPass.exp;
+          /* The part of it that is a tip (`o.tillTip`, in its unit), on a code that offers tips: said to the
+           * keeper with the payment (08d-till.js `tillOutboxAdd`), never more than the request. */
+          var tipAsk = Math.round(Number(o.tillTip) || 0);
+          if (tipAsk > 0 && tillPass.tips === true) openTill.tillTip = n > 0 ? Math.min(tipAsk, n) : 0;
           saveOpenRequests();
         }
         return text;
@@ -33793,6 +38334,10 @@
       /* Not while a card's visit has this phone at the card's mint (08a-flashcard.js, `cardVisit`): the walk would set out from
        * there, and come back to it. Once the phone is home. */
       if (cardAway) return cardAway.finished.then(function () { return FoxyWallet.claimUnclaimed(opts); });
+      /* Nor while another visit has it somewhere (`visitTake`: a payment being brought home, a tap at a payer's
+       * mint): the walk set out from the payer's mint, and came home to it. */
+      var away = visitBusy();
+      if (away) return Promise.resolve(away).then(null, function () { return null; }).then(function () { return FoxyWallet.claimUnclaimed(opts); });
       // a card's payments kept with no route, put right first where a write between two of their steps did not land (08a-flashcard.js)
       try { cardKeptTidy(); } catch (eTidy) { console.warn('[foxy] card: kept payments could not be looked over:', (eTidy && eTidy.message) || eTidy); }
       var all = unclaimed(), ids = Object.keys(all);
@@ -35359,6 +39904,8 @@
               save(K.atRisk, all);
               try { FoxyWallet.tag(g.hash, { atRisk: false }); } catch (x) {}
             };
+            /** @type {any} */
+            var takenRow = null;
             if (spent.length) {
               /* Redeemed after the refusal. Out of the pile, and the entry is
                * the payment it turned out to be. */
@@ -35366,6 +39913,9 @@
               spent.forEach(function (pr) { gone[pr.secret] = true; });
               setProofs(proofs(here, gu).filter(function (pr) { return !(pr && gone[pr.secret]); }), here, w, gu);
               var took = sumProofs(spent);
+              /* Less a short refund that came for these pieces (`atRiskRefunded`, `afterRefusal`): what the receiver kept
+               * is what they took less what they sent back, and the refund is in the pile already. */
+              var back = Math.min(took, Math.max(0, Number(g.refund) || 0));
               try {
                 /* And change it was owed is not coming. The entry went on
                  * saying `owed`, which the history card counts as money still
@@ -35375,12 +39925,14 @@
                 var owedOn = (load(K.log, []) || []).some(function (e) {
                   return e && e.hash === g.hash && e.changeState === 'owed' && Number(e.changeSats) > 0;
                 });
-                amendTx(g.hash, amountFields(gu, took, Object.assign({ state: 'success', settled: true, highRisk: false, taken: true,
-                                                memo: 'ecash, taken after a refusal' },
+                amendTx(g.hash, amountFields(gu, took - back, Object.assign({ state: 'success', settled: true, highRisk: false, taken: true,
+                                                memo: back ? 'ecash, refused and partly returned' : 'ecash, taken after a refusal' },
+                                              back ? { refunded: true, refundedPart: back } : {},
                                               owedOn ? { changeState: 'never came' } : {})));
               } catch (x) {}
               console.warn('[foxy] ecash a phone refused has since been redeemed: ' + (gu === 'sat' ? took + ' sats' : moneyWords(took, gu)) + '; its entry says paid');
-              out.push(Object.assign({ state: 'taken', hash: g.hash }, inUnit(took)));
+              takenRow = Object.assign({ state: 'taken', hash: g.hash, recovered: 0 }, inUnit(took), back ? { refund: back } : {});
+              out.push(takenRow);
               if (!live.length) { entomb(took); return null; }
             }
             /* Unspent: swapped for fresh pieces, as a split of this phone's
@@ -35400,6 +39952,7 @@
               // a fee in sats where it always went; one in another unit on a row of its own (`meltBackFee`)
               if (fee > 0) meltBackFee(here, gu, fee);
               if (spent.length) entomb(sumProofs(spent)); else forget();
+              if (takenRow) takenRow.recovered = sumProofs(fresh || []);
               try { amendTx(g.hash, { highRisk: false, takenBack: true }); } catch (x) {}
               console.log('[foxy] ecash at risk is safe again: ' + (gu === 'sat' ? sumProofs(fresh || []) + ' sats' : moneyWords(sumProofs(fresh || []), gu))
                 + ' swapped for pieces nobody has seen');
@@ -38169,7 +42722,11 @@
      * once none is. `opts.unit` ('sat' or
      * 'usd') picks a new one's unit; without it, dollars where this phone
      * holds dollars at a mint that issues them. A live code is never
-     * dropped; up to four are kept, and only an ended one goes. */
+     * dropped; up to eight are kept, and only one run out goes.
+     * `opts.fresh`: another code whatever is live, for another cashier (the
+     * list's ADD); `opts.tips` its own answer to ACCEPT TIPS? (the open till's
+     * otherwise), and `opts.label` a name for its row. Resolves also { tips,
+     * label }, `tips` whether the code offers them. */
     tillPassMake: function (opts) { return tillPassMake(opts); },
 
     /* Keeper: the codes still live, newest last: { id, unit, mint, mints,
@@ -38180,7 +42737,8 @@
       return tillPrune().filter(function (r) { return Number(r.exp) * 1000 > now; })
         .sort(function (a, b) { return Number(a.made) - Number(b.made); })
         .map(function (r) {
-          return { id: r.id, unit: r.unit, main: tillMainOf(r), mint: r.mint, mints: tillMintsOf(r), exp: r.exp, made: r.made, text: tillPassText(r) };
+          return { id: r.id, unit: r.unit, main: tillMainOf(r), mint: r.mint, mints: tillMintsOf(r), exp: r.exp, made: r.made, text: tillPassText(r),
+                   label: String(r.label || ''), tips: tillTipsOn(r), ended: !!r.endedAt };
         });
     },
 
@@ -38253,6 +42811,298 @@
     // for the suites: a row put in the outbox as a payment would put it, and the wait between tries (ms)
     _tillOutboxAdd: function (o) { return tillOutboxAdd(o); },
     _tillRetryMs: 0,
+    /* ---- the Cashu ID (08e-cashu-id.js, docs/CASHU-ID.md) -------------
+     *
+     * For the screens. MY CASHU ID shows `cashuIdMine` (its `text` is what the
+     * QR holds); a pasted or scanned ID is read by `cashuIdCheck` and kept as
+     * a contact by `cashuIdAdd`; `cashuIdPay` pays one; the phone hands what
+     * arrives to `_cashuIdArrived`, and this seed's own copies, after a restore,
+     * to `_cashuIdCopy`. What arrives at a mint this phone does not use waits for
+     * its receiver in `cashuIdWaiting` (raised by `_onCashuIdOffer`), and is
+     * answered by `cashuIdDecide`; a remembered answer (`cashuIdChoices`) runs
+     * by itself. */
+
+    /* ANY WALLET (MY CASHU ID's second button): a standard NUT-18 request any Cashu wallet pays, `opts.unit` 'sat' or
+     * 'usd', no amount, this phone's mints that honour a lock (the default first), locked to a fresh key of the seed's
+     * lock pool, delivered over Nostr to the ID's delivery key. Resolves { text (creqA…), id, pub, unit, mints, target };
+     * rejects with the sentence to show. Each call takes a new key. */
+    cashuIdAnyRequest: function (opts) { return cidAnyRequest(opts || {}); },
+
+    /* PAID TO YOUR ID KEY answered: `take` true (TAKE IT ANYWAY) has the ID key sign for that delivery alone and takes
+     * it; false (LEAVE IT) drops it. Resolves { state, why }; never rejects. `_onCashuIdUnblinded(view)` raises the card:
+     * { key, name, mint, host, unit, amount, at, refund }. */
+    cashuIdUnblinded: function (key, take) { return cidBareDecide(String(key || ''), !!take); },
+
+    /* This phone's own ID: { text, id, nostr, sig }, from the seed's keys. */
+    cashuIdMine: function () { return cidMine(); },
+
+    /* MY CASHU ID was shown: from now on the phone listens for payments to it
+     * (`cidListenNow`), at once and after every connect, and names itself to
+     * the contacts it pays. */
+    cashuIdShown: function () {
+      cidMarkInUse();
+      return cidListenNow();
+    },
+
+    /* Whether `text` is shaped like an ID string (a bad checksum still is). */
+    cashuIdLooks: function (text) { return cidShape(text); },
+
+    /* An ID string read: { id, nostr }, or null. `cashuIdProblem` says why
+     * not in a sentence, '' for a good one. Never throws. */
+    cashuIdDecode: function (text) { var r = cidRead(text); return r.id ? { id: r.id, nostr: r.nostr } : null; },
+    cashuIdProblem: function (text) { var r = cidRead(text); return r.id ? '' : String(r.why || 'That is not a Cashu ID.'); },
+
+    /* An ID string before it is kept: { id, nostr, text, own, name } (`name`
+     * the contact's where this ID is one already). Rejects with the sentence for
+     * one that is not an ID, a version 1 string among them. */
+    cashuIdCheck: function (text) {
+      var r = cidRead(text);
+      if (!r.id) return Promise.reject(new Error(String(r.why || 'That is not a Cashu ID.')));
+      return cidMine().then(function (mine) { return mine; }, function () { return null; }).then(function (mine) {
+        var known = cidContactOf(r.id);
+        return { id: r.id, nostr: r.nostr, text: cidEncode(r.id, r.nostr, r.sig),
+                 own: !!(mine && mine.id === r.id), name: known ? known.name : '' };
+      });
+    },
+
+    /* Kept as a contact under `name`: { handle, name, at, cid }. An ID that is a
+     * contact already is renamed, not written twice; its address is the one the
+     * ID itself signed. This phone's own is refused. */
+    cashuIdAdd: function (text, name) {
+      var r = cidRead(text);
+      if (!r.id) return Promise.reject(new Error(String(r.why || 'That is not a Cashu ID.')));
+      return cidMine().then(function (mine) {
+        if (mine.id === r.id) throw new Error('That is your own Cashu ID.');
+        var row = cidKeep(r, name);
+        // a new contact's keys are listened on for its messages (08f-cashu-msg.js)
+        if (cidInUse()) cmsgReopenSoon();
+        return row;
+      });
+    },
+
+    /* The contacts that are Cashu IDs, newest first. */
+    cashuIdContacts: function () { return cidContactsNow(); },
+
+    /* Pay a contact: `who` its ID string or ID key, `amount` in sats or, with
+     * `opts.unit` 'usd', in cents; `opts.note` a few words they see. Resolves
+     * { hash, token, sent, name, lockUntil, row } (see `cidPay`). */
+    cashuIdPay: function (who, amount, opts) { return cidPay(who, amount, opts); },
+
+    /* How long a payment waits for its contact before it comes back, in seconds. */
+    cashuIdLockSeconds: function () { return CID_TESTS && Number(FoxyWallet._cashuIdLockS) > 0 ? Number(FoxyWallet._cashuIdLockS) : CID_LOCK_S; },
+
+    /* Listen for payments to this phone's ID (once it is in use), and take what
+     * was kept. Resolves 1 when a relay is listening, else 0. `cashuIdHush` stops. */
+    cashuIdListen: function () { return cidListenNow(); },
+    cashuIdHush: function () {
+      cidListenGone();
+      return bridgeAsk('cashuIdInboxClose', {}, 5000).then(function () { return true; }, function () { return false; });
+    },
+
+    /* One delivery, from the phone: 'taken', 'kept', 'waiting' (at another mint: for its receiver to decide, or too small
+     * to bring home yet), 'away' (taken at another mint, its walk home left to `carryResume`), 'there' (kept at another
+     * mint, now one this phone uses), 'back' (paid back to its payer), 'seen', 'held' (read before the mint was connected
+     * for real, taken once it is) or 'refused'; never rejects. One every check on this phone has passed is said to the app
+     * as arriving (`_onCashuIdArriving({ unit, amount, name, mint })`) before the mint swaps it, and as paid once it has. */
+    _cashuIdArrived: function (body) {
+      // a message's first, to the public key, is not a payment (08f-cashu-msg.js)
+      if (cmsgIsFirst(body)) return cmsgFirstArrived(body);
+      // read before the mint was connected for real: held until it is ('held', `cidHoldEarly`)
+      if (cidHoldEarly(body)) return Promise.resolve('held');
+      return cidArrived(body).then(null, function (e) {
+        console.warn('[foxy] cashu id: a delivery could not be read:', (e && e.message) || e);
+        return 'refused';
+      });
+    },
+
+    /* This seed's own copy of a payment it made, read back after a restore:
+     * 'rebuilt', 'seen', 'collected' or 'refused'; never rejects. */
+    _cashuIdCopy: function (body) { return cidCopyArrived(body); },
+
+    /* Payments at mints this phone does not use waiting for their receiver, newest last: { key, name, mint, host, unit,
+     * amount, at, drop, back, lands, toUnit, fee, why, small, others, total, choice } (`cidOfferView`), `name` a contact's
+     * only where the payer proved it, `back` whether SEND IT BACK can be offered, `lands`/`toUnit`/`fee` the way home as
+     * quoted and `why` why BRING IT HOME cannot be done now. HISTORY lists them and the card asks; one not answered goes
+     * back to its payer after `drop`. */
+    cashuIdWaiting: function () { return cidOfferRows().map(cidOfferView); },
+
+    /* The card's answer for waiting delivery `key`: 'home' (BRING IT HOME), 'keep' (KEEP IT THERE) or 'back' (SEND IT
+     * BACK), remembered for its mint with `always`. Resolves { state, why, view } (`cidDecide`); never rejects. */
+    cashuIdDecide: function (key, choice, always) { return cidDecide(String(key || ''), String(choice || ''), !!always); },
+
+    /* The answers remembered by the card's tick, by host: [{ host, choice }]. `cashuIdChoiceClear(host)` forgets one, and
+     * with no host every one: the next payment at that mint asks again. */
+    cashuIdChoices: function () { return cidChoiceList(); },
+    cashuIdChoiceClear: function (host) { cidChoiceClear(host); return cidChoiceList(); },
+
+    /* Money this phone holds at a mint it does not use, brought home to its default mint as one payment (08e-cashu-id.js
+     * `cidCarry`): { mint, unit, amount, toUnit?, name?, hash?, before? }. Dollars land as dollars at a default mint that
+     * issues them and as sats at one that does not; sats as sats. It goes by the carry-home job, so a crossing that dies
+     * after its melt is finished on the next launch, connection or return. Resolves 'taken' once home, 'away' while it
+     * is still that mint's, 'refused' for nothing to bring. What a Cashu ID payment's BRING IT HOME does, for any other
+     * arrival at another mint to use. */
+    bringHome: function (delivery) { return cidCarry(delivery || {}); },
+
+    /* What bringing `amount` (in `unit`) home from `mint` would land, before anything is taken: { lands, toUnit, fee,
+     * why } (`cidHomeQuote`; `fee` in `unit`, `lands` 0 with `why` where the fee would take it all). `pieces`: how many
+     * pieces it comes in (the swap that takes them in is part of the cost). */
+    bringHomeQuote: function (mint, unit, amount, pieces) {
+      var from = canonicalMint(String(mint || '')), u = unitOf(unit) || 'sat';
+      var home = canonicalMint(String(load(K.mint, '') || mintUrl || ''));
+      if (!from || !home || from === home) return Promise.reject(new Error('That money is at this phone’s own mint.'));
+      return tillMintLoad(from, false).then(function () {
+        return cidHomeQuote(from, home, u, Math.round(Number(amount) || 0), Math.max(1, Math.round(Number(pieces) || 1)), tillKeysAt(from, u));
+      });
+    },
+
+    /* Send what is due, and look at what is out: { collected, back }. And the
+     * copies whose moment has come. */
+    cashuIdDeliver: function () { return cidDeliverAll(); },
+    cashuIdCopies: function () { return cidCopyAll(); },
+    cashuIdWatch: function () { return cidWatchAll(); },
+
+    /* What was sent to contacts, newest last, without the tokens. */
+    cashuIdOutbox: function () {
+      return cidOutboxRows().map(function (r) {
+        return { id: r.id, name: r.name, contact: r.contact, mint: r.mint, unit: r.unit, amount: r.amount, hash: r.hash,
+                 at: r.at, lockUntil: r.lockUntil, sentAt: r.sentAt || null, tries: Number(r.tries) || 0, state: r.state,
+                 copyAt: Number(r.copyAt) || null, copiedAt: Number(r.copiedAt) || null, restored: !!r.restored };
+      });
+    },
+
+    /* For the suites only (`CID_TESTS`, read as the wallet loads): the blinding
+     * with a fixed throwaway key, a piece's key from a base, the ID string, the
+     * nprofile, and the waits (s, ms). A page in the app answers null and reads
+     * neither wait. */
+    _cashuIdBlind: function (idHex, eHex, refundHex) { return CID_TESTS ? cidBlind(idHex, eHex, refundHex) : null; },
+    _cashuIdPieceKey: function (baseHex, j) { return CID_TESTS ? cidPieceKey(baseHex, j) : null; },
+    _cashuIdEncode: function (idHex, nostrHex, sigHex) { return CID_TESTS ? cidEncode(idHex, nostrHex, sigHex) : null; },
+    _cashuIdNprofile: function (xonlyHex, relays) { return CID_TESTS ? cidNprofile(xonlyHex, relays) : null; },
+    _cashuIdLockS: 0,
+    _cashuIdRetryMs: 0,
+    _cashuIdFreshMs: 0,
+    _cashuIdCopyMs: 0,
+
+
+    /* ---- BANK ACCOUNT (08f-bank.js) -------------------------------------
+     *
+     * For SEND > BANK ACCOUNT. `bankExchanges` lists the three; a username is
+     * cleaned by `bankUser` and looked up by `bankLookup`; what is chosen is
+     * kept by `bankSave` and read back by `bankSaved` (`bankForget` drops it);
+     * `bankOpen` opens the exchange's site, which opens its app where it is
+     * installed (the native side holds the addresses: FoxyBridge
+     * `companySites`). */
+
+    // [{ key, name, domain, by }], in the order the list shows them
+    bankExchanges: function () {
+      return ['strike', 'river', 'cashapp'].map(function (k) {
+        return { key: k, name: BANK[k].name, domain: BANK[k].domain, by: BANK[k].by, unchecked: !!BANK[k].unchecked };
+      });
+    },
+    bankUser: function (ex, raw) { return bankUser(ex, raw); },
+    bankLookup: function (ex, raw) { return bankLookup(ex, raw); },
+    bankSaved: function () { return bankSaved(); },
+    bankSave: function (ex, raw) { return bankSave(ex, raw); },
+    bankForget: function () { try { localStorage.removeItem(BANK_KEY); } catch (e) {} },
+    bankOpen: function (ex) {
+      var b = BANK[ex];
+      if (!b || !FoxyWallet.openCompany) return Promise.resolve();
+      return FoxyWallet.openCompany(b.site);
+    },
+    /* ---- messages between Cashu IDs (08f-cashu-msg.js, docs/CASHU-ID.md "Messages") -------------
+     *
+     * For the screens: CONTACTS shows each contact's unread count (`cashuMsgThreads`), a contact's screen its messages
+     * (`cashuMsgThread`) and SEND writes one (`cashuMsgSend`). Only once this phone's ID is in use (`cashuMsgOn`): with
+     * no ID in use there are no messages, none are listened for and none can be written. */
+
+    // whether messages can be read and written here: MY CASHU ID was shown, or its words restored
+    cashuMsgOn: function () { return cidInUse(); },
+
+    /* The conversations: { peer, name, contact, unread, lastAt, lastText }, contacts and the people who are not contacts
+     * yet that wrote ([] with no ID in use). */
+    cashuMsgThreads: function () { return cmsgThreadsNow(); },
+
+    /* One conversation, oldest first: { peer, name, contact, card, unread, msgs: [{ id, dir, text, at, mark }] }, `mark`
+     * 'sending…' or 'sent' for this phone's own, `card` the ID string of someone who is not a contact. null
+     * for none. */
+    cashuMsgThread: function (peer) {
+      if (!cidInUse()) return null;
+      var p = String(peer || '').toLowerCase();
+      var t = cmsgThread(cmsgAll(), p, false);
+      if (!t && cidContactOf(p)) t = cmsgNewThread(p);
+      return t ? cmsgView(t) : null;
+    },
+
+    /* The payments to and from Cashu IDs that INBOX lists beside the messages, newest first: { peer, dir, unit,
+     * amount, at } (`cmsgPaymentsNow`). */
+    cashuMsgPayments: function () { return cmsgPaymentsNow(); },
+
+    // their messages read: the unread count goes to 0
+    cashuMsgSeen: function (peer) { cmsgRead1(peer); },
+
+    /* Write to a contact (its ID key or ID string): resolves { id, i, first } once it is kept and waiting to go; rejects
+     * in words. */
+    cashuMsgSend: function (peer, text) { return cmsgSend(peer, text); },
+
+    cashuMsgListen: function () { return cmsgListenNow(); },
+    cashuMsgDeliver: function () { return cmsgDeliverAll(); },
+
+    /* One message from the phone (`cashuIdMsgOpen`): 'kept', 'seen' or 'refused'; never rejects. */
+    _cashuMsgArrived: function (peer, way, i, body) { return cmsgArrived(peer, way, Number(i), body); },
+
+    // the suites' waits (honoured only on a test's page, `CID_TESTS`)
+    _cashuMsgDelayMs: undefined,
+    _cashuMsgRetryMs: 0,
+    _cashuMsgReopenMs: 0,
+
+
+    /* ---- tips at the till, and the keeper's list of codes (08f-till-tips.js) ---
+     *
+     * For the screens. The keeper's answer to ACCEPT TIPS? as its till opens
+     * (`tillTipsSet`, read back by `tillTipsNow`): { on, to, ids }, `to` 'self',
+     * 'one' or 'group', `ids` up to eight { id, nostr, name, pct } whose
+     * percentages add up to 100. A sale's tip in the keeper's own till is passed
+     * on by `tillTipTaken`; a cashier's comes with its delivery and is passed on
+     * by the wallet. `tillPassList` and `tillPassEnd` are CASHIER CODE's list. */
+
+    tillTipsSet: function (t) { return tillTipsSet(t); },
+    tillTipsNow: function () { return tillTipsNow(); },
+    // an answer checked without keeping it: '' for a good one, else why not in a sentence
+    tillTipsProblem: function (t) {
+      try { tipsCheck(t); return ''; } catch (e) { return String((e && e.message) || e); }
+    },
+
+    /* Keeper: a sale in this phone's till has landed with a tip in it. `o`: { amount, unit, mint,
+     * hash }, `amount` the tip in whole sats or cents of `unit`; passed on as the till's answer says.
+     * Resolves { kept, jobs, waiting, seen }. */
+    tillTipTaken: function (o) {
+      try {
+        return Promise.resolve(tipForward({ tips: tillTipsNow(), amount: o && o.amount, unit: o && o.unit,
+          mint: (o && o.mint) || mintUrl, hash: o && o.hash, from: 'till' }));
+      } catch (e) { return Promise.reject(e); }
+    },
+
+    /* Keeper: the codes, { live, past } (see `tillPassList`): each { id, label, unit, main, mints,
+     * tips: { on, to, names, pcts }, made, exp, endedAt, how, until, text }. */
+    tillPassList: function () { return tillPassList(); },
+    // Keeper: END on a live code. True where one was ended.
+    tillPassEnd: function (id) { return tillPassEnd(String(id || '')); },
+
+    /* The tips, as one object for anything that passes tips on: check, split,
+     * forward, jobs, carry, run, MAX_IDS, MIN. */
+    tillTips: tillTips,
+    // for the suites: the wait between a failed tip payment and the next try (ms), on a test page only
+    _tillTipRetryMs: 0,
+    /* ---- the reminder after fifteen days away (08i-remind.js) ----
+     *
+     * `remindView` { eligible, on } for the switch REMIND ME AFTER 15 DAYS; `remindStatus` resolves 'none', 'on', 'off' or
+     * 'ask' (the card is due); `remindTurnOn` resolves 'on' or 'refused'; `remindTurnOff` and `remindNotNow`. */
+    remindView: function () { return remindView(); },
+    remindStatus: function () { return remindStatus(); },
+    remindTurnOn: function () { return remindTurnOn(); },
+    remindTurnOff: function () { return remindTurnOff(); },
+    remindNotNow: function () { remindNotNow(); },
+
     /* ---- the screen lock ---------------------------------------------
      *
      * A PIN in front of the app. The PIN itself is never stored: what is kept
@@ -38600,6 +43450,21 @@
      * with the mint, and the phone keeps Tor on the network while it is. */
     /** @type {((on: boolean) => void) | null} */
     _putAway: null,
+    /* Foxy has left the screen: no question waiting to be asked again on a fresh circuit is (`askedAgain`, `statesOf`). */
+    _stopAskingAgain: function () {
+      torSilentAway();                        // the askings unanswered are counted from the return (`torSilentAsked`)
+      var held = askAgainStops.splice(0, askAgainStops.length);
+      held.forEach(function (letGo) { try { letGo(); } catch (e) {} });
+      return held.length;
+    },
+    /* Tor was asked for new circuits after askings unanswered since a return, and no mint has answered since
+     * (`torSilentAsked`): for the shield on the money card. */
+    torRebuilding: function () { return torSilent.until > Date.now(); },
+    /* And it went on unanswered after those, with no host answering anything: Tor's connections are being started
+     * again (network off and on), for the shield's words. */
+    torRestarting: function () { return torSilent.restarting && torSilent.until > Date.now(); },
+    // for the tests: the count of askings unanswered in a row since the return, and whether one is counted at all
+    _torSilent: function () { return { armed: torSilent.armed, count: torSilent.count }; },
     _tidying: false,
     /** @type {any} */
     _topUp: null,
@@ -38778,6 +43643,7 @@
         return msg;
       }
       var run = ask(o.foxyCircuit ? String(o.foxyCircuit) : '').then(function answered(text) {
+        torCarried();
         var s = String(text || '');
         var nl = s.indexOf('\n');
         var code = Number(s.slice(0, nl)) || 0;
@@ -38832,6 +43698,16 @@
           if (badKey) { console.warn('[foxy]', badKey); throw new Error(badKey); }
           // a mint's own description of itself, for the next wallet to ask
           if (keyUrl) rememberKeyBody(keyUrl, raw);
+          /* An answer about another quote than the one asked, or in another unit or amount: refused whole, before
+           * anything reads it (`quoteAnswerProblem`), and said once. */
+          var badQuote = o.foxyText ? '' : quoteAnswerProblem(o.method, o.endpoint, o.requestBody, parsed);
+          if (badQuote) {
+            console.warn('[foxy] ' + hostOf(String(o.endpoint || '')).split('/')[0] + ' answered about a quote other than the one asked ('
+              + badQuote + '); refused, and nothing was done with it');
+            var wrongQuote = /** @type {any} */ (new Error('The mint’s answer was not about the quote asked, so it was not used. Nothing was done.'));
+            wrongQuote.foxyQuoteRefused = true;
+            throw wrongQuote;
+          }
           return parsed;
         }
         /* The errors cashu-ts throws itself, not a plain Error.
@@ -39281,6 +44157,8 @@
        * coming back this does nothing, and Tor coming up asks again. */
       dropSpare();
       warmSpareSoon();
+      // the Cashu ID's inbox was closed with the rest as Foxy left: the next listen opens it, whatever the catch-up says
+      cidListenGone();
       // and the newest block header for the cards, if the one kept has grown old while the app was away
       headerLater();
       if (FoxyWallet._onResume) {
@@ -39301,7 +44179,7 @@
         // a store short of room: sent tokens the mint says are claimed let go from their notes (`tidySentTokens`)
         .then(function () { return tidySentTokens().then(null, function () { return 0; }); })
         // and a till's, waited for by nobody: a cashier's outbox sent, a keeper listening again (08d-till.js)
-        .then(function () { tillCatchUp(); })
+        .then(function () { tillCatchUp(); cidCatchUp(); tipOnRoute(); })
         .catch(function (e) { console.warn('[foxy] resume sweep:', e && e.message); })
         /* After the melts are settled, so a crossing whose melt was cut has
          * been paid or given back by the time its note is looked at. */
@@ -39593,10 +44471,13 @@
           // in the refund's own unit: a dollar refund says its cents as `amount`, and 0 sats
           var ru = unitOf((r && r.unit) || 'sat') || 'sat';
           var rn = Math.round(satsOf(r && (r.amount != null ? r.amount : r.sats))) || 0;
-          atRiskRefunded(refundOf, rn, 'row').then(function () {
+          atRiskRefunded(refundOf, rn, 'row').then(function (how) {
             if (typeof FoxyWallet._onAtRisk === 'function') {
-              try { FoxyWallet._onAtRisk({ state: 'refunded', hash: refundOf, sats: ru === 'sat' ? rn : 0, unit: ru, amount: rn }); } catch (x) {}
+              try { FoxyWallet._onAtRisk({ state: 'refunded', hash: refundOf, sats: ru === 'sat' ? rn : 0, unit: ru, amount: rn,
+                                           short: how === 'partial' }); } catch (x) {}
             }
+            // a refund for part of it: the mint says which pieces were spent before any is struck (`atRiskRefunded`)
+            if (how === 'partial' && routeOpen() && FoxyWallet.settleAtRisk) return FoxyWallet.settleAtRisk();
           }, function () {});
         }
         try { dropTokenWatchesFor(text); } catch (e) {}
@@ -39719,6 +44600,11 @@
   FoxyWallet._trimStore = trimStore;
   FoxyWallet._storeRoom = STORE_ROOM;
   FoxyWallet._tidySentTokens = tidySentTokens;
+  // for the tests: the card loads' sweep (`cardLoadsSpent`), and its hour's notes made older by `ms` (tests/card-loads-spent.js)
+  FoxyWallet._cardLoadsSpent = function (at) { return cardLoadsSpent(wallet, at || mintUrl); };
+  FoxyWallet._cardLoadsAge = function (ms) {
+    Object.keys(cardLoadsAskedAt).forEach(function (k) { cardLoadsAskedAt[k] -= Math.max(0, Number(ms) || 0); });
+  };
   FoxyWallet._roomShort = function () { roomShortAt = Date.now(); };
   // (no per-operation holds any more: the store keeps one reserve, `growReserve`)
   FoxyWallet._holds = function () { return []; };
@@ -39730,4 +44616,4 @@
 /* GENERATED by tools/pack-index.py — do not edit. The build stamp: the sha256 of the joined
  * Web/foxy-wallet.js with this value blanked, the same as the page's meta foxy-wallet-stamp
  * (docs/BUILDING.md, "The build stamp"). */
-if (window.FoxyWallet) window.FoxyWallet.buildStamp = '91f2e6d26189cce9aeb7d8650ba8772b0ad463047fccaf0ed6bd08d4679c16b3';
+if (window.FoxyWallet) window.FoxyWallet.buildStamp = 'f8457cdf0b0bb1e10422c2d892c50b2eda1562951082ac54b8334c0d1a0604ed';

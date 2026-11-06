@@ -282,8 +282,8 @@ async function run() {
       toast(x) { this.toasts.push(x); }, px: () => RATE, satUsd: () => RATE / 1e8, offlineNow: () => true,
     });
     const rows = t.tillCapRows('M0', null);
-    ok(rows.length === 2 && rows[0].label === 'OFFLINE, PER PAYER' && rows[0].value === '$ 50.00' && rows[0].valueSub === '₿ 500'
-      && rows[1].label === 'OFFLINE, TOTAL' && rows[1].value === '$ 300.00' && rows[1].valueSub === '₿ 3,000',
+    ok(rows.length === 2 && rows[0].label === 'PER PERSON' && rows[0].value === '$ 50.00' && rows[0].valueSub === '₿ 500'
+      && rows[1].label === 'TOTAL' && rows[1].value === '$ 300.00' && rows[1].valueSub === '₿ 3,000',
       'two SETTINGS rows, dollars with the sats under', JSON.stringify(rows.map((r) => [r.label, r.value, r.valueSub])));
     rows[0].tap();
     ok(t.state.screen === 'amount' && t.state.flow === 'tillCap' && t.state.tillCapWhich === 'payer' && t.state.unit === 'USD'

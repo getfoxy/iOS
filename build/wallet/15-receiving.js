@@ -27,7 +27,10 @@
       if (opts && opts.lockPub) {
         try {
           var tp = tillTermsFor(opts.lockPub, unit || 'sat', at);
-          tillExtra = { lockPub: tp.lock, till: true, tillPass: tp.id, tillTo: tp.to, tillExp: tp.exp };
+          tillExtra = /** @type {any} */ ({ lockPub: tp.lock, till: true, tillPass: tp.id, tillTo: tp.to, tillExp: tp.exp });
+          // the part that is a tip, on a code that offers tips (`opts.tillTip`, in the invoice's unit): sent to the keeper with it
+          var tipAsk = Math.round(Number(opts.tillTip) || 0);
+          if (tipAsk > 0 && tp.tips === true) tillExtra.tillTip = Math.min(tipAsk, Math.round(Number(amount) || 0));
         } catch (eTill) { return Promise.reject(eTill); }
       }
 
@@ -736,8 +739,15 @@
           }).catch(function (e) {
             // A paid invoice that will not claim used to fail here in silence,
             // and the sats sat at the mint with nothing said. Say it.
+            /* And which of three it was, since they read alike and mean different things: nothing was asked (no route, a
+             * switch under way), so the invoice is as it was; the mint answered no; or the answer was lost and the mint may
+             * have acted, which a later pass settles. Only the last two are a paid invoice not collected. */
+            var kind = (neverSent(e) || (e && (e.foxyElsewhere || e.foxyConnecting || e.offline))) ? 'no route, nothing was asked'
+              : mintRefused(e) ? 'the mint refused'
+              : answerLost(e) ? 'the answer was lost'
+              : 'it failed';
             console.warn('[foxy] could not claim invoice', String(entry.quote).slice(0, 12) + '\u2026',
-              '\u2014', FoxyWallet.reason(e));
+              '\u2014', kind + ':', FoxyWallet.reason(e));
           });
         });
       });
@@ -1398,8 +1408,15 @@
               /* Charged only when the hold really went: a drop that was refused
                * leaves it for the next sweep, which would charge it again. */
               dropMelt(entry.quote);
+              /* The crossing's note stays unless the mint said FAILED. UNPAID two minutes on is
+               * a guess that the melt never arrived, and it can still arrive: the far mint's
+               * invoice is then paid, and the note holds the only copy of that quote and of the
+               * key (NUT-20) that claims it. Dropped here, those sats sat at the far mint with
+               * no key anywhere. `finishMove` lets the note go once the far mint says how its
+               * quote ended (claimed, or UNPAID past its expiry), and runs on every connect and
+               * return to the app. */
               if (unit !== 'sat') { if (meltGone(entry.quote)) meltBackFee(here, unit, entry.splitFee); }
-              else if (meltGone(entry.quote)) { chargeUnsentFee(here, entry.splitFee); dropMoveNoteFor(entry.bolt11); }
+              else if (meltGone(entry.quote)) { chargeUnsentFee(here, entry.splitFee); if (state === 'FAILED') dropMoveNoteFor(entry.bolt11); }
               if (entry.swap) unitSwapLanded(entry.swap, 'melt', 'back');
               settled.push({ quote: entry.quote, paid: false, unit: unit });
               console.log('[foxy] held melt', entry.quote,
@@ -1419,8 +1436,9 @@
                 if (entry.cardOut) cardOutReturn(entry.cardOut, entry.proofs, here, entry.cardHold || { card: entry.card || '', unit: unit }, 0);
                 else addOwnProofs(entry.proofs, here, mw, unit, true);
                 dropMelt(entry.quote);
+                // the crossing's note kept, as on UNPAID above: PENDING is not the mint's last word
                 if (unit !== 'sat') { if (meltGone(entry.quote)) meltBackFee(here, unit, entry.splitFee); }
-              else if (meltGone(entry.quote)) { chargeUnsentFee(here, entry.splitFee); dropMoveNoteFor(entry.bolt11); }
+                else if (meltGone(entry.quote)) chargeUnsentFee(here, entry.splitFee);
                 if (entry.swap) unitSwapLanded(entry.swap, 'melt', 'back');
                 settled.push({ quote: entry.quote, paid: false, unit: unit });
                 console.log('[foxy] held melt', entry.quote, 'left PENDING by the mint but never spent \u2014 returned',

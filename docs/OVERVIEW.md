@@ -50,7 +50,11 @@ mint is `mint.minibits.cash`.
   screen with its count and its choices. The banner is now a round shield in
   the money card's top right corner, in the same states and colours with a mark
   inside (a turning ring while securing, a red pulse and a toast when the IP
-  address is exposed), and its tap is the banner's. Only a first launch, with nothing on
+  address is exposed), and its tap is the banner's. Back from the background
+  with Tor's circuit up and three askings in a row on fresh circuits left
+  unanswered, the phone asks Tor once for new circuits (SIGNAL NEWNYM, never a
+  restart, at most once per return and a minute apart), and the shield turns
+  its ring with BUILDING NEW TOR CIRCUITS until a mint answers. Only a first launch, with nothing on
   file, waits behind that screen. Nothing about what is sent changes: the
   phone refuses every request without Tor, as before. A step that moves
   money waits a few seconds for a connection that is on its way rather than

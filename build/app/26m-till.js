@@ -93,10 +93,12 @@
       screen: 'amount', stack: [], flow: 'receive', amount: '', unit: 'USD',
       asset: '', network: '', note: '', noteDraft: '', recipient: '', recipientKind: '',
       wallet: this.tillMain(t), walletAuto: false, walletTapped: false,
+      // and no tip: each sale starts without one (26p-till-tips.js)
+      tillTip: null,
     };
   }
 
-  /* The lock in front of opening the till, closing it and showing a cashier code: Face ID where FACE / FINGER LOCK is on,
+  /* The lock in front of opening the till, closing it and showing a cashier code: Face ID where FACE ID LOCK is on,
    * else the PIN pad, as the launch's lock asks (10-pin.js, `pinLock`). A phone with no lock is told to set one first: a till
    * anybody can close is a phone anybody can walk off into SEND with. `why` is the pad's line under its title. */
   tillGate(then, why) {
@@ -108,7 +110,7 @@
       this.blockedCard('tillNoLock', {
         tone: 'warn', title: 'SET A LOCK FIRST',
         reason: 'The till opens and closes behind Face ID or a PIN, so a phone handed to someone else cannot leave it.',
-        chip: 'SETTINGS > SET PIN or FACE / FINGER LOCK.',
+        chip: 'SETTINGS > SET PIN or FACE ID LOCK.',
       });
       return;
     }
@@ -227,7 +229,8 @@
     if (!W || !W.tillKeeperOpen) {
       const unit = this.tillUnitAt(def);
       if (unit === 'both') { this.tillAskMain(def, ordered, false); return; }
-      this.tillStart({ unit: unit, mint: def, mints: ordered });
+      // and last, ACCEPT TIPS? (26p-till-tips.js)
+      this.tillTipsThen({ unit: unit, mint: def, mints: ordered }, false);
       return;
     }
     // a payment or a claim under way finishes at the mint it started on (`refuseSwitchWhileBusy`)
@@ -251,7 +254,7 @@
       if (moved) this.walletReady({ name: this.mintHost() });
       const unit = this.tillUnitAt(def);
       if (unit === 'both') { this.tillAskMain(def, ordered, moved); return; }
-      this.tillStart({ unit: unit, mint: def, mints: ordered });
+      this.tillTipsThen({ unit: unit, mint: def, mints: ordered }, moved);
     }, (e) => {
       if (staged) this.hideStage('tillOpen');
       if (cancelled) return;
@@ -291,7 +294,7 @@
       bal: null, short: { usd: '', sat: '' }, why: '',
     }, (u) => {
       this._tillMainAsk = null;
-      this.tillStart({ unit: 'both', main: u === 'usd' ? 'usd' : 'sat', mint: def, mints: mints });
+      this.tillTipsThen({ unit: 'both', main: u === 'usd' ? 'usd' : 'sat', mint: def, mints: mints }, !!moved);
     });
   }
 
@@ -301,6 +304,10 @@
    * opened from, as back off any question. True where it was handled here. */
   tillOpenBack() {
     const s = this.state || {};
+    // the tips' lists and CASHIER CODES (26p-till-tips.js, `tillListBack`)
+    if (this.tillListBack && this.tillListBack()) return true;
+    // the tip's own SET AMOUNT: back to the receive screen, the tip as it was
+    if (s.screen === 'amount' && s.flow === 'tillTip' && this.tillTipOtherSet) { this.tillTipOtherSet(null); return true; }
     if (s.screen === 'switchMint' && s.tillPick === 'default') { this.setState({ tillPick: 'set' }); return true; }
     if (s.screen === 'switchMint' && s.tillPick) { this.setState({ tillPick: false, tillSet: [] }); return false; }
     if (s.screen === 'currency' && s.currencyFlow === 'card' && this._tillMainAsk && !s.till) {
@@ -328,12 +335,14 @@
     const def = String((o && o.mint) || (W && W.mintUrl) || this.mintHost() || '');
     const named = (o && Array.isArray(o.mints)) ? o.mints.filter((u) => !!u) : [];
     const mints = [def].concat(named.filter((u, i) => strip(u) !== strip(def) && named.findIndex((x) => strip(x) === strip(u)) === i));
-    const till = { role: 'keeper', since: Date.now(), unit: unit, main: main, mint: def, mints: mints };
+    // and its tips, as ACCEPT TIPS? was answered (26p-till-tips.js): { on, to, ids }, off where nothing was asked
+    const tips = o && o.tips && o.tips.on ? o.tips : { on: false, to: 'self', ids: [] };
+    const till = { role: 'keeper', since: Date.now(), unit: unit, main: main, mint: def, mints: mints, tips: tips };
     console.log('[foxy] till: opened on this phone, in ' + unit + (unit === 'both' ? ' (' + main + ' first)' : '') + ' at ' + strip(def)
       + (mints.length > 1 ? ' and ' + (mints.length - 1) + ' more mint' + (mints.length > 2 ? 's' : '') : ''));
     // the requests made before it are let go, so none from before is shown in the till (`forgetRequests`)
     if (this.forgetRequests) this.forgetRequests();
-    this.setState(Object.assign({ till: till, open0: false, menuSettingsOpen: false }, this.homeState(till)));
+    this.setState(Object.assign({ till: till, open0: false }, this.homeState(till)));
     /* The rows at the till's mints are read once now and marked seen, not raised: a mint the phone had not been on this session
      * has a whole past that is not this session's (16-history-lists.js). */
     this._seenSeeded = false;
@@ -441,7 +450,9 @@
   /* CASHIER CODE, past the lock: a code for another Foxy to scan, made by the wallet (`tillPassMake`: a lock key from the seed,
    * a Nostr key the phone keeps in the Keychain, 72 hours). Shown on the stage screen that shows a code to be scanned, with
    * DONE, as the change card's code is (26e-loaders.js, `stageScreen`). */
-  tillPassShow() {
+  /* `extra`: what the codes' list's ADD A CASHIER asks for (26p-till-tips.js `tillCodeAdd`): { fresh, tips, label }, so a code
+   * is made beside those live, with tips of its own. */
+  tillPassShow(extra) {
     const W = window.FoxyWallet;
     if (!W || !W.tillPassMake) { this.toast('This Foxy cannot make a cashier code.', true); return; }
     const run = (this._tillPassRun = (this._tillPassRun || 0) + 1);
@@ -456,16 +467,20 @@
     const mints = keeper ? this.tillMintsNow() : [];
     // (and a till in both, its main: the code carries it, so a cashier's QR invoice is in it too)
     const main = keeper && unit === 'both' ? this.tillMain() : '';
-    const ask = unit || mints.length ? Object.assign(unit ? { unit } : {}, main ? { main } : {}, mints.length ? { mints } : {}) : undefined;
+    const more = extra && typeof extra === 'object' ? extra : null;
+    const ask = unit || mints.length || more ? Object.assign(unit ? { unit } : {}, main ? { main } : {}, mints.length ? { mints } : {}, more || {}) : undefined;
     Promise.resolve(W.tillPassMake(ask)).then((p) => {
       if (this._tillPassRun !== run) return;
       if (!p || !p.text) throw new Error('No code was made.');
       this.stageScreen('tillPass', {
         art: '', title: 'CASHIER CODE', qr: String(p.text),
         body: 'Scan with Foxy. Money they take is locked to this phone and sent here.'
+          + (more && this.tillTipsWords ? '<br>' + this.tillTipsWords(more.tips) : '')
           + (p.exp ? '<br>Expires ' + this.tillExpiresText(p.exp) : ''),
         button: 'DONE',
       });
+      // the codes' list, under it, has one more row (26p-till-tips.js)
+      if (more) this.setState({ menuTick: (this.state.menuTick || 0) + 1 });
     }).catch((e) => {
       if (this._tillPassRun !== run) return;
       this._tillPassRun = 0;
@@ -538,7 +553,7 @@
       // a request this phone made for itself is never shown in the till (12-receive.js, `forgetRequests`)
       if (this.forgetRequests) this.forgetRequests();
       // (its outbox and inbox are the wallet's to ask at the connect: 08d-till.js)
-      this.setState(Object.assign({ till: till, open0: false, menuSettingsOpen: false }, this.homeState(till)));
+      this.setState(Object.assign({ till: till, open0: false }, this.homeState(till)));
       this.loadHistory();
       return null;
     }).catch((e) => {
@@ -741,11 +756,11 @@
     if (!s.till) return;
     if (s.screen === 'home') {
       console.log('[foxy] till: a way home ended at the till instead');
-      this.setState(Object.assign({ open0: false, menuSettingsOpen: false }, this.homeState()));
+      this.setState(Object.assign({ open0: false }, this.homeState()));
       return;
     }
     // nor the menu, which is home's and has SEND, the cards and SETTINGS in it, whatever opened it
-    if (s.open0) { this.setState({ open0: false, menuSettingsOpen: false }); return; }
+    if (s.open0) { this.setState({ open0: false }); return; }
     /* Nor any screen the till has none of: a card's (LOAD and SEND are on it), SEND's, the menu's. Whatever reached one, a road
      * this file has not heard of, it is the till's SET AMOUNT before the next frame (and SET AMOUNT only for a receive: a
      * card's amounts are typed on it too, 26f-flashcard.js `fcAmount`). A keeper's receive paid by a card at
@@ -753,12 +768,16 @@
      * And in either role a card paying in its other currency (dollars for a bitcoin invoice) shows the total the holder
      * agrees to first (`fcOtherAgree`, `fcOuConfirm`): the payer pays the fee and sees it. Thrown out, no card could pay a
      * till across currencies (review, card-in-till); its TAP CARD and its back return to the till's receive screen. */
-    const kept = this.TILL_SCREENS.indexOf(s.screen) >= 0 && (s.screen !== 'amount' || s.flow === 'receive');
+    // (and the till's own lists, CASHIER CODES among them, and the tip's SET AMOUNT: 26p-till-tips.js)
+    const kept = (this.TILL_SCREENS.indexOf(s.screen) >= 0 && (s.screen !== 'amount' || s.flow === 'receive' || s.flow === 'tillTip'))
+      || (s.screen === 'switchMint' && !!s.tillList);
     if (!kept && !(s.till.role === 'keeper' && s.screen === 'fcXmConfirm') && s.screen !== 'fcOuConfirm') {
       console.log('[foxy] till: ' + s.screen + ' is not a screen the till has; back to its SET AMOUNT');
       this.setState(this.homeState());
       return;
     }
+    // a tip on the receive screen, and the keeper's PAID passing it on (26p-till-tips.js)
+    if (this.tillTipSync) this.tillTipSync(prevState);
     // a code that ran out in the middle of a payment: out of the till once it is over (`tillTick`)
     if (cashier && this._tillRunOut && !this._tillLeaving && !this.tillMidPayment()) this.tillRunOutGo();
     if (cashier && s.screen === 'paid' && !s.paidPlace && !s.payOut) {
@@ -783,10 +802,24 @@
     const where = (t) => (tillMints.length > 1 && t.mint && strip(t.mint) !== strip(tillMints[0]) ? ' \u00b7 ' + this.mintNameOf(t.mint) : '');
     const groups = (s.fresh ? [] : (s.history || [])).map((g) => ({
       label: g.label,
-      items: (g.items || []).filter((t) => t && t.dir === 'in' && !t.split && !t.changeRow
+      /* (and on the keeper's, a tip passed on, "Tip to <name>", out: 26p-till-tips.js) */
+      items: (g.items || []).filter((t) => t && (t.dir === 'in' || (!cashier && t.dir === 'out' && !!t.tillTipTo)) && !t.split && !t.changeRow
         && (Number(t.atMs) || 0) >= t0 && (!cashier || t.till)).map((t) => {
-        const waiting = cashier ? !t.tillSent : !!t.pending;
-        const rail = cashier ? (t.tillSent ? 'SENT TO KEEPER' : 'SENDING…') : (t.pending ? 'Pending' : '');
+        const tipOut = t.dir === 'out';
+        const waiting = cashier ? !t.tillSent : !!t.pending && !tipOut;
+        // a sale's tip, said beside where it stands (`tillTipRowText`)
+        const tipWords = this.tillTipRowText ? this.tillTipRowText(t) : '';
+        const rail = cashier ? (t.tillSent ? 'SENT TO KEEPER' : 'SENDING…') : (t.pending && !tipOut ? 'Pending' : '');
+        if (tipOut) {
+          return {
+            name: 'Tip to ' + t.tillTipTo, initial: String(t.tillTipTo || 'T').slice(0, 1).toUpperCase(),
+            cardBg: 'var(--surface)', cardEdge: '1.5px', cardSpin: 'none', tileBg: 'rgba(var(--ink-rgb),.35)', stroke: 'rgba(var(--ink-rgb),.35)',
+            amtColor: 'rgba(var(--ink-rgb),.7)',
+            amtText: '−' + (t.unit ? this.unitMoney(t.amount, t.unit) : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).main),
+            amtSub: t.unit ? this.unitLabel(t.unit) + ' ecash' : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).sub,
+            balText: '', line2: t.time, line3: '', line2Color: 'rgba(var(--ink-rgb),.45)', line2Weight: '500', open: () => {},
+          };
+        }
         return {
           name: (t.note && String(t.note).trim()) || t.name || 'Received',
           initial: String(t.name || 'R').slice(0, 1).toUpperCase(),
@@ -798,8 +831,8 @@
             : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).main),
           amtSub: t.unit ? this.unitLabel(t.unit) + ' ecash' : this.money(this.txTotalOut(t), this.txFiat(t, this.txTotalOut(t))).sub,
           balText: '',
-          line2: rail || (t.time + where(t)),
-          line3: rail ? t.time + where(t) : '',
+          line2: rail || (t.time + where(t) + (tipWords ? ' · ' + tipWords : '')),
+          line3: rail ? t.time + where(t) + (tipWords ? ' · ' + tipWords : '') : '',
           line2Color: rail ? (waiting ? amber : 'rgba(var(--ink-rgb),.5)') : 'rgba(var(--ink-rgb),.45)',
           line2Weight: rail ? '600' : '500',
           open: () => {},

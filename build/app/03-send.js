@@ -492,7 +492,9 @@
     }
     // a lightning address has to be resolved into an invoice first
     const to = String(this.state.recipient || '');
-    console.log('[foxy] send starting to', to.slice(0, 24),
+    /* The log is meant to be handed to somebody else, and a Lightning address is a person: it says only that it is one.
+     * The start of an invoice or a bitcoin address is what it always was, and the phone's redaction takes the rest out. */
+    console.log('[foxy] send starting to', to.indexOf('@') >= 0 ? 'a lightning address' : to.slice(0, 24),
       '|', (window.FoxyGate && window.FoxyGate.stamp) ? window.FoxyGate.stamp() : 'no gate');
 
     // Tor can drop while the app sits open, and a melt is the one call that
@@ -638,6 +640,10 @@
      * invoice it gave and the fee quote on it, paid as they stand while they
      * are fresh (`payLnurl`); an address the screen could not look up, or one
      * it was not asked about, is looked up here, as it was before. */
+    /* Paid to an exchange from SEND > BANK ACCOUNT (26q-bank.js): its entry in history says so ("To Strike"). Read now, while
+     * the recipient on screen is the one it chose. */
+    const bankEx = (!card && this.bankNow) ? this.bankNow() : '';
+    const tagFor = () => Object.assign({ to: to, note: (this.state.note || '').trim() }, bankEx ? { bank: bankEx } : {});
     const asked = this.sendAsk();
     const found = card ? (card.found || null) : (asked && asked.addr && this._found && this._found.addr === asked.addr && this._found.sats === asked.sats)
       ? this._found : null;
@@ -699,12 +705,12 @@
         console.log('[foxy] send pending');
         if (card) card.pendingShown = true;
         if (P) P.end();
-        W.tag(r.hash, { to: to, note: (this.state.note || '').trim() });
+        W.tag(r.hash, tagFor());
         this.showPayPending();
         return;
       }
       console.log('[foxy] send complete');
-      W.tag(r.hash, { to: to, note: (this.state.note || '').trim() });
+      W.tag(r.hash, tagFor());
       // from a card: what is left of the card's flow (change it is still owed) once the payment is made
       if (card) this.fcOutSettled(card, true);
       // an invoice a tap offered: the other phone is told, over the link that is still open

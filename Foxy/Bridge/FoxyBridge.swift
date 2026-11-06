@@ -53,6 +53,23 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
     /// The till's inboxes, by cashier code id: one Nostr key per code, kept in
     /// the Keychain for the code's three days (FoxyBridge+Till.swift).
     var tillInboxes = TillInboxes()
+    /// The Cashu ID's inbox: NIP-17 on the delivery key the seed derives, while
+    /// Foxy is in front (FoxyBridge+CashuID.swift).
+    var cashuIdInbox: NostrInbox?
+    /// The open being made, so a close while the seed is read ends it; and its answer.
+    var cashuIdTicket: UUID?
+    var cashuIdAnswer: ((Int) -> Void)?
+    /// The recovery key's inbox, read only after a restore, its open being made, and its answer.
+    var cashuIdCopies: NostrInbox?
+    var cashuIdCopiesTicket: UUID?
+    var cashuIdCopiesAnswer: ((Int) -> Void)?
+    /// The inboxes on the keys contacts' next messages may come to, one a contact (CashuMsgListen.swift), the open
+    /// being made, and its answer.
+    var cashuMsgInbox: CashuMsgListen?
+    /// Each contact's order of the three relays, kept for the session across listens (CashuMsgListen.swift).
+    var cashuMsgRotation = CashuMsgRotation()
+    var cashuMsgTicket: UUID?
+    var cashuMsgAnswer: ((Int) -> Void)?
     /// Tap to pay over Bluetooth (FoxyBridge+Tap.swift): the invoice on screen,
     /// advertised; or the search for one, and the page's request waiting on it.
     /// `TapRx`/`TapTx`: the Bluetooth link on a phone, its stand-in in the
@@ -400,6 +417,14 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         "p2pkReserve": FoxyBridge.handleP2PKReserve,
         "p2pkPubkeys": FoxyBridge.handleP2PKPubkeys,
         "p2pkKey": FoxyBridge.handleP2PKKey,
+        // The Cashu ID: its public keys, signatures by a payment's one-time key, the payer's proved name, and the
+        // base of this phone's own throwaway keys for what it pays (Foxy/Keychain/CashuID.swift)
+        "cashuIdPublic": FoxyBridge.handleCashuIdPublic,
+        "cashuIdSign": FoxyBridge.handleCashuIdSign,
+        "cashuIdTag": FoxyBridge.handleCashuIdTag,
+        "cashuIdEphemeral": FoxyBridge.handleCashuIdEphemeral,
+        // and the ID key's own signature, only for a delivery paid to it unblinded that the receiver chose to take
+        "cashuIdSignUnblinded": FoxyBridge.handleCashuIdSignUnblinded,
         "seedShow": FoxyBridge.handleSeedShow,
         "seedEnter": FoxyBridge.handleSeedEnter,
         "seedAdopt": FoxyBridge.handleSeedAdopt,
@@ -412,6 +437,8 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         "privacy": FoxyBridge.handlePrivacy,
         "captured": FoxyBridge.handleCaptured,
         "torRetry": FoxyBridge.handleTorRetry,
+        // askings on fresh circuits unanswered since a return: Tor may be asked for new circuits, once
+        "torRebuild": FoxyBridge.handleTorRebuild,
         "unprotected": FoxyBridge.handleUnprotected,
         "mintRequest": FoxyBridge.handleMintRequest,
         "hostsKnown": FoxyBridge.handleHostsKnown,
@@ -421,6 +448,8 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         "pasteStart": FoxyBridge.startPasteControl,
         "pasteStop": FoxyBridge.handlePasteStop,
         "notify": FoxyBridge.notify,
+        // the reminder after fifteen days away, made on the phone (Reminder.swift)
+        "reminder": FoxyBridge.handleReminder,
         "share": FoxyBridge.handleShare,
         // a text kept outside Foxy as a file the person puts where they choose, never the pasteboard (TextExport.swift)
         "exportText": FoxyBridge.handleExportText,
@@ -438,6 +467,14 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         "tillKeyDrop": FoxyBridge.handleTillKeyDrop,
         "tillInboxOpen": FoxyBridge.handleTillInboxOpen,
         "tillInboxClose": FoxyBridge.handleTillInboxClose,
+        // The Cashu ID's inbox, on the delivery key the seed derives (FoxyBridge+CashuID.swift)
+        "cashuIdInboxOpen": FoxyBridge.handleCashuIdInboxOpen,
+        "cashuIdInboxClose": FoxyBridge.handleCashuIdInboxClose,
+        // and on the recovery key, for this phone's own copies after a restore
+        "cashuIdCopiesOpen": FoxyBridge.handleCashuIdCopiesOpen,
+        // messages between Cashu IDs: wrapped natively to a key used once, and the inbox on a contact's next keys
+        "cashuIdMsgSend": FoxyBridge.handleCashuIdMsgSend,
+        "cashuIdMsgOpen": FoxyBridge.handleCashuIdMsgOpen,
         // Tap to pay: an invoice handed between two phones over Bluetooth (FoxyBridge+Tap.swift)
         "tapReceiveStart": FoxyBridge.handleTapReceiveStart,
         "tapReceiveStop": FoxyBridge.handleTapReceiveStop,
@@ -842,10 +879,13 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
             resolve(id: id, text: "unavailable", error: nil)
             return
         }
+        // seed reads made while this is up wait for its answer (SeedVault.awaitLockAnswer)
+        let asking = SeedVault.lockPromptBegan()
         ctx.evaluatePolicy(policy,
                            localizedReason: Self.biometricReason(body["reason"])) { ok, _ in
             // the seed read after an unlock uses this approval instead of asking again
             if ok { SeedVault.noteUnlock(ctx) }
+            SeedVault.lockPromptAnswered(asking)
             self.resolve(id: id, text: ok ? "yes" : "no", error: nil)
         }
     }
@@ -901,6 +941,23 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         resolve(id: id, text: Route.snapshot(), error: nil)
     }
 
+    /// The page has asked again on another circuit `silent` times in a row,
+    /// each left unanswered, since Foxy came back from the background: Tor may
+    /// be asked for new circuits (`TorService.silentAskings`, at most once per
+    /// return and never within a minute of the last), and after those, once
+    /// more askings go unanswered with no host answering anything, Tor's
+    /// network switched off and on (at most once per return, never within five
+    /// minutes of the last, never with a swap or restore out). Answers
+    /// "rebuilding" or "restarting" when it did, else why not.
+    private func handleTorRebuild(id: String, body: [String: Any]) {
+        let silent = (body["silent"] as? Int) ?? 0
+#if canImport(Tor)
+        resolve(id: id, text: TorService.silentAskings(max(0, min(silent, 1000)), moneyOut: !moneyInFlight.isEmpty), error: nil)
+#else
+        resolve(id: id, text: "no control link", error: nil)
+#endif
+    }
+
     /// CONTINUE UNPROTECTED, for this session. Turning it on needs a tap
     /// on an alert iOS draws: the page can ask, but no script can answer.
     /// Turning it off needs nothing. Ignored while Tor is up.
@@ -942,34 +999,60 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         }
         // https, or http to an .onion, and a host Foxy will ask for. The
         // same rules are applied again to every redirect, by the session.
-        if let problem = Route.urlProblem(url) {
-            resolve(id: id, text: nil, error: problem)
-            return
-        }
-        // GET or POST, before anything is asked of the person
-        guard let method = Self.mintMethod(body) else {
-            resolve(id: id, text: nil, error: "That is not a request Foxy will send.")
-            return
-        }
-        // Tor, or the open connection if the person chose it, or refused.
-        guard Route.available else {
-            resolve(id: id, text: nil, error: Route.refusal)
-            return
-        }
-        // A host Foxy has not used is asked about first, in an alert iOS
-        // draws (HostApprovals). A script cannot answer it.
-        let host = url.host ?? ""
-        guard HostApprovals.isApproved(host) else {
-            HostApprovals.ask(host, on: presenter) { allowed in
-                if allowed {
-                    self.sendMintRequest(id: id, body: body, url: url, method: method)
-                } else {
-                    self.resolve(id: id, text: nil, error: "You did not allow Foxy to contact \(HostApprovals.normal(host)).")
-                }
+        /* An .onion refused only because Tor was not up that moment, while it
+         * is on its way back (a control link being reconnected), is checked
+         * once more when Tor is up, or after a few seconds. */
+        TorReturn.onionWhenTorIsBack(problem: { Route.urlProblem(url) }, needsTor: Route.onionNeedsTor,
+                                     torComing: { Self.torOnItsWay }, wait: { then in
+            print("[foxy] mint request to", LogRedaction.host(url.host), "waits for Tor, on its way back, before it is asked")
+            Self.whenTorUp(then)
+        }) { problem in
+            if let problem {
+                self.resolve(id: id, text: nil, error: problem)
+                return
             }
-            return
+            // GET or POST, before anything is asked of the person
+            guard let method = Self.mintMethod(body) else {
+                self.resolve(id: id, text: nil, error: "That is not a request Foxy will send.")
+                return
+            }
+            // Tor, or the open connection if the person chose it, or refused.
+            guard Route.available else {
+                self.resolve(id: id, text: nil, error: Route.refusal)
+                return
+            }
+            // A host Foxy has not used is asked about first, in an alert iOS
+            // draws (HostApprovals). A script cannot answer it.
+            let host = url.host ?? ""
+            guard HostApprovals.isApproved(host) else {
+                HostApprovals.ask(host, on: self.presenter) { allowed in
+                    if allowed {
+                        self.sendMintRequest(id: id, body: body, url: url, method: method)
+                    } else {
+                        self.resolve(id: id, text: nil, error: "You did not allow Foxy to contact \(HostApprovals.normal(host)).")
+                    }
+                }
+                return
+            }
+            self.sendMintRequest(id: id, body: body, url: url, method: method)
         }
-        sendMintRequest(id: id, body: body, url: url, method: method)
+    }
+
+    /// Tor on its way up, for an .onion that waits for it (`TorReturn.onionWhenTorIsBack`).
+    private static var torOnItsWay: Bool {
+#if canImport(Tor)
+        return TorService.onItsWay
+#else
+        return false
+#endif
+    }
+
+    private static func whenTorUp(_ then: @escaping () -> Void) {
+#if canImport(Tor)
+        TorService.whenUp(within: TorReturn.onionWaitsForTor, then)
+#else
+        then()
+#endif
     }
 
     /// The methods a mint, a lightning-address server or an LNURL callback is
@@ -1068,7 +1151,8 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         }
     }
 
-    /* The GET DOLLARS screen's four web addresses, and no others. The page
+    /* The GET DOLLARS screen's four web addresses, and no others (SEND > BANK ACCOUNT's
+     * OPEN STRIKE, OPEN RIVER and OPEN CASH APP are three of them). The page
      * says which by name; the address itself is here, so nothing the page
      * holds can become a URL this app opens. It opens in the phone's browser,
      * outside Foxy and outside its Tor connection. */
@@ -1357,6 +1441,28 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
             center.add(request)
         }
         resolve(id: id, text: "ok", error: nil)
+    }
+
+    /// The reminder after fifteen days away (Reminder.swift). `{ days: 15 }` turns it on, asking iOS's permission if the page
+    /// says `ask` and it was never asked; `{ cancel: true }` turns it off. The words are Foxy's and the page gives none.
+    /// Answers "ok", "needs" (the question is still to be asked) or "refused".
+    private func handleReminder(id: String, body: [String: Any]) {
+        let ask: Bool
+        switch Reminder.parse(body) {
+        case .cancel:
+            Reminder.turnOff()
+            resolve(id: id, text: "ok", error: nil)
+            return
+        case .refused:
+            print("[foxy] reminder refused — not the fixed days")
+            resolve(id: id, text: "", error: "unknown reminder")
+            return
+        case .on(let asking):
+            ask = asking
+        }
+        Reminder.turnOn(ask: ask) { answer in
+            DispatchQueue.main.async { self.resolve(id: id, text: answer, error: nil) }
+        }
     }
 
     /// Keeps banners visible while the app is in the foreground.

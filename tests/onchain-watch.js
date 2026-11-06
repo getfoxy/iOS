@@ -219,7 +219,7 @@ async function run() {
    * starts again — and a return after time away is the likeliest moment for a
    * deposit to have confirmed. Read from the source: the wake handler is a
    * closure inside watchWake, not a method this file can lift out. */
-  const wake = method('watchWake() {');
+  const wake = method('watchWake() {') + method('wakeWork() {');
   check('coming back from the background arms the on-chain watcher',
     /onchainWatchLater\(\)/.test(wake), 'watchWake does not re-arm it');
   check('and asks the mint again what it does on chain', /onchainAsk\(\)/.test(wake),

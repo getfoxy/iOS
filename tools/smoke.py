@@ -1688,11 +1688,19 @@ nostr31 = {'secp256k1_ecdh', 'secp256k1_ec_pubkey_parse', 'secp256k1_keypair_cre
            'secp256k1_keypair_xonly_pub', 'secp256k1_xonly_pubkey_serialize', 'secp256k1_xonly_pubkey_parse',
            'secp256k1_schnorrsig_sign32', 'secp256k1_schnorrsig_verify'}
 NOSTR_DIR = os.path.join('Foxy', 'Nostr')
+# and what NUT13.swift alone may call for the Cashu ID (CashuID.swift): d·E, NUT-28's blinding, the delivery key's
+# x-only half, and NUT-11's BIP-340 signature by a payment's one-time key, which never leaves native code
+cashuid31 = {'secp256k1_ec_pubkey_parse', 'secp256k1_ec_pubkey_tweak_mul', 'secp256k1_keypair_create',
+             'secp256k1_keypair_xonly_pub', 'secp256k1_xonly_pubkey_serialize', 'secp256k1_schnorrsig_sign32',
+             'secp256k1_schnorrsig_verify',
+             # NUT-28's blinding: P + r·G, and the negated point and key for a payer that blinded the other parity
+             'secp256k1_ec_pubkey_tweak_add', 'secp256k1_ec_pubkey_negate', 'secp256k1_ec_seckey_negate'}
 for path31 in swift_files:
     text = open(path31, encoding='utf8').read()
     calls = set(re.findall(r'\b(secp256k1_\w+)\s*\(', text)) - {'secp256k1_pubkey', 'secp256k1_keypair',
                                                                   'secp256k1_xonly_pubkey', 'secp256k1_ecdh_hash_function'}
-    may = allowed31 | (nostr31 if path31.startswith(NOSTR_DIR) else set())
+    may = allowed31 | (nostr31 if path31.startswith(NOSTR_DIR) else set()) \
+        | (cashuid31 if path31 == os.path.join('Foxy', 'Keychain', 'NUT13.swift') else set())
     if calls - may:
         problems31.append(path31 + ' calls libsecp256k1 beyond what it may: ' + ', '.join(sorted(calls - may)))
 importers31 = [p for p in swift_files if re.search(r'^\s*import CSecp256k1\b', open(p, encoding='utf8').read(), re.M)]
@@ -1848,10 +1856,15 @@ actions32 = ['seedStatus', 'seedCreate', 'seedMigrate', 'countersImport', 'count
              # the keys a payment request locks ecash to, at NUT-13's P2PK path
              'p2pkReserve', 'p2pkPubkeys', 'p2pkKey',
              # a card's owner key, from the seed and the card's key: its public half, and signatures for a fixed list of labels
-             'cardOwnerKey', 'cardOwnerSign']
+             'cardOwnerKey', 'cardOwnerSign',
+             # the Cashu ID: its public keys, signatures by a payment's one-time key (never the key), the payer's
+             # proved name, and the base of this phone's own throwaway keys for what it pays
+             'cashuIdPublic', 'cashuIdSign', 'cashuIdTag', 'cashuIdEphemeral',
+             # and the ID key's own signature, for a delivery paid to it unblinded that the receiver takes anyway
+             'cashuIdSignUnblinded']
 declared32 = re.search(r'static let nativeSeedActions: Set<String> = \[(.*?)\]', native32, re.S)
 if not declared32 or sorted(re.findall(r'"(\w+)"', declared32.group(1))) != sorted(actions32):
-    problems32.append('nativeSeedActions is not the twenty-one seed actions')
+    problems32.append('nativeSeedActions is not the twenty-six seed actions')
 # a card's owner key signs every label but load only against the keeper's yes, asked before the card session and never in it
 sign32 = bridge_handler(both32, 'cardOwnerSign') or ''
 approve32 = bridge_handler(both32, 'cardOwnerApprove') or ''
@@ -1896,7 +1909,9 @@ for line32 in acts32.splitlines():
         if arg32.startswith('let '):
             continue  # a pattern (case .answer(let outcome)), not a reply
         if kind32 == 'answer' and not arg32.startswith(('json(', 'countersReply(', 'NUT13.reply(',
-                                                        'P2PK.pubkeysReply(', 'P2PK.keyReply(')):
+                                                        'P2PK.pubkeysReply(', 'P2PK.keyReply(',
+                                                        'CashuID.publicReply(', 'CashuID.signReply(',
+                                                        'CashuID.tagReply(', 'CashuID.baseReply(')):
             problems32.append('a seed action answers the page with ' + arg32.strip())
         elif re.search(r'\b(words|phrase|typed|mnemonic|seed|saved|served|candidate)\b', code32):
             problems32.append('a seed action may answer the page with the words or the seed: ' + arg32.strip())

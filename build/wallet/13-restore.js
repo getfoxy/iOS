@@ -79,13 +79,15 @@
              * (/v1/keysets, already loaded). The wallet above sees only sat
              * keysets; a usd balance another wallet made with the same words
              * sits under the usd ones. Blind-auth keysets are not money and
-             * are not walked. */
+             * are not walked. Nor is a unit Foxy cannot hold (msat, eur): ten
+             * empty batches on each of its keysets is twenty or more requests
+             * over Tor for nothing the wallet could keep or show. */
             var unitIds = {};
             try {
               var listed = w.keyChain && w.keyChain.keysets;
               (Array.isArray(listed) ? listed : Object.values(listed || {})).forEach(function (k) {
                 var u = k && unitOf(k.unit);
-                if (!u || u === 'sat' || u === 'auth' || !k.id) return;
+                if (!u || u === 'sat' || u === 'auth' || !HANDLED_UNITS[u] || !k.id) return;
                 (unitIds[u] = unitIds[u] || []).push(k.id);
               });
             } catch (e) {}

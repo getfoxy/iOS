@@ -152,6 +152,8 @@ function loadReal(opts) {
     w.document.body.appendChild(s);
   }
   if (o.before) o.before(w);
+  // the suites' own switches (`_cashuIdLockS` and the like) are read only on a page that says it is a test's, as it loads
+  if (!o.release) w.__foxyTestHooks = true;
   const s = w.document.createElement('script');
   s.textContent = fs.readFileSync(path.join(ROOT, 'Web', 'foxy-wallet.js'), 'utf8');
   w.document.body.appendChild(s);
@@ -364,11 +366,17 @@ function fakeMint(w, opts) {
   const o = opts || {};
   const C = w.CashuTS;
   // o.fill: the byte its key seed is made of, for mints with keysets of their own
-  const pair = C.createNewMintKeys(16, new w.Uint8Array(64).fill(o.fill || 7), { versionByte: o.versionByte || 0 });
-  const id = pair.keysetId;
+  let pair = C.createNewMintKeys(16, new w.Uint8Array(64).fill(o.fill || 7), { versionByte: o.versionByte || 0 });
+  let id = pair.keysetId;
   const hex = (b) => Buffer.from(Array.from(b)).toString('hex');
-  const pubs = {};
+  let pubs = {};
   for (const [a, k] of Object.entries(pair.pubKeys)) pubs[a] = typeof k === 'string' ? k : hex(k);
+  /* `rotate()`: the sat keyset is retired, as a mint rotates its keys. A new one (another key seed) is the active one; the old
+   * stays listed inactive at /v1/keysets, its pieces are still taken as inputs, and nothing more is signed on it: outputs
+   * on it are refused with NUT error 12002, as CDK and Nutshell refuse them. */
+  const retired = [];
+  const retiredOf = (kid) => retired.filter((r) => r.id === kid)[0] || null;
+  const onRetired = (outs) => (outs || []).some((x) => !!retiredOf(x && x.id));
   /* o.units: ['sat', 'usd'] for a mint that issues dollars as well, as Forge
    * does. A second keyset of its own (another key seed), listed beside the
    * sat one; mint and melt quotes in either unit at a fixed o.usdPerBtc
@@ -388,10 +396,11 @@ function fakeMint(w, opts) {
   if (usdPair) for (const [a, k] of Object.entries(usdPair.pubKeys)) usdPubs[a] = typeof k === 'string' ? k : hex(k);
   const usdPerBtc = Number(o.usdPerBtc) || 76900;
   // which key signs a keyset's outputs, and the unit a keyset is in
-  const privOf = (kid) => (usdPair && kid === usdId ? usdPair.privKeys : pair.privKeys);
-  const unitOfKeyset = (kid) => (usdPair && kid === usdId ? 'usd' : kid === id ? 'sat' : '');
+  const privOf = (kid) => (usdPair && kid === usdId ? usdPair.privKeys : retiredOf(kid) ? retiredOf(kid).pair.privKeys : pair.privKeys);
+  const unitOfKeyset = (kid) => (usdPair && kid === usdId ? 'usd' : kid === id || retiredOf(kid) ? 'sat' : '');
   const idOfUnit = (u) => (u === 'usd' ? usdId : id);
   const issuedBy = { sat: 0, usd: 0 }, takenBy = { sat: 0, usd: 0 };
+  let nut20Checked = 0;
   // an invoice this mint made, by its text, so a melt of it can pay it
   const byInvoice = {};
   // a PENDING melt's inputs and change outputs, until `settleMelt` says how it went
@@ -545,6 +554,8 @@ function fakeMint(w, opts) {
       // an on-chain quote is locked to a key of the wallet's (NUT-20), so a mint
       // that does one does the other
       if (o.onchain) nuts[20] = { supported: true };
+      // o.nut20: an invoice locked to a key (NUT-20) on a mint that does not settle on chain, as Nutshell and CDK do
+      if (o.nut20) nuts[20] = { supported: true };
       /* Spending conditions, for the tests that lock ecash to a key. Off by
        * default, because a mint that does not do NUT-11 is a case worth having
        * too: Foxy leaves the lock off a request such a mint would refuse. */
@@ -558,10 +569,12 @@ function fakeMint(w, opts) {
       return ok(info);
     }
     if (p === '/v1/keysets') {
-      const list = [{ id, unit: 'sat', active: true, input_fee_ppk: Number(o.feePpk) || 0 }];
+      const list = retired.map((r) => ({ id: r.id, unit: 'sat', active: false, input_fee_ppk: Number(o.feePpk) || 0 }))
+        .concat([{ id, unit: 'sat', active: true, input_fee_ppk: Number(o.feePpk) || 0 }]);
       if (usdId) list.push({ id: usdId, unit: 'usd', active: true, input_fee_ppk: Number(o.usdFeePpk) || 0 });
       return ok({ keysets: list });
     }
+    if (retiredOf(last) && p === '/v1/keys/' + last) return ok({ keysets: [{ id: last, unit: 'sat', active: false, keys: retiredOf(last).pubs }] });
     if (p === '/v1/keys' || p === '/v1/keys/' + id || (usdId && p === '/v1/keys/' + usdId)) {
       const list = [];
       if (p !== '/v1/keys/' + usdId) list.push({ id, unit: 'sat', active: true, keys: pubs });
@@ -573,7 +586,9 @@ function fakeMint(w, opts) {
       if (units.indexOf(unit) < 0) return no(11005, 'unit not supported');
       // cashu-ts checks the quote's amount against the one it asked for
       const k = n + 1;
-      const q = { quote: quoteId(), request: invoiceFor(Number(body.amount), unit, k), amount: Number(body.amount), unit: unit,
+      // o.quoteAmountOff: a mint whose quote is for that much more than was asked (a rounding mint, or one that is wrong)
+      const qAmount = Number(body.amount) + (Number(o.quoteAmountOff) || 0);
+      const q = { quote: quoteId(), request: invoiceFor(qAmount, unit, k), amount: qAmount, unit: unit,
                   state: o.quotesUnpaid ? 'UNPAID' : 'PAID',
                   expiry: now() + (unit === 'usd' ? (Number(o.usdQuoteTtl) || 60) : 3600) };
       byInvoice[q.request] = q.quote;
@@ -583,12 +598,24 @@ function fakeMint(w, opts) {
       return ok(q);
     }
     if (p.startsWith('/v1/mint/quote/bolt11/')) return quotes[last] ? ok(quotes[last]) : no(20007, 'quote not found');
+    // outputs on a keyset the mint has retired (`rotate`): NUT error 12002, before anything else is looked at
+    if ((p === '/v1/mint/bolt11' || p === '/v1/swap' || p === '/v1/melt/bolt11') && onRetired(body.outputs)) {
+      return no(12002, 'Keyset is inactive, cannot sign messages');
+    }
     if (p === '/v1/mint/bolt11') {
       const q = quotes[body.quote];
       if (!q) return no(20007, 'quote not found');
       if (q.state === 'ISSUED') return no(20002, 'quote already issued');
       if (q.state !== 'PAID') return no(20001, 'quote not paid');
       if (sum(body.outputs) !== q.amount) return no(11002, 'outputs do not add up to the quote');
+      /* A quote locked to a key (NUT-20) is minted only with that key's signature over the quote id and the outputs, as
+       * a real mint insists; `nut20Checked` counts the signatures it verified. */
+      if (q.pubkey) {
+        if (typeof body.signature !== 'string' || !C.verifyMintQuoteSignature(q.pubkey, q.quote, body.outputs, body.signature)) {
+          return no(20008, 'Signature for mint request invalid');
+        }
+        nut20Checked += 1;
+      }
       // outputs on the keyset of the quote's unit, as Nutshell insists
       if ((body.outputs || []).some((x) => (unitOfKeyset(x.id) || 'sat') !== (q.unit || 'sat'))) return no(11005, 'keyset unit does not match the quote');
       if (!unsigned(body.outputs)) return no(10002, 'Blinded Message is already signed.');
@@ -815,6 +842,17 @@ function fakeMint(w, opts) {
   }
   return {
     id, pubs, posted, change, spentSecrets, handle,
+    // the sat keyset retired and a new one made active; answers the new id (`keysetId()` reads the active one)
+    rotate: () => {
+      retired.push({ id, pair, pubs });
+      pair = C.createNewMintKeys(16, new w.Uint8Array(64).fill(((o.fill || 7) + 50 + retired.length) % 256), { versionByte: o.versionByte || 0 });
+      id = pair.keysetId;
+      pubs = {};
+      for (const [a, k] of Object.entries(pair.pubKeys)) pubs[a] = typeof k === 'string' ? k : hex(k);
+      return id;
+    },
+    keysetId: () => id,
+    retiredIds: () => retired.map((r) => r.id),
     // the usd keyset, with o.units
     usdId, usdPerBtc,
     quotes, melts,
@@ -823,6 +861,8 @@ function fakeMint(w, opts) {
     takenSats: () => taken,
     issuedIn: (u) => issuedBy[u] || 0,
     takenIn: (u) => takenBy[u] || 0,
+    // how many NUT-20 signatures a mint of a locked quote came with, each verified
+    nut20Checked: () => nut20Checked,
     // an invoice paid by somebody else (o.quotesUnpaid)
     payQuote: (q) => { if (quotes[q] && quotes[q].state === 'UNPAID') { quotes[q].state = 'PAID'; return true; } return false; },
     // the next answer to 'mint' or 'melt' is lost after the mint has acted on it
@@ -995,6 +1035,140 @@ function p2pkParent(seed) {
 function p2pkAt(parent, index) {
   const child = bip32Child(parent, index);
   return { priv: child.key.toString('hex'), pub: secpPublic(child.key).toString('hex') };
+}
+
+/* ---- the Cashu ID (Foxy/Keychain/CashuID.swift) ---------------------------
+ *
+ * The phone's half, written here a second time from docs/CASHU-ID.md with
+ * nothing but node's crypto and BigInt: the keys at m/129373'/20'/0'/0'/0',
+ * /1'/0'/0' and /2'/0'/0' (every level hardened), NUT-28's blinding (the shared
+ * x of d·E by a plain double-and-add, rᵢ = SHA-256("Cashu_P2BK_v1" ‖ Zx ‖ i) with
+ * its 0xFF retry, P′ = P + rᵢ·G, the one-time key d + r₀ or −d + r₀), the payer's
+ * proved name (SHA-256("foxy-cashu-id-from-v1" ‖ x(d·peer) ‖ E)), the paying
+ * key's base for a payment's throwaway keys, and BIP-340's Schnorr signature. The
+ * page's half uses the bundled cashu-ts and noble curve; the two agreeing with
+ * each other and with NUT-28's own vectors is the test that they are both right.
+ */
+const SECP_P = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F');
+const SECP_G = [BigInt('0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798'),
+                BigInt('0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8')];
+const fmod = (a, m) => ((a % m) + m) % m;
+function fpow(b, e, m) { let r = 1n; b = fmod(b, m); while (e > 0n) { if (e & 1n) r = r * b % m; b = b * b % m; e >>= 1n; } return r; }
+const finv = (a) => fpow(a, SECP_P - 2n, SECP_P);
+function ptAdd(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  if (a[0] === b[0] && fmod(a[1] + b[1], SECP_P) === 0n) return null;
+  const l = a[0] === b[0] && a[1] === b[1]
+    ? fmod(3n * a[0] * a[0] * finv(2n * a[1]), SECP_P)
+    : fmod((b[1] - a[1]) * finv(b[0] - a[0]), SECP_P);
+  const x = fmod(l * l - a[0] - b[0], SECP_P);
+  return [x, fmod(l * (a[0] - x) - a[1], SECP_P)];
+}
+function ptMul(k, P) { let R = null, Q = P; while (k > 0n) { if (k & 1n) R = ptAdd(R, Q); Q = ptAdd(Q, Q); k >>= 1n; } return R; }
+const n32 = (x) => Buffer.from(x.toString(16).padStart(64, '0'), 'hex');
+const ptBytes = (P) => Buffer.concat([Buffer.from([P[1] & 1n ? 3 : 2]), n32(P[0])]);
+function ptParse(buf) {
+  if (buf.length !== 33 || (buf[0] !== 2 && buf[0] !== 3)) throw new Error('not a point');
+  const x = BigInt('0x' + buf.subarray(1).toString('hex'));
+  let y = fpow(fmod(x * x * x + 7n, SECP_P), (SECP_P + 1n) / 4n, SECP_P);
+  if (fmod(y * y, SECP_P) !== fmod(x * x * x + 7n, SECP_P)) throw new Error('not on the curve');
+  if ((y & 1n) !== BigInt(buf[0] & 1)) y = SECP_P - y;
+  return [x, y];
+}
+const tagged = (tag, ...parts) => {
+  const t = crypto.createHash('sha256').update(tag, 'utf8').digest();
+  return crypto.createHash('sha256').update(Buffer.concat([t, t, ...parts])).digest();
+};
+const sha = (...parts) => crypto.createHash('sha256').update(Buffer.concat(parts.map((x) => Buffer.from(x)))).digest();
+const big = (buf) => BigInt('0x' + Buffer.from(buf).toString('hex'));
+function cashuIdPath(seed, branch) {
+  const mac = crypto.createHmac('sha512', 'Bitcoin seed').update(Buffer.from(seed)).digest();
+  let node = { key: mac.subarray(0, 32), chain: mac.subarray(32) };
+  for (const level of [129373, 20, branch, 0, 0]) node = bip32Child(node, level + 0x80000000);
+  return BigInt('0x' + node.key.toString('hex'));
+}
+// SHA-256(prefix ‖ ID ‖ delivery key): what the ID key signs to bind its delivery key
+const cashuIdBindDigest = (idHex, nostrHex) => sha(Buffer.from('foxy-cashu-id-bind-v1'), Buffer.from(idHex, 'hex'), Buffer.from(nostrHex, 'hex'));
+function cashuIdKeys(seed) {
+  const d = cashuIdPath(seed, 0), q = cashuIdPath(seed, 1), pay = cashuIdPath(seed, 2), rec = cashuIdPath(seed, 3);
+  const id = ptBytes(ptMul(d, SECP_G)).toString('hex'), nostr = n32(ptMul(q, SECP_G)[0]).toString('hex');
+  // the recovery key (m/129373'/20'/3'/0'/0'): the copies of this phone's own payments go to its x-only public half
+  const recovery = n32(ptMul(rec, SECP_G)[0]).toString('hex');
+  return { d, q, pay, rec, id, nostr, recovery, sig: schnorrSign(d, cashuIdBindDigest(id, nostr)) };
+}
+// NUT-28's rᵢ from the shared x and a slot, with its one retry
+function p2bkTweak(zx, slot) {
+  let r = big(sha(Buffer.from('Cashu_P2BK_v1'), zx, Buffer.from([slot])));
+  if (r === 0n || r >= SECP_ORDER) r = big(sha(Buffer.from('Cashu_P2BK_v1'), zx, Buffer.from([slot, 0xff])));
+  if (r === 0n || r >= SECP_ORDER) throw new Error('P2BK: tweak derivation failed');
+  return r;
+}
+const sharedX = (scalar, pointHex) => n32(ptMul(scalar, ptParse(Buffer.from(pointHex, 'hex')))[0]);
+// the payer's side: P′ = P + rᵢ·G, rᵢ from e·P
+function cashuIdBlind(pHex, e, slot) {
+  const r = p2bkTweak(sharedX(e, pHex), slot);
+  return ptBytes(ptAdd(ptParse(Buffer.from(pHex, 'hex')), ptMul(r, SECP_G))).toString('hex');
+}
+/* The receiver's side for the lock key (slot 0): r₀ from d·E, and the one-time key
+ * d + r₀ where P′ = ID + r₀·G, −d + r₀ where P′ = −ID + r₀·G; null for any other key.
+ * `lock` omitted: the first. */
+function cashuIdOneTime(d, eHex, lock) {
+  const r = p2bkTweak(sharedX(d, eHex), 0);
+  const ID = ptMul(d, SECP_G);
+  const plus = ptBytes(ptAdd(ID, ptMul(r, SECP_G))).toString('hex');
+  const minus = ptBytes(ptAdd([ID[0], SECP_P - ID[1]], ptMul(r, SECP_G))).toString('hex');
+  if (!lock || lock === plus) return { r, k: (d + r) % SECP_ORDER, L: plus };
+  if (lock === minus) return { r, k: fmod(r - d, SECP_ORDER), L: minus };
+  return null;
+}
+// SHA-256("foxy-cashu-id-from-v1" ‖ x(d·peer) ‖ E)
+const cashuIdTag = (d, peerHex, eHex) => sha(Buffer.from('foxy-cashu-id-from-v1'), sharedX(d, peerHex), Buffer.from(eHex, 'hex')).toString('hex');
+// HMAC-SHA256 keyed by the paying key over prefix ‖ ID ‖ index (4) ‖ locktime (8)
+function cashuIdPayBase(pay, idHex, index, locktime) {
+  const msg = Buffer.alloc(18 + 33 + 12);
+  Buffer.from('foxy-cashu-id-e-v1').copy(msg, 0);
+  Buffer.from(idHex, 'hex').copy(msg, 18);
+  msg.writeUInt32BE(index >>> 0, 51);
+  msg.writeBigUInt64BE(BigInt(locktime), 55);
+  return crypto.createHmac('sha256', n32(pay)).update(msg).digest('hex');
+}
+// piece j's throwaway key from a payment's base: SHA-256(base ‖ j as 2 bytes), once more with 0xFF
+function cashuIdPieceKey(baseHex, j) {
+  const head = Buffer.concat([Buffer.from(baseHex, 'hex'), Buffer.from([(j >> 8) & 255, j & 255])]);
+  let e = big(sha(head));
+  if (e === 0n || e >= SECP_ORDER) e = big(sha(head, Buffer.from([0xff])));
+  if (e === 0n || e >= SECP_ORDER) throw new Error('no throwaway key');
+  return e;
+}
+/* Messages between two Cashu IDs (Foxy/Keychain/CashuMsg.swift), a second time from
+ * docs/CASHU-ID.md: the pair secret SHA-256("foxy-msg-pair-v1" ‖ x(d·peer)), the
+ * direction (0 from the lower ID key's 33 bytes to the higher), and message i's key
+ * SHA-256("foxy-msg-recv-v1" ‖ secret ‖ dir ‖ i as 4 bytes) and its seal's
+ * SHA-256("foxy-msg-seal-v1" ‖ …), once more with 0xFF where not below n. */
+const cashuMsgPair = (d, peerHex) => sha(Buffer.from('foxy-msg-pair-v1'), sharedX(d, peerHex)).toString('hex');
+const cashuMsgDir = (fromHex, toHex) => (Buffer.compare(Buffer.from(fromHex, 'hex'), Buffer.from(toHex, 'hex')) < 0 ? 0 : 1);
+function cashuMsgKey(kind, pairHex, dir, i) {
+  const at = Buffer.alloc(4);
+  at.writeUInt32BE(i >>> 0, 0);
+  const head = Buffer.concat([Buffer.from('foxy-msg-' + kind + '-v1'), Buffer.from(pairHex, 'hex'), Buffer.from([dir]), at]);
+  let k = big(sha(head));
+  if (k === 0n || k >= SECP_ORDER) k = big(sha(head, Buffer.from([0xff])));
+  if (k === 0n || k >= SECP_ORDER) throw new Error('no message key');
+  return k;
+}
+// the x-only public half of a key, as the relays see it
+const xOnlyOf = (k) => n32(ptMul(k, SECP_G)[0]).toString('hex');
+// BIP-340 signing, auxiliary randomness all zero (a test model's)
+function schnorrSign(k, msg) {
+  const P = ptMul(k, SECP_G);
+  const d = P[1] & 1n ? SECP_ORDER - k : k;
+  const t = Buffer.from(n32(d).map((b, i) => b ^ tagged('BIP0340/aux', Buffer.alloc(32))[i]));
+  let r = BigInt('0x' + tagged('BIP0340/nonce', t, n32(P[0]), msg).toString('hex')) % SECP_ORDER;
+  const R = ptMul(r, SECP_G);
+  if (R[1] & 1n) r = SECP_ORDER - r;
+  const e = BigInt('0x' + tagged('BIP0340/challenge', n32(R[0]), n32(P[0]), msg).toString('hex')) % SECP_ORDER;
+  return Buffer.concat([n32(R[0]), n32((r + e * d) % SECP_ORDER)]).toString('hex');
 }
 
 /* ---- the owner key (P-256) --------------------------------
@@ -1364,6 +1538,87 @@ function nativePhone(opts) {
       const pair = lockKeyAt(words(), m.index);
       return ok({ index: m.index, privkey: pair.priv, pubkey: pair.pub });
     },
+    /* handleCashuIdPublic, SeedActions.cashuIdPublic: the ID key's public half
+     * (33 bytes), the delivery key's x-only one (32), and the ID key's signature
+     * binding the two (no auxiliary randomness, so the same every time). */
+    cashuIdPublic() {
+      if (!words()) return no(SAYS.noSeed);
+      if (!unlock('cashuIdPublic', 'read')) return no(SAYS.unreadable);
+      const k = cashuIdKeys(seedNow());
+      return ok({ id: k.id, nostr: k.nostr, sig: k.sig, recovery: k.recovery });
+    },
+    /* handleCashuIdSign, SeedActions.cashuIdSign: every piece a P2PK secret (not
+     * SIG_ALL) with its E a point, before the seed is read; then each lock key must
+     * be this ID blinded by that piece's E (NUT-28 slot 0), or nothing is signed.
+     * Never the key itself. */
+    cashuIdSign(m) {
+      const lockOf = (sec) => {
+        try {
+          if (typeof sec !== 'string' || sec.length > 1024) return null;
+          const j = JSON.parse(sec);
+          if (!Array.isArray(j) || j.length !== 2 || j[0] !== 'P2PK' || !j[1] || typeof j[1].data !== 'string'
+              || !/^0[23][0-9a-fA-F]{64}$/.test(j[1].data)) return null;
+          if ((j[1].tags || []).some((t) => Array.isArray(t) && String(t[0]).toLowerCase() === 'sigflag' && String(t[1]).toUpperCase() === 'SIG_ALL')) return null;
+          return j[1].data.toLowerCase();
+        } catch (x) { return null; }
+      };
+      const pieces = Array.isArray(m.pieces) ? m.pieces : null;
+      if (!pieces || !pieces.length || pieces.length > 100
+          || !pieces.every((p) => p && typeof p === 'object' && lockOf(p.secret) !== null
+            && typeof p.e === 'string' && /^0[23][0-9a-fA-F]{64}$/.test(p.e))) return no(SAYS.bad);
+      if (!words()) return no(SAYS.noSeed);
+      if (!unlock('cashuIdSign', 'read')) return no(SAYS.unreadable);
+      const d = cashuIdKeys(seedNow()).d;
+      const keys = [];
+      for (const p of pieces) {
+        let t = null;
+        try { t = cashuIdOneTime(d, p.e.toLowerCase(), lockOf(p.secret)); } catch (x) { return no('That is not a payment to this Cashu ID.'); }
+        if (!t) return no('That ecash is not locked to this Cashu ID.');
+        keys.push(t.k);
+      }
+      phone.cashuIdSigned = (phone.cashuIdSigned || 0) + pieces.length;
+      return ok({ sigs: pieces.map((p, i) => schnorrSign(keys[i], crypto.createHash('sha256').update(p.secret, 'utf8').digest())) });
+    },
+    /* handleCashuIdSignUnblinded, SeedActions.cashuIdSignUnblinded: the ID key's own
+     * signature (TAKE IT ANYWAY), over 1 to 100 P2PK secrets (not SIG_ALL) whose
+     * `data` is the ID itself, either parity; anything else signs nothing. */
+    cashuIdSignUnblinded(m) {
+      const lockOf = (sec) => {
+        try {
+          if (typeof sec !== 'string' || sec.length > 1024) return null;
+          const j = JSON.parse(sec);
+          if (!Array.isArray(j) || j.length !== 2 || j[0] !== 'P2PK' || !j[1] || typeof j[1].data !== 'string'
+              || !/^0[23][0-9a-fA-F]{64}$/.test(j[1].data)) return null;
+          if ((j[1].tags || []).some((t) => Array.isArray(t) && String(t[0]).toLowerCase() === 'sigflag' && String(t[1]).toUpperCase() === 'SIG_ALL')) return null;
+          return j[1].data.toLowerCase();
+        } catch (x) { return null; }
+      };
+      const secrets = Array.isArray(m.secrets) ? m.secrets : null;
+      if (!secrets || !secrets.length || secrets.length > 100 || !secrets.every((t) => lockOf(t) !== null)) return no(SAYS.bad);
+      if (!words()) return no(SAYS.noSeed);
+      if (!unlock('cashuIdSignUnblinded', 'read')) return no(SAYS.unreadable);
+      const k = cashuIdKeys(seedNow());
+      if (!secrets.every((t) => lockOf(t).slice(2) === k.id.slice(2))) return no('That ecash is not locked to this Cashu ID.');
+      phone.cashuIdSignedBare = (phone.cashuIdSignedBare || 0) + secrets.length;
+      return ok({ sigs: secrets.map((t) => schnorrSign(k.d, crypto.createHash('sha256').update(t, 'utf8').digest())) });
+    },
+    /* handleCashuIdTag, SeedActions.cashuIdTag: the payer's name, proved. */
+    cashuIdTag(m) {
+      const pt = /^0[23][0-9a-fA-F]{64}$/;
+      if (typeof m.peer !== 'string' || !pt.test(m.peer) || typeof m.e !== 'string' || !pt.test(m.e)) return no(SAYS.bad);
+      if (!words()) return no(SAYS.noSeed);
+      if (!unlock('cashuIdTag', 'read')) return no(SAYS.unreadable);
+      try { return ok({ tag: cashuIdTag(cashuIdKeys(seedNow()).d, m.peer.toLowerCase(), m.e.toLowerCase()) }); }
+      catch (x) { return no('That is not a payment to this Cashu ID.'); }
+    },
+    /* handleCashuIdEphemeral, SeedActions.cashuIdEphemeral: a payment's base. */
+    cashuIdEphemeral(m) {
+      if (typeof m.to !== 'string' || !/^0[23][0-9a-fA-F]{64}$/.test(m.to)
+          || !int(m.index, 0, 4294967295) || !int(m.locktime, 0, Number.MAX_SAFE_INTEGER)) return no(SAYS.bad);
+      if (!words()) return no(SAYS.noSeed);
+      if (!unlock('cashuIdEphemeral', 'read')) return no(SAYS.unreadable);
+      return ok({ base: cashuIdPayBase(cashuIdKeys(seedNow()).pay, m.to.toLowerCase(), m.index, m.locktime) });
+    },
     /* handleCardOwnerKey, SeedActions.cardOwnerKey: the owner PUBLIC key for a
      * card, 04 || X || Y. The private half is HMAC-SHA256 keyed with the seed over
      * "FoxyCard/owner", a zero byte and the card's key (33 bytes), taken mod the
@@ -1527,4 +1782,6 @@ function nativePhone(opts) {
 }
 
 module.exports = { load, proof, stubCashu, connected, loadReal, fakeMint, books, booksWrong, rebook, noBooks, nativePhone, NATIVE_RULES, NATIVE_SAYS, counterSlot, PHONE_WORDS,
-                   p2pkParent, p2pkAt, cardOwnerScalar, p256Public, p256Sign, p256Verify, CARD_LABELS };
+                   p2pkParent, p2pkAt, cardOwnerScalar, p256Public, p256Sign, p256Verify, CARD_LABELS,
+                   cashuIdKeys, cashuIdOneTime, cashuIdBlind, cashuIdTag, cashuIdPayBase, cashuIdPieceKey, cashuIdBindDigest,
+                   p2bkTweak, sharedX, schnorrSign, cashuMsgPair, cashuMsgDir, cashuMsgKey, xOnlyOf };

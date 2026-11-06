@@ -2416,6 +2416,109 @@
     return (all && typeof all === 'object' && !Array.isArray(all)) ? all : {};
   }
 
+  /* ---- card loads whose pieces the mint says are spent --------------------------------------------------------------
+   *
+   * A card top-up's note keeps its token (`token`) until every piece is in its card's file (`cardLoadOnFile`), because
+   * until then the text may be all a lost card's take-back has. A load for a card that has no row on this phone (made
+   * before the file existed, or for a card since set up again with new keys) can never meet that rule, and on a phone
+   * whose store filled, 90 such loads held 2 MB, 88 of them for pieces long since spent at their mints.
+   *
+   * So, after a connect has settled (`connect`'s sweeps, never in front of them), the loads still kept at the mint just
+   * connected to are asked about (NUT-07: reads and changes nothing), at most CARD_LOADS_BATCH Ys a request, on a
+   * circuit of this sweep's own, at most once an hour a mint (a note in memory, not in storage). A load the mint says is
+   * spent in every piece keeps only its showing copy (`kept`, as a claimed token's: `forgetClaimedToken`), which the
+   * kept tokens' budget bounds (`trimKeptTokens`). Anything unspent, pending, missing or unasked keeps its text and is
+   * asked again another time; an answer that is not one state for each Y asked, by its Y, is refused whole; a load
+   * whose change is still owed stays; a load at another mint is not asked about here; a load on file is let go by
+   * the trim without asking.
+   *
+   * Asking about sent tokens at every connect was taken out because it told a mint who paid whom: the sender asks about
+   * pieces the receiver then redeems. A card load has no other party. The payer and the receiver are this phone, and
+   * the mint saw these very pieces made by this phone's swap to the card's key; asking now tells it only that this
+   * phone still has a note of them. A mint that wrongly said SPENT would cost only the showing copy's place in a
+   * lost card's take-back, and a take-back of pieces is the mint's to honour or refuse in any case.
+   * Resolves how many loads were let go. */
+  var CARD_LOADS_BATCH = 400;
+  var CARD_LOADS_AGAIN_MS = 60 * 60 * 1000;
+  var cardLoadsAskedAt = /** @type {Object<string, number>} */ ({});
+  var cardLoadsGoing = /** @type {Object<string, Promise<number>|undefined>} */ ({});
+  /** @returns {Promise<number>} */
+  function cardLoadsSpent(w, at) {
+    var here = canonicalMint(at || '');
+    if (!w || !here || !routeOpen()) return Promise.resolve(0);
+    if (cardLoadsGoing[here]) return /** @type {Promise<number>} */ (cardLoadsGoing[here]);
+    if (Date.now() - (cardLoadsAskedAt[here] || 0) < CARD_LOADS_AGAIN_MS) return Promise.resolve(0);
+    var meta = load('foxy.txmeta', {});
+    var asks = /** @type {Array<{hash: string, token: string, ys: Array<string>}>} */ ([]);
+    Object.keys(meta || {}).forEach(function (h) {
+      var m = meta[h];
+      if (!m || m.to !== 'card' || m.owedChange || typeof m.token !== 'string' || !m.token) return;
+      var info = null;
+      try { info = FoxyWallet.tokenInfo(m.token); } catch (e) { info = null; }
+      if (!info || !Array.isArray(info.proofs) || !info.proofs.length || canonicalMint(info.mint || '') !== here) return;
+      // on file: the trim lets it go without asking (`trimPlan`)
+      if (cardLoadOnFile(m.token)) return;
+      var ys = info.proofs.map(function (p) { return lookupOf(p); });
+      if (ys.some(function (y) { return !y; })) return;
+      asks.push({ hash: h, token: m.token, ys: ys });
+    });
+    // nothing to ask is no question asked, and no hour's wait
+    if (!asks.length) return Promise.resolve(0);
+    cardLoadsAskedAt[here] = Date.now();
+    var all = /** @type {Array<string>} */ ([]);
+    asks.forEach(function (a) { all = all.concat(a.ys); });
+    var size = Math.max(1, Math.min(CARD_LOADS_BATCH, mintArrayCap(w)));
+    var parts = /** @type {Array<Array<string>>} */ ([]);
+    for (var i = 0; i < all.length; i += size) parts.push(all.slice(i, i + size));
+    var circuit = circuitFor('cardload:' + here + ':' + Date.now());
+    var said = /** @type {Object<string, string>} */ ({});
+    var answered = 0;
+    var going = parts.reduce(function (chain, part) {
+      return chain.then(function () {
+        if (!routeOpen()) return null;
+        return withTimeout(FoxyWallet.nativeRequest({
+          endpoint: here + '/v1/checkstate', method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          requestBody: { Ys: part }, foxyCircuit: circuit,
+        }), 30000, 'the mint’s word on card loads').then(function (j) {
+          var states = j && Array.isArray(j.states) ? j.states : null;
+          // one state for each Y asked, by its Y, or none of the answer is taken
+          if (!states || states.length !== part.length) return null;
+          var got = /** @type {Object<string, string>} */ ({});
+          states.forEach(function (st) { if (st && typeof st.Y === 'string') got[st.Y] = String(st.state || '').toUpperCase(); });
+          if (!part.every(function (y) { return Object.prototype.hasOwnProperty.call(got, y); })) return null;
+          part.forEach(function (y) { said[y] = got[y]; });
+          answered += 1;
+          return null;
+        }, function () { /* not answered: kept, and asked another time */ return null; });
+      });
+    }, Promise.resolve(/** @type {any} */ (null))).then(function () {
+      // nothing answered (no route, no word): the next connect asks again
+      if (!answered) delete cardLoadsAskedAt[here];
+      var spent = asks.filter(function (a) { return a.ys.every(function (y) { return said[y] === 'SPENT'; }); });
+      var now = load('foxy.txmeta', {});
+      var gone = 0, bytes = 0;
+      spent.forEach(function (a) {
+        var m = now[a.hash];
+        // only as it was asked about: a note changed meanwhile is left for the next time
+        if (!m || m.to !== 'card' || m.owedChange || m.token !== a.token) return;
+        m.kept = m.token;
+        delete m.token;
+        gone += 1;
+        bytes += a.token.length;
+      });
+      if (gone) {
+        trimKeptTokens(now);
+        try { save('foxy.txmeta', now); } catch (e) { console.warn('[foxy] card: the loads the mint says are spent could not be let go:', e && e.message); return 0; }
+      }
+      console.log('[foxy] card: ' + gone + ' loads whose pieces the mint says are spent let go, ' + Math.round(bytes / 1024) + ' KB; '
+        + (asks.length - gone) + ' kept');
+      return gone;
+    }).then(function (n) { delete cardLoadsGoing[here]; return n; }, function () { delete cardLoadsGoing[here]; return 0; });
+    cardLoadsGoing[here] = going;
+    return going;
+  }
+
   /* A refund key for this card, from the phone's words: the one already on
    * file for it, or a fresh one, written down before it is answered. '' when
    * the phone has none to give. `unit`: what the card is being set up to hold,
@@ -8464,8 +8567,10 @@
       var joined = cardAway;
       return joined.ready.then(function () { return handle(joined); }, function (e) { return cardVisitEnd(joined).then(function () { throw e; }); });
     }
-    if (claimAway || claimingLate) {
-      return Promise.resolve(claimAway || claimingLate).then(null, function () { return null; }).then(function () { return cardVisit(at); });
+    // and any other visit (`visitBusy`: a payment being brought home, a tap at a payer's mint)
+    var busy = visitBusy();
+    if (busy) {
+      return Promise.resolve(busy).then(null, function () { return null; }).then(function () { return cardVisit(at); });
     }
     var home = canonicalMint(mintUrl || '');
     if (!home || home === to) return Promise.resolve(handle(null));

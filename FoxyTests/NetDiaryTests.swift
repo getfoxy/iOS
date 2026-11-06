@@ -127,6 +127,26 @@ final class NetDiaryTests: XCTestCase {
         XCTAssertTrue(kept.contains("<cashu token,") && kept.contains("<lightning invoice,") && kept.contains("<hex, 64 chars"), kept)
     }
 
+    /// A Lightning address names a person: the whole of it goes, the host after the at-sign with the name before it, and the
+    /// key names that carry an at-sign before a unit (a pile "...@usd") are not mistaken for one.
+    func testRedactionTakesOutALightningAddress() {
+        let kept = LogRedaction.redact("[foxy] send starting to alice.b+tips@walletofsatoshi.com then pile foxy.cashu.proofs.https://m.test@usd")
+        XCTAssertFalse(kept.contains("alice") || kept.contains("walletofsatoshi"), kept)
+        XCTAssertTrue(kept.contains("<lightning address, 32 chars, not logged>"), kept)
+        XCTAssertTrue(kept.contains("m.test@usd"), kept)
+    }
+
+    /// A Cashu ID string, a NUT-18 request and the nprofile a Cashu ID is delivered to name a person: none reaches the log.
+    func testRedactionTakesOutACashuIDAndItsAddress() {
+        let id = "foxyid1AgNlIzuO9oM0GjHpzSncvCYSxfTge7XbrS0ufWT-_AvYlmZtyOXIU-UVU9JX7nrzYmsmyeEdPbEa6ASNFPd48g26cTqHsw"
+        let request = "creqA" + String(repeating: "pWFpaGI0NThkN2", count: 3)
+        let requestB = "CREQB1" + String(repeating: "QYQQWAR", count: 4)
+        let profile = "nprofile1qqsrhuxx8l9ex335q7he0f09aej04zpazpl0ne2cgukyawd24mayt8gpp4mhxue69uhhytnc9e3k7mgpz4mhxue69uhkg6nzv9ejuumpv34kytnrdaksjlyr9p"
+        let kept = LogRedaction.redact("[foxy] cashu id \(id) to \(profile) and \(request) \(requestB)")
+        XCTAssertFalse(kept.contains(id) || kept.contains(profile) || kept.contains(request) || kept.contains(requestB), kept)
+        XCTAssertTrue(kept.contains("<cashu id,") && kept.contains("<nostr profile,") && kept.contains("<payment request,"), kept)
+    }
+
     /// A Release build's lines name no host: `host` and the first eight hex
     /// characters of the SHA-256 of its name, lowercased. Two lines about one
     /// host still read as the same host; a Debug build names it.

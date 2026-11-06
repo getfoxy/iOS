@@ -168,6 +168,9 @@ function wallet(over) {
     quarantinedSats: () => 2100,
     quarantinedUnknown: () => 100,
     tokensNotClaimed: () => Promise.resolve([{ sats: 100 }, { sats: 21 }]),
+    // what clearing kept, said after the clear (`clearHistoryNow`): two sent tokens and one load on a card
+    _sentTokens: () => [{ hash: 'a', token: 'cashuAone' }, { hash: 'b', token: 'cashuAtwo' }, { hash: 'c', token: 'cashuAload', card: true }],
+    tokenInfo: (t) => ({ sats: t === 'cashuAone' ? 100 : 21, unit: 'sat', amount: null, proofs: [{}] }),
     clearHistory() {},
     clearContacts() {},
     splitClear() {},
@@ -202,6 +205,58 @@ const SERIES = { '1D': { pts: [[0, 60], [50, 40], [100, 20]], d: 'M0 60L50 40L10
 
 // a representative state of a screen, against the stand-in wallet
 const at = (screen, state, extra) => Object.assign({ wallet: true, state: Object.assign({ screen, stack: [] }, LIVE, state || {}) }, extra || {});
+
+/* Messages between Cashu IDs, last so that the views before keep their numbers: the bare screen, as every screen the app
+ * names is drawn with no wallet, and its representative states. */
+function messageViews() {
+  const v = [];
+  const add = (label, view) => v.push([label, view]);
+  add('screen cidChat', { state: { screen: 'cidChat', stack: [] } });
+  /* Messages between Cashu IDs (26p-cashu-msg.js): a contact that is a Cashu ID with unread messages, someone who is not
+   * a contact under NEW MESSAGES, and a contact's screen with the ID in use, empty, and with no ID in use. */
+  const CID_A = '02' + 'a1'.repeat(32), CID_S = '03' + 'b2'.repeat(32);
+  const MSG_CONTACTS = CONTACTS.concat([{ name: 'Carol', handle: 'foxyid1' + 'C'.repeat(179), cid: { id: CID_A, nostr: 'c3'.repeat(32), sig: '' } }]);
+  const MSGS = [
+    { id: 'a', dir: 'in', text: 'Lunch at noon?', at: Date.UTC(2026, 10, 4, 9, 0), mark: '' },
+    { id: 'b', dir: 'out', text: 'Yes, see you there', at: Date.UTC(2026, 10, 4, 9, 1), mark: 'sent' },
+    { id: 'c', dir: 'out', text: 'Bringing the receipt\nand the change', at: Date.UTC(2026, 10, 4, 9, 2), mark: 'sent' },
+  ];
+  const MSG_ON = { cashuMsgOn: () => true,
+    cashuMsgThreads: () => [{ peer: CID_A, name: 'Carol', contact: true, unread: 3, lastAt: 1, lastText: '' },
+      { peer: CID_S, name: 'A Cashu ID', contact: false, unread: 1, lastAt: 2, lastText: '' }],
+    cashuMsgThread: (p) => (p === CID_A ? { peer: CID_A, name: 'Carol', contact: true, card: '', unread: 0, msgs: MSGS }
+      : { peer: CID_S, name: 'A Cashu ID', contact: false, card: 'foxyid1' + 'S'.repeat(179), unread: 0, msgs: MSGS.slice(0, 1) }),
+    cashuMsgSeen: () => {} };
+  add('contacts, a Cashu ID with unread messages, and a new one', at('contacts', { contacts: MSG_CONTACTS }, { wallet: MSG_ON }));
+  add('cidChat, a contact\u2019s messages', at('cidChat', { contacts: MSG_CONTACTS, cmPeer: CID_A, cmDraft: 'On my way' }, { wallet: MSG_ON }));
+  add('cidChat, someone who is not a contact', at('cidChat', { contacts: MSG_CONTACTS, cmPeer: CID_S }, { wallet: MSG_ON }));
+  add('cidChat, no messages yet', at('cidChat', { contacts: MSG_CONTACTS, cmPeer: CID_A },
+    { wallet: Object.assign({}, MSG_ON, { cashuMsgThread: () => ({ peer: CID_A, name: 'Carol', contact: true, card: '', unread: 0, msgs: [] }) }) }));
+  add('cidChat, a refusal under the field', at('cidChat', { contacts: MSG_CONTACTS, cmPeer: CID_A, cmErr: 'That message is too long. A message is at most 1000 characters.' }, { wallet: MSG_ON }));
+  add('cidChat, no Cashu ID in use', at('cidChat', { contacts: MSG_CONTACTS, cmPeer: CID_A }, { wallet: { cashuMsgOn: () => false } }));
+  /* With the keyboard up (kbInset, watchKeyboard in 15-paid-wake-keyboard.js): the frame padded by its height, the field
+   * and SEND at the foot of what is left, the list above them shortened. */
+  add('cidChat, a contact\u2019s messages, keyboard up', at('cidChat', { contacts: MSG_CONTACTS, cmPeer: CID_A, cmDraft: 'On my way', kbInset: 336 }, { wallet: MSG_ON }));
+  add('cidChat, no messages yet, keyboard up', at('cidChat', { contacts: MSG_CONTACTS, cmPeer: CID_A, kbInset: 336 },
+    { wallet: Object.assign({}, MSG_ON, { cashuMsgThread: () => ({ peer: CID_A, name: 'Carol', contact: true, card: '', unread: 0, msgs: [] }) }) }));
+  /* CHAT, home's round button at the top left, with the unread count on its corner, and INBOX, which it opens (26p-cashu-msg.js
+   * `renderInbox`): messages and payments either way, newest first; empty; with no ID in use. */
+  add('screen inbox', { state: { screen: 'inbox', stack: [] } });
+  const INBOX_ON = Object.assign({}, MSG_ON, {
+    cashuMsgThreads: () => [{ peer: CID_A, name: 'Carol', contact: true, unread: 3, lastAt: Date.UTC(2026, 10, 4, 9, 2), lastText: 'Bringing the receipt\nand the change' },
+      { peer: CID_S, name: 'A Cashu ID', contact: false, unread: 1, lastAt: Date.UTC(2026, 10, 4, 8, 0), lastText: 'Hi, is this Foxy?' }],
+    cashuMsgPayments: () => [{ peer: CID_A, dir: 'out', unit: 'usd', amount: 125, at: Date.UTC(2026, 10, 3, 18, 0) },
+      { peer: '02' + 'c4'.repeat(32), dir: 'in', unit: 'sat', amount: 500, at: Date.UTC(2026, 10, 4, 8, 30) }] });
+  const INBOX_CONTACTS = MSG_CONTACTS.concat([{ name: 'Dave', handle: 'foxyid1' + 'D'.repeat(179), cid: { id: '02' + 'c4'.repeat(32), nostr: 'd5'.repeat(32), sig: '' } }]);
+  add('home, CHAT with unread messages', at('home', { contacts: INBOX_CONTACTS }, { wallet: INBOX_ON }));
+  add('inbox, messages and payments', at('inbox', { contacts: INBOX_CONTACTS, stack: ['home'] }, { wallet: INBOX_ON }));
+  add('inbox, nothing yet', at('inbox', { contacts: MSG_CONTACTS, stack: ['home'] },
+    { wallet: Object.assign({}, MSG_ON, { cashuMsgThreads: () => [], cashuMsgPayments: () => [] }) }));
+  add('inbox, no Cashu ID in use', at('inbox', { contacts: MSG_CONTACTS, stack: ['home'] }, { wallet: { cashuMsgOn: () => false, cashuMsgPayments: () => [] } }));
+  // the menu with BACKUP ACCOUNT at the very top: money in the wallet, the words not checked
+  add('home, the menu with BACKUP ACCOUNT', at('home', { open0: true }, { wallet: { backedUp: () => false } }));
+  return v;
+}
 
 function representative(logic) {
   const v = [];
@@ -523,6 +578,34 @@ function representative(logic) {
   add('confirm, paid by Cashu', at('confirm', { flow: 'receive', invoice: 'lnbc2100n1stub', amount: '2100', unit: 'SATS', asset: 'BITCOIN', network: 'LIGHTNING', recvRail: 'CASHU' }));
   add('confirm, any amount, no invoice yet', at('confirm', { flow: 'receive', amount: '', unit: 'USD' }));
   add('confirm, dollars', at('confirm', { flow: 'receive', invoice: 'lnbc2100n1stub', amount: '1.34', unit: 'USD', asset: 'DOLLARS' }));
+  /* Tips at the till (26p-till-tips.js): the till's receive with its tip buttons, none picked and $2 picked; who the tips go to (the
+   * SWITCH MINT list of Cashu ID contacts), a group's shares short of 100% and at it; and CASHIER CODES, two live and two under PAST.
+   * Fixed times, so the expiry words do not move. */
+  const TIP_TILL = { role: 'keeper', since: 0, unit: 'sat', main: 'sat', mint: MINT, mints: [MINT],
+    tips: { on: true, to: 'one', ids: [{ id: '02' + '1'.repeat(64), nostr: '1'.repeat(64), name: 'Ana', pct: 100 }] } };
+  add('confirm, the till with tips', at('confirm', { flow: 'receive', invoice: 'lnbc2100n1stub', amount: '10', unit: 'USD', till: TIP_TILL }));
+  add('confirm, the till with a $2 tip on it', at('confirm', { flow: 'receive', invoice: 'lnbc2100n1stub', amount: '12', unit: 'USD', till: TIP_TILL,
+    tillTip: { cents: 200, num: 200, den: 1200, base: '10', pick: 200 } }));
+  add('confirm, the till with a tip typed', at('confirm', { flow: 'receive', invoice: 'lnbc2100n1stub', amount: '13.50', unit: 'USD', till: TIP_TILL,
+    tillTip: { cents: 350, num: 350, den: 1350, base: '10', pick: 'other' } }));
+  add('SET AMOUNT, the till’s tip', at('amount', { flow: 'tillTip', unit: 'USD', amount: '3.50', till: TIP_TILL, stack: ['amount', 'confirm'] }));
+  const CID_CONTACTS = () => [
+    { handle: 'foxyid1a', name: 'Ana', at: 1, cid: { id: '02' + '1'.repeat(64), nostr: '1'.repeat(64) } },
+    { handle: 'foxyid1b', name: 'Ben', at: 2, cid: { id: '02' + '2'.repeat(64), nostr: '2'.repeat(64) } },
+  ];
+  add('switchMint, who the tips go to', at('switchMint', { tillList: 'person', tillPersonFor: 'one' }, { wallet: { cashuIdContacts: CID_CONTACTS } }));
+  add('switchMint, who the tips go to, no contacts yet', at('switchMint', { tillList: 'person', tillPersonFor: 'one' }, { wallet: { cashuIdContacts: () => [] } }));
+  const GROUP = (b) => [{ id: '02' + '1'.repeat(64), nostr: '1'.repeat(64), name: 'Ana', pct: 60 }, { id: '02' + '2'.repeat(64), nostr: '2'.repeat(64), name: 'Ben', pct: b }];
+  add('switchMint, a group of tips short of 100%', at('switchMint', { tillList: 'group', tillGroup: GROUP(0) }));
+  add('switchMint, a group of tips at 100%', at('switchMint', { tillList: 'group', tillGroup: GROUP(40) }));
+  const CODES = { live: [
+      { id: 'a1', label: 'Front', unit: 'sat', main: 'sat', mints: [MINT], tips: { on: false, to: 'self', names: [] }, made: 1792900000000, exp: 1793159200, endedAt: 0, how: 'expired', until: 1793159200000, text: 'https://getfoxy.io/till#AAAA' },
+      { id: 'a2', label: 'Patio', unit: 'both', main: 'usd', mints: [MINT, 'https://home.example.com'], tips: { on: true, to: 'group', names: ['Ana', 'Ben'] }, made: 1792900100000, exp: 1793159300, endedAt: 0, how: 'expired', until: 1793159300000, text: 'https://getfoxy.io/till#BBBB' }],
+    past: [
+      { id: 'a3', label: 'Bar', unit: 'usd', main: 'usd', mints: [MINT], tips: { on: true, to: 'one', names: ['Ana'] }, made: 1792700000000, exp: 1792959200, endedAt: 1792800000000, how: 'ended', until: 1792800000000, text: '' },
+      { id: 'a4', label: '', unit: 'sat', main: 'sat', mints: [MINT], tips: { on: true, to: 'self', names: [] }, made: 1792400000000, exp: 1792659200, endedAt: 0, how: 'expired', until: 1792659200000, text: '' }] };
+  add('switchMint, CASHIER CODES, two live and two past', at('switchMint', { tillList: 'codes', till: TIP_TILL }, { wallet: { tillPassList: () => CODES } }));
+  add('switchMint, CASHIER CODES, none', at('switchMint', { tillList: 'codes', till: TIP_TILL }, { wallet: { tillPassList: () => ({ live: [], past: [] }) } }));
   add('confirm, no wallet', { state: { screen: 'confirm', stack: [], invoice: 'lnbc2100n1stub', amount: '21', unit: 'SATS' } });
   add('paid, received, live', at('paid', { amount: '2100', unit: 'SATS', asset: 'BITCOIN', recv: { live: 'in' }, recvResolved: true }));
   add('paid, received, cash', at('paid', { amount: '2100', unit: 'SATS', asset: 'DOLLARS', recv: { live: 'gone' } }));
@@ -616,6 +699,10 @@ function representative(logic) {
     history: [{ label: 'TODAY', items: [TX_AT_RISK, Object.assign({}, TX_OUT, { pending: true })] }] },
     { wallet: Object.assign({}, OFFLINE, { trustedWaiting: () => [{ id: 'r1', sats: 4900, at: 1 }] }) }));
   add('txDetail, a payment at risk', at('txDetail', { tx: TX_AT_RISK }));
+  // a payment to the ID at a mint this phone does not use, too small to bring home yet: a row in HISTORY, nothing asked
+  add('history, a Cashu ID payment waiting at another mint', at('history', { history: [{ label: 'TODAY', items: [
+    { name: 'From Carol', party: 'From Carol', dir: 'in', time: '10:40', sats: 5, fee: 0, rail: 'Cashu ID', hash: 'cid-waiting-cid:k1',
+      pending: true, cidWait: true, cidKey: 'cid:k1', cidLine: 'At home.example.com \u00b7 tap to decide', note: '', token: '', mint: 'https://home.example.com' }, TX_IN] }] }));
   // a card's payment taken offline: in the list, its detail, and the amber ring on home while it waits
   add('history, a card payment taken offline, waiting for the mint', at('history', {
     history: [{ label: 'TODAY', items: [TX_CARD_KEPT, TX_IN] }] }, { wallet: { cardKeptWaiting: () => [{ id: 'card-kept', sats: 592, date: 4102444800, state: 'kept', at: 1 }] } }));
@@ -732,11 +819,14 @@ function representative(logic) {
     { wallet: TWO({ walletChoice: () => ({ hold: 'dollars', recv: 'usd', send: 'usd' }), balanceOf: (u) => (u === 'usd' ? 4205 : 0) }) }));
   add('two balances: home, the menu with SWAP', at('home', Object.assign({ balSats: 0, open0: true }, TWO_LIVE),
     { wallet: TWO({ walletChoice: () => ({ hold: 'dollars', recv: 'usd', send: 'usd' }), balanceOf: (u) => (u === 'usd' ? 4205 : 0) }) }));
-  // holding both, SETTINGS open: no RECEIVE IN or SEND IN (every receive and send asks which balance)
-  add('two balances: settings', at('home', Object.assign({ open0: true, menuSettingsOpen: true }, TWO_LIVE),
+  // holding both, SETTINGS (open as every section is): no RECEIVE IN or SEND IN (every receive and send asks which balance)
+  add('two balances: settings', at('home', Object.assign({ open0: true }, TWO_LIVE),
     { wallet: TWO({ walletChoice: () => ({ hold: 'both', recv: '', send: '' }) }) }));
   // SETTINGS open with the two till caps (26j-till-caps.js): what one payer may hand this phone offline, and what it holds in all
-  add('settings, what it takes offline', at('home', { open0: true, menuSettingsOpen: true },
+  // REMIND ME AFTER 15 DAYS (26o-remind.js `remindMenuRow`), the first row of SETTINGS, on
+  add('settings, remind me after 15 days', at('home', { open0: true },
+    { wallet: { remindView: () => ({ eligible: true, on: true }) } }));
+  add('settings, what it takes offline', at('home', { open0: true },
     { wallet: { tillCaps: () => ({ payerSats: 66000, holdSats: 396000, promptSats: 198000, payerSet: false, holdSet: true }) } }));
   add('SET AMOUNT, what one payer may hand you offline', at('amount', { flow: 'tillCap', tillCapWhich: 'payer', unit: 'USD', amount: '40' }));
   add('two balances: what to hold, Both picked', at('holdChoice', Object.assign({ holdPick: 'both' }, TWO_LIVE), { wallet: TWO() }));
@@ -788,6 +878,18 @@ function representative(logic) {
     recipientKind: 'invoice', recipient: INVOICE_THIS_MINT, payFromFlow: 'send', payFromList: PF_LIST, payFromPick: OTHER + '|sat',
     payMint: OTHER, payUnit: 'sat' }, TWO_LIVE), { wallet: TWO(), before: (l) => { l._pf = { flow: 'send', run: 1, home: MINT,
       full: { [OTHER + '|sat']: { mint: OTHER, unit: 'sat', amount: 2100, feeReserve: 1, need: 2101, ok: true, why: '' } } }; } }));
+  /* Short in the unit a request asks, with the other balance at this mint (2026-11-04, 26l-pay-from.js `pfSwapSource`): the
+   * dollars here, by the SWAP screen's swap, as a row beside another mint's sats, and the offer paid from them. */
+  const PF_SWAP = PF(MINT + '|usd', { have: 8916, cost: 151, fee: 2, ok: true, rank: 25, pref: true, swap: true, toUnit: 'sat', want: 1829, amt: 5000 });
+  const PF_SWAP_FULL = (l) => { l._pf = { flow: 'req', run: 1, home: MINT, full: { [MINT + '|usd']: { total: 151, amount: 149, fee: 2, get: 1868,
+    rate: { usdPerBtc: 80000 }, state: 'quoted', expiresAt: 4102444800000 } } }; };
+  const REQ_SWAP = { id: 'req-swap', sats: 5000, unit: 'sat', mints: [MINT], transports: ['nostr'], delivery: { kind: 'nostr', target: 'nprofile1x' } };
+  add('PAY FROM, a request short in sats: the dollars at this mint, by a swap', at('payFrom', Object.assign({ payFromFlow: 'req',
+    payFromPick: OTHER + '|sat', payFromAsk: 'Pay $ 4.00 from', req: REQ_SWAP, payFromList: [
+      PF(OTHER + '|sat', { have: 9000, cost: 5003, fee: 3, ok: true, rank: 3 }), PF_SWAP,
+    ] }, TWO_LIVE), { wallet: TWO(), before: PF_SWAP_FULL }));
+  add('reqOffer, paid from the dollars at this mint by a swap', at('reqOffer', Object.assign({ req: REQ_SWAP, payFromFlow: 'req',
+    payFromList: [PF_SWAP], payFromPick: MINT + '|usd', payMint: MINT, payUnit: 'usd', balSats: 3190 }, TWO_LIVE), { wallet: TWO(), before: PF_SWAP_FULL }));
   add('two balances: paid, ADDED TO DOLLARS', at('paid', Object.assign({ paidUnit: 'usd', paidAmount: 500, recvResolved: true,
     recv: { live: 'in' } }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: sent FROM DOLLARS', at('sendDone', Object.assign({ sendPhase: 'settled', recipientKind: 'invoice',
@@ -966,6 +1068,35 @@ function representative(logic) {
   ] }], historyComplete: false, histUnit: 'usd' }, TWO_LIVE), { wallet: HOLDS_BTC }));
   add('two balances: dollars a card paid for sats, swapped into bitcoin, in detail', at('txDetail', Object.assign({ tx: ASK_ROW('req-d3', '09:30',
     { convert: 'done', convertSats: 6961, stamp: 'Today, 09:30' }) }, TWO_LIVE), { wallet: HOLDS_BTC }));
+  /* SEND > BANK ACCOUNT (26q-bank.js): the exchanges on the mint list, the username screen in each state its lookup leaves it,
+   * River's paste screen, SET AMOUNT straight to the address kept with CHANGE EXCHANGE, and the sent screen for each. */
+  const BANK_W = (over) => ({ wallet: Object.assign({
+    bankExchanges: () => [{ key: 'strike', name: 'Strike', domain: 'strike.me', by: 'address' }, { key: 'river', name: 'River', domain: 'river.com', by: 'invoice' },
+      { key: 'cashapp', name: 'Cash App', domain: 'cash.app', by: 'address', unchecked: true }],
+    bankUser: (ex, raw) => String(raw || '').trim().replace(/^[$@]+/, '').split('@')[0].toLowerCase(),
+    bankSaved: () => null,
+  }, over || {}) });
+  const STRIKE = { bank: { ex: 'strike', to: 'alice@strike.me' }, recipient: 'alice@strike.me', recipientKind: 'email' };
+  add('BANK ACCOUNT: the exchanges', at('switchMint', { bankPick: true }, BANK_W()));
+  add('BANK ACCOUNT: the exchanges, Strike kept', at('switchMint', { bankPick: true }, BANK_W({ bankSaved: () => ({ ex: 'strike', user: 'alice', addr: 'alice@strike.me' }) })));
+  add('BANK ACCOUNT: a Strike username to type', at('bankAsk', { bankEx: 'strike', bankDraft: '', bankLook: null }, BANK_W()));
+  add('BANK ACCOUNT: a Strike username being checked', at('bankAsk', { bankEx: 'strike', bankDraft: 'alice', bankLook: { state: 'checking', user: 'alice' } }, BANK_W()));
+  add('BANK ACCOUNT: a Strike username found', at('bankAsk', { bankEx: 'strike', bankDraft: 'alice',
+    bankLook: { state: 'found', user: 'alice', addr: 'alice@strike.me' } }, BANK_W()));
+  add('BANK ACCOUNT: a Strike username not found', at('bankAsk', { bankEx: 'strike', bankDraft: 'bob',
+    bankLook: { state: 'missing', user: 'bob', addr: 'bob@strike.me' } }, BANK_W()));
+  add('BANK ACCOUNT: Strike could not be reached', at('bankAsk', { bankEx: 'strike', bankDraft: 'bob', bankLook: { state: 'failed', user: 'bob' } }, BANK_W()));
+  add('BANK ACCOUNT: a cashtag that could not be checked', at('bankAsk', { bankEx: 'cashapp', bankDraft: 'alice',
+    bankLook: { state: 'unchecked', user: 'alice', addr: 'alice@cash.app' } }, BANK_W()));
+  add('BANK ACCOUNT: River, an invoice to paste, River kept', at('bankAsk', { bankEx: 'river', bankShort: true, bankLook: null }, BANK_W()));
+  add('BANK ACCOUNT: River, what was pasted is no invoice', at('bankAsk', { bankEx: 'river', bankLook: { state: 'bad' } }, BANK_W()));
+  add('BANK ACCOUNT: SET AMOUNT for the Strike address kept, CHANGE EXCHANGE', at('amount', Object.assign({ flow: 'send', unit: 'USD', amount: '12.50',
+    bankShort: true }, STRIKE), BANK_W()));
+  add('BANK ACCOUNT: sent to Strike', at('sendDone', Object.assign({ sendPhase: 'settled', amount: '12.50', unit: 'USD' }, STRIKE), BANK_W()));
+  add('BANK ACCOUNT: sent to Cash App', at('sendDone', { sendPhase: 'settled', amount: '12.50', unit: 'USD', recipient: 'alice@cash.app', recipientKind: 'email',
+    bank: { ex: 'cashapp', to: 'alice@cash.app' } }, BANK_W()));
+  add('BANK ACCOUNT: sent to River', at('sendDone', { sendPhase: 'settled', amount: '2100', unit: 'SATS', recipient: 'lnbc21u1priverinvoice', recipientKind: 'invoice',
+    bank: { ex: 'river', to: 'lnbc21u1priverinvoice' } }, BANK_W()));
   return v;
 }
 
@@ -1060,6 +1191,41 @@ function cards() {
   const yes = (a) => { const b = Array.from(a._blockedEl.querySelectorAll('div')).find((d) => d.textContent === 'YES, DELETE' && !d.children.length); if (b) b.click(); };
   add('card: clear history, are you sure', (a) => a.askClear('history'));
   add('card: clear history, are you triple sure', (a) => { a.askClear('history'); yes(a); });
+  // the Cashu ID (26o-cashu-id.js): MY CASHU ID's code with SHARE, and the card a pasted one asks with
+  const CID_TEXT = 'foxyid1' + 'A'.repeat(94);
+  // tips at the till (26p-till-tips.js): the questions, a group row's share, a code's name, a code again with END, and END's ask
+  add('card: ACCEPT TIPS?', (a) => a.tillTipsAsk(null, () => {}, () => {}));
+  add('card: ACCEPT TIPS?, the till’s answer said', (a) => a.tillTipsAsk({ on: true, to: 'group', ids: [{ name: 'Ana' }, { name: 'Ben' }] }, () => {}, () => {}));
+  add('card: TIPS GO TO', (a) => { a.tillTipsAsk(null, () => {}, () => {}); a.tillTipsAskTo(); });
+  add('card: PASTE A CASHU ID', (a) => a.tillIdPaste());
+  add('card: a share of the group', (a) => { a.setState({ tillGroup: [{ id: 'g1', nostr: '1'.repeat(64), name: 'Ana', pct: 60 }] }); a.tillGroupRow('g1'); });
+  add('card: NAME THIS CODE?', (a) => a.tillCodeAdd());
+  add('stage: a cashier code again, with END', (a) => a.tillCodeOpen({ id: 'a1', text: 'https://getfoxy.io/till#AAAA', exp: 1793159200, tips: { on: true, to: 'one', names: ['Ana'] } }, 'Front'));
+  add('card: END THIS CODE?', (a) => a.tillCodeEndAsk({ id: 'a1' }, 'Front'));
+  add('stage: MY CASHU ID', (a) => a.cidShowCode(CID_TEXT));
+  add('card: NAME THIS CONTACT?', (a) => a.cidNameAsk(CID_TEXT, ''));
+  add('card: NAME THIS CONTACT?, a contact already', (a) => a.cidNameAsk(CID_TEXT, 'Alice'));
+  add('card: your own Cashu ID', (a) => a.cidAddAsk(CID_TEXT), { wallet: { cashuIdCheck: () => Promise.resolve({ own: true, name: '' }) } });
+  // a version 1 string, with no signature of the ID's own: not a Cashu ID
+  add('card: a version 1 Cashu ID', (a) => a.cidAddAsk(CID_TEXT), { wallet: { cashuIdCheck: () => Promise.reject(new Error('That is not a Cashu ID.')) } });
+  // a payment to the Cashu ID at a mint this phone does not use: its three answers and the tick, too small, in dollars; and SETTINGS > OTHER MINTS
+  const CID_OFFER = { key: 'cid:k1', name: 'Carol', mint: 'https://home.example.com', host: 'home.example.com', unit: 'sat', amount: 300, at: 0, drop: 0,
+    back: true, lands: 290, toUnit: 'sat', fee: 10, why: '', small: false, others: 0, total: 300, choice: '' };
+  add('card: paid at another mint', (a) => a.cidOfferCard(CID_OFFER));
+  add('card: paid at another mint, too small to bring home, from an unnamed payer', (a) => a.cidOfferCard(Object.assign({}, CID_OFFER,
+    { name: '', back: false, amount: 5, total: 5, lands: 0, fee: 0, small: true, why: 'Too small to bring home: the fee would take all of it.' })));
+  add('card: paid at another mint, dollars that land as sats, with another waiting', (a) => a.cidOfferCard(Object.assign({}, CID_OFFER,
+    { unit: 'usd', amount: 300, others: 1, total: 450, toUnit: 'sat', lands: 5800, fee: 6 })));
+  add('card: other mints', (a) => a.cidChoicesCard(), { wallet: { cashuIdChoices: () => [{ host: 'forge.flashapp.me', choice: 'home' }, { host: 'home.example.com', choice: 'keep' }],
+    cashuIdChoiceClear: () => [] } });
+  // ANY WALLET (MY CASHU ID's second button): a standard request with COPY and SHARE; and a payment to the ID key itself, unblinded
+  add('stage: MY CASHU ID, with ANY WALLET', (a) => a.cidShowCode(CID_TEXT), { wallet: { cashuIdAnyRequest: () => Promise.resolve({ text: 'creqA' }) } });
+  // the reminder after 15 days away (26o-remind.js): the card asked once
+  add('card: remind you?', (a) => a.remindAskCard());
+  add('stage: ANY WALLET', (a) => a.cidAnyShowCode('creqA' + 'B'.repeat(200)));
+  const CID_BARE = { key: 'cid:b1', name: '', mint: 'https://home.example.com', host: 'home.example.com', unit: 'sat', amount: 15, at: 0, refund: false };
+  add('card: paid to your ID key', (a) => a.cidBareCard(CID_BARE));
+  add('card: paid to your ID key, by a named payer', (a) => a.cidBareCard(Object.assign({}, CID_BARE, { name: 'Bob' })));
   add('price error bar', (a) => a.showPriceError());
   add('sheet: type a mint', (a) => a.typeMint());
   add('sheet: a note', (a) => a.noteSheet('dinner', () => {}));
@@ -1153,6 +1319,13 @@ function cards() {
   // money from this phone onto a card at another mint: what is refused before anything is asked (26f-flashcard.js, fcXlOffline, fcXlSend)
   add('card: a card at another mint, loaded with no connection', (a) => a.fcXlOffline());
   add('card: a dollar card at another mint, the amount typed in sats', (a) => a.blockedCard('fc-xl-unit', { tone: 'warn', title: 'A DOLLAR CARD', reason: 'This card holds dollars. Type the amount in dollars.' }));
+  // DEPOSIT above the phone's balance (26f-flashcard.js `fcDepArrived`): the invoice's money in, and the card asked for again
+  add('card: a deposit came in, tap the card again', (a) => {
+    const d = { key: 'k', amount: 5000, unit: 'sat', flowUnit: null, hash: '', arrived: true };
+    a._fcDep = d;
+    a.fcDepArrived(d);
+    clearTimeout(a._fcDepHoldT);
+  });
   add('card: a card at another mint, the melt refused', (a) => a.blockedCard('fc-xl-not', { tone: 'warn', title: 'NOT ON THE CARD', reason: 'The payment could not be routed. Nothing was taken.' }));
   /* A till with no route: a card that cannot pay it (too old to prove its money, unable to, or holding money the mint never
    * signed), and the price a card cannot make exactly. */
@@ -1281,6 +1454,9 @@ function cards() {
       cardTransfers: () => ({ [KEY_A]: { from: MINT, to: OTHER, unit: 'usd', toUnit: 'usd', amount: 2000, stage: 'off', at: 0 } }) }) }));
     put('flashcard, a card of the beaker design, standing up', at('flashcard', { fc: UFC({ design: 'EL1' }) }, { wallet: CARDS() }));
   }
+  // SEND > BANK ACCOUNT's question before a username (26q-bank.js)
+  add('card: ALREADY HAVE AN ACCOUNT WITH STRIKE?', (a) => a.bankHaveAsk('strike'));
+  add('card: ALREADY HAVE AN ACCOUNT WITH CASH APP?', (a) => a.bankHaveAsk('cashapp'));
   return v;
 }
 
@@ -1313,7 +1489,7 @@ const INSTANCE = ['_lastFee', '_returnTo', '_blockedEl', '_blockedKind', '_cardQ
   const views = [['home (first render)', {}]]
     .concat(screens.map((s) => ['screen ' + s, { state: { screen: s, stack: [] } }]))
     .concat(popups.map((p) => ['popup ' + p, { state: { screen: 'home', stack: [], [p]: true } }]))
-    .concat(representative(logic), cards());
+    .concat(representative(logic), cards(), messageViews());
 
   const recorded = fs.existsSync(path.join(DIR, 'index.json'))
     ? JSON.parse(fs.readFileSync(path.join(DIR, 'index.json'), 'utf8')) : {};

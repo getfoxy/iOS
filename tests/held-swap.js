@@ -35,6 +35,9 @@ function page() {
         if (isSwap && ctx.lose) {
           const how = ctx.lose;
           ctx.lose = '';
+          /* { raw } or { err }: what comes back in place of the mint's answer, the mint not having acted (a proxy's
+           * status, a mint's coded refusal, a socket cut), for the classes of failure below. */
+          if (how && typeof how === 'object') return how.raw ? reply(w, m.id, how.raw) : reply(w, m.id, null, how.err);
           if (how === 'after') mint.handle(m);
           return reply(w, m.id, null, 'The network connection was lost.');
         }
@@ -200,6 +203,49 @@ async function run() {
     ok(Object.keys(JSON.parse(c.storage.getItem('foxy.req.unclaimed') || '{}')).length === 0, 'and the copy held on trust is let go');
     ok((await c.W.balanceSats()) === whole, 'the balance is whole, once', String(await c.W.balanceSats()) + ' of ' + whole);
     ok(swaps(c).length === 0, 'and the record is gone');
+  }
+
+  // ---- which failures are a lost answer, and which a refusal (2026-11-04) ----
+  {
+    /* A 5xx, a gateway timeout, a socket cut or a Tor stream failing after the request may have reached the mint
+     * leaves open that the mint did the work: the pieces that went in are held until the mint is asked (check-state).
+     * A 4xx, with a mint's coded error or not, is the mint saying no: nothing was done and the pieces stay. A 502 used
+     * to be neither, and its pieces stayed in the pile, spendable, until a sweep. */
+    const classes = [
+      ['a 500', { raw: '500\n{"detail":"Internal Server Error"}' }, true],
+      ['a 502 from a proxy', { raw: '502\n<html>Bad Gateway</html>' }, true],
+      ['a 503 from a proxy', { raw: '503\n' }, true],
+      ['a 504 gateway timeout', { raw: '504\n{"detail":"the answer was lost on the way back"}' }, true],
+      ['a socket cut mid-request', { err: 'The network connection was lost.' }, true],
+      ['a Tor stream that failed after sending', { err: 'm.test could not be asked over Tor: the stream was closed' }, true],
+      ['a 400 with a mint error', { raw: '400\n' + JSON.stringify({ code: 11001, detail: 'Token already spent.' }) }, false],
+      ['a 404', { raw: '404\n{"detail":"Not Found"}' }, false],
+      // the bare word "tor" matched this, and held pieces for an error that says nothing about the wire
+      ['an error naming storage and history', { err: 'The history in storage could not be restored.' }, false],
+    ];
+    for (const [name, how, lost] of classes) {
+      const c = page();
+      await c.W.connect(MINT, null, null, { remember: true });
+      await c.W.claim((await c.W.invoice(4096, '')).hash);
+      const whole = await c.W.balanceSats();
+      c.lose = how;
+      await c.W.tidyChange().then(() => null, () => null);
+      await settle();
+      const held = c.W.heldSats();
+      if (lost) {
+        ok(held > 0 && (await c.W.balanceSats()) === whole - held && swaps(c).length === 1,
+           name + ' on a swap is a lost answer: its pieces are held until the mint is asked', held + ' held of ' + whole + ', ' + swaps(c).length + ' record(s)');
+        // the mint never acted: asked once the hold is old enough, the pieces come back
+        age(c, 30);
+        await c.W.recoverSwaps();
+        await settle();
+        ok(c.W.heldSats() === 0 && (await c.W.balanceSats()) === whole, '  and asked by check-state, a swap the mint never made gives them back',
+           c.W.heldSats() + ' held, ' + (await c.W.balanceSats()) + ' of ' + whole);
+      } else {
+        ok(held === 0 && (await c.W.balanceSats()) === whole, name + ' on a swap is not a lost answer: nothing is held, the pieces stay spendable',
+           held + ' held, ' + (await c.W.balanceSats()) + ' of ' + whole);
+      }
+    }
   }
 
   console.log('\n' + (failed ? failed + ' held-swap check(s) failed' : 'all held-swap checks pass'));

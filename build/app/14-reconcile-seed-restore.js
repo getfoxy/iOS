@@ -363,40 +363,54 @@
     this.toast('Tap again to clear ' + which);
   }
 
-  /* History cleared, once both cards have said yes (`askClear`). */
+  /* History cleared, once both cards have said yes (`askClear`), at once.
+   *
+   * It used to ask the mint first whether every sent token had been claimed, one token on its own circuit, and only then show a
+   * third card whose button did the clearing. On a phone with 125 kept tokens that took 36 seconds, the holder had left the
+   * screen by then, and nothing was ever cleared. The second YES now clears, and what was kept is said afterwards from this
+   * phone's own notes, which costs no request: a sent token nobody has claimed is money in a string, and clearing keeps its text
+   * (`clearHistory`); so is a load still on a card, kept for taking a lost card back. */
   clearHistoryNow() {
     const W = window.FoxyWallet;
     if (!W) return;
-    const clear = (forgetToken) => {
-      W.clearHistory({ forgetToken });
-      this.loadHistory();
-      this.toast('History cleared');
-    };
-    /* A sent token nobody has claimed is money in a string. Clearing
-     * history keeps its text (`clearHistory`), and says so first. */
-    if (!W.tokensNotClaimed) { clear(false); return; }
-    W.tokensNotClaimed().then(list => {
-      if (!list.length) { clear(true); return; }
-      /* Each unit summed on its own, never added together: '1,200 sats
-       * and $ 3.00'. A dollar token's `sats` is null; its cents are in
-       * `amount` under unit 'usd'. */
-      const by = {};
-      list.forEach(t => {
-        const u = String((t && t.unit) || 'sat');
-        const n = u === 'sat' ? (Number(t.sats != null ? t.sats : t.amount) || 0) : (Number(t.amount) || 0);
-        by[u] = (by[u] || 0) + n;
-      });
-      const figures = Object.keys(by).sort((a, b) => (a === 'usd' ? -1 : b === 'usd' ? 1 : 0))
-        .map(u => (u === 'sat' ? this.group(by[u]) + ' sats' : this.unitMoney(by[u], u))).join(' and ');
-      this.blockedCard('unclaimedTokens', {
-        tone: 'warn',
-        title: 'UNCLAIMED ECASH',
-        reason: (list.length === 1 ? 'A token you sent' : list.length + ' tokens you sent') + ', '
-          + figures + ', ' + (list.length === 1 ? 'has' : 'have') + ' not been claimed. '
-          + 'Clearing history keeps ' + (list.length === 1 ? 'it' : 'them') + ' on this phone, to hand over or take back.',
-        chip: 'The rest of history is cleared.',
-        retry: 'CLEAR HISTORY',
-        go: () => clear(true),
-      });
-    }).catch(() => clear(false));
+    W.clearHistory({ forgetToken: true });
+    this.toast('History cleared');
+    // what was kept is said first; the list behind it reloads after
+    try { this.sayWhatClearingKept(W); } catch (e) { console.warn('[foxy] what clearing history kept could not be said:', e && e.message); }
+    this.loadHistory();
+  }
+
+  sayWhatClearingKept(W) {
+    let kept = [];
+    try { kept = W._sentTokens ? W._sentTokens() : []; } catch (e) { kept = []; }
+    if (!kept.length) return;
+    /* Each unit summed on its own, never added together: '1,200 sats and $ 3.00'. A dollar token's `sats` is null; its cents
+     * are in `amount` under unit 'usd'. Card loads are counted apart: they are not tokens the holder handed to anyone. */
+    const by = {};
+    let sent = 0, loads = 0;
+    kept.forEach((e) => {
+      if (e && e.card) { loads += 1; return; }
+      let info = null;
+      try { info = W.tokenInfo ? W.tokenInfo(e.token) : null; } catch (x) { info = null; }
+      if (!info) return;
+      sent += 1;
+      const u = String(info.unit || 'sat');
+      const n = u === 'sat' ? (Number(info.sats != null ? info.sats : info.amount) || 0) : (Number(info.amount) || 0);
+      by[u] = (by[u] || 0) + n;
+    });
+    if (!sent && !loads) return;
+    const figures = Object.keys(by).sort((a, b) => (a === 'usd' ? -1 : b === 'usd' ? 1 : 0))
+      .map((u) => (u === 'sat' ? this.group(by[u]) + ' sats' : this.unitMoney(by[u], u))).join(' and ');
+    const words = [];
+    if (sent) {
+      words.push((sent === 1 ? 'A token you sent' : sent + ' tokens you sent') + ', ' + figures + ', '
+        + (sent === 1 ? 'has' : 'have') + ' not been claimed');
+    }
+    if (loads) words.push((loads === 1 ? 'a load on one of your cards is' : loads + ' loads on your cards are') + ' kept for taking a lost card back');
+    this.blockedCard('unclaimedTokens', {
+      tone: 'warn',
+      title: 'UNCLAIMED ECASH',
+      reason: words.join(', and ') + '. ' + (sent + loads === 1 ? 'It stays' : 'They stay') + ' on this phone, to hand over or take back.',
+      chip: 'The rest of history is cleared.',
+    });
   }

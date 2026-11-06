@@ -359,6 +359,13 @@ is `UNPAID`, or `PENDING` with every input `UNSPENT`. Anything else is left for
 the next pass. The PAYMENT PENDING screen also runs the sweep 30 and 150
 seconds after it opens.
 
+A melt that pays a crossing (§7) keeps the crossing's note when its pieces are
+given back on `UNPAID` or `PENDING`: only `FAILED`, the mint's verdict, takes
+the note with it. Two minutes of `UNPAID` is a guess that the melt never
+arrived, and it can still arrive; the far invoice is then paid, and the note
+holds the only copy of its quote and its NUT-20 key. It used to go with the
+hold, and a melt that landed late left the sats at the far mint with no key.
+
 The change is restored from the recorded ranges, not from "where the counters
 stood at the hold to where they stand now". That span also covered any token
 sent after the hold, and a token not yet claimed came back as UNSPENT change:
@@ -428,7 +435,11 @@ sentence (`sendShortfall`, §14).
    between these two writes.
 3. Log the send as settled, **write** an audit record (the token's proofs as
    inputs, the kept change as outputs), and **write** the token into
-   `foxy.txmeta` under the send's entry, so it can be handed over again.
+   `foxy.txmeta` under the send's entry, so it can be handed over again. The
+   fee on the entry is what the mint charges for the pieces that went in
+   (`swapCost`), not what is left over: a swap that does not add up to that is
+   logged, and its entry says what went in and what came back (`swapInSats`,
+   `swapOutSats`), so a lost piece of change reads as missing, not as fee.
 4. Show it. A watch (`watchTokenClaim`) asks the mint whether the token's
    proofs are spent, by their fingerprints alone, on one circuit used for
    nothing else: about once a second while the token's screen is open, then on
@@ -477,6 +488,19 @@ not watched to its claim now keeps its text until history is cleared. **Clearing
 notes and the audit trail too; if a sent token is not yet claimed (or cannot be
 checked from here), the app says UNCLAIMED ECASH and clears only on CLEAR
 ANYWAY, since twelve words can still restore it.
+
+**Card loads.** A card top-up's note keeps its token (`token`) until every
+piece is in that card's file on this phone (`cardLoadOnFile`), because until
+then the text may be all a lost card's take-back has. The trim and clearing
+history keep it. A load for a card with no row on this phone can never meet that
+rule, so after a connect settles the loads kept at that mint are asked about
+(`cardLoadsSpent`, NUT-07, at most 400 Ys a request, on a circuit of the
+sweep's own, at most once an hour a mint): a load whose every piece the mint
+says is SPENT keeps only its showing copy (`kept`), which `trimKeptTokens`
+bounds. Unspent, pending, missing or unread pieces keep the text and are asked
+again another time; an answer that is not one state for each Y asked is
+refused whole; a load whose change is still owed is not asked about. The
+balance and the screens are not touched.
 
 ---
 
@@ -788,6 +812,23 @@ going through" and step 3 is never reached, or it returns pending and the claim
 in step 3 fails because the destination has not been paid. Either way the note
 stays and `finishMove()` tries the claim later.
 
+**When a note goes.** On a claim (the money is in), on a melt the near mint
+says `FAILED`, or from `finishMove()` when the far mint says the quote is
+`UNPAID`, nothing is held that could still pay it, the note is an hour old and,
+where the far mint gave the quote an expiry, that expiry has passed. A melt
+given back on `UNPAID` keeps the note (§2), and `finishMove()` asks the far
+mint about it on every connect and every return to the app until one of those
+is true.
+
+**How many at once.** Notes (`foxy.cashu.move`) and payments being carried home
+(`foxy.cashu.carry`) are kept up to 200 rows or 256 KB a list. Both were cut
+to their last 20 on every write, and the oldest, paid at the far mint and not
+yet claimed, was dropped without a word. Past the bound only a row that holds
+no money is let go (a carry job still `asked`; no note ever qualifies), and a
+NEW transfer that would need more room is refused before anything is paid
+(`unsent`, "... are still waiting to finish"). A row already on file, or one
+written as money arrives, is always written.
+
 **From dollars.** A source mint that holds both balances on this phone is asked
 about on the CURRENCY screen first (TRANSFER WHICH?, `trPick` in
 `26a-transfer.js`); one that holds only one is that one, asked nothing. A dollar
@@ -802,6 +843,47 @@ quote is dearer), and the sat pile at the source is not touched. The
 confirmation shows the sats landing and the dollars leaving. The note, the
 claim and `finishMove()` are as above: the destination's side is sats either
 way. Pinned by `tests/transfer-dollars.js`.
+
+**Into dollars at the far mint** (`transferQuote(from, n, { unit, toUnit: 'usd' })`).
+The far mint's invoice is asked for in its own cents (a dollar wallet there),
+`n` and `moving` are those cents, and the source melts its own unit into it at
+its own price (`amountUnit`, what the invoice costs there). `moveRun()` writes
+the unit on the crossing's note and claims with the far mint's dollar wallet,
+so `finishMove()` claims an interrupted one the same way; its result names the
+unit (`unit`). Only a payment brought home (below) asks for this now.
+
+**A payment to the Cashu ID at a mint this phone does not use**
+(`08e-cashu-id.js`, `CASHU-ID.md`). Its receiver decides on a card: BRING IT
+HOME, KEEP IT THERE or SEND IT BACK. Before the card, the way home is quoted
+with nothing in hand (`cidHomeQuote`, `transferQuote(…, { quoteOnly: true })`):
+the default mint's invoice, the source's melt quote for it, the source's fee for
+the pieces and for the swap that takes them in, stepped down until the whole
+cost fits in what came. BRING IT HOME takes the pieces at that mint (signed for
+by the phone, swapped in by a wallet made for that mint, the phone staying where
+it is) and carries the sum home as one payment (`bringHome`, the carry-home job
+below, `foxy.cashu.carry`, with `unit` and `toUnit`):
+
+- **sats** land as sats, as they always did;
+- **dollars** are melted at that mint by its dollar quote
+  (`transferQuote(from, n, { unit: 'usd', toUnit })`, `moveRun()`'s dollar
+  branch, `pay()` with `unit: 'usd'` and the plan's quote) into an invoice of
+  the default mint, which mints **dollars** where it issues them on an active
+  keyset (`toUnit: 'usd'`: the Lightning sats minted as dollars at that mint's
+  rate, the invoice in its cents) and **sats** where it does not. The quote for
+  a crossing into sats starts from what 10,000 sats cost at that mint and steps
+  in proportion; `carryPlan` steps a job across units the same way, from the
+  figure the card was quoted at (`job.guess`).
+
+The job is written after the take and before the melt. A crossing that dies
+before the melt (a mint not answering) stays `paid` and `carryResume` walks it
+again; one that dies after the melt is `moving`, and `finishMove()` claims it in
+the unit its note names; either way the money is this phone's at that mint
+meanwhile. The row at home says what left and what landed, in the unit that
+left: "From Carol, came home from forge.flashapp.me as 3,901 sats, fee $0.06",
+"… as $2.94, fee $0.09"; sats to sats keep "…, fee 2 sats". The fee is what was
+taken, less change the route's reserve left at that mint, less what landed was
+worth there (the same figure in one unit; across two, the invoice's price at
+that mint). Pinned by `tests/cashu-id-choice.js` (D1 to D4).
 
 **Every invoice a crossing asks for is asked again** (`createQuote`,
 `00-header-and-mint-errors.js`): after three seconds of nothing at a mint that
@@ -845,7 +927,9 @@ go leaves the money in this phone at the card's mint and says so. Pinned by
 Several invoices, one per person, **written** to `foxy.split.pending` as a
 unit, stamped with the mint. Each is claimed as in §1 when paid;
 `splitReconcile()` settles rows the watcher missed, first from local history,
-then by asking the mint and claiming any it reports paid. A fully paid split is
+then by asking the mint and claiming any it reports paid. A row the mint reports
+`ISSUED` is ticked only once its ecash is in the history: `recoverIssued()` runs
+first (§1), and `ISSUED` with no ecash on record here leaves the share owed. A fully paid split is
 marked done, not deleted. A share can also be paid by a card (CARD.md, *Paying
 at a till*): that payment is an entry of its own, which the app notes on the
 share's row (`splitNoteCard`) as soon as the card has signed, and the reconcile
@@ -1046,6 +1130,19 @@ memory only: a page killed in between starts with nothing arriving and the
 payment back on the kept list. A late claim (`claimUnclaimed`) counts the same
 way while it swaps. `tests/usd-tap.js` §26, in sats and in dollars.
 
+**On its way, for as long as a melt is with the mint.** The other side of it: the
+pieces a melt holds (`foxy.cashu.melting`: a payment, a swap's first leg, a
+card's payment) are out of the balance and on no row until the melt lands and
+its row is written, or comes back into the pile. The history audit counts them
+as on their way (`W.meltingIn`, per unit, at this mint; a swap's leg that
+`heldIn` already names is not counted twice), so the books never disagree while
+a payment is in flight, PENDING across a relaunch included, and the ring does not
+go red for a payment that is only slow. The balance and home's pill are
+unchanged. Clearing history while a melt is held writes those pieces into the
+opening row, which the melt's row takes out again when it lands.
+`tests/audit-in-flight.js` reads the audit at every step of a payment and of a
+swap each way, PENDING, relaunched, settled and failed.
+
 *This widens "settled" for money coming in, and it is the incoming mirror of
 review finding 9 (THREAT-MODEL.md §12). It does not survive a mint that will
 never swap again: history and balance would both show sats that cannot be
@@ -1210,7 +1307,9 @@ against two CDK mints set up like them (`tools/live/mint-pair.sh`).
   nothing, the pile went on showing pieces the mint had spent, and after two
   minutes the record was dropped as "never made" with the payment inside it.
   Now `connect` holds those pieces out of the balance (`holdUnanswered`,
-  with or without a route), `recoverSwaps` asks the mint by the written-down
+  with or without a route, at every mint a record names, not only the one
+  connected to: a send cut short at another mint left its pieces spendable
+  there), `recoverSwaps` asks the mint by the written-down
   outputs (`finishLockedSend`), and what it rebuilds is written as
   `sendToken` would have written it (`writeLockedSend`): the change in, the
   spent pieces out, the payment on an entry of its own with its token, to be
@@ -1293,7 +1392,16 @@ found, and what holds now:
   every mint a record is at, the same way.
 - **Locked pieces paid out of are struck off once the token exists.**
   `forwardLocked(text, { defer: true })` signs and writes nothing; `sendToken`
-  strikes all of them off together after `mustSave(K.outtok)`.
+  strikes all of them off together after `mustSave(K.outtok)`. Their secrets go
+  on the handed-on list (`foxy.req.handedon`), bounded as the in-flight lists
+  are (200 entries or 256 KB): a secret no waiting row names is let go first,
+  oldest first; one a row still names is never dropped; and a hand-on that
+  would need more room is refused before anything is signed (`handedRoom`).
+- **A payment swapped in is counted once** even when its row could not be
+  struck off the unclaimed list: the page that swapped it counts it as landed,
+  and after a relaunch a row whose pieces this phone has noted as taken
+  (`noteTaken`) is left out of the balance (`rowSwappedIn`) until the next claim
+  pass lets it go.
 - **An overpaying tap token names the key for its change** in its own memo,
   so a token shown as a code after the link dropped still gets change back.
 - **One sum for what a melt needs** (`meltNeed`): the invoice, the reserve,
@@ -1309,7 +1417,10 @@ found, and what holds now:
   paid at it connects with `{ remember: false }`: `moveRun(plan, onStage,
   { visit: true })`, `carryBegin`, and a late claim of another mint's ecash
   (`claimUnclaimed`, which then goes back). Killed over there, the app opens
-  at home.
+  at home. One visit at a time: each waits for any other to be home, and
+  while one is away what a person starts waits too (`visitTake`), except
+  during a tap at the payer's mint, whose own request and payment are made
+  there.
 
 **A payment taken at the payer's mint is not received until it is home**
 (`foxy.cashu.carry`, 04-lost-answers.js). The job is written before the
@@ -1451,6 +1562,16 @@ What the code does with money:
   refund short of what was paid by more than the greater of 6 sats and 1% is
   still kept, because it is locked to this phone, and it is said as ONLY PART
   CAME BACK, with both figures.
+- **A short refund is not the whole answer.** It used to end the wait, and a
+  late one struck every piece of the payment, with no question asked of the
+  mint; the pieces the receiver had not spent stayed theirs to redeem. Now the
+  original pieces go into the pile flagged, as with no refund (below), the
+  refund is written on their group (`refund`, when it came as change), and the
+  mint is asked their state (`_settleAtRiskOnce`, check-state): the spent ones
+  are struck and the entry becomes what they took less the refund; the rest are
+  swapped back and said as taken back. With no route nothing is struck until
+  the mint can be asked. A refund within that tolerance is the whole answer,
+  as before.
 - **No refund in 10 seconds is HIGH RISK** (`afterRefusal`, `atRiskAdd`). The
   pieces are the payer's own and the receiver has a copy. They go back into the
   pile and the balance, flagged in `foxy.cashu.atrisk` and written with
@@ -1690,6 +1811,18 @@ swap whose answer comes inside the wait…", "a token send whose answer is
 lost…", "a swap found at the mint is finished once however the page is
 killed…"), `tests/locked-send-lost.js` and `tests/flashcard-sigall.js` 25h.
 
+**Which failures are a lost answer** (`answerLost`, which decides whether a
+swap's inputs are held, `holdInputs`). A refusal (`mintRefused`: a 4xx, a
+coded mint error, outputs signed before, bad signatures) is not, and nor is a
+request that never left (`neverSent`). A 5xx is (500, 502, 503, 504: a mint or
+a proxy failing after the request may have reached the mint), and so is a
+failure named as one on the wire: a connection lost, reset or closed, a socket
+cut, a timeout, a request cancelled, a Tor stream or circuit failing, "could
+not be asked over Tor". These used to be read from a word list in which a
+502's "The mint answered 502." matched nothing, so its pieces stayed in the
+pile, spendable, until a sweep; and the bare word "tor" matched any message
+naming storage, history or a restore.
+
 ## 18. Two balances at one mint — sat and usd
 
 A mint can issue ecash in more than one unit. Forge issues sat and usd keysets,
@@ -1914,9 +2047,109 @@ no bitcoin price anywhere. The rules are the sat rules (§11, §12, TAP-SPEC.md
 The simulators' stand-in tap link and pretend airplane mode (tools/sim)
 carry the request as the page wrote it, so nothing in them names a unit.
 
+**A request short in its unit, paid from the other balance (2026-11-04).**
+Online, at the mint this phone is on, where it issues both: a request (scanned,
+pasted or tapped) that the request's own balance there cannot cover with its
+fee (`sendShortfall`), while the other balance covers what is missing on its
+face, gets a PAY FROM row for that other balance (26l-pay-from.js
+`pfSwapSource`): "From your dollars at FORGE, fee about $ 0.02" (or "From your
+sats at …" the other way), beside any crossing from another mint, cheapest
+first. It is quoted by the SWAP screen's own quote (`swapQuote`: an invoice in
+the request's unit and the melt from the other), sized for what is missing
+and a little over (2 sats or 1 %, or a cent), asked once more and larger when
+the first brings too little, and NOT ENOUGH when that is more than the balance
+holds. Its fee is the SWAP screen's FEE: what leaves less what arrives, at the
+quote's rate. Chosen, PAY on the offer runs `swapRun` (the quote shown while it
+holds 20 s more, else a fresh one) under the swapping overlay, and the request
+is paid from what it brought with nothing more asked (`pfSwapThenPay`,
+`makeTokenForRequest` `go.swapped`): one confirmation, one PAID. A swap the mint
+has not finished is SWAP STILL GOING THROUGH and nothing is paid; one it did
+not make says so and the offer stays. The swap's two rows are the SWAP
+screen's. Lightning invoices need none of this: a melt is quoted from either
+balance at the mint already (CURRENCY, WALLET, PAY FROM).
+
 Out of scope for now, and refused where a unit cannot go: cards (sats), on
 chain (sats; Forge has none), split bills and transfers between mints (sats),
 dollar ecash at a mint this phone is not on.
+
+## 19. The till: tips passed on, and the list of cashier codes
+
+The till (point of sale) is `build/wallet/08d-till.js` and `build/app/26m-till.js`:
+a keeper's phone takes payments into its own wallet, and a cashier's phone,
+which scanned one of the keeper's CASHIER CODES, takes payments locked to the
+keeper and sends them to it over Nostr. Tips are `08f-till-tips.js` and
+`26p-till-tips.js`.
+
+**The question.** As the till opens, after the lock, the mints, the default
+mint and the default currency, ACCEPT TIPS? YES / NO. YES asks TIPS GO TO:
+MYSELF, ONE PERSON (a Cashu ID contact, or one pasted or scanned, which has to
+be named and is kept as a contact first) or GROUP (up to eight Cashu IDs, each
+with a whole percentage, the percentages adding up to 100; the one added last
+takes what is left). The answer is kept with the till (`foxy.till.tips`, let go
+when the till closes) as
+
+    { on, to: 'self' | 'one' | 'group', ids: [{ id, nostr, name, pct }] }
+
+`id` and `nostr` are the ID's two keys as its contact keeps them, so a contact
+removed later is still paid.
+
+**One payment.** Where the till offers tips, its receive screen shows $1, $2,
+$5 and OTHER under the amount. The request and invoice are live at the amount
+typed; a tip makes them again for the total, the same tip again takes it off,
+and OTHER asks the tip on SET AMOUNT. The payer pays one payment, the total.
+The screen remembers what part of it is tip as a fraction in the keypad's own
+unit (`tillTip`: `num / den`), so the tip part of whatever lands is
+`floor(paid × num / den)`, in the unit it landed in.
+
+**Passed on** (`tipForward`), once the payment is in:
+
+- MYSELF: nothing moves. The sale's row says `tip $X` (`tillTip`).
+- ONE PERSON: one Cashu ID payment of the whole tip (`cashuIdPay`, see
+  `CASHU-ID.md`), its row "Tip to <name>".
+- GROUP: each share is `floor(tip × pct / 100)`, whole sats or cents, and what
+  rounding leaves goes to the first share, so the shares add up to the tip. A
+  share under 10 sats or 1 cent is not sent: it waits for that ID, at that mint
+  and in that unit (`foxy.till.tips.carry`), and rides with the next tip to it.
+  The rest are one payment each, each a "Tip to <name>" row.
+
+Each payment to a Cashu ID is a job (`foxy.till.tips.jobs`), made from the
+keeper's balance at the mint the sale landed at, one at a time. No route, or the
+phone at another mint, and it waits, counting no try. A failure is tried again a
+minute later, and at once when the route comes back; ten failures, or a week
+waiting, and it gives up: the money stays in the keeper's balance and the sale's
+row says so ("not sent to <name>, kept"). A sale is passed on once
+(`foxy.till.tips.sales`, by its row). Where the app is killed between the
+payment landing and PAID, the keeper's own till passes nothing on and the tip
+stays in its balance.
+
+**A cashier's tips.** Each code is asked the same two questions as it is made,
+the till's answer first. The code itself carries only `tips: true` (or nothing):
+who the tips go to stays on the keeper's own row of the code, so nobody's Cashu
+ID is in a QR code at a counter. A cashier's till shows the tip buttons only on
+a code that says so; its request or invoice names the tip part (`tillTip`, kept
+on the open request or the quote's record, never more than the payment), its
+outbox row and its delivery to the keeper carry it (`tip`), and the keeper,
+having taken the payment, passes the tip on by its own row of the code. A
+delivery claiming a larger tip than it brought passes on no more than came in;
+a code without tips passes on nothing whatever its delivery says.
+
+**The list.** CASHIER CODE on the till's SET AMOUNT opens CASHIER CODES: the live
+codes, each a row with its label (only the keeper's phone has it), its mints,
+its currency, its tips and when it ends; ADD A CASHIER makes another beside them,
+so several cashiers work at once (eight codes at most, live or ended within the
+week a late payment by one may still arrive in, and the phone listens on all
+eight). A row shows its QR again with END THIS CODE. END takes it off the list
+for good; its cashier is not told (nothing reaches a cashier but its code) and
+may go on taking payments by it until it runs out, which are still the keeper's
+money and still taken, so its key and its listening stay for the usual week.
+Ended and run-out codes are listed under PAST with when they ran and how they
+ended (`foxy.till.passes.log`, forty at most, outliving the codes' rows and
+keys). Nothing on any of these screens totals what a code, a cashier or the till
+took.
+
+The suites: `tests/till-tips.js` (the wallet: the answer's checks, the split,
+the jobs, the cashier's fields, the list) and `tests/till-ui.js` §20 (the
+screens).
 
 ## Paths that move proofs and have no section above
 

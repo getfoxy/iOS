@@ -3,13 +3,16 @@
   /** @param {RenderContext} c */
   renderMints(c) {
     const { s, sc } = c;
-    const tillOn = s.tillPick === 'set' && !!this.tillSetNow && this.tillSetNow().length > 0;
+    /* And the till's lists, in the same rows (26p-till-tips.js, `tillListVals`): who its tips go to, a group's shares, and its
+     * CASHIER CODES with those that have ended under PAST. Null outside them. */
+    const L = (sc === 'switchMint' && s.tillList && this.tillListVals) ? this.tillListVals() : null;
+    const tillOn = L ? !!L.next.on : s.tillPick === 'set' && !!this.tillSetNow && this.tillSetNow().length > 0;
     const FUR = "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),"
       + "linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),url('foxy-fur.webp')";
     return {
       isSwitchMint: sc === 'switchMint',
       // adding a mint belongs to switching, not to picking one to move between
-      mintPickers: !s.trStep && !s.fcPick && !s.tillPick && !s.wdPick,
+      mintPickers: !s.trStep && !s.fcPick && !s.tillPick && !s.wdPick && !s.tillList && !s.bankPick,
       /* The same list does three jobs: switching, and the two steps of a
        * transfer between your own mints. */
       /* And a fourth, for a card: which mint it moves to (26f-flashcard.js).
@@ -18,13 +21,18 @@
       /* And the till's two (26m-till.js): every mint it takes, ticked, then NEXT (`tillPick` 'set'); then which of those is
        * the default (`tillPick` 'default'). */
       // and a card's WITHDRAW TO (26n-card-withdraw-to.js, `wdPick`): where all of it lands, the cheapest first
-      mintTitle: s.wdPick ? 'WITHDRAW TO'
+      // and SEND's BANK ACCOUNT (26q-bank.js, `bankPick`): the exchanges, in the list's look
+      mintTitle: L ? L.title
+        : s.bankPick ? 'BANK ACCOUNT'
+        : s.wdPick ? 'WITHDRAW TO'
         : s.tillPick === 'default' ? 'DEFAULT MINT'
         : s.tillPick ? 'TILL AT WHICH MINTS?'
         : s.fcPick ? 'TO WHICH MINT?'
         : s.trStep === 'from' ? 'FROM WHICH MINT?'
         : s.trStep === 'to' ? 'TO WHICH MINT?' : 'SWITCH MINT',
-      mintNowLine: s.wdPick ? (this.fcWdLine ? this.fcWdLine() : '')
+      mintNowLine: L ? L.line
+        : s.bankPick ? 'Trade your Foxy balance for dollars with one of these exchanges.'
+        : s.wdPick ? (this.fcWdLine ? this.fcWdLine() : '')
         : s.tillPick === 'default' ? 'Payments from mints you did not pick are moved here. Invoices are made here.'
         : s.tillPick ? 'Pick every mint this till takes. Payments from other mints cross into the default, the payer paying the fee.'
         : s.fcPick ? 'This card is at ' + this.mintNameOf(s.fc && s.fc.mint) + '.'
@@ -36,7 +44,7 @@
       /* The mint you are on comes first and looks different. It used to be
        * filtered out, which left the screen showing every mint except the one
        * that matters. */
-      mintRows: (() => {
+      mintRows: L ? L.rows : (() => {
         const all = this.allMints();
         const row = (m, here) => {
           const pile = this.mintPile(m.url);
@@ -76,6 +84,7 @@
           if (s.tillPick === 'default') return ordered.filter(m => this.tillTicked(m.url)).map(m => row(m, false));
           return ordered.map(m => row(m, this.tillTicked(m.url)));
         }
+        if (s.bankPick) return this.bankRows ? this.bankRows() : [];
         if (s.wdPick) return this.fcWdRows ? this.fcWdRows(row) : [];
         if (s.fcPick) {
           // every mint but the one the card is at
@@ -95,8 +104,15 @@
           .concat(all.filter(m => !this.onMint(m.url)).map(m => row(m, false)));
       })(),
       // NEXT under the till's set list: the fur once a mint is ticked, grey and nothing before (26m-till.js, `tillSetNext`)
-      tillNextShown: s.tillPick === 'set',
-      tillNext: () => this.tillSetNext(),
+      tillNextShown: L ? !!L.next.shown : s.tillPick === 'set',
+      tillNext: L ? L.next.tap : () => this.tillSetNext(),
+      tillNextLabel: L ? L.next.label : 'NEXT',
+      // the till's lists' second button (ADD, PASTE A CASHU ID), and CASHIER CODES' PAST
+      tillAddShown: !!(L && L.add.shown),
+      tillAddLabel: L ? L.add.label : '',
+      tillAdd: L ? L.add.tap : () => {},
+      tillPastShown: !!(L && L.past.length),
+      tillPastRows: L ? L.past : [],
       tillNextBg: tillOn ? 'var(--acc)' : 'rgba(var(--ink-rgb),.14)',
       tillNextFur: tillOn ? FUR : 'none,none,none',
       tillNextInk: tillOn ? '#fff' : 'rgba(var(--ink-rgb),.4)',

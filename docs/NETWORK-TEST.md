@@ -392,8 +392,8 @@ Established by counting call sites. Debug-only diagnostics are not listed.
 | `Foxy/Network/OrbotLink.swift` | `orbot:request/token…` (no `//`) | Opens Orbot. Not a network request. |
 | `Foxy/Network/OnionPost.swift` | `onionPost`: a payment to a payee's version 3 `.onion` address | Its own SOCKS5 connection to Tor's port over an `NWConnection`. It checks `TorService.isRunning` and `socksPort` itself and refuses with `.noTor` otherwise, and takes only `http://` to an `.onion` host. |
 | `Foxy/Network/OnionInbox.swift` | the onion inbox: a listener, while a payment request is on screen | Bound to `127.0.0.1` only and published by Tor as a hidden service, so it takes connections from Tor and from nothing else. It originates nothing. |
-| `Foxy/Nostr/NostrDelivery.swift` | `nostrSend`: a payment wrapped for a receiver's Nostr key | `wss` WebSockets to at most five relays the request names, or to the four built in (`relay.damus.io`, `nos.lol`, `relay.primal.net`, `relay.minibits.cash`), through `Route.startSocket`: over Tor, each on its own circuit, or refused. |
-| `Foxy/Nostr/NostrInbox.swift` | listening for a payment while a request is on screen | The same four relays, up to four sockets, through `Route.startSocket`. |
+| `Foxy/Nostr/NostrDelivery.swift` | `nostrSend`: a payment wrapped for a receiver's Nostr key | `wss` WebSockets to at most five relays the request names, or to the three built in (`relay.damus.io`, `relay.primal.net`, `relay.minibits.cash`), through `Route.startSocket`: over Tor, each on its own circuit, or refused. |
+| `Foxy/Nostr/NostrInbox.swift` | listening for a payment while a request is on screen | The same three relays, one socket each, through `Route.startSocket`. |
 | Tor.framework, IPtProxy | Tor's own connections | Relays, bridges, and Snowflake's broker and STUN contacts. Through Orbot's bypass port when Orbot has let Foxy past. |
 
 **Originate nothing:** `foxy-tor-gate.js`, `foxy-send-progress.js`,
@@ -436,7 +436,7 @@ content rule list also blocks `ws` and `wss` from the page. Polling does the
 same job, a few seconds slower on a received payment.
 
 Native code does open WebSockets: `Foxy/Nostr/NostrDelivery.swift` to publish a
-payment, and `NostrInbox.swift` to listen for one on up to four public relays
+payment, and `NostrInbox.swift` to listen for one on up to three public relays
 while a payment request is on screen. Both go through `Route.startSocket`, so
 both are over Tor or refused, and the relay hostnames are in the inventory
 above. (An earlier version of this section said a socket is never opened, which

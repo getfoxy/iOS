@@ -102,6 +102,14 @@
     }
   }());
 
+  /* Two stores an earlier test build kept for features Foxy no longer has, read by nothing now: removed at every boot
+   * (two lookups, nothing once they are gone). Not a schema step, so a phone can still go back to a build that knows
+   * fewer steps. The lock-key rows those codes were filed under stay: their keys are the seed's. */
+  (function dropRetiredStores() {
+    if (storageNewer) return;
+    try { localStorage.removeItem('foxy.wake'); localStorage.removeItem('foxy.lnurl.codes'); } catch (e) {}
+  }());
+
   var K = {
     mint: 'foxy.cashu.mint',
     proofs: 'foxy.cashu.proofs',
@@ -170,6 +178,25 @@
     // the keeper's till while it runs: the mints it takes payments at, and the default among them (`tillKeeperOpen`)
     tillKeeper: 'foxy.till.keeper',
     tillOutbox: 'foxy.till.outbox',
+    /* Tips at the till (08f-till-tips.js): the keeper's answer as its till opened (whether, and to whom); every code
+     * made, kept to list under PAST after its row and keys are gone; the tips being passed on to Cashu IDs, each a
+     * payment still to make from the keeper's balance; what is too small to send yet, per ID; and the sales whose tip
+     * was passed on already, so a sale is never tipped twice. */
+    tillTips: 'foxy.till.tips',
+    tillPassLog: 'foxy.till.passes.log',
+    tillTipJobs: 'foxy.till.tips.jobs',
+    tillTipCarry: 'foxy.till.tips.carry',
+    tillTipSales: 'foxy.till.tips.sales',
+    /* The Cashu ID (08e-cashu-id.js): what this phone sent to a contact, locked to a one-time key of theirs with a
+     * refund key of its own, until the mint says it was collected or its locktime brings it back (money: mustSave);
+     * the secrets of what came in (hashed), so a delivery read twice is taken once; and what came while it could not be taken. */
+    cidOutbox: 'foxy.cid.outbox',
+    cidSeen: 'foxy.cid.seen',
+    cidInbox: 'foxy.cid.inbox',
+    /* and what came at a mint this phone does not use too small to be worth crossing home, waiting for more there; and when
+     * this phone last asked such a mint about a delivery, five an hour */
+    cidOffers: 'foxy.cid.offers',
+    cidForeign: 'foxy.cid.foreign',
   };
 
   /* A day. Bitcoin seldom moves more than a few percent in one; past that the
@@ -405,6 +432,70 @@
   function homeFirst(run) {
     if (!claimAway) return run();
     return claimAway.then(function () { return homeFirst(run); });
+  }
+  /* The other visits take the same hold.
+   *
+   * Bringing a payment home (`carryResume`, `carryHome`, `carryRefund`) goes
+   * to the payer's mint and back as the late claim does, and held nothing: an
+   * invoice asked for while it was there was made there, and a catch-up that
+   * set out while the late claim was away left from the mint the claim was
+   * visiting, the two moving `wallet` and `mintUrl` under each other
+   * (tests/away-claim.js). A visit now waits for any other to be over
+   * (`visitBusy`: the late claim's walk, a card's visit, another of these) and
+   * then holds what a person starts, as the walk does, until it ends
+   * (`visitTake`, `visitEnd`). Its own calls say so as the walk's do
+   * (`walkCalling`). It is still the one wallet moved about; a visit with a
+   * wallet of its own, so the globals never move, is the proper fix and a
+   * larger one.
+   *
+   * A cross-mint tap's visit (`carryBegin`) is a lease and not a hold: the
+   * request it makes and the payment it takes are made at the payer's mint on
+   * purpose, by the screen the person is looking at, so nothing they start is
+   * held by it. The background visits queue behind it all the same, and it
+   * behind them. It ends when its walk home takes over (`carryHome`), when it
+   * is given up (`carryEnd`), when another tap's begins, when the phone is no
+   * longer at that mint, or after TAP_VISIT_MS, whichever is first: a tap
+   * whose payer walked away says nothing at all, and a lease that never ended
+   * would hold every visit after it. */
+  var visitAway = /** @type {any} */ (null);
+  var TAP_VISIT_MS = 130000;
+  function visitEnd(v) {
+    if (!v || v.over) return;
+    v.over = true;
+    if (v.timer) clearTimeout(v.timer);
+    if (visitAway === v) visitAway = null;
+    if (claimAway === v.finished) claimAway = null;
+    v.done();
+  }
+  // a promise to wait on before a visit sets out, or null when none is away
+  function visitBusy() {
+    var t = visitAway;
+    if (t && t.lease && !t.going && canonicalMint(mintUrl || '') !== t.mint) visitEnd(t);
+    if (claimAway) return claimAway;
+    if (claimingLate) return claimingLate;
+    if (cardAway) return cardAway.finished;
+    if (!visitAway) return null;
+    // a lease is looked at again each second, for a phone that has left that mint since
+    if (visitAway.lease) return Promise.race([visitAway.finished, new Promise(function (r) { setTimeout(r, 1000); })]);
+    return visitAway.finished;
+  }
+  /* Once every other visit is over: resolves the visit, ended by `visitEnd`.
+   * `o.lease`: the tap's, at `o.mint`, for `o.job`. */
+  function visitTake(what, o) {
+    var busy = visitBusy();
+    if (busy) return Promise.resolve(busy).then(null, function () { return null; }).then(function () { return visitTake(what, o); });
+    var done = /** @type {any} */ (null);
+    var finished = new Promise(function (res) { done = res; });
+    var v = /** @type {any} */ ({ what: what, job: (o && o.job) || '', mint: canonicalMint((o && o.mint) || ''), lease: !!(o && o.lease),
+                                   going: !!(o && o.lease), finished: finished, done: done, over: false, timer: null });
+    visitAway = v;
+    if (v.lease) v.timer = setTimeout(function () { visitEnd(v); }, TAP_VISIT_MS);
+    else claimAway = finished;
+    return Promise.resolve(v);
+  }
+  // the tap's lease for job `id`, handed over or given up
+  function tapVisitEnd(id) {
+    if (visitAway && visitAway.lease && (!id || visitAway.job === id)) visitEnd(visitAway);
   }
   /* Crossings this page is in the middle of, by quote, and payments being
    * brought home, by job. `finishMove` and `carryResume` leave them alone:
@@ -825,12 +916,39 @@
    * within one. */
   var COUNTER_SKIPS = [10, 50, 100];
 
+  /* The mint refusing the keyset a request's outputs were set out on: NUT error 12001 (not known) or 12002 (inactive),
+   * cashu-ts's StaleKeysetError for either, or the words a mint gives them. A mint that rotated its keys answers this to
+   * every request built on the keyset it retired, until the wallet reads its keysets again. */
+  function keysetRefused(e) {
+    var code = Number(e && (e.code || (e.response && e.response.code)));
+    if (code === 12001 || code === 12002) return true;
+    if (e && e.name === 'StaleKeysetError') return true;
+    var why = String((e && (e.message || e.detail)) || e || '');
+    return /keyset/i.test(why) && /inactive|unknown|not known|not found|stale/i.test(why) && !(e && e.noCounters);
+  }
+
   // quotePaid: for a claim, resolves true while the mint still calls the quote PAID
   /** @param {(function(): *)=} quotePaid */
   function onceMoreIfSigned(w, label, run, quotePaid) {
     var tries = 0;
+    var keysetsRead = false;
     function attempt() {
       return run().catch(function (e) {
+        /* A keyset the mint has retired: its keysets read once more from the mint itself (what this session remembers of
+         * them dropped first, `forgetMintKeys`, or cashu-ts's own refresh is answered from it: its `repaired` is not a
+         * read of the mint), and the request set out again, on whatever keyset is active now, once. A second refusal is
+         * the answer, as before. Nothing was signed: the mint refuses the keyset before it looks further. */
+        if (!keysetsRead && keysetRefused(e) && w && typeof w.loadMint === 'function') {
+          keysetsRead = true;
+          console.warn('[foxy] ' + label + ': the mint refused the keyset (' + String((e && e.message) || e).slice(0, 60)
+            + '); reading its keysets again and setting the request out once more');
+          var at = '';
+          try { at = mintOf(w); forgetMintKeys(at); } catch (x) {}
+          return Promise.resolve().then(function () { return w.loadMint(true); }).then(function () {
+            try { if (at) mintCacheSave(at, w); } catch (x) {}
+            return attempt();
+          }, function () { throw e; });
+        }
         var used = alreadySigned(e)
           ? Promise.resolve(true)
           : (quotePaid && mintSaysPaidOrPending(e))
@@ -1010,9 +1128,83 @@
    * asked again every five seconds. An `another()` that gives nothing ends
    * the asking again there: a fee quote whose asker has stopped listening
    * (`quoteFee`, `opts.stop`). */
+  /* The askings again still waiting on a timer, each as the function that lets go of its timer. iOS runs no page script
+   * while Foxy is in the background, so a timer left over from a question asked just before would fire on the way back
+   * and ask a mint again about something the person has left: Foxy being put away lets go of them all
+   * (`_stopAskingAgain`, from the app's `putAway`). The question itself is not settled by this: it is still answered by
+   * the askings already out, or by the caller's own deadline. */
+  var askAgainStops = [];
+
+  /* Tor up and carrying nothing, after a return from the background.
+   *
+   * A phone back after 44 seconds had Tor's circuit up, and every request to the mint went unanswered for about a
+   * hundred seconds, through ten askings on other circuits, until Tor rebuilt on its own: every fresh circuit was
+   * built through the same guards. So the askings again (`askedAgain`, `statesOf`) are counted here, in a row since
+   * Foxy came back, and any answer from a mint puts the count back to none. Each one is told to the phone
+   * (`torRebuild`), which decides: at its number (three) it asks Tor once for new circuits, never a restart, at most
+   * once per return and not within a minute of the last. While Tor is at it, and until a mint answers or
+   * `TOR_REBUILD_SHOWN_MS` passes, the shield on the money card turns its ring and says so (`torRebuilding`).
+   *
+   * New circuits are built through the guards Tor already holds, and a phone whose guards went down, up and down
+   * again was not helped by them. So the count goes on past three, and the phone decides the second stage too: three
+   * more unanswered within twenty seconds, with no host at all answering anything since the return, and it switches
+   * Tor's network off and on, every connection closed and made again (at most once per return, never within five
+   * minutes of the last, never with a swap out). It answers "restarting" then, and the shield says that instead
+   * (`torRestarting`). A question out at that moment fails as it does when the route drops, and is asked again by
+   * its own rules; what is asked again here (quotes, lookups, checks of pieces) commits to nothing.
+   *
+   * Counted only after Foxy has been put away once (`armed`, from `_stopAskingAgain`): a launch has its own
+   * screens for a Tor still connecting. */
+  var TOR_REBUILD_SHOWN_MS = 30000;
+  var torSilent = { armed: false, count: 0, until: 0, restarting: false, timer: /** @type {any} */ (null) };
+  function torSilentAway() {
+    torSilent.armed = true;
+    torSilent.count = 0;
+    torSilentShown(0);
+  }
+  function torSilentShown(ms) {
+    var was = torSilent.until > Date.now();
+    clearTimeout(torSilent.timer);
+    torSilent.timer = null;
+    torSilent.until = ms > 0 ? Date.now() + ms : 0;
+    if (!(ms > 0)) torSilent.restarting = false;
+    if (ms > 0) torSilent.timer = setTimeout(function () { torSilent.timer = null; torSilentShown(0); }, ms);
+    var now = torSilent.until > Date.now();
+    if (now !== was && FoxyWallet._onPrivacy) {
+      try { FoxyWallet._onPrivacy(FoxyWallet.privacy()); } catch (e) { console.error('[foxy] privacy watcher:', e && e.message); }
+    }
+  }
+  // a mint answered, whatever it said: Tor is carrying
+  function torCarried() {
+    torSilent.count = 0;
+    if (torSilent.until) torSilentShown(0);
+  }
+  // one asking again on another circuit, the one before it unanswered
+  function torSilentAsked() {
+    if (!torSilent.armed || !bridged()) return;
+    torSilent.count += 1;
+    var n = torSilent.count;
+    bridgeAsk('torRebuild', { silent: n }, 5000).then(function (said) {
+      var what = String(said);
+      if (what !== 'rebuilding' && what !== 'restarting') return;
+      console.log('[foxy] ' + n + ' askings in a row unanswered since the return: '
+        + (what === 'restarting' ? 'Tor\u2019s connections are started again' : 'Tor is asked for new circuits'));
+      if (torSilent.count < n) return;
+      // the words change while the ring is already turning: pushed as a change all the same
+      var turn = what === 'restarting' && !torSilent.restarting && torSilent.until > Date.now();
+      torSilent.restarting = what === 'restarting';
+      torSilentShown(TOR_REBUILD_SHOWN_MS);
+      if (turn && FoxyWallet._onPrivacy) {
+        try { FoxyWallet._onPrivacy(FoxyWallet.privacy()); } catch (e) { console.error('[foxy] privacy watcher:', e && e.message); }
+      }
+    }, function () {});
+  }
+
   function askedAgain(w, what, ask, another, within) {
     return new Promise(function (ok, no) {
-      var settled = false, asked = 0, failed = 0, again = null;
+      var settled = false, asked = 0, failed = 0, again = null, quit = false;
+      var letGo = function () { quit = true; clearTimeout(again); again = null; };
+      askAgainStops.push(letGo);
       var began = Date.now();
       var allowed = Number(within) > 0 ? Number(within) : 30000;
       var at = w && ((w.mint && w.mint.mintUrl) || w.mintUrl);
@@ -1023,7 +1215,11 @@
       // the first asking may come sooner: at a mint, whose wait is the five-second floor, with no wait set outright
       var sooner = !set && !!at && ms === ASK_AGAIN_LEAST_MS;
       var next = typeof another === 'function' ? another : function () { return onCircuit(w); };
-      var stop = function () { settled = true; clearTimeout(again); again = null; };
+      var stop = function () {
+        settled = true; clearTimeout(again); again = null;
+        var at = askAgainStops.indexOf(letGo);
+        if (at >= 0) askAgainStops.splice(at, 1);
+      };
       var yes = function (via) {
         return function (r) { if (settled) return; stop(); ok({ got: r, w: via }); };
       };
@@ -1043,15 +1239,16 @@
         again = null;
         var look = early ? QUICK_AGAIN_MS : wait;
         // every extra circuit asked, or the next would go when the caller has given up: no timer at all
-        if (settled || asked > most || Date.now() - began + look >= allowed) return;
+        if (settled || quit || asked > most || Date.now() - began + look >= allowed) return;
         again = setTimeout(function () {
           again = null;
-          if (settled) return;
+          if (settled || quit) return;
           if (early && askAgainWait(at, 0, true) !== QUICK_AGAIN_MS) { askAgainLater(wait - QUICK_AGAIN_MS); return; }
           var other;
           try { other = next(); } catch (e) { other = null; }
           if (!other) return;
           console.log('[foxy] ' + what + ' has not answered in ' + Math.round((Date.now() - began) / 1000) + 's; asking again on another circuit');
+          torSilentAsked();
           send(other);
           askAgainLater(ms);
         }, look);
@@ -1076,19 +1273,29 @@
       : askAgainWait((w && ((w.mint && w.mint.mintUrl) || w.mintUrl)) || '', 6000);
     var asked = new Promise(function (ok, no) {
       var settled = false, second = false, failed = 0;
-      var yes = function (r) { if (settled) return; settled = true; clearTimeout(again); ok(r); };
+      var letGo = function () { clearTimeout(again); };
+      askAgainStops.push(letGo);
+      var done = function () {
+        settled = true; clearTimeout(again);
+        var at = askAgainStops.indexOf(letGo);
+        if (at >= 0) askAgainStops.splice(at, 1);
+      };
+      var yes = function (r) { if (settled) return; done(); ok(r); };
       var bad = function (e) {
         failed += 1;
         if (settled || (second && failed < 2)) return;
-        settled = true; clearTimeout(again); no(e);
+        done(); no(e);
       };
       var again = setTimeout(function () {
         if (settled) return;
+        var gone = askAgainStops.indexOf(letGo);
+        if (gone >= 0) askAgainStops.splice(gone, 1);
         second = true;
         console.log('[foxy] the mint\u2019s proof check has not answered in ' + Math.round(wait / 1000) + 's; asking again on another circuit');
         var other;
         try { other = onCircuit(w, 'check-again:' + Date.now()); } catch (e) { other = null; }
         if (!other || !other.checkProofsStates) { second = false; return; }
+        torSilentAsked();
         Promise.resolve().then(function () { return other.checkProofsStates(list); }).then(yes, bad);
       }, wait);
       Promise.resolve().then(function () { return w.checkProofsStates(list); }).then(yes, bad);
@@ -1356,6 +1563,79 @@
     return (typeof p === 'string' && /^[0-9a-f]{64}$/i.test(p)) ? p.toLowerCase() : '';
   }
 
+  /* Whether a mint's answer about a quote is about the quote asked, at the
+   * one door every request to a mint goes by (`nativeRequest`). '' when it
+   * is, or what is wrong with it.
+   *
+   * Foxy keeps its invoices and its payments by quote id and asks about each
+   * by that id, and what comes back decides whether an invoice is claimed or a
+   * payment's held pieces are struck or given back. So an answer is used only
+   * when it is about what was asked:
+   *
+   *   a quote's state (GET .../quote/{method}/{id}): the answer's `quote` is
+   *   that id; and for an invoice of this phone's, its unit is the invoice's
+   *   and its amount the one the mint named when the invoice was made (the
+   *   record's `quoted`), where the answer says one;
+   *   several quotes' states in one ask (POST .../quote/{method}/check): one
+   *   answer for each quote asked, in the order asked, each as above, or the
+   *   whole answer is refused;
+   *   a new quote (POST .../quote/{method}): in the unit asked for.
+   *
+   * The library checks the ids and a batch's count and order itself; this
+   * holds them whatever library is under it, and adds the unit and amount of
+   * an invoice the phone already holds, which the library cannot know: a
+   * check that called a 100 sat invoice paid at 150, or paid in dollars, was
+   * claimed. */
+  var QUOTE_PATH = /\/v1\/(mint|melt)\/quote\/([A-Za-z0-9_-]+)(?:\/([^\/?#]+))?\/?(?:[?#].*)?$/;
+  function quoteAnswerProblem(method, endpoint, requestBody, parsed) {
+    var m = QUOTE_PATH.exec(String(endpoint || ''));
+    if (!m) return '';
+    var side = m[1], how = m[2], last = '';
+    try { last = m[3] ? decodeURIComponent(m[3]) : ''; } catch (e) { last = String(m[3]); }
+    var verb = String(method || 'GET').toUpperCase();
+    var short = function (q) { return String(q).slice(0, 12) + (String(q).length > 12 ? '…' : ''); };
+    // an invoice of this phone's, by its id, from its record
+    var mine = function (id) {
+      if (side !== 'mint') return null;
+      var lists = [load(K.quotes, []), load(K.quotesOld, [])];
+      for (var i = 0; i < lists.length; i++) {
+        for (var j = 0; j < (lists[i] || []).length; j++) if (lists[i][j] && lists[i][j].quote === id) return lists[i][j];
+      }
+      return null;
+    };
+    var one = function (asked, got) {
+      if (!got || typeof got !== 'object') return 'no record for quote ' + short(asked);
+      if (String(got.quote) !== String(asked)) return 'quote ' + short(asked) + ' asked, ' + short(got.quote) + ' answered';
+      var rec = mine(asked);
+      if (!rec) return '';
+      if (rec.unit && typeof got.unit === 'string' && got.unit && got.unit.toLowerCase() !== String(rec.unit).toLowerCase()) {
+        return 'quote ' + short(asked) + ' answered in ' + got.unit + ', not ' + rec.unit;
+      }
+      if (how === 'bolt11' && rec.quoted && got.amount != null && satsOf(got.amount) !== Number(rec.quoted)) {
+        return 'quote ' + short(asked) + ' answered for ' + satsOf(got.amount) + ', not ' + rec.quoted;
+      }
+      return '';
+    };
+    if (verb === 'GET' && last && last !== 'check') return one(last, parsed);
+    if (verb !== 'POST') return '';
+    var b = requestBody || {};
+    if (last === 'check') {
+      var asked = Array.isArray(b.quotes) ? b.quotes.map(String) : [];
+      if (!Array.isArray(parsed)) return 'a batch of ' + asked.length + ' asked, no list answered';
+      if (parsed.length !== asked.length) return 'a batch of ' + asked.length + ' asked, ' + parsed.length + ' answered';
+      for (var k = 0; k < asked.length; k++) {
+        var why = one(asked[k], parsed[k]);
+        if (why) return 'a batch of ' + asked.length + ': ' + why;
+      }
+      return '';
+    }
+    if (!last && parsed && typeof parsed === 'object' && typeof b.unit === 'string' && b.unit
+        && typeof parsed.unit === 'string' && parsed.unit && parsed.unit.toLowerCase() !== b.unit.toLowerCase()) {
+      return 'a ' + side + ' quote in ' + b.unit + ' asked, one in ' + parsed.unit + ' answered';
+    }
+    return '';
+  }
+
   function quoteLock(w) {
     try {
       var CT = window.CashuTS;
@@ -1405,6 +1685,13 @@
       }
       return made.q;
     }).then(function (q) {
+      /* The invoice is for what the quote says, and that is what is minted (`mintAmountOf`): one for another amount than
+       * the one asked, past rounding, is refused before it is shown or paid. */
+      var said = quoteAmountOf(q);
+      if (said && Math.abs(said - Math.round(Number(amount) || 0)) > QUOTE_ROUNDING) {
+        console.warn('[foxy] asked ' + (host || 'the mint') + ' for an invoice for ' + amount + ' and its quote is for ' + said);
+        throw new Error((host || 'The mint') + ' made its invoice for ' + said + ', not the ' + amount + ' asked for. Nothing was paid.');
+      }
       /* The invoice names the mint's node (05-paying-this-mint.js) — but only
        * a sat invoice. A mint with a dollar balance can have its dollar
        * invoices made by somebody else's node (Forge's come from Flash's node,
@@ -1420,11 +1707,28 @@
     });
   }
 
-  // `lock` is anything carrying { pubkey, privkey } — a stored invoice, a move note
+  /* A mint quote's own amount (NUT-04 `amount`), or 0 where it names none. A quote further from the amount asked than
+   * this is refused when it is made (`createQuote`): a unit of rounding, as a mint quoting cents may round. */
+  var QUOTE_ROUNDING = 1;
+  function quoteAmountOf(q) {
+    var n = q && q.amount != null ? satsOf(q.amount) : NaN;
+    return Number.isSafeInteger(n) && n > 0 ? n : 0;
+  }
+
+  /* What a claim mints: the quote's own amount where its record kept one (`quoted`, written with the quote, 08c-units.js
+   * `keepQuote`; a move note's, 14-moving-between-mints.js), and the amount asked for otherwise. A mint signs for the
+   * amount its quote is for, and a claim for another is refused. */
+  function mintAmountOf(rec, asked) {
+    var n = rec && Number(rec.quoted);
+    return Number.isSafeInteger(n) && n > 0 ? n : asked;
+  }
+
+  // `lock` is anything carrying { pubkey, privkey } — a stored invoice, a move note — and maybe `quoted` (`mintAmountOf`)
   function mintQuoteProofs(w, amount, quoteId, lock) {
+    var n = mintAmountOf(lock, amount);
     return lock && lock.privkey && lock.pubkey
-      ? w.mintProofsBolt11(amount, { quote: quoteId, pubkey: lock.pubkey }, { privkey: lock.privkey })
-      : w.mintProofsBolt11(amount, quoteId);
+      ? w.mintProofsBolt11(n, { quote: quoteId, pubkey: lock.pubkey }, { privkey: lock.privkey })
+      : w.mintProofsBolt11(n, quoteId);
   }
 
   /* What a mint charges to spend `count` pieces, without holding any yet.
@@ -1464,6 +1768,33 @@
     } catch (e2) {}
     if (!isFinite(n) || n < 0) n = 0;
     return Math.ceil(n);
+  }
+
+  /* What a send's swap cost, held to what the mint charges for the pieces that went in.
+   *
+   * It was worked out by subtraction: what went in, less the token, less what was kept. A piece of change that went
+   * missing between the swap and the pile was booked as fee that way, and the books still added up, so a real loss
+   * would have read as a dear swap and nothing would have said so. The fee is the mint's charge for those inputs
+   * (`swapFeeFor`); when the sum says otherwise the mismatch is logged, and `off` and the two figures go on the entry
+   * so it says what really went in and what came back. The payment is never refused over it: by now the token exists.
+   *
+   * `have`: the pile the swap was made from; `split`: { send, keep }, where `keep` holds the pieces of `have` that were
+   * not used beside the change. Resolves { fee, wentIn, cameBack, off }, `off` the sats the sum is short (or over). */
+  function swapCost(w, have, split) {
+    var kept = {};
+    ((split && split.keep) || []).forEach(function (p) { if (p && p.secret) kept[String(p.secret)] = true; });
+    var inputs = (have || []).filter(function (p) { return p && p.secret && !kept[String(p.secret)]; });
+    var untouched = (have || []).filter(function (p) { return p && p.secret && kept[String(p.secret)]; });
+    var wentIn = sumProofs(inputs);
+    var cameBack = sumProofs((split && split.send) || []) + sumProofs((split && split.keep) || []) - sumProofs(untouched);
+    var fee = inputs.length ? swapFeeFor(w, inputs) : 0;
+    var off = wentIn - cameBack - fee;
+    if (off !== 0) {
+      console.warn('[foxy] a send\u2019s swap does not add up: ' + wentIn + ' went in, ' + cameBack + ' came back, and the mint '
+        + 'charges ' + fee + ' as its fee for those ' + inputs.length + ' piece(s); ' + Math.abs(off)
+        + (off > 0 ? ' is missing' : ' more came back than was paid') + '. The fee is booked as charged.');
+    }
+    return { fee: fee, wentIn: wentIn, cameBack: cameBack, off: off };
   }
 
   function swapFeeFor(w, list) {

@@ -222,7 +222,8 @@ ok(/var owed = Math\.max\(0, paid - asked - \(Number\(p\.inFee\) \|\| 0\)\);\n  
   const recv = read('build/wallet/15-receiving.js');
   ok(/try \{ holdUnanswered\(u\); \}/.test(read('build/wallet/11-routing.js'))
      && /if \(r\.kind !== 'send' \|\| !\(r\.locked && r\.locked\.length\) \|\| r\.freeInputs \|\| heldHas\(r\.id\)\) return;/.test(lost)
-     && /if \(canonicalMint\(r\.mint\) !== here \|\| liveSwap\[r\.id\]\) return;/.test(lost),
+     // at every mint a record names, not only the one connected to (2026-11-04)
+     && /if \(!r \|\| !r\.mint \|\| liveSwap\[r\.id\]\) return;/.test(lost),
      'the pieces of a locked send no page is waiting on are held as the wallet connects');
   ok(/if \(r\.kind === 'send' && r\.locked && r\.locked\.length\) \{\n\s+if \(liveSwap\[r\.id\]\) return null;\n\s+return finishLockedSend\(uw, r\)/.test(recv)
      && /var wrote = writeLockedSend\(uw, r, got\.send, got\.change\);/.test(recv),
@@ -244,7 +245,9 @@ ok(/var owed = Math\.max\(0, paid - asked - \(Number\(p\.inFee\) \|\| 0\)\);\n  
      && /if \(!\(code > 0\) \|\| code === 409 \|\| code === 504\) return 'unconfirmed';/.test(read('build/wallet/21-native-bridges.js')),
      'plain ecash the receiver could not swap in is kept and answered 409 only while the mint may have it — a status the phone passes on and the payer reads as unconfirmed; refused, nothing is kept');
   ok(/if \(meltGone\(quote\.quote\)\) chargeUnsentFee\(at, splitFee\);/.test(read('build/wallet/16-sending.js'))
-     && (recv.match(/if \(meltGone\(entry\.quote\)\) \{ chargeUnsentFee\(here, entry\.splitFee\); dropMoveNoteFor\(entry\.bolt11\); \}/g) || []).length === 2,
+     // and the crossing's note goes with it only on FAILED: a melt given back on UNPAID or PENDING may still land (2026-11-04)
+     && (recv.match(/if \(meltGone\(entry\.quote\)\) \{? ?chargeUnsentFee\(here, entry\.splitFee\);/g) || []).length === 2
+     && (recv.match(/if \(state === 'FAILED'\) dropMoveNoteFor\(entry\.bolt11\);/g) || []).length === 1,
      'a melt that did not go charges its split\u2019s fee once, wherever the hold is given back');
   ok(/return FoxyWallet\._sweepMeltsOnce\(\{ w: ow, here: at \}\);/.test(recv)
      && /return awayWallet\(at\)\.then\(function \(ow\) \{ return FoxyWallet\._sweepMeltsOnce\(\{ w: ow, here: at \}\); \}\)/.test(recv)
@@ -337,7 +340,7 @@ ok(/var owed = Math\.max\(0, paid - asked - \(Number\(p\.inFee\) \|\| 0\)\);\n  
    'the fee a payer adds for the receiver is fee, not change');
 ok(/topUpFees: 'foxy\.cashu\.topupfees'/.test(read('build/wallet/00-header-and-mint-errors.js'))
    && /topUpFeeSats: function \(\) \{/.test(read('build/wallet/22-screen-lock.js'))
-   && /const off = whole \? Math\.round\(run\) \+ held \+ back \+ fees : 0;/.test(read('build/app/16-history-lists.js')),
+   && /const off = whole \? Math\.round\(run\) \+ held \+ back \+ fees \+ melting : 0;/.test(read('build/app/16-history-lists.js')),
    'the fees top-ups cost are written down and the audit counts them');
 ok(/if \(!this\._lockedOnce && this\.pinLock\) this\.pinLock\(\);/.test(read('build/app/06-wallet-boot-and-restore.js')),
    'a cold launch asks for the PIN once the wallet can say one is set');

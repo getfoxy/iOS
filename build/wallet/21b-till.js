@@ -30,7 +30,11 @@
      * once none is. `opts.unit` ('sat' or
      * 'usd') picks a new one's unit; without it, dollars where this phone
      * holds dollars at a mint that issues them. A live code is never
-     * dropped; up to four are kept, and only an ended one goes. */
+     * dropped; up to eight are kept, and only one run out goes.
+     * `opts.fresh`: another code whatever is live, for another cashier (the
+     * list's ADD); `opts.tips` its own answer to ACCEPT TIPS? (the open till's
+     * otherwise), and `opts.label` a name for its row. Resolves also { tips,
+     * label }, `tips` whether the code offers them. */
     tillPassMake: function (opts) { return tillPassMake(opts); },
 
     /* Keeper: the codes still live, newest last: { id, unit, mint, mints,
@@ -41,7 +45,8 @@
       return tillPrune().filter(function (r) { return Number(r.exp) * 1000 > now; })
         .sort(function (a, b) { return Number(a.made) - Number(b.made); })
         .map(function (r) {
-          return { id: r.id, unit: r.unit, main: tillMainOf(r), mint: r.mint, mints: tillMintsOf(r), exp: r.exp, made: r.made, text: tillPassText(r) };
+          return { id: r.id, unit: r.unit, main: tillMainOf(r), mint: r.mint, mints: tillMintsOf(r), exp: r.exp, made: r.made, text: tillPassText(r),
+                   label: String(r.label || ''), tips: tillTipsOn(r), ended: !!r.endedAt };
         });
     },
 

@@ -186,7 +186,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     clearTimeout(A._holdT); A.stopReceive();
     toasts = [];
     A.setState(Object.assign(patch, initial, { walletLive: true, balSats: 50000, balUsdCents: null, livePrice: PRICE,
-      satUsd: PRICE / 1e8, screen: 'home', stack: [], open0: true, menuSettingsOpen: true, menuSecurityOpen: true }, state || {}));
+      satUsd: PRICE / 1e8, screen: 'home', stack: [], open0: true }, state || {}));
     A.refreshUsd();
     await settle();
   };
@@ -212,8 +212,8 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     const W = twoWallet({ real: realChoice({ hold: 'both' }) });
     await fresh(W);
     const l = labels();
-    ok(l.indexOf('FACE / FINGER LOCK') >= 0 && l.indexOf('FACE / FINGER LOCK') + 1 === l.indexOf('SET PIN'),
-      'holding both: SET PIN follows the two switches straight away', l.join(', '));
+    ok(l.indexOf('SET PIN') >= 0 && l.indexOf('SET PIN') + 1 === l.indexOf('FACE ID LOCK') && l.indexOf('SET PIN') === l.indexOf('AUTO TAP TO PAY') + 1,
+      'holding both: SET PIN and FACE ID LOCK follow AUTO TAP TO PAY straight away', l.join(', '));
   }
 
   // ---- 2. holding both: every receive asks, and nothing is kept ------------------------------

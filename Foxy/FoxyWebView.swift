@@ -306,6 +306,16 @@ final class WebHostController: UIViewController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(screenshotTaken),
             name: UIApplication.userDidTakeScreenshotNotification, object: nil)
+        /* The keyboard, told to the page. The web view fills the screen and is not made smaller for it, so the page
+         * lifts what is typed into above it (watchKeyboard, 15-paid-wake-keyboard.js); the page's own measurement,
+         * visualViewport, can say nothing in this web view, and iOS's word for the keyboard's frame is the one that
+         * always comes. */
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(keyboardMoving(_:)),
+            name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(keyboardMoving(_:)),
+            name: UIResponder.keyboardWillHideNotification, object: nil)
 
         #if DEBUG
         // The unit tests (tools/unit-tests.sh) run inside this app and test
@@ -326,9 +336,18 @@ final class WebHostController: UIViewController {
             guard let webView = self?.webView else { done(false); return }
             webView.evaluateJavaScript(CardAddress.pageCall) { answer, _ in done((answer as? Bool) == true) }
         }
+        /* And on a first run, the address that opened Foxy is kept for the end of the set-up and asked of the page,
+         * which answers "keep", "shown" or "over" (CardTapDelivery, `Arrival`). */
+        CardTapDelivery.shared.askArrival = { [weak self] arrival, done in
+            guard let webView = self?.webView else { done(nil); return }
+            webView.evaluateJavaScript(arrival.pageCall) { answer, _ in done(answer as? String) }
+        }
 
         // A fresh install must not inherit the last one's seed.
         Self.forgetSeedIfReinstalled()
+        /* A first run is a launch with no seed: a fresh install, or one whose set-up never made its words. Asked
+         * quietly (no Face ID), after any seed of an earlier install has gone. Not knowing is not a first run. */
+        CardTapDelivery.shared.firstRun = SeedVault.seedIsThere() == false
         /* Tor starts itself, and the page is told every change.
          *
          * Nothing reaches a mint until Tor is up, or until the person chooses
@@ -634,10 +653,11 @@ final class WebHostController: UIViewController {
         }
         /* foxy://card is the card's address said by hand, for a simulator, which cannot be handed the real one: it
          * tells the page a card was tapped, the way the phone does when a card's banner is tapped (CardTapDelivery),
-         * and the page decides what to do about it. It takes no parameters, and not through the hash. */
+         * and the page decides what to do about it; on a first run it is kept as an arrival, as the real address is. It
+         * takes no parameters, and not through the hash. */
         if target == "card" {
             print("[deeplink] a card tap")
-            CardTapDelivery.shared.cardTapped()
+            CardTapDelivery.shared.received(URL(string: CardAddress.scheme + "://" + CardAddress.host + CardAddress.path))
             return
         }
         var parts = ["foxy=" + target]
@@ -1161,6 +1181,25 @@ final class WebHostController: UIViewController {
         bridge.pushScreenshot()
     }
 
+    @objc private func keyboardMoving(_ note: Notification) {
+        guard let webView, let screen = webView.window?.screen else { return }
+        var covered = 0
+        if note.name != UIResponder.keyboardWillHideNotification,
+           let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue {
+            // iOS gives the frame in the screen's space
+            covered = Self.keyboardCover(keyboard: webView.convert(end, from: screen.coordinateSpace), page: webView.bounds)
+        }
+        bridge.evaluate("window.__foxyKeyboard && window.__foxyKeyboard(\(covered))")
+    }
+
+    /// How many points of the page's foot a keyboard covers, both in the web view's own space: none for a keyboard
+    /// off the screen, beside the page or floating clear of its foot (an iPad's), and never more than the page.
+    static func keyboardCover(keyboard: CGRect, page: CGRect) -> Int {
+        guard !keyboard.isNull, !keyboard.isEmpty, keyboard.intersects(page), keyboard.maxY >= page.maxY - 1 else { return 0 }
+        let top = max(keyboard.minY, page.minY)
+        return Int(max(0, page.maxY - top).rounded())
+    }
+
     private var backgroundedAt: Date?
     /// Foxy has been active in this run before: a focus taken and given back
     /// (the card sheet, Face ID) is then no return from anywhere (`TorReturn.leftKnown`).
@@ -1187,6 +1226,8 @@ final class WebHostController: UIViewController {
          * taken off it, requests cut) only reads right after this. The return
          * is the page's own line ("[foxy] wake: Ns in the background"). */
         print("[foxy] app: in the background")
+        // the reminder after fifteen days away starts counting again from here (Reminder.swift)
+        Reminder.refresh()
         /* The connection diary, written here because this is where a force-quit
          * begins: the app switcher only reaches an app already backgrounded, so
          * somebody killing Foxy to escape a stuck screen is who this is for. */
@@ -1312,6 +1353,8 @@ final class WebHostController: UIViewController {
     }
 
     @objc private func appBecameActive() {
+        // in front: the pending reminder is replaced by one fifteen days out (Reminder.swift)
+        Reminder.refresh()
         /* Whether Foxy actually went away, or only lost focus for a moment.
          *
          * A screenshot, Control Center, Face ID and a system alert all resign
@@ -1741,7 +1784,8 @@ struct ContentView: View {
          * https://getfoxy.io/card, and iOS hands it over when the person taps the banner. SwiftUI passes a universal
          * link to the app as a URL (onOpenURL), and a browsing-web user activity is the other way a link has reached
          * an app, so both are taken, and both end in CardTapDelivery.received, which keeps the card's address, drops
-         * anything else without a word, and tells the page only that a card was tapped. A launch from the banner is
+         * anything else without a word, and tells the page only that a card was tapped (on a first run, that a card
+         * opened Foxy, for the end of the set-up: `Arrival`). A launch from the banner is
          * delivered the same way once the view is up: the scene's connection options are SwiftUI's to read, and this
          * app is scene-based (WindowGroup, and the scene manifest generated by project.yml), so UIKit does not call
          * the app delegate's application(_:continue:restorationHandler:) and nothing is added there. */

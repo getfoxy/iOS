@@ -47,7 +47,14 @@
    * (`tillListenNow`), so the whole week is inside what they are asked for. */
   var TILL_LISTEN_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
   var TILL_SEND_UNTIL_MS = TILL_LISTEN_AFTER_MS;
-  var TILL_PASSES_MAX = 4;
+  /* Eight codes at most, live or ended within the week a payment by one may
+   * still arrive in, and the phone listens on all of them (TillInboxes.most in
+   * FoxyBridge+Till.swift says the same): a keeper may have several cashiers
+   * at once, each by a code of their own (CASHIER CODE's list, 26m-till.js). */
+  var TILL_PASSES_MAX = 8;
+  // the most a cashier code's label holds, and the list of codes kept to show under PAST
+  var TILL_LABEL_MAX = 24;
+  var TILL_LOG_MAX = 40;
   var TILL_SEEN_MAX = 2000;
   /* What the keeper keeps of a delivery it cannot take yet (at another mint,
    * or with no route): fifty, and a megabyte in all. Only ecash the mint
@@ -142,7 +149,13 @@
     var nowS = Math.floor(Date.now() / 1000);
     if (j.exp <= nowS) return { why: 'That cashier code has expired. Ask for a new one.' };
     if (j.exp > nowS + TILL_PASS_MS / 1000 + TILL_PASS_SLACK_S) return bad;
-    return { pass: { v: 1, id: j.id, mint: mints[0], mints: mints, unit: j.unit, main: main, lock: j.lock, to: j.to, exp: j.exp } };
+    /* Whether the cashier's till offers tips: true or nothing. Who they go to is
+     * not in the code (the keeper's phone keeps that, on its row of the code),
+     * so a code at a counter names nobody's Cashu ID. */
+    if (j.tips !== undefined && typeof j.tips !== 'boolean') return bad;
+    var out = { v: 1, id: j.id, mint: mints[0], mints: mints, unit: j.unit, main: main, lock: j.lock, to: j.to, exp: j.exp };
+    if (j.tips === true) out.tips = true;
+    return { pass: out };
   }
 
   /* A till's mints as a list Foxy can hold it to: each a mint address Foxy
@@ -188,6 +201,8 @@
     var body = { v: 1, id: p.id, mint: mints[0] || p.mint, mints: mints, unit: p.unit };
     if (p.unit === 'both') body.main = p.main === 'usd' ? 'usd' : 'sat';
     body.lock = p.lock; body.to = p.to; body.exp = p.exp;
+    // `tips` only on a code whose till offers them (`tillTipsOn`): a code without reads as it always did
+    if (tillTipsOn(p)) body.tips = true;
     return TILL_URL + tillB64(JSON.stringify(body));
   }
 
@@ -392,6 +407,7 @@
   function tillKeeperForget() {
     tillClear(K.tillKeeper);
     tillClear(K.tillKeeperHome);
+    tillClear(K.tillTips);
   }
 
   /* The keeper's till while it is open (`tillKeeperOpen`): { mints, def }, the
@@ -442,7 +458,7 @@
   function tillLiveNewest(unit, mints, main) {
     var now = Date.now();
     var live = tillPrune().filter(function (r) {
-      return Number(r.exp) * 1000 > now && (!unit || r.unit === unit) && (!mints || tillSameMints(tillMintsOf(r), mints))
+      return Number(r.exp) * 1000 > now && !r.endedAt && (!unit || r.unit === unit) && (!mints || tillSameMints(tillMintsOf(r), mints))
         && (!main || r.unit !== 'both' || tillMainOf(r) === main);
     }).sort(function (a, b) { return Number(a.made) - Number(b.made); });
     return live.length ? live[live.length - 1] : null;
@@ -476,12 +492,17 @@
       return Promise.reject(new Error('A cashier code takes payments at the mint this phone is on, and at mints Foxy can use.'));
     }
     var mainWant = opts && (opts.main === 'usd' || opts.main === 'sat') ? opts.main : '';
-    var live = tillLiveNewest(want, named, mainWant);
+    /* `opts.fresh`: another code, for another cashier, whatever is live (CASHIER CODE's ADD); a code
+     * with tips asked of it apart from the till's is one too. Otherwise a live code for this till is
+     * answered again, as it always was. */
+    var fresh = !!(opts && (opts.fresh || opts.tips !== undefined));
+    var live = fresh ? null : tillLiveNewest(want, named, mainWant);
     if (live) {
       Promise.resolve().then(function () { return FoxyWallet.tillListen(); }).then(null, function () {});
-      return Promise.resolve({ text: tillPassText(live), id: live.id, exp: live.exp, mints: tillMintsOf(live), main: tillMainOf(live) });
+      return Promise.resolve({ text: tillPassText(live), id: live.id, exp: live.exp, mints: tillMintsOf(live), main: tillMainOf(live),
+                               tips: tillTipsOn(live), label: String(live.label || '') });
     }
-    if (tillMaking) return tillMaking;
+    if (tillMaking && !fresh) return tillMaking;
     var run = tillPassMakeNew(opts);
     tillMaking = run;
     var done = function () { if (tillMaking === run) tillMaking = null; };
@@ -507,6 +528,17 @@
     if (unit !== 'sat' && unitsOf(at).indexOf('usd') < 0) return Promise.reject(new Error(hostOf(at) + ' does not issue dollars.'));
     var mintsNo = tillMintsProblem(mints);
     if (mintsNo) return Promise.reject(new Error(mintsNo));
+    /* Its tips: asked of this code (`o.tips`), or the open till's (`tillTipsNow`). Who they go to stays on
+     * this phone's row; the code carries only whether there are any. */
+    var tips;
+    try { tips = o.tips !== undefined ? tipsCheck(o.tips) : tillTipsNow(); } catch (eT) { return Promise.reject(eT); }
+    var label = tillLabelClean(o.label);
+    // eight at most, and only a code run out makes room (below): with eight not run out, no ninth
+    var nowCheck = Date.now();
+    var kept = tillPrune();
+    if (kept.length >= TILL_PASSES_MAX && !kept.some(function (r) { return Number(r.exp) * 1000 <= nowCheck; })) {
+      return Promise.reject(new Error(TILL_PASSES_MAX + ' cashier codes are out already. A new one can be made once one of them runs out.'));
+    }
     var raw = new Uint8Array(8);
     (window.crypto || window.msCrypto).getRandomValues(raw);
     var id = hexOf(raw);
@@ -521,17 +553,20 @@
                     exp: Math.floor((now + TILL_PASS_MS) / 1000), made: now };
         // a till in both: the main its screen chose (`opts.main`), sats where none was
         if (unit === 'both') row.main = o.main === 'usd' ? 'usd' : 'sat';
+        row.tips = tips;
+        if (label) row.label = label;
         // a code no phone could read back (its mints' addresses too long between them) is not handed out
         if (tillPassText(row).length > TILL_TEXT_MAX) {
           tillForget(row);
           throw new Error('The till’s mints’ addresses are too long for one cashier code. Take fewer mints.');
         }
         var rows = tillPrune().concat([row]);
-        /* Four at most, and only ever an ended one goes, oldest first, with
-         * its keys. None other is live (a live one is answered again,
-         * above), and with one live at a time four reach back past the week
-         * a code is listened for after it ends, so this drops nothing that
-         * could still arrive. */
+        /* Eight at most, and only ever one run out goes, oldest first, with
+         * its keys: never one still live, nor one ended by hand (END) whose
+         * cashier may still be taking payments by it until it runs out. One
+         * run out within the week is listened for no longer: what its cashier
+         * still had to send stays in that cashier's outbox, locked to this
+         * phone, and is found by walking the seed. */
         var gone = [];
         while (rows.length > TILL_PASSES_MAX) {
           var ended = rows.filter(function (r) { return r !== row && Number(r.exp) * 1000 <= now; });
@@ -543,11 +578,13 @@
         try { mustSave(K.tillPasses, rows); }
         catch (e) { tillForget(row); throw e; }
         gone.forEach(tillForget);
+        // and on the list of codes, which outlives the rows and their keys (PAST, `tillPassList`)
+        tillLogAdd(row);
         console.log('[foxy] till: a cashier code was made, ' + unit + ' at ' + hostOf(at)
           + (mints.length > 1 ? ' and ' + (mints.length - 1) + ' other mint(s)' : '') + ', for 72 hours');
         // and the phone listens for it from now on
         Promise.resolve().then(function () { return FoxyWallet.tillListen(); }).then(null, function () {});
-        return { text: tillPassText(row), id: id, exp: row.exp, mints: mints, main: tillMainOf(row) };
+        return { text: tillPassText(row), id: id, exp: row.exp, mints: mints, main: tillMainOf(row), tips: tillTipsOn(row), label: label };
       }, function (e) {
         dropLockKey('till-' + id);
         throw e;
@@ -799,6 +836,14 @@
       tillSeenAdd(proofs);
       tillInboxDrop(at);
       console.log('[foxy] till: a payment from a cashier was taken in');
+      /* Its tip, where the code offers tips: the cashier says how much of it was the tip (`tip`, in
+       * its unit), and this phone's own row of the code says who it goes to (08f-till-tips.js). Never
+       * more than what came in. */
+      var tip = tillTipOfBody(j, r, unit);
+      if (tip > 0 && tillTipsOn(pass)) {
+        try { tipForward({ tips: pass.tips, amount: tip, unit: unit, mint: mint, hash: (r && r.hash) || '', from: 'cashier' }); }
+        catch (eTip) { console.warn('[foxy] till: a cashier’s tip could not be passed on; it stays here:', (eTip && eTip.message) || eTip); }
+      }
       return 'taken';
     }, function (e) {
       var why = String((e && e.message) || e);
@@ -916,6 +961,9 @@
     var row = { n: n, passId: String(o.passId || ''), to: String(o.to || ''), mint: canonicalMint(o.mint || ''),
                 unit: unitOf(o.unit) || 'sat', amount: Math.round(satsOf(o.amount)), proofs: o.proofs,
                 hash: String(o.hash || ''), exp: Number(o.exp) || 0, at: Date.now(), sentAt: null, tries: 0 };
+    // the part of it that was a tip, said to the keeper with the payment (`tip`): never more than the payment
+    var tip = Math.round(Number(o.tip) || 0);
+    if (tip > 0) row.tip = Math.min(tip, row.amount);
     rows.push(row);
     mustSave(K.tillOutbox, rows);
     return row;
@@ -986,7 +1034,10 @@
             return null;
           }
           if (!routeOpen()) { tillTried(r); return null; }
-          var body = JSON.stringify({ id: 'till:' + r.passId + ':' + r.n, mint: r.mint, unit: r.unit, proofs: r.proofs, memo: 'till' });
+          var sends = { id: 'till:' + r.passId + ':' + r.n, mint: r.mint, unit: r.unit, proofs: r.proofs, memo: 'till' };
+          // and how much of it was a tip, for the keeper to pass on (`tillTipOfBody`)
+          if (Number(r.tip) > 0) sends.tip = Math.round(Number(r.tip));
+          var body = JSON.stringify(sends);
           return deliverOverNostr(r.to, body).then(function () {
             var rows = tillOutboxRows();
             rows.forEach(function (x) { if (x.passId === r.passId && x.n === r.n) x.sentAt = Date.now(); });
@@ -1170,7 +1221,7 @@
       var hash = 'till-' + p.id;
       try {
         tillOutboxAdd({ proofs: p.proofs, mint: p.mint, unit: pu, amount: kept, to: open.tillTo, passId: open.tillPass,
-                        exp: open.tillExp, hash: hash });
+                        exp: open.tillExp, hash: hash, tip: Number(open.tillTip) || 0 });
       } catch (e) {
         console.error('[foxy] till: a payment could not be written down; refusing it:', (e && e.message) || e);
         return no(422, 'This phone could not write the payment down, so it was not taken. Try again.');
@@ -1216,7 +1267,7 @@
     });
     var asked;
     try {
-      asked = Promise.resolve(w.mintProofsBolt11(entry.amount,
+      asked = Promise.resolve(w.mintProofsBolt11(mintAmountOf(entry, entry.amount),
         entry.pubkey ? { quote: quoteId, pubkey: entry.pubkey } : { quote: quoteId },
         entry.privkey ? { privkey: entry.privkey } : undefined,
         { type: 'p2pk', options: { pubkey: String(entry.lockPub).toLowerCase() } }));
@@ -1245,7 +1296,7 @@
       already = tillOutboxHolds(fresh);
       if (!already) {
         tillOutboxAdd({ proofs: fresh, mint: at, unit: unit, amount: got, to: entry.tillTo, passId: entry.tillPass,
-                        exp: entry.tillExp, hash: quoteId });
+                        exp: entry.tillExp, hash: quoteId, tip: Number(entry.tillTip) || 0 });
       }
     } finally { free(); }
     drop();
@@ -1377,7 +1428,7 @@
   /* ---- listening, joining, leaving ---- */
 
   /* The keeper's phone told to listen on every code whose payments can still
-   * arrive, newest four (the phone takes no more), then what was kept for this
+   * arrive, newest eight (the phone takes no more), then what was kept for this
    * mint taken. Shared while it runs; called again, it asks the phone again,
    * which closes the set it had and opens this one: so a call after the phone
    * closed them for the background opens them again. */
@@ -1556,6 +1607,7 @@
     var home = load(K.tillKeeperHome, null);
     tillClear(K.tillKeeperHome);
     tillClear(K.tillKeeper);
+    tillClear(K.tillTips);
     var to = home && typeof home.mint === 'string' ? canonicalMint(home.mint) : '';
     if (!to || to === canonicalMint(mintUrl || '')) return Promise.resolve({ mint: canonicalMint(mintUrl || ''), moved: false });
     // home at once from the keys on file, and its mint asked behind it (`lazy`)

@@ -217,6 +217,10 @@ enum TorService {
     private static var askedCircuits: Set<String> = []
     private static var openLinks: Set<String> = []
     private static var askedAgainAt = Date.distantPast
+    /// When Tor's network was last switched off and on (`nudge`), for any
+    /// reason: the second stage after a return waits five minutes from it
+    /// (`TorReturn.restartCoolDown`).
+    private static var nudgedAt: Date?
     /// The control link Tor's circuit and relay-connection events were asked for on.
     private static weak var eventsAsked: TorController?
     /// Moves on every change that can close Tor's listener, so an answer about
@@ -524,6 +528,7 @@ enum TorService {
         let sinceBroughtBack = broughtBackAt.map { Date().timeIntervalSince($0) }
         parked = false
         if wasParked { broughtBackAt = Date() }
+        if wasParked { rebuild.returned(); restartRule.returned() }   // the page's unanswered askings count from here (`silentAskings`)
         /* A Foxy launched in the background, for the Bluetooth accessory, and
          * never in front has no time put away: it reckons with at least half a
          * minute (TorReturn.awayReckoned). And the SOCKS listener is asked, over
@@ -1926,6 +1931,7 @@ enum TorService {
     private static func nudge() {
         guard let ctrl = controller, !parked else { return }
         let gen = setUpGen
+        nudgedAt = Date()
         print("[foxy] tor: retrying")
         step("Tor's connections started again (network off and on)")
         forgetSocksPort()                         // switching the network closes the listener
@@ -1942,6 +1948,92 @@ enum TorService {
                 readSocksPort()
             }
         }
+    }
+
+    // MARK: New circuits, when the ones Tor has carry nothing
+
+    /// `TorReturn.Rebuild` on the control link Tor already has: SIGNAL NEWNYM,
+    /// only while Tor is up and Foxy is in front. Nothing else is touched: no
+    /// restart, Tor's network stays on, and its SOCKS listener stays open.
+    private static let rebuild: TorReturn.Rebuild = {
+        let r = TorReturn.Rebuild { done in
+            guard ready, !parked, let ctrl = controller else { return false }
+            control(ctrl, "SIGNAL", ["NEWNYM"], timeout: 4, claims: { c, _ in
+                c.count == 1 && (c[0] == 250 || c[0] >= 500)
+            }, done: { c, _ in done(c.first == 250) })
+            return true
+        }
+        r.told = { took in
+            print(took ? "[foxy] tor: Tor took the request for new circuits; the next requests go on new ones"
+                       : "[foxy] tor: Tor did not take the request for new circuits")
+        }
+        return r
+    }()
+
+    /// `TorReturn.Restart` on the switch Tor's own stalls already use: the
+    /// network off and on (`nudge`), which closes every connection Tor has,
+    /// guards included, and connects again. Only while Tor is up and Foxy is
+    /// in front.
+    private static let restartRule: TorReturn.Restart = TorReturn.Restart {
+        guard ready, !parked, controller != nil else { return false }
+        print("[foxy] tor: \(TorReturn.restartAfterSilent) more askings unanswered within \(Int(TorReturn.restartWithin))s after the new circuits, and no host has answered since the return; starting Tor's connections again (network off and on)")
+        nudge()
+        return true
+    }
+
+    /// A host answered a request through the route (Route.start's `counted`),
+    /// whatever it said: Tor carries, and the second stage is off for this return.
+    static func hostAnswered() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        restartRule.answered()
+    }
+
+    /// The page has asked `count` times in a row on another circuit, each left
+    /// unanswered, since Foxy came back (`torRebuild`). Answers what was done,
+    /// in `TorReturn.Rebuild.Answer`'s words; "rebuilding" when Tor was asked;
+    /// and once it has been, in `TorReturn.Restart.Answer`'s, "restarting"
+    /// when Tor's network was switched off and on. `moneyOut`: a swap or a
+    /// restore is out (FoxyBridge.moneyInFlight), and is not cut.
+    static func silentAskings(_ count: Int, moneyOut: Bool = false) -> String {
+        dispatchPrecondition(condition: .onQueue(.main))
+        let answer = rebuild.silent(count)
+        switch answer {
+        case .sent:
+            restartRule.rebuilt()
+            print("[foxy] tor: \(count) askings in a row on fresh circuits went unanswered since the return; asking Tor for new circuits (NEWNYM)")
+        case .tooFew:
+            break
+        case .doneThisReturn:
+            let second = restartRule.silent(lastNudge: nudgedAt, moneyOut: moneyOut)
+            switch second {
+            case .sent, .tooFew, .doneThisReturn, .notAfterRebuild:
+                break
+            default:
+                print("[foxy] tor: \(count) askings in a row unanswered since the return; Tor's connections not started again (\(second.rawValue))")
+            }
+            return second.rawValue
+        default:
+            print("[foxy] tor: \(count) askings in a row unanswered since the return; no new circuits asked for (\(answer.rawValue))")
+        }
+        return answer.rawValue
+    }
+
+    /// Tor is on its way up: running, not stopped, failed or parked. For an
+    /// .onion asked for in the seconds a control link is reconnected
+    /// (`TorReturn.onionWhenTorIsBack`).
+    static var onItsWay: Bool {
+        thread != nil && !ready && !stopped && !failed && !parked
+    }
+
+    /// Calls `then` on the main queue once Tor is up, or after `within`.
+    static func whenUp(within: TimeInterval, _ then: @escaping () -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        let until = Date().addingTimeInterval(within)
+        func look() {
+            if ready || Date() >= until || !onItsWay { then(); return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { look() }
+        }
+        look()
     }
 
     /// The stall watch starts over: Tor's network has just come on.

@@ -138,6 +138,7 @@ only:
 | `-FoxySeedScreenTest show` / `verify` / `enter` / `counters` / `wipe` | Three seconds after the page loads, asks the bridge from the page for the seed actions (§14) and logs one `[seedscreentest]` line with each answer, secrets as counts only. Makes a seed if there is none. `wipe` asks to delete the seed |
 | `-FoxyTorStall auth` | Every reply to Tor's control authentication is dropped until RESTART TOR or RETRY is tapped: a hang a phone once showed, on demand (§5h) |
 | `-FoxyTorStall listener` | The TCP control port is treated as refused once, as iOS leaves it after reclaiming a suspended app's sockets, so the recovery runs on demand (§5i) |
+| `-FoxyReminderMinutes N` | The reminder after 15 days away (REMIND ME AFTER 15 DAYS) is set for N minutes (at least 1) instead of 15 days, so it can be seen to fire: allow it, leave Foxy, wait N minutes |
 | `-FoxyKeychainTest YES` | At launch, checks the keychain rules on scratch entries — a different seed refused without replace, the Orbot key stored — and logs `[keychaintest]` lines. It only reads the wallet's own seed |
 
 ### Driving Foxy from outside (deep links)
@@ -220,9 +221,14 @@ needed them.
 you added for testing. Debugger detached and Console.app streaming, as in the
 setup above, unless a step says otherwise.
 
-**Menu paths.** BACKUP is at the top of the menu until the words are verified,
-and under SETTINGS after that. RESTORE, LOGS, SET PIN and the AUTO TAP TO PAY
-and FACE / FINGER LOCK switches are under MENU → SETTINGS. SPLIT is SPLIT A BILL.
+**Menu paths.** The menu has four sections, each open until tapped shut:
+WALLET (FOXY CARD, MY CASHU ID, HISTORY, CHAT, CONTACTS, HIDE BALANCE, YOUR
+CHANGE), MINTS (SWITCH/ADD MINTS, TRANSFER MONEY), TOOLS (POINT OF SALE, SPLIT A
+BILL) and SETTINGS (AUTO TAP TO PAY, SET PIN, FACE ID LOCK, OFFLINE LIMITS with PER PERSON and TOTAL, BACKUP,
+RESTORE, RESTORE LOST CARD, TEST LOGS). BACKUP ACCOUNT is at the very top while
+the wallet holds money and the words are not verified; BACKUP is always under
+SETTINGS. LOGS is TEST LOGS; SPLIT is SPLIT A BILL; the card is MENU → FOXY CARD
+(home's top-left button is CHAT, which opens INBOX).
 
 ### A. Tor, the network, and what leaves the phone
 
@@ -663,7 +669,7 @@ both. Console: `held melt … settled as paid`, or `… did not go — returned`
 #### 13c. A token's own note
 
 Make a token (13a) and, on its screen, tap ADD A NOTE and
-write a few words. Make a second token without a note. Then Home → HISTORY (the round button at the top left of home, not the menu),
+write a few words. Make a second token without a note. Then MENU → HISTORY (under WALLET),
 and open the first token.
 
 **Pass:** the token screen shows that token's note, not the note of an earlier
@@ -1197,9 +1203,9 @@ payment is still unclaimed is refused with "A payment or swap is still settling"
    then 1 s, 2 s, 4 s…
 3. While it says wait, enter the right PIN. It must be refused.
 4. Force-quit Foxy (swipe it away), open it again, enter a wrong PIN.
-5. With FACE / FINGER LOCK off in the menu, remove the PIN and set it again. Lock and
+5. With FACE ID LOCK off in the menu, remove the PIN and set it again. Lock and
    return, twice.
-6. Turn FACE / FINGER LOCK on. Lock and return; then again, cancelling the Face ID
+6. Turn FACE ID LOCK on. Lock and return; then again, cancelling the Face ID
    prompt.
 
 **Pass:** 3 refused without unlocking. 4 still waits, and the count did not
@@ -1222,7 +1228,7 @@ it, and use Face ID if it is on. Neither should lock again.
 The screens are now drawn by one function
 each. Walk through the home screen, RECEIVE (an invoice, and pasting a
 token), SEND MONEY (an invoice, ecash, a lightning address) up to the confirm
-screen, HISTORY (top left of home, not the menu) and one transaction's detail, MENU → CONTACTS, MENU →
+screen, MENU → HISTORY and one transaction's detail, MENU → CONTACTS, MENU →
 SWITCH, MENU → BACKUP (the recovery phrase), MENU → SETTINGS → RESTORE, MENU → SPLIT A BILL, the PIN
 screen, and a blocked card (receiving a spent token again, 13a, shows one).
 
@@ -1238,6 +1244,23 @@ what it did.
    the backup button, an amber ring on history. Verify the words. **Pass:**
    both stop.
 4. The app icon is the new one.
+
+#### 13r. The reminder after 15 days away
+
+Needs a phone with a Cashu ID in use (MENU → MY CASHU ID has been opened, or the words were restored) and a Debug build run
+with `-FoxyReminderMinutes 2`.
+
+1. Open MENU → MY CASHU ID, close it, put Foxy away and bring it back. **Pass:** no card over the code; at the return a card says "Foxy can remind you after 15 days away, so a payment or
+   message waiting for you is not missed." with TURN ON and NOT NOW. (If notifications were already allowed for payments, no
+   card: the switch is simply on.)
+2. TURN ON. **Pass:** iOS asks its own notification question once; MENU → SETTINGS shows REMIND ME AFTER 15 DAYS, the first
+   row of SETTINGS, on.
+3. Put Foxy away and wait 2 minutes. **Pass:** a notification "You have not opened Foxy in 15 days. A payment or message may
+   be waiting for you." Tapping it opens Foxy.
+4. Open Foxy, leave it again after one minute, and wait 90 seconds. **Pass:** nothing yet (each coming and going starts the
+   wait again); it comes 2 minutes after the last.
+5. Turn REMIND ME AFTER 15 DAYS off and put Foxy away. **Pass:** nothing arrives. Turn it on again: iOS is not asked twice.
+6. A phone with no Cashu ID in use. **Pass:** no REMIND ME AFTER 15 DAYS row and no card.
 
 #### 13f. Typing a mint address
 
@@ -2042,7 +2065,7 @@ on a real card. The sheet's lines are short from this release: `Tap behind the p
 Needs a card of software 1.19 with its tag on, a second card of 1.19 with its tag switched off (the card repository says how), a
 phone with a build signed with the associated domain (`tools/flashcard.entitlements`, so `FOXY_ENTITLEMENTS` in `local.env`) and the
 site's association file naming that build, and for step 7 a phone with no Foxy on it. Test money only. Nothing here has run on a real
-card. The log lines are `card tap: …` (`sh tools/pull-device-log.sh`, or LOGS in the menu); none of them has anything of the address in it.
+card. The log lines are `card tap: …` (`sh tools/pull-device-log.sh`, or TEST LOGS in the menu); none of them has anything of the address in it.
 A build installed from Xcode is matched against Apple's cached copy of the site's association file like any other, which can lag when the
 file was changed a moment ago; Apple's developer mode for associated domains (`?mode=developer` on the entry in a local copy of the
 entitlements, never committed) makes iOS ask the site directly, for a test build.
@@ -2082,7 +2105,7 @@ Needs a card of software 1.20 (`01 14` at SELECT), the holder's phone and a seco
 for step 4 a card loaded by a build or a wallet that sends no proofs. Test money only. Nothing here has run on a real card, and
 nobody has timed a load on one: each piece with a proof is a command of its own, 177 bytes, where three went in one before. The log
 lines are `card: wrote …` (each write) and `card: its proofs: …` (each check), and the read's own line gains `proofs <ms>`
-(`sh tools/pull-device-log.sh`, or LOGS in the menu); none has a secret, a nonce or a point in it.
+(`sh tools/pull-device-log.sh`, or TEST LOGS in the menu); none has a secret, a nonce or a point in it.
 
 1. **A load.** Set up a card, ADD FUNDS 2,000 sats (thirty-two pieces), the owner's tap. **Pass:** the card's screen is back with the
    balance counted up and `Verified At <time>`; the log has `card: wrote 32 piece(s), 32 with the mint’s proof (32 kept by

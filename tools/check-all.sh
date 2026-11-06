@@ -8,6 +8,7 @@
 # and the native seed's Swift tests on this Mac (tools/nativetests: NUT-13,
 # BIP-39, the counters and every seed action, no simulator). Without swift they
 # say SKIP; FOXY_NATIVE_TESTS=skip skips them where another job runs them.
+# FoxyTests (the Xcode unit tests) run after them when FOXY_SIM_UDID names a simulator, and say SKIP when it does not.
 # Stops at the first failure. Simulator tests are in tools/sim; the live
 # test-mint run is tools/live.
 #
@@ -74,14 +75,17 @@ check "attack 11-01 r5" 1 node tests/attack-2026-11-01-round5.js
 check "attack 11-01 r6" 1 node tests/attack-2026-11-01-round6.js
 check "attack 11-01 r7" 1 node tests/attack-2026-11-01-round7.js
 check "attack 11-01 r8" 1 node tests/attack-2026-11-01-round8.js
+check "attack 11-05"    1 node tests/attack-2026-11-05.js
 check "change twin"    1 node tests/change-twin.js
 check "address kept"   1 node tests/onchain-address-kept.js
 check "lock key kept"  1 node tests/lock-key-kept.js
 check "lock pool seed" 1 node tests/lock-pool-seed.js
 check "refund after kill" 1 node tests/refund-after-kill.js
 check "split doors"    1 node tests/split-doors.js
+check "split issued"   1 node tests/split-issued.js
 check "p2pk round trip" 1 node tests/p2pk-round-trip.js
 check "offline accept" 1 node tests/offline-accept.js
+check "claimed once"   1 node tests/claimed-once.js
 check "net of fee"     1 node tests/net-of-fee.js
 check "offline connect" 1 node tests/offline-connect.js
 check "switch instant" 1 node tests/switch-instant.js
@@ -90,6 +94,7 @@ check "change leg"     1 node tests/change-leg.js
 check "spend offline"  1 node tests/spend-offline.js
 check "change recovery" 1 node tests/change-recovery.js
 check "audit"          1 node tests/audit.js
+check "audit in flight" 1 node tests/audit-in-flight.js
 check "waiting screens" 1 node tests/waiting-screens.js
 check "ask-again pace" 1 node tests/ask-again-pace.js
 check "send fee check" 1 node tests/send-fee-check.js
@@ -102,16 +107,23 @@ check "convert on return" 1 node tests/convert-on-return.js
 check "sats for dollars" 1 node tests/sats-for-dollars-tap.js
 check "hand-over rules" 1 node tests/handover-rules.js
 check "forward locked" 1 node tests/forward-locked.js
+check "handed-on bound" 1 node tests/handed-on-bound.js
 check "offline ui"     1 node tests/offline-ui.js
 check "locked send lost" 1 node tests/locked-send-lost.js
 check "store full"     1 node tests/store-full.js
+check "card loads spent" 1 node tests/card-loads-spent.js
 check "crossings"      1 node tests/crossings.js
 check "circuit warm"   1 node tests/circuit-warm.js
 check "away claim"     1 node tests/away-claim.js
 check "carry cards"    1 node tests/carry-cards.js
 check "offline hostile" 1 node tests/offline-hostile.js
 check "counter refusal" 1 node tests/counter-refusal.js
+check "mint answers"   1 node tests/mint-answers.js
+check "hostile quote"  1 node tests/hostile-quote.js
 check "till caps"      1 node tests/till-caps.js
+check "till wallet"    1 node tests/till-wallet.js
+check "till screens"   1 node tests/till-ui.js
+check "till tips"      1 node tests/till-tips.js
 check "price difference" 1 node tests/price-difference.js
 check "onchain keypad" 1 node tests/onchain-keypad.js
 check "mint busy"      1 node tests/mint-busy.js
@@ -174,6 +186,7 @@ check "connection diary" 1 node tests/connection-diary.js
 check "claim guards"    1 node tests/claim-guards.js
 check "screen lock"     1 node tests/screen-lock.js
 check "deep links"      1 node tests/deep-links.js
+check "arrival"         1 node tests/arrival.js
 check "amount entry"    1 node tests/amount-entry.js
 check "token watch"     1 node tests/token-watch-speed.js
 check "array cap"       1 node tests/array-cap.js
@@ -193,6 +206,14 @@ check "settle quiet"   1 node tests/settle-quiet.js
 check "retry/re-arm"   1 node tests/retry-and-rearm.js
 check "onion fallback" 1 node tests/onion-fallback.js
 check "https delivery" 1 node tests/https-delivery.js
+check "cashu id"       1 node tests/cashu-id.js
+check "cashu id, other mints" 1 node tests/cashu-id-choice.js
+check "cashu id, screens" 1 node tests/cashu-id-ui.js
+check "cashu id, any wallet" 1 node tests/cashu-id-any.js
+check "reminder"       1 node tests/remind.js
+check "cashu id, messages" 1 node tests/cashu-msg.js
+check "cashu id, message screens" 1 node tests/cashu-msg-ui.js
+check "every field above the keyboard" 1 node tests/keyboard-lift.js
 check "amountless"     1 node tests/amountless-invoice.js
 check "render parity"  1 node tests/render-parity.js
 check "render snapshots" 1 node tests/render-snapshots.js
@@ -208,6 +229,8 @@ check "seed on the phone, screens" 1 node tests/native-seed-app.js
 check "NUT-13 vectors" 1 node tests/nut13-vectors.js
 check "spec vectors"   1 node tests/nut-vectors.js
 check "fuzz"           1 node tests/fuzz-parsers.js
+check "bank account"   1 node tests/bank-account.js
+check "chosen offline"  1 node tests/chosen-offline.js
 # XCTest reports on stderr, which check leaves out: keep its count and any error
 native_tests() {
   out="$(swift test --package-path tools/nativetests 2>&1)"
@@ -221,5 +244,23 @@ elif command -v swift >/dev/null 2>&1; then
   check "native Swift tests" 1 native_tests
 else
   printf '\n== native Swift tests\nSKIP: swift is not installed here, so NUT13.swift, BIP39.swift and the counter rules were not tested\n'
+fi
+# FoxyTests on the simulator, after the native tests. Only when FOXY_SIM_UDID names a simulator that exists: the first one booted is not
+# always one that may have its Foxy replaced (installing the test build does that), so it is never guessed here. The whole of
+# FoxyTests runs (about 600 tests, under a minute once built, so no subset is needed); FOXY_CHECK_CLASSES="CardGateTests ..." narrows it.
+# Without a simulator the line below says SKIP: a skipped step is a step whose Swift went untested.
+FOXY_CHECK_CLASSES="${FOXY_CHECK_CLASSES:-}"
+xcode_tests() {
+  out="$(FOXY_ONLY="$FOXY_CHECK_CLASSES" sh tools/unit-tests.sh 2>&1)"
+  code=$?
+  printf '%s\n' "$out" | tail -4
+  return $code
+}
+if [ -z "${FOXY_SIM_UDID:-}" ]; then
+  printf '\n== FoxyTests (simulator)\nSKIP: FOXY_SIM_UDID not set, FoxyTests not run\n'
+elif ! xcrun simctl list devices 2>/dev/null | grep -q "$FOXY_SIM_UDID"; then
+  printf '\n== FoxyTests (simulator)\nSKIP: FOXY_SIM_UDID %s is not a simulator on this Mac, FoxyTests not run\n' "$FOXY_SIM_UDID"
+else
+  check "FoxyTests (simulator)" 4 xcode_tests
 fi
 printf '\nall checks pass\n'

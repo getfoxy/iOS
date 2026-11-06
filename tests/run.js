@@ -1938,7 +1938,7 @@ const eq = (got, want, what) =>
         seen.checks += 1;
         return o.checkFails ? Promise.reject(new Error('Load failed')) : Promise.resolve({ state: 'PAID' });
       }
-      mintProofsBolt11() { seen.mints += 1; return Promise.reject(new Error(o.mintError)); }
+      mintProofsBolt11() { seen.mints += 1; return Promise.reject(typeof o.mintError === 'string' ? new Error(o.mintError) : o.mintError); }
       getFeesForProofs() { return 0; }
       send() { seen.sends += 1; return Promise.reject(new Error(o.sendError || 'no')); }
     };
@@ -1999,6 +1999,25 @@ const eq = (got, want, what) =>
     await ctx.W.sweepQuotes();
     return eq(ctx.W.stuckInvoices().length, 0, 'stuck invoices');
   });
+
+  /* The log line for a paid invoice that will not claim says which of three it was, so a missing route is not read as a
+   * paid invoice the mint kept (the comment above the line says that is what it must not mean). */
+  for (const [why, mintError, word] of [
+    ['no route', 'Foxy is not connected to Tor.', /no route/],
+    ['the answer was lost', 'mintRequest did not answer.', /answer was lost/],
+    ['the mint refused', Object.assign(new Error('The mint said no.'), { status: 400 }), /mint refused/],
+  ]) {
+    await test('a claim that fails for want of: ' + why + ' is logged as that', async () => {
+      const { ctx } = await stuckCtx({ mintError });
+      const lines = [];
+      const warn = ctx.window.console.warn;
+      ctx.window.console.warn = function () { lines.push(Array.prototype.join.call(arguments, ' ')); };
+      try { await ctx.W.sweepQuotes(); } finally { ctx.window.console.warn = warn; }
+      const line = lines.find(l => /could not claim invoice/.test(l));
+      if (!line) return 'no line: ' + JSON.stringify(lines.slice(-3));
+      return word.test(line) ? null : 'the line does not say it: ' + line;
+    });
+  }
 
   await test('a mint\'s invalid signatures on a claim are said once and never asked again', async () => {
     const { ctx, seen, told } = await stuckCtx({ mintError: 'DLEQ verification failed on mint response' });
@@ -3049,6 +3068,14 @@ const eq = (got, want, what) =>
     const { storage } = load({ storage: { 'foxy.schema': '1', 'flash.leftover': 'x', 'foxy.p2pk.refundn': '3' } });
     if (storage.getItem('foxy.p2pk.refundn') !== null) return 'step 2 did not run';
     return storage.getItem('flash.leftover') === 'x' ? null : 'step 1 ran again on an install already past it';
+  });
+
+  await test('the stores of two removed features go at boot; the lock-key rows stay', async () => {
+    const rows = JSON.stringify([{ name: 'lnurl-00ff', index: 3 }]);
+    const { storage } = load({ storage: { 'foxy.wake': '{"on":true}', 'foxy.lnurl.codes': '[{"id":"x"}]', 'foxy.req.lockkeys': rows } });
+    if (storage.getItem('foxy.wake') !== null) return 'foxy.wake is still there';
+    if (storage.getItem('foxy.lnurl.codes') !== null) return 'foxy.lnurl.codes is still there';
+    return storage.getItem('foxy.req.lockkeys') === rows ? null : 'the lock-key rows were touched';
   });
 
   await test('storage from a newer Foxy is left untouched: no migration, no writes, no mint contacted', async () => {

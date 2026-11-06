@@ -3,10 +3,10 @@
    * The owner's till caps (2026-10-16): $50 from one payer, $300 held in all,
    * with a prompt at half of that. The wallet keeps and applies them
    * (07-request-delivery.js, `tillCaps`, `tillRefusal`); these are the screens'
-   * half: two rows in SETTINGS, the amount typed on SET AMOUNT as every amount
+   * half: two rows under SETTINGS > OFFLINE LIMITS, the amount typed on SET AMOUNT as every amount
    * is, and the notice on the receive screen. */
 
-  /* The two SETTINGS rows, in the drawer's own row style: the figure in
+  /* The two rows, PER PERSON and TOTAL, in the drawer's own row style: the figure in
    * dollars, sats under it. A tap opens SET AMOUNT for it. `path` is the
    * row's icon and `shut` the drawer's own closing (21-render-values.js). */
   tillCapRows(path, shut) {
@@ -21,8 +21,8 @@
         tap: shut ? shut(() => this.tillCapAsk(which)) : () => this.tillCapAsk(which) };
     };
     return [
-      row('OFFLINE, PER PAYER', 'payer', caps.payerSats, caps.payerCents),
-      row('OFFLINE, TOTAL', 'hold', caps.holdSats, caps.holdCents),
+      row('PER PERSON', 'payer', caps.payerSats, caps.payerCents),
+      row('TOTAL', 'hold', caps.holdSats, caps.holdCents),
     ];
   }
 

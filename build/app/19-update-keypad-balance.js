@@ -45,6 +45,15 @@
     } else if (s.sendSlow || s.sendPct) {
       this.setState({ sendSlow: false, sendPct: 0 });
     }
+    /* Behind another job's request, which can be sixty seconds, the screen says so after a few: the thirteen above is for a
+     * payment that is really out. STOP still drops it, because it has not begun (`sendStopWaiting`). */
+    clearTimeout(this._sendBehindT);
+    if (s.screen === 'sendDone') {
+      this._sendBehindT = setTimeout(() => {
+        const now = this.state;
+        if (now.screen === 'sendDone' && (now.sendPhase || 'in') === 'in' && this.sendBehindOther && this.sendBehindOther()) this.setState({ sendSlow: true });
+      }, 5000);
+    }
     // a card's VERIFYING over a code (26f-flashcard.js, `fcCardVerifying`) comes down with the confirmation, or with home, whichever way in
     // (the till's SET AMOUNT is its home: 26m-till.js, `tillIdle`)
     if ((s.screen === 'paid' || s.screen === 'home' || (this.tillIdle && this.tillIdle())) && this.stageUp && this.stageUp('paidCheck')) this.hideStage('paidCheck');
@@ -158,6 +167,8 @@
     if (this.syncHome) this.syncHome();
     // and a payment from a card is that only while its flow is on screen (26f-flashcard.js, `syncCardOut`)
     this.syncCardOut();
+    // a card's DEPOSIT asked for by invoice: its money come in, or its invoice left (26f-flashcard.js, `syncFcDep`)
+    if (this.syncFcDep) this.syncFcDep(prevState);
     this.syncUnit();
     this.syncQueue();
     this.syncSlide();
@@ -193,11 +204,14 @@
     this._wasHome = home;
   }
 
-  /* SETTINGS opened in the drawer: its rows unfold at the bottom, below the fold on most phones, so the drawer scrolls to its
-   * end as they open, and the person sees what they asked for. Nothing on close, nor for TOOLS, whose rows are in view. (Both
-   * drawers carry the mark, home's and the card screen's: whichever is up scrolls; the other is not drawn.) */
+  /* SETTINGS opened again in the drawer, after it was tapped shut: its rows unfold at the bottom, below the fold on most phones,
+   * so the drawer scrolls to its end as they open, and the person sees what they asked for. Nothing on close, nor for the
+   * other sections, nor as the drawer opens with every section open (21-render-values.js, `menuShut`). (Both drawers carry
+   * the mark, home's and the card screen's: whichever is up scrolls; the other is not drawn.) */
   syncMenuScroll(prevState) {
-    if (!this.state.menuSettingsOpen || (prevState && prevState.menuSettingsOpen)) return;
+    const shutNow = !!(this.state.menuShut || {}).settings;
+    const shutBefore = !!(prevState && (prevState.menuShut || {}).settings);
+    if (shutNow || !shutBefore) return;
     const els = (typeof document !== 'undefined') ? document.querySelectorAll('[data-menu-drawer]') : [];
     if (!els.length) return;
     const go = () => { els.forEach((el) => { try { el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); } catch (e) { el.scrollTop = el.scrollHeight; } }); };

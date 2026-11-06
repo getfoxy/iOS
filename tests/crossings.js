@@ -101,7 +101,7 @@ function page(o) {
       phone.attach(w);
       ctx_mints = opts.mints || {
         [HOME]: fakeMint(w, { p2pk: true, fill: 7 }),
-        [THEIR]: fakeMint(w, { p2pk: true, fill: 9, quoteFrom: 5000, feePpk: opts.feePpk }),
+        [THEIR]: fakeMint(w, Object.assign({ p2pk: true, fill: 9, quoteFrom: 5000, feePpk: opts.feePpk }, opts.their || {})),
       };
     },
   });
@@ -905,6 +905,144 @@ async function run() {
     ok(!!e && W.balanceAt(HOME) === had && notes(p).length === notes0 && !seen.some((r) => r.m === 'POST' && r.u.indexOf(HOME) === 0),
        'a far mint that refuses the invoice: nothing posted at the near mint, nothing held, no note', e ? String(e.message).slice(0, 60) : 'it went through');
     p.fate = null;
+  }
+
+  /* ---- a melt given back as UNPAID that lands after all (2026-11-04) ----------------------------------
+   *
+   * A crossing's melt whose answer was lost reads UNPAID at the near mint while the request is still on its
+   * way. Two minutes on, the hold gives the pieces back; the note of the crossing went with it, and the note
+   * is the only copy of the far mint's quote and of its NUT-20 key. When the melt then landed, the far
+   * invoice was paid and nobody could claim it. The note now stays until the far mint says how its quote
+   * ended, and the next catch-up claims it with the key the note kept. */
+  {
+    // a far mint whose invoices wait to be paid, and which locks them to a key (NUT-20, which it offers beside on chain)
+    const far = { quotesUnpaid: true, onchain: true };
+    const p = page({ their: far });
+    await fund(p, HOME, 1000);
+    const W = p.W;
+    let late = null, claimSigned = null;
+    // the melt reaches nobody yet: no answer comes, and the mint has not seen it
+    p.fate = (m) => {
+      if (m.method === 'POST' && /\/v1\/melt\/bolt11$/.test(m.url) && canon(new URL(m.url).origin) === HOME) { late = m; return 'lost'; }
+      return '';
+    };
+    const plan = await W.transferQuote(HOME, 300, { to: THEIR, land: true });
+    const e = await W.moveRun(plan, () => {}, { visit: true }).then(() => null, (x) => x);
+    p.fate = null;
+    await W.connect(HOME, null, null, { remember: false });
+    await settle();
+    ok(!!e && !!late && notes(p).length === 1 && notes(p)[0].lock && W.pendingMelts().length === 1,
+       'a crossing whose melt got no answer is held, with its note and the quote’s key', (e ? String(e.message).slice(0, 50) : 'it went through') + '; ' + notes(p).length + ' note(s)');
+    // 130 s on, the near mint still reads UNPAID: the pieces come back
+    const melting = read(p, 'foxy.cashu.melting', []);
+    melting.forEach((h) => { h.at = Math.floor(Date.now() / 1000) - 130; });
+    p.storage.setItem('foxy.cashu.melting', JSON.stringify(melting));
+    await W.sweepMelts();
+    ok(W.pendingMelts().length === 0 && notes(p).length === 1 && notes(p)[0].quote === plan.mintQuote.quote,
+       'UNPAID two minutes on gives the pieces back, and keeps the crossing’s note and its key', W.pendingMelts().length + ' held, ' + notes(p).length + ' note(s)');
+    // ...and at 300 s the melt the mint never saw arrives, and pays the far invoice
+    p.mints[HOME].handle(late);
+    p.mints[THEIR].payQuote(plan.mintQuote.quote);
+    p.fate = (m) => {
+      if (m.method === 'POST' && /\/v1\/mint\/bolt11$/.test(m.url)) { try { claimSigned = !!JSON.parse(m.body).signature; } catch (x) { claimSigned = false; } }
+      return '';
+    };
+    await W.catchUpCrossings();
+    p.fate = null;
+    await settle();
+    ok(W.balanceAt(THEIR) === plan.moving && !notes(p).length && claimSigned === true,
+       'the melt landing late is claimed at the far mint, signed with the kept key, and then the note goes',
+       W.balanceAt(THEIR) + ' at their mint for ' + plan.moving + '; ' + notes(p).length + ' note(s)');
+    noBooks(p, 'a melt landed after its pieces were given back: the near pile holds the spent pieces until it is reconciled');
+    // a note whose invoice the far mint says is still UNPAID, an hour old, stays until that invoice expires
+    const q = page({ their: far });
+    await fund(q, HOME, 1000);
+    q.fate = (m) => (m.method === 'POST' && /\/v1\/melt\/bolt11$/.test(m.url)) ? 'lost' : '';
+    const plan2 = await q.W.transferQuote(HOME, 200, { to: THEIR, land: true });
+    await q.W.moveRun(plan2, () => {}, { visit: true }).then(() => null, () => null);
+    q.fate = null;
+    await q.W.connect(HOME, null, null, { remember: false });
+    await settle();
+    const mh = read(q, 'foxy.cashu.melting', []);
+    mh.forEach((h) => { h.at = Math.floor(Date.now() / 1000) - 130; });
+    q.storage.setItem('foxy.cashu.melting', JSON.stringify(mh));
+    await q.W.sweepMelts();
+    const nl = notes(q);
+    nl.forEach((n) => { n.at = Date.now() - 2 * 3600000; });
+    q.storage.setItem('foxy.cashu.move', JSON.stringify(nl));
+    await q.W.finishMove();
+    ok(notes(q).length === 1, 'an hour on, a note whose far invoice has not expired is kept', notes(q).length + ' note(s)');
+    noBooks(q, 'a crossing left unpaid on purpose');
+  }
+
+  /* ---- more transfers in flight than the old list held (2026-11-04) -------------------------------------
+   *
+   * The notes of crossings paid and not yet claimed, and the jobs of payments being brought home, were cut to
+   * their last twenty on every write: a twenty-first dropped the oldest, a payment made at the far mint that
+   * nothing could claim any more. */
+  {
+    const p = page();
+    await fund(p, HOME, 2000);
+    const W = p.W;
+    p.fate = claimCut(THEIR);
+    const quotes = [];
+    for (let i = 0; i < 21; i++) {
+      const plan = await W.transferQuote(HOME, 20, { to: THEIR, land: true });
+      await W.moveRun(plan, () => {}, { visit: true }).then(() => null, () => null);
+      quotes.push(plan.mintQuote.quote);
+      await W.connect(HOME, null, null, { remember: false });
+    }
+    const kept = notes(p).map((n) => n.quote);
+    ok(kept.length === 21 && quotes.every((q) => kept.indexOf(q) >= 0), '21 crossings paid and not claimed keep 21 notes, the first among them',
+       kept.length + ' note(s); first kept: ' + (kept.indexOf(quotes[0]) >= 0));
+    p.fate = null;
+    await settle();
+    await W.finishMove();
+    ok(W.balanceAt(THEIR) === 21 * 20 && !notes(p).length, 'and every one of the 21 is claimed', W.balanceAt(THEIR) + ' at their mint; ' + notes(p).length + ' note(s) left');
+
+    // a list full of crossings still to claim: a new one is refused before anything is paid, and none is let go
+    const full = [];
+    for (let i = 0; i < 200; i++) full.push({ to: THEIR, from: HOME, quote: 'q-full-' + i, amount: 5, lock: null, request: 'lnbc5n1pfull' + i, at: Date.now() });
+    const q = page({ storage: { 'foxy.cashu.move': JSON.stringify(full) } });
+    await fund(q, HOME, 1000);
+    const had = q.W.balanceAt(HOME);
+    const plan = await q.W.transferQuote(HOME, 20, { to: THEIR, land: true });
+    const meltsBefore = q.hits.filter((h) => /\/v1\/melt\/bolt11$/.test(h)).length;
+    const e = await q.W.moveRun(plan, () => {}, { visit: true }).then(() => null, (x) => x);
+    ok(!!e && e.unsent === true && /200 transfers between mints are still waiting/.test(e.message),
+       'with 200 crossings waiting to be claimed, a new one is refused, said as nothing sent', e ? e.message : 'it went ahead');
+    ok(q.hits.filter((h) => /\/v1\/melt\/bolt11$/.test(h)).length === meltsBefore && q.W.balanceAt(HOME) === had
+       && notes(q).length === 200 && full.every((n) => notes(q).some((k) => k.quote === n.quote)),
+       'nothing was paid, and every one of the 200 notes is still on file', notes(q).length + ' note(s); ' + q.W.balanceAt(HOME) + ' of ' + had);
+    noBooks(q, 'notes written by hand');
+
+    // payments being carried home: room is made only from a job nothing has arrived for
+    const job = (i, state) => ({ id: 'cj' + i, home: HOME, from: THEIR, net: 50, ask: 52, at: Date.now() - 1000 + i, state });
+    const jobsOf = (c) => (read(c, 'foxy.cashu.carry', []) || []);
+    const mixed = [job(0, 'asked')];
+    for (let i = 1; i < 200; i++) mixed.push(job(i, 'paid'));
+    // written once the connect's own catch-up is done, so that only carryBegin acts on them
+    const r = page();
+    await r.W.connect(HOME, null, null, { remember: true });
+    await settle();
+    r.storage.setItem('foxy.cashu.carry', JSON.stringify(mixed));
+    const id = await r.W.carryBegin({ from: THEIR, to: HOME, net: 50, ask: 52 }).then((x) => x, (x) => ({ err: x }));
+    const after = jobsOf(r);
+    ok(typeof id === 'string' && after.length === 200 && !after.some((j) => j.id === 'cj0')
+       && after.filter((j) => j.state === 'paid').length === 199,
+       'a full list of jobs makes room by letting go the one nothing arrived for, never a payment taken and not home',
+       (id && id.err ? id.err.message : id) + '; ' + after.length + ' job(s), ' + after.filter((j) => j.state === 'paid').length + ' paid');
+    const paidOnly = [];
+    for (let i = 0; i < 200; i++) paidOnly.push(job(i, 'paid'));
+    const s2 = page();
+    await s2.W.connect(HOME, null, null, { remember: true });
+    await settle();
+    s2.storage.setItem('foxy.cashu.carry', JSON.stringify(paidOnly));
+    const no = await s2.W.carryBegin({ from: THEIR, to: HOME, net: 50, ask: 52 }).then(() => null, (x) => x);
+    ok(!!no && no.unsent === true && jobsOf(s2).length === 200 && jobsOf(s2).every((j) => j.state === 'paid'),
+       'and with 200 payments still to bring home, another is refused and all 200 are kept', no ? no.message : 'it went ahead');
+    noBooks(r, 'jobs written by hand');
+    noBooks(s2, 'jobs written by hand');
   }
 
   console.log(failed ? '\n' + failed + ' crossing check(s) failed' : '\nall crossing checks pass');

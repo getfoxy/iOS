@@ -39,15 +39,20 @@
          * `setOffline` and `routeOpen`. All four have to agree or
          * the screens and the wallet argue about what this phone can reach. */
         offline: !!privacy.offline
-          && !(String(next.tor || 'connecting') === 'up'
-               && String(next.network || 'unknown') !== 'none'),
+          && (!!privacy.offlineChosen
+              || !(String(next.tor || 'connecting') === 'up'
+                   && String(next.network || 'unknown') !== 'none')),
+        /* The holder's own choice, as against the automatic one home-first makes
+         * while Tor is still coming up. Only the automatic one is given up when
+         * Tor is really up; this one stays until the holder undoes it. */
+        offlineChosen: !!privacy.offlineChosen && !!privacy.offline,
       };
       // for the connection diary: the moment the route opens or shuts
       noteRouteChange(wasOpen);
       /* The route went from open to shut: Tor drops the circuits it had, the spare's among them (and the phone lets go of the
        * connection it kept for it, Route.dropWarm). Kept, it was handed to the next job on the route's return as ready, and that
        * job rode a circuit Tor no longer had; let go, the return opens a new one. */
-      if (wasOpen && !routeOpen()) dropSpare();
+      if (wasOpen && !routeOpen()) { dropSpare(); cidListenGone(); }
       if (window.FoxyGate && window.FoxyGate._changed) {
         try { window.FoxyGate._changed(FoxyWallet.privacy()); }
         catch (e) { console.error('[foxy] gate:', e && e.message); }
@@ -90,7 +95,7 @@
       // and the newest Bitcoin block header is fetched for the cards, if the one kept is old (08b-block-headers.js)
       if (!wasUp && privacy.tor === 'up') headerLater();
       // and what a cashier took and could not send with no route goes now (08d-till.js), not at its next minute
-      if (!wasUp && privacy.tor === 'up' && routeOpen()) tillOnRoute();
+      if (!wasUp && privacy.tor === 'up' && routeOpen()) { tillOnRoute(); cidOnRoute(); tipOnRoute(); }
       return FoxyWallet.privacy();
     },
 
@@ -108,7 +113,7 @@
                unprotected: privacy.unprotected, transport: privacy.transport,
                orbot: privacy.orbot, firstSetup: privacy.firstSetup,
                vpn: privacy.vpn, orbotKey: privacy.orbotKey, offline: privacy.offline,
-               network: privacy.network };
+               offlineChosen: !!privacy.offlineChosen, network: privacy.network };
     },
 
     /* The person chose to carry on with no network, or to stop doing so.
@@ -118,7 +123,7 @@
      * refusing. This only tells the gate to come down and the screens to say so.
      * Deliberately not `setUnprotected`, which asks iOS to draw a destructive
      * alert because that one really does put traffic on the open internet. */
-    setOffline: function (on) {
+    setOffline: function (on, chosen) {
       /* Refused only when there is a real route to refuse it for.
        *
        * This was `privacy.tor !== 'up'`, and Tor's `up` is a circuit Foxy built
@@ -132,7 +137,18 @@
        * anything", so where the two disagree it wins here exactly as it wins in
        * the gate (`noNetwork`). */
       var reallyUp = privacy.tor === 'up' && privacy.network !== 'none';
-      privacy.offline = !!on && !reallyUp;
+      /* The holder's own choice (`chosen`) is the exception, and it sticks.
+       *
+       * A phone had WORK OFFLINE chosen while Tor was up, and twenty seconds
+       * later took a payment to the mint over a connection that carried nothing:
+       * the choice had been refused, or given up on the next push, because Tor
+       * said `up`. What the holder asked for stands until they undo it, and the
+       * banner says so. The automatic offline of home-first (no `chosen`) is the
+       * one that still yields to a route. */
+      privacy.offline = !!on && (!!chosen || !reallyUp);
+      /* Sticky only where it used to be refused: chosen with Tor really up. Chosen while Tor is still coming (the gate's PROCEED
+       * OFFLINE) is the old choice, given up when Tor is up, as the gate's scenarios pin. */
+      privacy.offlineChosen = !!on && !!chosen && reallyUp;
       /* Choosing to work offline puts down the choice to work unprotected.
        *
        * They are opposite intents — one sends nothing, the other sends everything
@@ -447,7 +463,7 @@
        * made for this connect (`loadMintOnOne`). */
       var ready = cached
         ? Promise.resolve().then(function () { w.loadMintFromCache(cached.info, cached.keys); })
-        : withTimeout(loadMintOnOne(w, !!(opts && opts.sessionInfo)), 30000, hostOf(u));
+        : withTimeout(loadMintOnOne(w, !!(opts && opts.sessionInfo), 30000), 30000, hostOf(u));
       return ready.then(function () {
         /* A lazy switch's own confirmation (`_confirm`), arriving after the phone had gone elsewhere: let go, and
          * the wallet in hand stays. */
@@ -532,6 +548,9 @@
           return ids;
         };
         var owedBefore = owedOut();
+        /* The Cashu ID's: what its inbox read before this connect is taken now, not at the end of the catch-up below
+         * (`cidOnConnect`). Not on a visit. */
+        if (!opts || opts.remember !== false) cidOnConnect();
         /* Anything paid while the app was away is still sitting at the mint;
          * then any melt whose outcome was never learned, and any swap whose
          * answer was lost after the mint made it. One after another, each after
@@ -544,7 +563,7 @@
           .then(function () { return tidySentTokens().then(null, function () { return 0; }); })
           .then(sweepPause).then(function () { return FoxyWallet.claimUnclaimed(); })
           // and a till's: what a cashier still has to send, and what a keeper kept for this mint (08d-till.js)
-          .then(function () { tillCatchUp(); })
+          .then(function () { tillCatchUp(); cidCatchUp(); tipOnRoute(); })
           // and a card's pieces it signed for while the mint was not answering (08a-flashcard.js)
           .then(function () { return FoxyWallet.cardTaken().length ? FoxyWallet.cardSettle() : null; })
           // and change due to a card that could not be made when it paid
@@ -581,6 +600,9 @@
               try { FoxyWallet._onCaughtUp({ cardOwed: cardOwed }); } catch (x) {}
             }
           })
+          /* And card loads kept at this mint that the mint may say are spent (08a-flashcard.js, `cardLoadsSpent`): started
+           * here and waited for by nothing, on a circuit of its own, at most once an hour a mint. */
+          .then(function () { try { cardLoadsSpent(w, u).then(null, function () { return 0; }); } catch (x) {} })
           /* Then the invoices this phone made at other mints (`_sweepAway`): after, not in front, so a mint that does not
            * answer holds back none of the above. */
           .then(function () { return FoxyWallet._sweepAway(); })

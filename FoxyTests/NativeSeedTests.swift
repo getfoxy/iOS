@@ -23,7 +23,7 @@ final class NativeSeedTests: XCTestCase {
 
     // MARK: Which actions answer
 
-    func testTheSeedActionsAreTwentyOneAndRunInEveryBuild() {
+    func testTheSeedActionsAreTwentySixAndRunInEveryBuild() {
         XCTAssertEqual(FoxyBridge.nativeSeedActions, [
             "seedStatus", "seedCreate", "seedMigrate", "countersImport", "counterReserve", "counterReserveAt", "counterAdvance",
             "counterSnapshot", "restoreSecrets", "seedShow", "seedEnter", "seedAdopt", "seedCandidateForget", "seedWipe",
@@ -33,8 +33,12 @@ final class NativeSeedTests: XCTestCase {
             // a card's owner key, which stays in native code: its public half, and signatures for a fixed
             // list of labels (CardOwner, in Foxy/Keychain/NUT13.swift)
             "cardOwnerKey", "cardOwnerSign",
+            // the Cashu ID (Foxy/Keychain/CashuID.swift): public keys, one-time signatures, the proved name, a payment's base
+            "cashuIdPublic", "cashuIdSign", "cashuIdTag", "cashuIdEphemeral",
+            // and the ID key's own signature, for a delivery paid to it unblinded that the receiver takes anyway
+            "cashuIdSignUnblinded",
         ])
-        XCTAssertEqual(FoxyBridge.nativeSeedActions.count, 21)
+        XCTAssertEqual(FoxyBridge.nativeSeedActions.count, 26)
         // the draft's action that handed the page a secret is gone, and so is the signed time
         XCTAssertNil(FoxyBridge.handlers["cardOwner"])
         XCTAssertNil(FoxyBridge.handlers["cardTime"])
@@ -52,6 +56,87 @@ final class NativeSeedTests: XCTestCase {
     }
 
     // MARK: Input checks
+
+    /// cashuIdSign: 1 to 100 pieces, each a P2PK secret (not SIG_ALL) with its E as a point; anything else is
+    /// "bad request" before the seed is read.
+    func testCashuIdSignTakesPiecesWithTheirE() throws {
+        let e = "02f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9"
+        let lock = "037e2e84f10e29248ca8693174a04280d0756d26aba59f8b4c1c06a17c5b40be36"
+        let secret = "[\"P2PK\",{\"nonce\":\"00\",\"data\":\"\(lock)\",\"tags\":[]}]"
+        let piece: [String: Any] = ["secret": secret, "e": e.uppercased()]
+        XCTAssertEqual(FoxyBridge.cashuIdSignCheck(["pieces": [piece, piece]]),
+                       .ok(.init(pieces: Array(repeating: CashuID.Piece(secret: secret, e: try NUT13.bytes(hex: e)), count: 2))))
+        let sigAll = "[\"P2PK\",{\"nonce\":\"00\",\"data\":\"\(lock)\",\"tags\":[[\"sigflag\",\"SIG_ALL\"]]}]"
+        let bad: [[String: Any]] = [
+            [:], ["pieces": []], ["pieces": Array(repeating: piece, count: 101)],
+            ["pieces": [["secret": secret]]], ["pieces": [["secret": secret, "e": "04" + String(e.dropFirst(2))]]],
+            ["pieces": [["secret": secret, "e": String(e.prefix(64))]]], ["pieces": [["secret": sigAll, "e": e]]],
+            ["pieces": [["secret": "[\"HTLC\",{\"nonce\":\"00\",\"data\":\"\(lock)\"}]", "e": e]]],
+            ["pieces": [["secret": String(repeating: "x", count: 1025), "e": e]]],
+            // the shape of the earlier draft, one E for all
+            ["e": e, "secrets": [secret]],
+        ]
+        for body in bad { XCTAssertEqual(FoxyBridge.cashuIdSignCheck(body), .refuse("bad request"), "\(body)") }
+    }
+
+    /// cashuIdSignUnblinded: 1 to 100 P2PK secrets (not SIG_ALL), nothing else; "bad request" before the seed is read.
+    func testCashuIdSignUnblindedTakesSecretsOnly() {
+        let id = "0365233b8ef683341a31e9cd29dcbc2612c5f4e07bb5dbad2d2e7d64fefc0bd896"
+        let secret = "[\"P2PK\",{\"nonce\":\"00\",\"data\":\"\(id)\",\"tags\":[]}]"
+        XCTAssertEqual(FoxyBridge.cashuIdSignUnblindedCheck(["secrets": [secret, secret]]), .ok(.init(secrets: [secret, secret])))
+        let sigAll = "[\"P2PK\",{\"nonce\":\"00\",\"data\":\"\(id)\",\"tags\":[[\"sigflag\",\"SIG_ALL\"]]}]"
+        for body: [String: Any] in [[:], ["secrets": []], ["secrets": Array(repeating: secret, count: 101)], ["secrets": [sigAll]],
+                                    ["secrets": [1]], ["secrets": secret], ["pieces": [["secret": secret, "e": id]]]] {
+            XCTAssertEqual(FoxyBridge.cashuIdSignUnblindedCheck(body), .refuse("bad request"), "\(body)")
+        }
+    }
+
+    /// cashuIdTag and cashuIdEphemeral: points, a 32-bit index and a whole locktime; the ID under `to`, never `id`.
+    func testCashuIdTagAndEphemeralTakeOnlyTheirShapes() throws {
+        let p = "023b2460793848e414cf2b22a46c09860c42bc58cf3a03ad21d41ba2d0f22d131b"
+        let e = "02f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9"
+        XCTAssertEqual(FoxyBridge.cashuIdTagCheck(["peer": p, "e": e]), .ok(.init(peer: try NUT13.bytes(hex: p), e: try NUT13.bytes(hex: e))))
+        XCTAssertEqual(FoxyBridge.cashuIdTagCheck(["peer": p]), .refuse("bad request"))
+        XCTAssertEqual(FoxyBridge.cashuIdTagCheck(["peer": "05" + String(p.dropFirst(2)), "e": e]), .refuse("bad request"))
+        XCTAssertEqual(FoxyBridge.cashuIdEphemeralCheck(["to": p, "index": 7, "locktime": 1_900_000_000]),
+                       .ok(.init(id: try NUT13.bytes(hex: p), index: 7, locktime: 1_900_000_000)))
+        for body: [String: Any] in [["id": p, "index": 7, "locktime": 1], ["to": p, "index": -1, "locktime": 1],
+                                    ["to": p, "index": 4_294_967_296, "locktime": 1], ["to": p, "index": 1.5, "locktime": 1],
+                                    ["to": p, "index": true, "locktime": 1], ["to": p, "index": 1, "locktime": "1"],
+                                    ["to": p, "index": 1, "locktime": -5]] {
+            XCTAssertEqual(FoxyBridge.cashuIdEphemeralCheck(body), .refuse("bad request"), "\(body)")
+        }
+    }
+
+    /// cashuIdInboxOpen's since: inside the last thirty-two days, else thirty-two days back; a boolean is not a number.
+    func testCashuIdSinceIsThirtyTwoDays() {
+        let now = 1_800_000_000
+        XCTAssertEqual(FoxyBridge.cashuIdSince(now - 31 * 86_400, now: now), now - 31 * 86_400)
+        XCTAssertEqual(FoxyBridge.cashuIdSince(now - 32 * 86_400, now: now), now - 32 * 86_400)
+        XCTAssertEqual(FoxyBridge.cashuIdSince(now - 33 * 86_400, now: now), now - 32 * 86_400)
+        XCTAssertEqual(FoxyBridge.cashuIdSince(now + 60, now: now), now - 32 * 86_400)
+        XCTAssertEqual(FoxyBridge.cashuIdSince(true, now: now), now - 32 * 86_400)
+        XCTAssertEqual(FoxyBridge.cashuIdSince(NSNumber(value: 1), now: now), now - 32 * 86_400)
+        XCTAssertEqual(FoxyBridge.cashuIdSince("1799999999", now: now), now - 32 * 86_400)
+        XCTAssertEqual(FoxyBridge.cashuIdSince(nil, now: now), now - 32 * 86_400)
+        XCTAssertEqual(FoxyBridge.cashuIdPages, 8)
+    }
+
+    /// tillInboxOpen's since: a number inside the last twelve days, else five days back. A boolean is told apart by
+    /// its CF type: `value is Bool` is true of any NSNumber 0 or 1, and of nothing else, so it let neither through
+    /// as a boolean nor stopped a real 0 or 1; the same check as `cashuIdSince`.
+    func testTillSinceTellsABooleanByItsType() {
+        let now = 1_800_000_000
+        XCTAssertEqual(FoxyBridge.tillSince(now - 6 * 86_400, now: now), now - 6 * 86_400)
+        XCTAssertEqual(FoxyBridge.tillSince(NSNumber(value: now - 86_400), now: now), now - 86_400)
+        XCTAssertEqual(FoxyBridge.tillSince(now - 13 * 86_400, now: now), now - 5 * 86_400)
+        XCTAssertEqual(FoxyBridge.tillSince(now + 60, now: now), now - 5 * 86_400)
+        XCTAssertEqual(FoxyBridge.tillSince(true, now: now), now - 5 * 86_400)
+        XCTAssertEqual(FoxyBridge.tillSince(kCFBooleanTrue as Any, now: now), now - 5 * 86_400)
+        XCTAssertEqual(FoxyBridge.tillSince(NSNumber(value: 1), now: now), now - 5 * 86_400)
+        XCTAssertEqual(FoxyBridge.tillSince("1799999999", now: now), now - 5 * 86_400)
+        XCTAssertEqual(FoxyBridge.tillSince(nil, now: now), now - 5 * 86_400)
+    }
 
     func testCounterReserveTakesZeroToAThousand() {
         for count in [0, 1, 1000] {

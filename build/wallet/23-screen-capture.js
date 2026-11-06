@@ -140,6 +140,8 @@
        * coming back this does nothing, and Tor coming up asks again. */
       dropSpare();
       warmSpareSoon();
+      // the Cashu ID's inbox was closed with the rest as Foxy left: the next listen opens it, whatever the catch-up says
+      cidListenGone();
       // and the newest block header for the cards, if the one kept has grown old while the app was away
       headerLater();
       if (FoxyWallet._onResume) {
@@ -160,7 +162,7 @@
         // a store short of room: sent tokens the mint says are claimed let go from their notes (`tidySentTokens`)
         .then(function () { return tidySentTokens().then(null, function () { return 0; }); })
         // and a till's, waited for by nobody: a cashier's outbox sent, a keeper listening again (08d-till.js)
-        .then(function () { tillCatchUp(); })
+        .then(function () { tillCatchUp(); cidCatchUp(); tipOnRoute(); })
         .catch(function (e) { console.warn('[foxy] resume sweep:', e && e.message); })
         /* After the melts are settled, so a crossing whose melt was cut has
          * been paid or given back by the time its note is looked at. */

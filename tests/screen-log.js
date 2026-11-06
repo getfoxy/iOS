@@ -96,5 +96,18 @@ function note(state, from, extra) {
     leaks.length === 0, 'leaked: ' + leaks.join(', ') + ' in ' + line);
 }
 
+{
+  // the send's own line names a Lightning address only as one, whatever its length or where a cut would fall
+  const start = src.indexOf("console.log('[foxy] send starting to', ");
+  const expr = start < 0 ? '' : src.slice(start + "console.log('[foxy] send starting to', ".length, src.indexOf(",\n", start));
+  const payee = expr ? new Function('to', 'return ' + expr + ';') : null;
+  check('the send line is found in the app', !!payee, expr);
+  if (payee) {
+    const said2 = ['alice@walletofsatoshi.com', 'a.very.long.name.indeed.yes@example.org', 'bob@x.io'].map(payee);
+    check('a Lightning address is not named in the send line', said2.every(t => t === 'a lightning address'), said2.join(' | '));
+    check('an invoice or bitcoin address is still cut to its first 24 characters',
+      payee('lnbc1' + 'q'.repeat(60)).length === 24 && payee('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq').length === 24, '');
+  }
+}
 console.log('\n' + (R.fail ? R.pass + ' passed, ' + R.fail + ' failed' : 'all ' + R.pass + ' screen log checks pass'));
 process.exit(R.fail ? 1 : 0);

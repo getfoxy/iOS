@@ -651,6 +651,20 @@ final class TapPlaceTests: XCTestCase {
         XCTAssertFalse(TapPlace.givenBackByBadBytes(linked: true))
     }
 
+    /// A batch of writes is answered once, so every one of them must be the
+    /// holder's word on the input characteristic: a second phone's request
+    /// behind the holder's first was let through on the first one's say.
+    func testABatchIsRefusedIfAnyWriteIsNotTheHolders() throws {
+        let holder = UUID(), other = UUID()
+        XCTAssertTrue(TapPlace.allFromHolder([(holder, true), (holder, true)], holder: holder))
+        XCTAssertFalse(TapPlace.allFromHolder([(holder, true), (other, true)], holder: holder), "another phone's word behind the holder's")
+        XCTAssertFalse(TapPlace.allFromHolder([(holder, true), (holder, false)], holder: holder), "the holder's word on another characteristic")
+        XCTAssertFalse(TapPlace.allFromHolder([(holder, true)], holder: nil), "nobody holds the place")
+        XCTAssertFalse(TapPlace.allFromHolder([], holder: holder))
+        let source = try String(contentsOf: repoRoot().appendingPathComponent("Foxy/Bluetooth/TapLink.swift"), encoding: .utf8)
+        XCTAssertTrue(source.contains("TapPlace.allFromHolder("), "didReceiveWrite no longer checks every request")
+    }
+
     /// And the receiver asks these rules, not the buffer: the clock no longer
     /// waits for an empty one, and every way a handshake comes to nothing puts
     /// it back on the air.

@@ -725,6 +725,10 @@
      * path monitor's first word, is not an accusation that the phone is off the
      * air. */
     if (privacy.network === 'none') return false;
+    /* Working offline by the holder's choice is no route, even over a Tor that
+     * is up: the wallet acts on what it holds until they say otherwise.
+     * Going unprotected is the louder, deliberate act and wins over it. */
+    if (privacy.offline && privacy.offlineChosen && !privacy.unprotected) return false;
     return privacy.tor === 'up' || privacy.unprotected;
   }
 
@@ -783,6 +787,8 @@
   function routeComing() {
     if (!bridged() || routeOpen()) return false;
     if (privacy.network === 'none' || privacy.unprotected) return false;
+    // the holder chose to wait for nothing: no connection is "on its way" for them
+    if (privacy.offlineChosen) return false;
     return privacy.tor === 'connecting' || privacy.tor === 'stuck';
   }
 

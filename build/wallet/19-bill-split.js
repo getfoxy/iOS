@@ -51,9 +51,10 @@
      *
      * The ledger goes first for the common case. The mint is asked only about
      * rows the ledger could not settle. A row the mint reports PAID has money
-     * waiting that nothing claimed, so it is claimed here; ISSUED means the
-     * watcher claimed it before dying. Resolves with the number of rows newly
-     * marked paid. */
+     * waiting that nothing claimed, so it is claimed here; ISSUED means a
+     * claim was made, and the share is ticked only once that claim's ecash is
+     * in the history (recovered here when its answer was lost). Resolves with
+     * the number of rows newly marked paid. */
     splitReconcile: function () {
       /* One walk at a time, however many things ask (see `reconciling`). */
       if (reconciling) return reconciling;
@@ -136,7 +137,25 @@
           // each row's invoice on its own circuit
           return onCircuit(w, 'quote:' + r.hash).checkMintQuoteBolt11(r.hash).then(function (q) {
             var state = q && q.state;
-            if (state === 'ISSUED') { mark(r); return; }
+            /* ISSUED says somebody claimed the invoice, not that this phone holds what was claimed.
+             *
+             * It used to tick the share on that word alone. A claim whose answer was lost, a second device on the
+             * same words, or a mint that says ISSUED wrongly all read the same, and the collecting screen said that
+             * person had paid while the sats were in no balance here. The issued-invoice recovery runs first
+             * (`recoverIssued`: the claim's recorded outputs, what the mint signed there and nothing here holds),
+             * and the share is ticked only once a settled entry for its invoice is in the history. ISSUED with no
+             * ecash on record leaves the share owed: the person can still tick it by hand, and a seed restore finds
+             * sats a claim recorded nowhere. */
+            if (state === 'ISSUED') {
+              return FoxyWallet.recoverIssued(r.hash).then(function () {
+                var landed = load(K.log, []).some(function (t) {
+                  return t && t.dir === 'in' && t.settled && t.hash === r.hash;
+                });
+                if (landed) { mark(r); return; }
+                console.warn('[foxy] split: the mint says', String(r.hash).slice(0, 12) + '\u2026',
+                  'was claimed, but no ecash for it is on this phone \u2014 the share stays owed');
+              });
+            }
             if (state === 'PAID') {
               // paid and never claimed: the money is at the mint waiting
               return FoxyWallet.claim(r.hash).then(function () {
@@ -376,6 +395,8 @@
       if (already.length) {
         return Promise.reject(new Error('That ecash has already been handed on once.'));
       }
+      // room on the handed-on list before anything is signed (`handedRoom`): a note that cannot be kept stops it here
+      try { handedRoom(mineProofs.length); } catch (eRoom) { return Promise.reject(eRoom); }
       return lockKeyMatching(lockedTo(mineProofs[0]), FoxyWallet._lockPubOf).then(function (key) {
         var mine = '';
         try { mine = key ? FoxyWallet._lockPubOf(key) : ''; } catch (e) { mine = ''; }
@@ -1522,6 +1543,10 @@
       if (withLocked || exact || cover) {
         try { roomFor('token'); noteLastToken(); } catch (eRoom) { return Promise.reject(eRoom); }
       }
+      // and room on the handed-on list for every locked piece going out, asked before any is signed (`handedRoom`)
+      if (withLocked) {
+        try { handedRoom(piecesOfRows(withLocked.rows)); } catch (eHand) { return Promise.reject(eHand); }
+      }
       if (withLocked) {
         /* Signed now, and only the rows that are really going out: signing
          * writes them down as handed on (`rememberHandedOn`) and drops them from
@@ -1634,6 +1659,9 @@
            * (08a-flashcard.js). The flag is part of each piece's secret, and
            * the card can sign for no piece written without it. */
           if (lockTo && opts && opts.sigAll) /** @type {any} */ (lockOut.options).sigFlag = 'SIG_ALL';
+          /* NUT-28 (pay-to-blinded-key): every key of the lock blinded for each piece by a throwaway key of its own,
+           * whose public half goes on the proof (`p2pk_e`). A payment to a Cashu ID (08e-cashu-id.js) is made so. */
+          if (lockTo && opts && opts.blindKeys) /** @type {any} */ (lockOut.options).blindKeys = true;
           if (lockTo && opts && Array.isArray(opts.denominations) && opts.denominations.length) {
             lockOut.denominations = opts.denominations.map(function (d) { return Math.round(Number(d)); });
           }
@@ -1699,14 +1727,16 @@
         var token = encodeToken(at, split.send, 'sat', changeNoteKey && Number(split.over) > 0
           ? { memo: CHANGE_NOTE + changeNoteKey + ':' + want } : null);
         var hash = sendHash;
-        /* What the swap cost. The pile went in, the token and the change came
-         * out, and the difference is the mint's. It was written as 0, so a
-         * 945-sat token that took 956 from the pile left the audit 11 short,
-         * and another phone 4 short over two payments. Exact
+        /* What the swap cost: what the mint charges for the pieces that went
+         * in (`swapCost`). It was written as 0, so a 945-sat token that took
+         * 956 from the pile left the audit 11 short, and another phone 4 short
+         * over two payments. Then it was the difference between what went in
+         * and what came out, which booked a lost piece of change as fee. Exact
          * pieces swap nothing and cost nothing. */
-        var tokFee = split.swapped
-          ? Math.max(0, sumProofs(have) - sumProofs(split.send) - sumProofs(split.keep || []))
-          : 0;
+        var cost = split.swapped ? swapCost(w, have, split) : null;
+        var tokFee = cost ? cost.fee : 0;
+        // the swap that did not add up says so on its entry: what went in and what came back
+        var costOff = cost && cost.off !== 0 ? { swapInSats: cost.wentIn, swapOutSats: cost.cameBack } : {};
 
         /* The string IS the money now — those proofs are out of the balance
          * and exist nowhere else. Written down before anything else can go
@@ -1769,6 +1799,8 @@
             // paid over by too little to come back: said on the entry, counted in what it cost
             dustSats: dust || undefined,
             feeSats: tokFee,
+            swapInSats: costOff.swapInSats,
+            swapOutSats: costOff.swapOutSats,
             // settled as far as this wallet is concerned: the proofs left the
             // balance. Whether anyone claimed the token is the mint's business,
             // and nothing here checks after the fact.
