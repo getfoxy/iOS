@@ -1,8 +1,8 @@
 import Foundation
 import UserNotifications
 
-/// The one reminder Foxy makes for itself: a local notification fifteen days after Foxy was last in front, so a payment or
-/// message waiting at the relays is not missed. Made on the phone and sent by nobody; there is no push and no server.
+/// The one reminder Foxy makes for itself: a local notification fifteen days after Foxy was last in front, so a payment
+/// waiting at the relays is not missed. Made on the phone and sent by nobody; there is no push and no server.
 ///
 /// The page asks once (`reminder`, FoxyBridge.swift) and the phone keeps the answer (`enabled`). From then on every coming
 /// to the front and every going away replaces the pending notification with a new one fifteen days out (`refresh`), so it
@@ -11,7 +11,7 @@ enum Reminder {
     /// Fifteen days, in one place. The page names it in `days` and anything else is refused.
     static let days = 15
     static let title = "Foxy"
-    static let body = "You have not opened Foxy in 15 days. A payment or message may be waiting for you."
+    static let body = "You have not opened Foxy in 15 days. A payment may be waiting for you."
     static let identifier = "foxy.reminder"
     static let enabledKey = "foxy.reminder.enabled"
 

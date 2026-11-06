@@ -2,11 +2,12 @@
    *
    * The wallet's half is 08e-cashu-id.js and docs/CASHU-ID.md. Here:
    *
-   *   MY CASHU ID (the menu) ..... the stage screen that shows a code to be scanned (`stageScreen`), with SHARE above DONE,
+   *   MY CASHU ID (the menu, and home's round button at the top left)
+   *                                the stage screen that shows a code to be scanned (`stageScreen`), with SHARE above DONE,
    *                                the share sheet the app uses for a token; the ID string is the code.
    *   a pasted or scanned ID ..... NAME THIS CONTACT?, a card with a field (`blockedCard` `field`); your own is said to be
    *                                yours, a mistyped one is refused ("That is not a Cashu ID.").
-   *   paying one ................. CONTACTS (from SEND) → SET AMOUNT → the confirmation, which says once that the money
+   *   paying one ................. CONTACTS (from SEND or the menu) → SET AMOUNT → the confirmation, which says once that the money
    *                                comes back after thirty days if it is not collected → sent over Nostr.
    *   money at another mint ...... PAID AT ANOTHER MINT, a card with three answers (`cidOfferCard`): BRING IT HOME (its fee
    *                                under it, or why it cannot be done), KEEP IT THERE, and SEND IT BACK where the payer proved
@@ -95,7 +96,7 @@
     });
   }
 
-  /* ADD A CASHU ID and SCAN A CASHU ID, on the empty INBOX and the empty CONTACTS: the ID is read as a pasted or scanned one
+  /* ADD A CASHU ID and SCAN A CASHU ID, on the empty CONTACTS: the ID is read as a pasted or scanned one
    * is (`cidAddAsk`), which goes on to NAME THIS CONTACT?. */
   cidPasteAsk() { this.cidPasteCard('cidPaste', (text) => this.cidAddAsk(text)); }
 
@@ -200,20 +201,34 @@
     ];
     if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
     const back = { label: 'CANCEL', go: () => this.setState({ screen: 'home', stack: [], cidBusy: false, cidErr: '' }) };
+    /* The keeper's 1m (2026-11-06), with the contact's name where a Lightning payment names its invoice: RECEIVER GETS, FEE
+     * (this mint's for making the locked pieces, as the wallet counts it), PAYING, RECEIVER, and PAYING FROM's pill, which
+     * opens nothing: a contact is paid from this mint. CANCEL is the X. */
+    let fee = 0;
+    try {
+      const lack = (W && W.sendShortfall && amount > 0) ? W.sendShortfall(amount, { unit: unit, locked: true }) : null;
+      fee = lack ? Math.max(0, Math.round(Number(lack.fee) || 0)) : 0;
+    } catch (e) { fee = 0; }
+    const fig = (n) => (unit === 'usd' ? this.unitFigure(n, 'usd') : this.money(n).main);
+    const look = (sp) => (!this.cfPayLook ? sp : this.cfPayLook(Object.assign(sp, { close: back.go }), {
+      gets: figure.main, fee: fig(fee), paying: fig(amount + fee), receiver: name.toUpperCase(),
+      word: String(at).toUpperCase() + ' · ' + this.unitWord(unit), go: null,
+    }));
     if (s.cidErr) {
-      return {
+      return look({
         title: 'CONFIRMATION', amountLabel: 'SENDING', amount: figure.main, amountSub: figure.sub, amountInk: '#FF5C5C', rows: rows,
         warn: s.cidErr, cta: 'TRY AGAIN', ctaTone: 'warn', go: () => this.cidSend(), secondary: back,
-      };
+      });
     }
-    return {
+    return look({
       title: 'CONFIRMATION', amountLabel: 'SENDING', amount: figure.main, amountSub: figure.sub,
       // a copy goes to the seed's own recovery key once a relay has it (08e-cashu-id.js), so the words find it too
       subtitle: 'If ' + name + ' has not collected it in ' + days + ' days it comes back to you, here or wherever your words are restored.',
       rows: rows, secondary: back,
-      cta: s.cidBusy ? 'SENDING…' : 'SEND ' + figure.main, ctaTone: 'go', ctaBusy: !!s.cidBusy,
+      // PAY, as every confirmation's button says (the keeper, 2026-11-06)
+      cta: s.cidBusy ? 'SENDING…' : 'PAY ' + fig(amount + fee), ctaTone: 'go', ctaBusy: !!s.cidBusy,
       go: () => { if (!this.state.cidBusy) this.cidSend(); },
-    };
+    });
   }
 
   /* SEND: locked to their one-time key and handed to the relays. A payment no relay took yet is in the outbox, and goes
@@ -387,8 +402,10 @@
     W._onCashuIdOffer = (v) => { this.loadHistory(); this.cidOfferCard(v); };
     // a payment locked to the ID key itself, unblinded: asked, never signed for by itself
     W._onCashuIdUnblinded = (v) => this.cidBareCard(v);
-    // and the messages between Cashu IDs (26p-cashu-msg.js)
-    this.cmWake();
-    try { if (W.cashuIdListen) Promise.resolve(W.cashuIdListen()).catch(() => {}); } catch (e) {}
-    try { if (W.cashuIdDeliver) Promise.resolve(W.cashuIdDeliver()).catch(() => {}); } catch (e) {}
+    // (the listening opened again waits while a card's sheet is up: `cardAfter`)
+    const listen = () => {
+      try { if (W.cashuIdListen) Promise.resolve(W.cashuIdListen()).catch(() => {}); } catch (e) {}
+      try { if (W.cashuIdDeliver) Promise.resolve(W.cashuIdDeliver()).catch(() => {}); } catch (e) {}
+    };
+    if (W.cardAfter) W.cardAfter(listen); else listen();
   }

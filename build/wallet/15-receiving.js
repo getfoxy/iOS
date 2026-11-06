@@ -620,6 +620,8 @@
      * sweep to clear. */
     _sweepHeldNow: function () {
       if (!quoteSweepHeld || !routeOpen() || !wallet || wallet.foxyFromCache) return Promise.resolve([]);
+      // a card's sheet is up: once it is down (`cardAfter`)
+      if (cardSheetUp()) { cardAfter(function () { FoxyWallet._sweepHeldNow(); }); return Promise.resolve([]); }
       console.log('[foxy] a route is up and the quote sweep was held \u2014 running it now');
       return FoxyWallet.sweepQuotes().then(null, function (e) {
         console.warn('[foxy] the held quote sweep:', e && e.message);

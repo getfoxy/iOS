@@ -181,6 +181,8 @@ class Component extends DCLogic {
       wdPick: false, tillList: false, tillListBackTo: false,
       // nor SEND's BANK ACCOUNT (26q-bank.js)
       bankPick: false,
+      // nor a mint picked on an earlier card's WITHDRAW TO or TRANSFER TO (26n-card-withdraw-to.js, `fcListNext`)
+      mintSel: '',
     }, extra || {}));
   }
   back() {
@@ -363,6 +365,9 @@ class Component extends DCLogic {
    *    cta?: string, ctaTone?: string, ctaBusy?: boolean,
    *    titleUp?: boolean, wallet?: { word: string, go: () => void, label?: string },
    *    diffLine?: ?{ text: string, amber: boolean, pct: number },
+   *    stack?: Array<{ label: string, value: string, big?: boolean, small?: boolean, ink?: string, sub?: string }>,
+   *    details?: Array<{ label: string, value: string, wide?: boolean }>, detailNote?: string,
+   *    from?: ?{ word: string, go: ?(() => void) },
    *    go?: () => void }} ConfirmSpec */
   /* What the confirmation shell shows (renderConfirmShell). */
   /** @returns {ConfirmSpec} */
@@ -465,6 +470,34 @@ class Component extends DCLogic {
     const atPrice = out ? (cardUsd ? cardRate : Math.round((this.px && this.px()) || 0)) : 0;
     const atLine = atPrice > 0 ? 'at $ ' + this.group(atPrice) + ' per bitcoin' : '';
     if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
+    /* The keeper's 1l (2026-11-06): a Lightning payment from this phone's balance, its figures stacked, RECEIVER GETS, FEE,
+     * PAYING and RECEIVER, and PAYING FROM at the foot, which opens PAY FROM where there is a choice (`cfPayLook`). Not from
+     * a card: its confirmation is its own. */
+    const payBase = s.quotedAmt != null ? s.quotedAmt : this.sendSatsNow();
+    /* What leaves is the sum `pay` refuses on (`payNeed`: the amount, the reserve and the mint's fee on the pieces it
+     * spends), never less: at a mint that charges for its pieces the quote's fee alone said less than went. FEE is that
+     * less the amount. */
+    let payNeedSats = null;
+    if (asks && !out && s.quotedFee != null) {
+      payNeedSats = payBase + s.quotedFee;
+      try {
+        const pn = (W && W.payNeed) ? W.payNeed(payBase, s.quotedFee) : null;
+        if (pn && pn.need != null && Number(pn.need) > payNeedSats) payNeedSats = Math.round(Number(pn.need));
+      } catch (e) { /* the quote's own sum, then */ }
+    }
+    const payTotal = payNeedSats != null ? this.money(payNeedSats).main : '';
+    const look = (sp) => {
+      if (!asks || out || !this.cfPayLook) return sp;
+      const many = !!(this.pfMany && this.pfMany('send'));
+      return this.cfPayLook(sp, {
+        gets: this.sendAmountText(),
+        fee: payNeedSats != null ? this.money(payNeedSats - payBase).main : held ? 'CHECKING…' : 'UNKNOWN',
+        paying: payTotal || (held ? 'CHECKING…' : sp.amount),
+        receiver: this.sendToText(),
+        word: this.pfLabel ? this.pfLabel(this.pfHome(), 'sat') : String(s.payFrom || 'BITCOIN'),
+        go: many ? () => this.openWalletPick() : null,
+      });
+    };
     /* The code is not a row any more: it is above the amount, the same size,
      * in the accent — the same place and shape as on the receiver's screen, so
      * the two can be held side by side and compared at a glance rather than
@@ -481,7 +514,7 @@ class Component extends DCLogic {
       return (need && need > have) ? need - have : 0;
     })();
     if (shortOf) {
-      return {
+      return look({
         title: 'CONFIRMATION', amountLabel: 'SENDING',
         amount: this.sendAmountText(),
         amountInk: '#FF5C5C',
@@ -489,13 +522,13 @@ class Component extends DCLogic {
         // (what this phone holds with the mint is no part of what a card holds: nothing is held back from a card)
         warn: this.heldBlocks(out ? 0 : shortOf) || (out ? 'More than the card holds \u2014 short by ' : 'More than your balance \u2014 short by ') + this.money(shortOf).main,
         cta: 'CLOSE', ctaTone: 'warn', go: () => this.back(),
-      };
+      });
     }
     /* Typed in dollars: nothing can be sent until two price sources agree on
      * how many sats that is (checkSendPrice). */
     if (s.recipientKind !== 'invoice' && s.unit !== 'SATS' && s.sendPriceCheck !== 'agreed') {
       const failed = s.sendPriceCheck === 'failed';
-      return {
+      return look({
         title: 'CONFIRMATION', amountLabel: 'SENDING',
         amount: '$ ' + this.usd(val),
         amountSub: failed ? '' : 'Checking the price with two sources\u2026',
@@ -503,7 +536,7 @@ class Component extends DCLogic {
         warn: failed ? 'Two price sources did not agree on the price of bitcoin, so Foxy cannot work out the sats. Nothing was sent.' : '',
         cta: failed ? 'TRY AGAIN' : 'CHECKING THE PRICE\u2026', ctaTone: failed ? 'warn' : 'go',
         go: failed ? () => this.checkSendPrice() : () => {},
-      };
+      });
     }
     /* Once the fee is quoted: can the balance cover the payment and its fee?
      *
@@ -534,14 +567,14 @@ class Component extends DCLogic {
     // a dollar card's headline is what the invoice costs in dollars, at the mint's quote, once it has one
     const cardHead = (cardUsd && s.quotedAmt != null) ? cfig(s.quotedAmt).main : null;
     if (covers && !covers.ok) {
-      return {
+      return look({
         title: 'CONFIRMATION', amountLabel: 'SENDING',
         amount: cardHead || this.sendAmountText(),
         amountInk: '#FF5C5C',
         rows: rows,
         warn: this.heldBlocks(out ? 0 : covers.need - covers.have) || covers.why,
         cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
-      };
+      });
     }
     const spec = {
       title: 'CONFIRMATION', amountLabel: 'SENDING',
@@ -569,7 +602,8 @@ class Component extends DCLogic {
        * the sending screen that the payment did not fit. While that is being
        * asked, or the connection it is asked over is on its way, the button
        * says CHECKING and does nothing, and the FEE row says the same. */
-      cta: held ? 'CHECKING…' : 'SEND ' + this.sendAmountText(),
+      // (PAY and what leaves, on the new confirmation: the keeper's 1l)
+      cta: held ? 'CHECKING…' : (asks && !out) ? 'PAY ' + (payTotal || this.sendAmountText()) : 'SEND ' + this.sendAmountText(),
       ctaBusy: held,
       ctaTone: 'go',
       go: held ? () => {} : () => this.startSend(),
@@ -585,7 +619,7 @@ class Component extends DCLogic {
     }
     // from a card: the price under the amount, where there is one
     if (out && atLine) spec.amountSub = atLine;
-    return spec;
+    return look(spec);
   }
 
   /* Which of your mints issued this invoice, if any, and what you hold there.
@@ -861,12 +895,8 @@ class Component extends DCLogic {
    * cover this payment greyed (renderCurrency). With a choice of mints on PAY
    * FROM, its list again, the one paying ringed (26l-pay-from.js). */
   openWalletPick() {
-    const s = this.state;
-    if (this.pfMany && this.pfMany('send')) {
-      this.setState({ payFromReopen: true, payFromTapped: true, payFromPick: s.payMint ? this.pfKey(s.payMint, s.payUnit) : (s.payFromPick || '') });
-      this.go('payFrom');
-      return;
-    }
+    // a choice of mints: PAY FROM again, the source it is paid from ticked (26l-pay-from.js `pfReopen`)
+    if (this.pfMany && this.pfMany('send') && this.pfReopen) { this.pfReopen(); return; }
     this.go('walletPick');
   }
 
@@ -927,7 +957,14 @@ class Component extends DCLogic {
       ? (W.amountOf(String(s.recipient)) || 0) : this.typedSats();
     const bracket = (t) => (t ? '(' + t + ')' : '');
     const fig = (n) => (wallet === 'usd' ? { main: this.unitFigure(n, 'usd'), sub: '' } : this.money(n));
-    const total = q ? Math.round(Number(q.amount) || 0) + Math.round(Number(q.feeReserve) || 0) : null;
+    let total = q ? Math.round(Number(q.amount) || 0) + Math.round(Number(q.feeReserve) || 0) : null;
+    // what leaves is the sum `pay` refuses on (`payNeed`), never less: the reserve and the mint's fee on the pieces it spends
+    if (q && total != null && W && W.payNeed) {
+      try {
+        const pn = W.payNeed(q.amount, q.feeReserve, { unit: wallet });
+        if (pn && pn.need != null && Number(pn.need) > total) total = Math.round(Number(pn.need));
+      } catch (e) { /* the quote's own sum, then */ }
+    }
     const rows = [
       this.cfRow('TO', this.sendToText()),
       this.cfRow('AMOUNT', q ? fig(q.amount).main : this.sendAmountText(), {
@@ -959,25 +996,38 @@ class Component extends DCLogic {
                              ownWord: 'the mint\u2019s', slackCents: 1 })
       : null;
     const base = {
-      title: 'CONFIRM PAYMENT', titleUp: true, amountLabel: 'TOTAL', rows: rows, diffLine: diffLine,
+      // (CONFIRMATION, as the keeper drew 1l on 2026-11-06)
+      title: 'CONFIRMATION', titleUp: true, amountLabel: 'TOTAL', rows: rows, diffLine: diffLine,
       wallet: Object.assign({ word: this.walletLabel(wallet), go: () => this.openWalletPick() }, many ? { label: 'PAY FROM' } : {}),
       close: () => this.setState({ screen: 'home', stack: [] }),
       // the figure in ink, as drawn; red only when it cannot be paid
       amountInk: 'var(--ink)',
     };
+    /* The keeper's 1l (2026-11-06): the same figures stacked, in the balance that pays (the sats the payee is paid under
+     * RECEIVER GETS where dollars pay), and PAYING FROM's pill naming the mint and the balance, which opens the choice
+     * between them, or PAY FROM where other mints could pay too (`openWalletPick`). */
+    const look = (sp) => (!this.cfPayLook ? sp : this.cfPayLook(sp, {
+      gets: q ? fig(q.amount).main : this.sendAmountText(),
+      getsSub: (wallet === 'usd' && asked) ? '₿ ' + this.group(asked) : '',
+      fee: (q && total != null) ? fig(total - Math.round(Number(q.amount) || 0)).main : held ? 'CHECKING…' : 'UNKNOWN',
+      paying: total != null ? fig(total).main : held ? 'CHECKING…' : sp.amount,
+      receiver: this.sendToText(),
+      word: this.pfLabel ? this.pfLabel(this.pfHome ? this.pfHome() : '', wallet) : this.walletLabel(wallet),
+      go: () => this.openWalletPick(),
+    }));
     /* Typed in dollars to an address: the address is asked in sats, so two
      * price sources agree on them first (checkSendPrice), whichever balance
      * then pays. */
     if (s.recipientKind !== 'invoice' && s.unit !== 'SATS' && s.sendPriceCheck !== 'agreed') {
       const failed = s.sendPriceCheck === 'failed';
       const val = parseFloat(s.amount) || 0;
-      return Object.assign(base, {
+      return look(Object.assign(base, {
         amount: '$ ' + this.usd(val),
         amountSub: failed ? '' : 'Checking the price with two sources…',
         warn: failed ? 'Two price sources did not agree on the price of bitcoin, so Foxy cannot work out the sats. Nothing was sent.' : '',
         cta: failed ? 'TRY AGAIN' : 'CHECKING THE PRICE…', ctaTone: failed ? 'warn' : 'go',
         go: failed ? () => this.checkSendPrice() : () => {},
-      });
+      }));
     }
     const fits = this.quoteFits(wallet);
     // short, with the other balance's quote still to come: CHECKING, since that one may pay it (`autoWallet`)
@@ -986,7 +1036,7 @@ class Component extends DCLogic {
       const W2 = window.FoxyWallet;
       let why = '';
       try { why = (W2 && W2.payNeed && q) ? String((W2.payNeed(q.amount, q.feeReserve, { unit: wallet }) || {}).why || '') : ''; } catch (e) { why = ''; }
-      return Object.assign(base, {
+      return look(Object.assign(base, {
         amount: total != null ? fig(total).main : this.sendAmountText(),
         amountSub: (total != null && wallet === 'sat') ? fig(total).sub : '',
         amountInk: '#FF5C5C',
@@ -996,14 +1046,15 @@ class Component extends DCLogic {
           : (wallet === 'sat' && this.heldBlocks && q ? this.heldBlocks(total - this.unitBalance('sat')) : '') || why
             || 'More than your ' + this.unitWord(wallet).toLowerCase() + '.',
         cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
-      });
+      }));
     }
-    return Object.assign(base, {
+    return look(Object.assign(base, {
       amount: total != null ? fig(total).main : this.sendAmountText(),
       amountSub: (total != null && wallet === 'sat') ? fig(total).sub : '',
-      cta: held ? 'CHECKING…' : 'PAY',
+      // PAY and what leaves (the keeper's 1l)
+      cta: held ? 'CHECKING…' : 'PAY' + (total != null ? ' ' + fig(total).main : ''),
       ctaBusy: held,
       ctaTone: 'go',
       go: held ? () => {} : () => this.startSend(),
-    });
+    }));
   }

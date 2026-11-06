@@ -72,6 +72,8 @@ ASSETS = {
     'Web/risk-grain.jpg':       (131515,  '3798d85f020e99b2d5b8306324d7636d0fcf51548fcada742ccb0b92bc96eab5'),
     'Web/foxy-intro.mp4':       (976087,  '2c3ef790193cc6dd179f2fed3c4707fe140d2d863208ec1bc353eb3439e6025c'),
     'Web/foxy-intro-last.png':  (71955,   '137a597ceaad06f1e22817d037b390973e38e03b5869b08f625d8949cedcd725'),
+    'Web/img/foxy-wait.mp4':    (1198649, '4e517b5c3513f55fb3432d3517af156e08a3d16d093950bcb9390f2a50d3ca0d'),
+    'Web/img/foxy-wait-first.png': (52880, '8886855ab558c96d8b387390292d58f90894e55fabaca41d2c7754cafae0d08c'),
     'Web/foxy-splash-still.png': (61988,  'd21b711786d81aa20cb79b3aa823178230eb66b71fceb7478da12c6af6626144'),
     'Web/foxy-sheet.webp':      (1751366, 'fb38cb859810c60efda24f7f1e4ce3c49b321fcd85dc13fcd3cafd2d1b4c10a9'),
     'Web/foxy-fur.webp':        (65776,   'b9a1c1e11785c5a45a58e6098418e16ee01afaefadc1b3e109ecf3a6e26d4684'),

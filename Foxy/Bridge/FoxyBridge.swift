@@ -63,13 +63,6 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
     var cashuIdCopies: NostrInbox?
     var cashuIdCopiesTicket: UUID?
     var cashuIdCopiesAnswer: ((Int) -> Void)?
-    /// The inboxes on the keys contacts' next messages may come to, one a contact (CashuMsgListen.swift), the open
-    /// being made, and its answer.
-    var cashuMsgInbox: CashuMsgListen?
-    /// Each contact's order of the three relays, kept for the session across listens (CashuMsgListen.swift).
-    var cashuMsgRotation = CashuMsgRotation()
-    var cashuMsgTicket: UUID?
-    var cashuMsgAnswer: ((Int) -> Void)?
     /// Tap to pay over Bluetooth (FoxyBridge+Tap.swift): the invoice on screen,
     /// advertised; or the search for one, and the page's request waiting on it.
     /// `TapRx`/`TapTx`: the Bluetooth link on a phone, its stand-in in the
@@ -472,9 +465,6 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         "cashuIdInboxClose": FoxyBridge.handleCashuIdInboxClose,
         // and on the recovery key, for this phone's own copies after a restore
         "cashuIdCopiesOpen": FoxyBridge.handleCashuIdCopiesOpen,
-        // messages between Cashu IDs: wrapped natively to a key used once, and the inbox on a contact's next keys
-        "cashuIdMsgSend": FoxyBridge.handleCashuIdMsgSend,
-        "cashuIdMsgOpen": FoxyBridge.handleCashuIdMsgOpen,
         // Tap to pay: an invoice handed between two phones over Bluetooth (FoxyBridge+Tap.swift)
         "tapReceiveStart": FoxyBridge.handleTapReceiveStart,
         "tapReceiveStop": FoxyBridge.handleTapReceiveStop,
@@ -491,6 +481,7 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         // A card that holds ecash, held to the phone (FoxyBridge+Flashcard.swift)
         "cardBegin": FoxyBridge.handleCardBegin,
         "cardSend": FoxyBridge.handleCardSend,
+        "cardSendMany": FoxyBridge.handleCardSendMany,
         "cardSay": FoxyBridge.handleCardSay,
         "cardAgain": FoxyBridge.handleCardAgain,
         "cardEnd": FoxyBridge.handleCardEnd,

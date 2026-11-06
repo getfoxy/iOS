@@ -16,6 +16,15 @@
     headerKept: function () { return headerKept(); },
     headerHeightOf: function (hash) { return headerHeightOf(hash); },
     headerRefresh: function (opts) { return headerRefresh(opts); },
+    /* The same, asked by a screen for a tap soon to come (a DEPOSIT's invoice up, its money in): fetched where what is kept is older
+     * than two minutes, never waited on by the tap; off where the suites turn the fetches that happen on their own off. */
+    /* Whether a card's sheet is up, and work to do once none is (08a-flashcard.js, `cardAfter`): at once where none is. */
+    cardSheetUp: function () { return cardSheetUp(); },
+    cardAfter: function (fn) { cardAfter(fn); },
+    headerWarm: function () {
+      if (FoxyWallet._headersOff) return Promise.resolve({ kept: headerKept(), fetched: false, why: 'off' });
+      return headerRefresh();
+    },
     headerShort: function (hash) { return headerShort(hash); },
     _headersOff: false,
     // how long after Tor comes up, or the app comes back, the header is asked for, in ms (the suites set it short)
@@ -39,7 +48,18 @@
     /* What goes onto a card is cut like a cash drawer, to fill the gaps in what it holds (08a-flashcard.js). */
     cardLadder: function (sats, most, biggest, have, plain) { return cardLadder(sats, most, biggest, have, plain); },
     // (`depth`: four for a card of 1.23 that holds both units, eight where not given)
-    cardDeepLadder: function (sats, most, biggest, have, depth) { return cardDeepLadder(sats, most, biggest, have, depth); },
+    cardDeepLadder: function (sats, most, biggest, have, depth, sets, exact) { return cardDeepLadder(sats, most, biggest, have, depth, sets, exact); },
+    /* The five seconds a tap (08a-flashcard.js, "five seconds a tap"): how many pieces a load and a payment's change write at
+     * most, the first load's depth, and the time a tap of `pieces` holds the card for by that budget. */
+    cardTapBudget: function () {
+      return { tapMs: CARD_TAP_MS, pieceMs: CARD_PIECE_MS, loadOwnMs: CARD_LOAD_OWN_MS, payOwnMs: CARD_PAY_OWN_MS,
+               load: CARD_TAP_LOAD, change: CARD_TAP_CHANGE, firstDepth: CARD_FIRST_DEPTH, deep: CARD_DEEP, deepTop: CARD_DEEP_TOP };
+    },
+    cardTapEstimate: function (kind, pieces) { return cardTapEstimate(kind, pieces); },
+    // for the suites: a first load cut this many deep instead of one binary set (0: as decided, CARD_FIRST_DEPTH)
+    _cardFirstDepth: 0,
+    // for the suites: no five-second cap on the pieces of one tap (a drawer written in one go, as before 2026-11-06)
+    _cardTapUncapped: false,
     /* What a card holds, as the amounts of its pieces, for cutting more for it. */
     cardHeld: function (card, except) { return cardHeldAmounts(card, except); },
     // (`unit`: the card's; a dollar card's largest piece is the dollar keyset's, in cents)
@@ -1290,7 +1310,11 @@
        * (`cardWriteOwed`), and what else is on the card it reads whole on
        * the card's own screen, which is where the bookkeeping is. */
       var how = { short: true };
+      var before = null;
+      // (a link that is not a sheet of the phone's, a card held to a reader in a suite, is timed from this write's own read)
+      if (link && !link.one) { try { link.firstAnswerAt = 0; } catch (e0) {} }
       return cardLook(link, how).then(function (card) {
+        before = card;
         if (card.info.pin === 'blocked') throw cardRefused('6983');
         if (!o.owner && !o.change && !pin && card.info.pinSet) throw cardError('bad-pin', 'A card PIN is 4 to 8 digits.');
         if (asOwner && !card.info.owner) throw cardRefused('6a90');
@@ -1320,7 +1344,8 @@
           });
         }).then(function () {
           return cardRepointFor(t, card);
-        }).then(function () {
+        }).then(function (moved) {
+          if (moved) card.repointed = true;
           // (1.23: the price a rate is written at where the card wants one, and the held tap's askings for the screen)
           card.price = o.price;
           card.onHold = o.onHold;
@@ -1328,9 +1353,19 @@
         });
       }).then(function (r) {
         wrote = r;
-        // after the write, what the card comes to: the short way for an owner as for a till
+        /* After the write, what the card comes to: from what was read before it and what went on, where that says it for certain
+         * (`cardAfterWrite`); otherwise read again, the short way for an owner as for a till. */
+        // (not for the owner's own read after, which asks what only its owner is told: its limits and its rate)
+        var after = asOwner ? null : cardAfterWrite(before, r);
+        if (after) return after;
         return cardLook(link, asOwner ? { mine: true, short: true } : { short: true });
       }).then(function (card) {
+        /* The line a phone test of the five seconds is read from: the pieces this write put on, the milliseconds from its first load
+         * command to its last answer, and the card's time in the field, from its first answer in this sheet to its last. */
+        try {
+          var contact = (link && link.firstAnswerAt && link.lastAnswerAt) ? link.lastAnswerAt - link.firstAnswerAt : 0;
+          console.log('[foxy] card: wrote ' + (Number(wrote.written) || 0) + ' piece(s) in ' + (Number(wrote.loadMs) || 0) + ' ms, contact ' + contact + ' ms from read to done');
+        } catch (eLog) {}
         // a short read lists no nonces, and says nothing of which pieces have left the card
         if (!card.bare && card.record.refundKey && cardsOnFile()[card.key]) cardRemember(card, card.pieces, true);
         // what went on, in the card's unit: `amount`, and `sats` for a bitcoin card only (`back`, `change` and `refund` are in it too)
@@ -1980,6 +2015,10 @@
      * sheet dismissed or timed out while it looks rejects with `fn`'s error and
      * `sheetClosed`, and the screen says what is left. */
     cardSession: function (text, fn, opts) {
+      // the page's background work waits while this sheet is up (`cardAfter`): until the card is let go, or the tap settles
+      cardSheets += 1;
+      var down = false;
+      var sheetDown = function () { if (down) return; down = true; cardSheetDown(); };
       var link = {
         released: false,
         // what is true of the card for as long as this sheet is up, and no longer (08a-flashcard.js, `cardProvedHere`)
@@ -1988,6 +2027,26 @@
           // once let go, nothing more is asked of the card; the sheet is gone
           if (link.released) return Promise.reject(new Error('the card was let go'));
           return bridgeAsk('cardSend', { apdu: String(apdu) }, 15000);
+        },
+        /* Several commands sent back to back by the phone (`cardSendMany`, FoxyBridge+Flashcard.swift): the answers in order, the
+         * last the first that was not 9000, and `lost` where the card left part way. One trip to the phone and back for all of
+         * them, where one each was most of a load's time on a busy phone. A phone with no such step answers `unsupported`, and
+         * the commands are sent one at a time (`cardTalk`). */
+        sendMany: function (apdus) {
+          if (link.released) return Promise.reject(new Error('the card was let go'));
+          if (link.noMany) return Promise.reject(Object.assign(new Error('unsupported'), { unsupported: true }));
+          var list = (apdus || []).map(String);
+          return bridgeAsk('cardSendMany', { apdus: list }, 15000 + 2000 * list.length).then(function (text) {
+            var parts = String(text || '').split(',').filter(function (x) { return x !== ''; });
+            var lost = parts.length > 0 && parts[parts.length - 1] === 'lost';
+            return { answers: lost ? parts.slice(0, -1) : parts, lost: lost };
+          }, function (e) {
+            if (/unknown action/i.test(String((e && e.message) || ''))) {
+              link.noMany = true;
+              throw Object.assign(new Error('unsupported'), { unsupported: true });
+            }
+            throw e;
+          });
         },
         say: function (line) {
           if (link.released) return Promise.resolve();
@@ -2000,6 +2059,7 @@
         release: function (line) {
           if (link.released) return Promise.resolve();
           link.released = true;
+          sheetDown();
           return bridgeAsk('cardEnd', { text: String(line || 'Done.') }, 5000).then(function () {}, function () {});
         },
         /* The card left part way through: the sheet stays up and looks for it
@@ -2024,8 +2084,8 @@
        * comes after takes the circuit made ready, and is not the one that waits
        * for a new one (`warmMint`). */
       if (opts && opts.warm) { try { FoxyWallet.warmMint(); } catch (e) {} }
-      // and the newest block header, if the one kept is old: for the next tap, not this one (`cardClock`)
-      headerSoon();
+      // and the newest block header, if the one kept is old: for the next tap, not this one (`cardClock`); a throw here must not leave the sheet counted up
+      try { headerSoon(); } catch (eH) { /* the next tap fetches it */ }
       var ended = function (e) {
         /* `e.sheetText`: the flow put things right in the sheet before it
          * failed (a refused payment's pieces put back on the card), and the
@@ -2078,6 +2138,6 @@
          * this deadline passing are the same kind but marked `quiet`, so the screen that asked can leave without making anything of it. */
         var quiet = /timed out|did not answer|interrupted/i.test(why);
         throw cardError('cancelled', /timed out|did not answer/i.test(why) ? 'No card was tapped.' : 'The card was not tapped.', quiet ? { quiet: true } : undefined);
-      });
+      }).then(function (r) { sheetDown(); return r; }, function (e) { sheetDown(); throw e; });
     },
 

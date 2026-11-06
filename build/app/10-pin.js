@@ -697,6 +697,9 @@
     if (this._pinLocked) return;
     this._pinLocked = true;
     this._lockedOnce = true;
+    /* A card's PIN pad the lock comes over (26f-flashcard.js `fcAskPin`) is asked again once the app is unlocked: its flow has its
+     * pieces made and waiting, and without it would be left with no pad and no word. */
+    const cardAsk = (this._pinEl && this._pinEl.parentNode && /** @type {any} */ (this._pinEl).__fcAsk) || null;
     // said, so a diary shows the lock: it drew and asked in silence, and a report about it had nothing to go on
     console.log('[foxy] lock: up, ' + (byFaceAlone ? 'a face is the way in' : 'the PIN pad') + (W.faceLock && W.faceLock() ? ', a face is asked' : ''));
     this._unlockWait = new Promise(resolve => { this._unlockDone = resolve; });
@@ -704,6 +707,7 @@
       this._pinLocked = false;
       this.pinDismiss();
       if (this._unlockDone) { this._unlockDone(); this._unlockDone = null; }
+      if (cardAsk && this.fcAskPin) this.fcAskPin(cardAsk.o, cardAsk.then);
     };
 
     /* Face ID first, when it is there and wanted.

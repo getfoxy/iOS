@@ -56,7 +56,7 @@ final class ReminderTests: XCTestCase {
         XCTAssertFalse(trigger.repeats)
         XCTAssertEqual(r.content.interruptionLevel, .active, "a banner and a sound, as the payment notifications")
         XCTAssertEqual(r.content.title, "Foxy")
-        XCTAssertEqual(r.content.body, "You have not opened Foxy in 15 days. A payment or message may be waiting for you.")
+        XCTAssertEqual(r.content.body, "You have not opened Foxy in 15 days. A payment may be waiting for you.")
         XCTAssertTrue(Reminder.enabled)
     }
 

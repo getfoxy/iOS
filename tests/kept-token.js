@@ -90,7 +90,8 @@ ok(/Route\.shutDoor\(\)\s*DispatchQueue\.main\.asyncAfter\(deadline: \.now\(\) \
 ok(/TIDY_AWAY_STOP = 12000;/.test(tidy)
    && /if \(this\._putAway && Date\.now\(\) - \(this\._putAwayAt \|\| 0\) > this\.TIDY_AWAY_STOP\) \{[\s\S]{0,200}?this\._tidyOwed = true;[\s\S]{0,140}?return;/.test(tidy),
    'no new swap starts after twelve seconds away, so none is cut off at twenty');
-ok(/this\.movingMints\(\) \|\| this\._changeDueAt\) \{ this\.tidyChangeLater\(more\); return; \}/.test(tidy),
+// (nor while a card's sheet is up: `cardSheetUp`, the card's tap time first)
+ok(/this\.movingMints\(\) \|\| this\._changeDueAt( \|\| \(W\.cardSheetUp && W\.cardSheetUp\(\)\))?\) \{ this\.tidyChangeLater\(more\); return; \}/.test(tidy),
    'but not while change is on its way back to this phone');
 ok(/tidySteps: function \(\) \{/.test(read('build/wallet/19-bill-split.js')), 'the wallet says how many swaps that is');
 ok(/if TorReturn\.returnFindsRouteUp\(ready: ready, wasParked: wasParked, away: away,/.test(read('Foxy/Tor/TorService.swift'))
@@ -168,8 +169,9 @@ ok(/static let authenticationTries = 8/.test(read('Foxy/Tor/TorService.swift')),
   const tap = read('build/app/26d-tap.js');
   ok(/if \(this\._carryingHome\) return null;/.test(tap)
      && /this\._carryingHome = true;\n    if \(this\.syncTap\) this\.syncTap\(\);/.test(tap)
-     && /const settle = \(\) => \{\n      this\.hideMelt\(\);\n      this\._quiet = false;\n      this\._carryingHome = false;/.test(tap)
-     && /\}\)\.then\(\(r\) => \{\n      settle\(\);/.test(tap) && /\}\)\.catch\(e => \{\n      settle\(\);/.test(tap),
+     // (the wait is the fox's, or the melt loader where it cannot be drawn: 26r-fox-wait.js; ALL SET only where it landed)
+     && /const settle = \(landed\) => \{\n      if \(fox\) this\.foxEnd\('carryMove', landed\); else this\.hideMelt\(\);\n      this\._quiet = false;\n      this\._carryingHome = false;/.test(tap)
+     && /\}\)\.then\(\(r\) => \{\n      settle\(!!\(r && r\.state === 'home'\)\);/.test(tap) && /\}\)\.catch\(e => \{\n      settle\(false\);/.test(tap),
      'the invoice screen offers nothing while its payment is carried home, and offers again whichever way that ends');
 }
 
@@ -270,7 +272,7 @@ ok(/keepSentToken\(\{ token: token, sats: sumProofs\(split\.send\), unit: 'sat',
   ok(/if \(!opts \|\| opts\.remember !== false\) save\(K\.mint, u\);/.test(route)
      && /var how = visit \? \{ remember: false \} : undefined;/.test(move)
      && /return FoxyWallet\.connect\(terms\.from, null, null, \{ remember: false \}\)/.test(move)
-     && /W\.moveRun\(plan, \(\) => \{\}, \{ visit: true(, quoted: true, warm: true)? \}\)/.test(read('build/app/26d-tap.js')),
+     && /W\.moveRun\(plan, (fox \? this\.foxHears\('crossMove'\) : )?\(\) => \{\}, \{ visit: true(, quoted: true, warm: true)? \}\)/.test(read('build/app/26d-tap.js')),
      'a crossing and a carry visit the other mint without saving it as the phone\u2019s own');
   ok(/if \(opts && opts\.remember === false\) return null;\n\s+return FoxyWallet\.crossingsWaiting\(\) \? FoxyWallet\.catchUpCrossings\(\) : null;/.test(route)
      && /return \(mintUrl && FoxyWallet\.crossingsWaiting\(\)\) \? FoxyWallet\.catchUpCrossings\(\) : null;/.test(read('build/wallet/23-screen-capture.js'))

@@ -1,58 +1,87 @@
-  /* ---- the screen behind the card sheet --------------------------------------
+  /* ---- the card tap screens ----------------------------------------------------
    *
-   * Foxy's own screen while the phone's NFC sheet is up, from the design: a card
-   * comes down behind a phone with three waves rising, the title says what to do,
-   * and the amount is under it. Everything is in the top half, where the sheet
-   * (the phone's own, drawn nowhere here) leaves room; the bottom holds only
-   * CANCEL, which is under the sheet's own on a phone.
+   * One family of full screens for every card tap, from the keeper's 2026-11-06 design (screens 1a to 1g), and
+   * only the words change from one flow to the next. Each is a ground, a title of 34px spaced out, the amount at
+   * 76px under it, then three dots, a paragraph or a chip where the screen has one, and its pills at the foot.
+   * The status bar is the phone's own, and the NFC sheet is iOS's: neither is drawn here.
    *
-   * Two grounds. Light blue while no card is connected (TAP BEHIND PHONE, and the
-   * asking again: TAP FOR CHANGE, PLEASE TAP AGAIN, ENTER PIN); orange, with the
-   * fur over it, from the moment the sheet reports a card connected (KEEP
-   * HOLDING, VERIFYING CARD, REMOVE) until it is lost or the sheet ends. The card
-   * and the waves loop while a card is wanted and settle behind the phone once it
-   * is there; the page's stylesheet stops the loop for a person who asks for
-   * less motion (build/markup.html, `[data-look]`), and the card is then just
-   * drawn settled.
+   *   1a  WAITING        light blue   the sheet is up and no card is in contact: TAP TO PAY, TAP TO LOAD, and so
+   *                                   on by flow (FC_TAP_FLOWS), with the arrow over the top of the screen and
+   *                                   TAP CARD BEHIND THE TOP; ENTER PIN while the pad is up over it
+   *   1b  GETTING READY  light blue   the phone is making what it will write, before any sheet (`fcAddRun`)
+   *   1c  IN CONTACT     orange       the card is being read or is signing: PAYING, RECEIVING, READING, ...
+   *   1d  CHECKING       teal         the card has signed and been let go, and the mint is asked: CHECKING for a
+   *                                   payment, CHARGING for a load, VERIFYING for a read; STILL ... once the wait
+   *                                   the CHECKING screen makes has run out (`fcChecking`, which is drawn so too)
+   *   1e  TAP AGAIN      yellow       a load whose card was not read: the money still waits to go onto it
+   *                                   (26f-flashcard.js, `fcStillWaiting`); TAP CARD and LATER
+   *   1f  TAP AGAIN      yellow       a payment whose card was not read: nothing has been paid (`fcFailed`'s
+   *                                   `gone`); TAP CARD and CANCEL
+   *   1g  CARD LOST      red          the instant the phone's link says the card has gone mid-tap; it stays until
+   *                                   the card is found again (1c), the card turns out to have signed and the mint
+   *                                   is asked (1d), or the tap ends, when the flow says what happened (1e, 1f)
    *
-   * What it says, by where the tap has got to (`fcTapLook`):
+   * What the screen behind the sheet says, by where the tap has got to (`fcTapLook`, the key kept on `data-look`):
    *
-   *   TAP BEHIND PHONE         waiting for the first contact
-   *   KEEP HOLDING · N s       in contact, the card being asked; N counts up from
-   *                            the contact, a whole second at a time
-   *   VERIFYING CARD           the card has signed and is still there: the mint is
-   *                            asked, and change is fetched or written
-   *   REMOVE                   the card has signed and nothing more is wanted of it:
-   *                            for as long as the phone's sheet may still be showing, which
-   *                            is until it has gone or a second and a half after the card
-   *                            signed, whichever is first
-   *   CHECKING                 and then, while the mint has not answered the swap of what the
-   *                            card signed: there is nothing to remove, and the mint is asked
-   *   STILL CHECKING           the wait the CHECKING card makes (`fcChecking`) has run out, and
-   *                            the phone goes on asking
-   *   TAP FOR CHANGE           the card has signed and contact broke before the
-   *                            change went on (or the second tap is waiting for it)
-   *   PLEASE TAP AGAIN         contact broke part way, and the same sheet asks again
-   *   ENTER PIN                the sheet ended asking for the PIN; the pad is up
+   *   hold      1a  the flow's TAP TO ...      waiting for the first contact
+   *   keep      1c  the flow's contact word    in contact, the card being asked
+   *   verify    1c  the same                   the card has signed and is still there: the mint is asked, and
+   *                                            change is fetched or written
+   *   remove    1d  the flow's checking word   the card has signed and nothing more is wanted of it, while the
+   *                                            phone's sheet may still be showing (until it has gone or a second
+   *                                            and a half after the card signed, whichever is first)
+   *   checking  1d  the same                   and then, while the mint has not answered
+   *   still     1d  STILL and the same         the wait the CHECKING screen makes (`fcChecking`) has run out
+   *   change    1a  TAP FOR CHANGE             the card has signed and its change waits for the next tap;
+   *             1g  CARD LOST                  or contact broke before the change went on
+   *   again     1g  CARD LOST                  contact broke part way, and the same sheet asks again;
+   *             1a  the flow's TAP TO ...      or a tap that begins again with nothing asked of the card yet
+   *   pin       1a  ENTER PIN                  the sheet ended asking for the PIN; the pad is up
    *
-   * The sheet's own line is the wallet's and 26f's (FC_STEPS, fcProgressText);
-   * nothing of it is repeated here, and no estimate of how long a tap will take:
-   * the till cannot know the count, and the card does not say it.
-   *
-   * The card in the animation is the card screen's own card (build/markup.html,
-   * `[data-card-portrait]`), standing up, 150px wide: its design is the card's (FX1 is
-   * the upright picture, img/card-fx1-portrait.jpg; FL1 the drawn face and EL1 the
-   * animated beaker, each turned a quarter to stand), FX1 until a card has been read at a till.
+   * The sheet's own line is the wallet's and 26f's (FC_STEPS, fcProgressText); nothing of it is repeated here.
+   * A person who asks for less motion has the dots and the arrow still (build/markup.html, `[data-look]` and
+   * `[data-tp-move]`).
    */
-  FC_TAP_FACE = '<div data-card-face style="width:100cqw;height:63.02cqw;border-radius:4.17cqw;box-sizing:border-box;position:relative;overflow:hidden;background:repeating-linear-gradient(92deg,rgba(255,255,255,.05) 0 1px,rgba(255,255,255,0) 1px 3px),repeating-linear-gradient(0deg,rgba(0,0,0,.16) 0 1px,rgba(0,0,0,0) 1px 4px),radial-gradient(circle at 22% 8%,rgba(255,255,255,.14),rgba(255,255,255,0) 46%),linear-gradient(146deg,#3A3B3D 0%,#1B1C1E 38%,#101113 72%,#26272A 100%);box-shadow:inset 0 1.5px 0 rgba(255,255,255,.34),inset 0 -2px 0 rgba(0,0,0,.7),inset 1.5px 0 0 rgba(255,255,255,.14),inset -1.5px 0 0 rgba(0,0,0,.6),0 2px 0 rgba(0,0,0,.7),0 14px 28px rgba(0,0,0,.6)"><div style="position:absolute;inset:3.52cqw;border-radius:2.34cqw;border:1px solid rgba(255,255,255,.16);box-shadow:inset 0 0 0 1px rgba(0,0,0,.5);pointer-events:none"></div><div style="position:absolute;inset:4.56cqw;border-radius:1.82cqw;background:repeating-linear-gradient(45deg,rgba(255,255,255,.045) 0 1px,rgba(255,255,255,0) 1px 5px),repeating-linear-gradient(-45deg,rgba(255,255,255,.045) 0 1px,rgba(255,255,255,0) 1px 5px);pointer-events:none"></div><div style="position:absolute;inset:6.25cqw;border-radius:1.04cqw;background:radial-gradient(circle at 50% 46%,rgba(0,0,0,.5),rgba(0,0,0,0) 72%);pointer-events:none"></div><div style="position:absolute;left:50%;top:50%;width:31.25cqw;height:31.25cqw;transform:translate(-50%,-50%);border-radius:50%;background:linear-gradient(150deg,#2E2F32,#121315);box-shadow:inset 0 2px 3px rgba(0,0,0,.8),inset 0 -1.5px 0 rgba(255,255,255,.16),0 1px 0 rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;pointer-events:none"><svg viewBox="0 0 236.5 366" style="height:16.15cqw;width:10.43cqw;display:block;opacity:.5"><path d="M81.1,364.6c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8L37.9,56.1c4.3-20.8,21.7-34.8,42.9-34.2,14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#050505"></path><path d="M103,355c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8L59.7,46.4c4.3-20.8,21.7-34.8,42.9-34.2,14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#5C5C5C"></path><path d="M124.1,342.8c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8,32.1-112C85.2,13.5,102.6-.5,123.8,0c14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#C9C9C9"></path></svg></div><div style="position:absolute;left:9.92cqw;top:8.75cqw;width:15.18cqw;height:13.78cqw;border-radius:1.56cqw;background:linear-gradient(150deg,#E8E4D8,#A9A392);box-shadow:inset 0 1px 0 rgba(255,255,255,.7),inset 0 -1px 0 rgba(60,58,50,.4),0 2px 4px rgba(0,0,0,.5);overflow:hidden"><div style="position:absolute;left:0;right:0;top:33%;height:1px;background:rgba(70,68,60,.4)"></div><div style="position:absolute;left:0;right:0;top:66%;height:1px;background:rgba(70,68,60,.4)"></div><div style="position:absolute;top:0;bottom:0;left:33%;width:1px;background:rgba(70,68,60,.4)"></div><div style="position:absolute;top:0;bottom:0;left:66%;width:1px;background:rgba(70,68,60,.4)"></div></div><div style="position:absolute;right:7.81cqw;bottom:6.25cqw;display:flex;flex-direction:column;align-items:center;gap:2px"><div style="font-size:5.99cqw;font-weight:800;line-height:1;color:rgba(255,255,255,.5)">₿</div><div style="font-family:Sora,sans-serif;font-size:2.86cqw;font-weight:600;letter-spacing:0.24em;color:rgba(255,255,255,.42)">BEARER</div></div>' + this.FC_EL1_FACE + '</div>';
-  FC_TAP_GROUNDS = {
-    '01': { ground: '#BFE3EC', ink: '#0F2A33', shadow: '0 14px 30px rgba(15,42,51,.28)' },
-    '03': { ground: '#EB6A2E', ink: '#1A0A04', shadow: '0 14px 30px rgba(26,10,4,.32)' },
+  // each screen's ground, ink, and the colours of its paragraph, its chip and its filled pill
+  FC_TAP_SCREENS = {
+    '1a': { bg: 'linear-gradient(180deg,#D6EEF4 0%,#BFE3EC 60%,#A9D6E2 100%)', ink: '#0F2A33' },
+    '1b': { bg: 'linear-gradient(180deg,#D6EEF4 0%,#BFE3EC 60%,#A9D6E2 100%)', ink: '#0F2A33' },
+    '1c': { bg: 'linear-gradient(180deg,#FF9A5C 0%,#EB6A2E 60%,#D9561C 100%)', ink: '#1A0A02' },
+    '1d': { bg: 'linear-gradient(180deg,#1A3C47 0%,#0F2A33 60%,#081C22 100%)', ink: '#F2FAFC' },
+    '1e': { bg: 'linear-gradient(180deg,#FFE7A8 0%,#F6C453 60%,#EDB236 100%)', ink: '#2A1A00', words: '#3D2A05', chip: 'rgba(42,26,0,.1)', solid: '#2A1A00', solidInk: '#FFE7A8' },
+    '1f': { bg: 'linear-gradient(180deg,#FFE7A8 0%,#F6C453 60%,#EDB236 100%)', ink: '#2A1A00', words: '#3D2A05', chip: 'rgba(42,26,0,.1)', solid: '#2A1A00', solidInk: '#FFE7A8' },
+    '1g': { bg: 'linear-gradient(180deg,#E8503F 0%,#D93A2B 60%,#B82A1E 100%)', ink: '#FFFFFF', words: '#FFE9E5', chip: 'rgba(255,255,255,.16)', solid: '#FFFFFF', solidInk: '#B82A1E' },
   };
-  FC_TAP_TITLES = {
-    hold: 'TAP BEHIND PHONE', keep: 'KEEP HOLDING · ', verify: 'VERIFYING CARD', remove: 'REMOVE',
-    checking: 'CHECKING', still: 'STILL CHECKING',
-    change: 'TAP FOR CHANGE', again: 'PLEASE TAP AGAIN', pin: 'ENTER PIN',
+  /* The words of each flow: what 1a asks for, what 1c says while the card is in contact, and what 1d says while the mint is
+   * asked. A tap names its flow (`fcTap`'s `o.flow`); one that names none is a payment's where it is paying (`o.paying`),
+   * the change's where it is a payment's second tap (`o.look`), and plain TAP CARD otherwise. */
+  FC_TAP_FLOWS = {
+    pay: { tap: 'TAP TO PAY', contact: 'PAYING', check: 'CHECKING' },
+    load: { tap: 'TAP TO LOAD', contact: 'RECEIVING', check: 'CHARGING' },
+    change: { tap: 'TAP FOR CHANGE', contact: 'RECEIVING', check: 'CHARGING' },
+    read: { tap: 'TAP TO READ', contact: 'READING', check: 'VERIFYING' },
+    withdraw: { tap: 'TAP TO WITHDRAW', contact: 'WITHDRAWING', check: 'CHECKING' },
+    swap: { tap: 'TAP TO SWAP', contact: 'SWAPPING', check: 'CHECKING' },
+    move: { tap: 'TAP TO MOVE', contact: 'MOVING', check: 'CHECKING' },
+    renew: { tap: 'TAP TO RENEW', contact: 'RENEWING', check: 'CHECKING' },
+    reset: { tap: 'TAP TO RESET', contact: 'RESETTING', check: 'CHECKING' },
+    setup: { tap: 'TAP TO SET UP', contact: 'SETTING UP', check: 'CHECKING' },
+    pin: { tap: 'TAP TO SET PIN', contact: 'WRITING', check: 'CHECKING' },
+    limit: { tap: 'TAP TO SET LIMIT', contact: 'WRITING', check: 'CHECKING' },
+    rate: { tap: 'TAP TO SET RATE', contact: 'WRITING', check: 'CHECKING' },
+    write: { tap: 'TAP CARD', contact: 'WRITING', check: 'CHECKING' },
+    card: { tap: 'TAP CARD', contact: 'READING', check: 'CHECKING' },
+  };
+  FC_TAP_WORDS = {
+    lost: 'The card moved away too soon. Hold it still behind the top of the phone.',
+    load: 'The card wasn’t read. This money is still waiting to go onto it.',
+    back: 'The card wasn’t read. This money is still waiting to go back onto it.',
+    pay: 'The card wasn’t read. Nothing has been paid yet.',
+  };
+  FC_TAP_CHIPS = { shield: 'Your money is still on your card.', lock: 'Only this card can receive it.' };
+  FC_TAP_ICONS = {
+    shield: '<path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"></path><path d="M9 12l2 2 4-4"></path>',
+    lock: '<rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path>',
   };
   // how long REMOVE is said after the card has signed, if the sheet has not been seen to go before then
   FC_TAP_REMOVE_MS = 1500;
@@ -77,6 +106,10 @@
         // the sheet ended asking for the PIN; and the tap that follows the pad
         pin: false, pinAgain: !!o.pinAgain,
         design: '',
+        // CLOSE took the screen down (`fcTapClose`); and a tap that takes up one the card left part way, some of it signed already
+        closed: false, resumed: !!o.lost && !!o.paying,
+        // the change has been asked for in this tap (TAP FOR CHANGE): the card in contact after it is receiving
+        forChange: false,
       };
     }
     const t = o.t;
@@ -98,12 +131,15 @@
   fcTapLost() {
     const t = this.fcTapState();
     if (t.gone || t.pin) return;
+    /* Only a card that was in the field can be lost. The phone's link says `lost` too when iOS ends a sheet no card came near
+     * (its own Cancel, its minute run out), and that is no card lost: the screen stays as it was, and the tap ends silent. */
+    if (!t.connected && !t.touched) return;
     t.lost = true;
     t.connected = false;
     if (this.stageUp('card')) this.fcTapDraw();
   }
 
-  /* The sheet ended asking for the PIN: the pad comes up over this, and the tap that follows it starts as PLEASE TAP AGAIN. */
+  /* The sheet ended asking for the PIN: the pad comes up over this, and the tap that follows it asks for the card again (1a). */
   fcTapPin() {
     const t = this.fcTapState();
     t.pin = true;
@@ -174,13 +210,8 @@
     }
   }
 
-  /* The seconds since the card connected. */
-  fcHeldSeconds() {
-    const t = this.fcTapState();
-    return t.connected ? Math.max(0, Math.floor((Date.now() - t.since) / 1000)) : 0;
-  }
-
-  /* Which screen this is, from where the tap has got to. */
+  /* Which screen this is, from where the tap has got to: the key (`data-look`), the screen of the family it is drawn as
+   * (`data-scheme`), whether the arrow and TAP CARD BEHIND THE TOP are up (`data-loop`), and whether CANCEL is. */
   fcTapLook() {
     const o = this._fcTapO || {};
     const t = this.fcTapState();
@@ -195,132 +226,227 @@
     // the tap that follows the PIN pad: nothing has been asked of the card yet, and it was asked before
     else if (t.pinAgain) key = 'again';
     else key = 'hold';
-    const warm = key === 'keep' || key === 'verify' || key === 'remove' || key === 'checking' || key === 'still';
+    // (the change asked for: from then on the card in contact is receiving it)
+    if (key === 'change') t.forChange = true;
+    const screen = (key === 'keep' || key === 'verify') ? '1c'
+      : (key === 'remove' || key === 'checking' || key === 'still') ? '1d'
+      : ((key === 'again' || key === 'change') && t.lost) ? '1g' : '1a';
     return {
-      key, scheme: warm ? '03' : '01',
-      // the card is wanted, and the loop says so; once it is there it stays settled
-      loop: key === 'hold' || key === 'again' || key === 'change',
+      key, scheme: screen,
+      // the card is wanted, and the arrow over the top says where
+      loop: screen === '1a' && key !== 'pin',
       // nothing has been asked of the card: the one way out is here (after that, finishing is)
       cancel: !t.touched && !t.connected && (key === 'hold' || key === 'again' || key === 'change'),
     };
   }
 
-  /* The screen, made once for a tap and kept: what changes is its ground, its title, and whether the card moves. */
-  fcTapBuild() {
+  // the words of the flow this tap is (FC_TAP_FLOWS)
+  fcTapFlow() {
+    const o = this._fcTapO || {};
+    const F = this.FC_TAP_FLOWS;
+    return F[String(o.flow || '')] || (o.look === 'receive' ? F.change : o.paying ? F.pay : F.card);
+  }
+
+  /* What the screen shows for a look: its screen, title, amount, the dots, the paragraph and chip of a card lost, and its pills. */
+  fcTapSpec(k) {
+    const o = this._fcTapO || {};
+    const t = this.fcTapState();
+    const f = this.fcTapFlow();
+    const spec = { screen: k.scheme, amount: o.amount || '', amountSub: o.amountSub || '', hint: k.loop, dots: '', words: '', chip: null, solid: null, plain: null };
+    const close = { label: 'CLOSE', go: () => this.fcTapClose() };
+    if (k.scheme === '1g') {
+      spec.title = 'CARD LOST';
+      spec.words = this.FC_TAP_WORDS.lost;
+      /* Money the card was to receive waits for it alone; a card that has not signed still holds its own. A payment taken up
+       * again after the card left part way (`o.lost` as it began) has some of it signed already: neither is said then. */
+      const receiving = f === this.FC_TAP_FLOWS.load || f === this.FC_TAP_FLOWS.change || t.signed;
+      spec.chip = receiving ? { icon: 'lock', text: this.FC_TAP_CHIPS.lock } : t.resumed ? null : { icon: 'shield', text: this.FC_TAP_CHIPS.shield };
+      spec.solid = { label: 'TRY AGAIN', go: () => this.fcTapRetry() };
+      spec.plain = { label: 'CANCEL', go: () => { const W = this.fcW(); if (W) W.cardStop(); } };
+      return spec;
+    }
+    if (k.key === 'pin') { spec.title = 'ENTER PIN'; return spec; }
+    if (k.scheme === '1a') {
+      spec.title = k.key === 'change' ? this.FC_TAP_FLOWS.change.tap : f.tap;
+      // the session ends as cancelled, and that is what takes this screen down
+      if (k.cancel) spec.plain = { label: 'CANCEL', go: () => { const W = this.fcW(); if (W) W.cardStop(); } };
+      return spec;
+    }
+    spec.dots = 'fast';
+    spec.plain = close;
+    spec.title = k.scheme === '1c' ? (t.forChange ? this.FC_TAP_FLOWS.change.contact : f.contact) : (k.key === 'still' ? 'STILL ' : '') + f.check;
+    return spec;
+  }
+
+  /* CLOSE on 1c and 1d: this screen goes, and the tap goes on under the phone's sheet (or, the card let go, at the mint) to its
+   * end, which is said as it always is; nothing of it draws this screen again. */
+  fcTapClose() {
+    this.fcTapState().closed = true;
+    this.hideStage('card');
+  }
+
+  /* TRY AGAIN on CARD LOST: the same sheet is asking for the card already, and the screen says so again (1a). */
+  fcTapRetry() {
+    const t = this.fcTapState();
+    t.lost = false;
+    if (this.stageUp('card')) this.fcTapDraw();
+  }
+
+  /* ---- one screen of the family, made and filled ------------------------------------------------------------------- */
+
+  /* The screen's parts, made once: the arrow and its words at the top, the title, the amount and what goes under it, and
+   * two pills at the foot (the filled one over the outlined one). `fcFamilyFill` changes them in place. */
+  fcFamilyBuild(kind) {
     this.hideStage();
     const root = document.createElement('div');
     root.id = 'foxy-stage';
-    root.setAttribute('data-stage', 'card');
-    root.setAttribute('data-look', 'hold');
-    root.style.cssText = 'position:fixed;inset:0;z-index:2147483300;display:flex;flex-direction:column;overflow:hidden;'
-      + 'box-sizing:border-box;padding-top:env(safe-area-inset-top);font-family:Sora,system-ui,sans-serif;'
-      + '-webkit-font-smoothing:antialiased;transition:background-color .35s ease,color .35s ease;animation:foxyIn .18s ease';
-    const BLUE = '#0A84FF';
-    const wave = (d, delay) => '<path data-tap-wave d="' + d + '" style="opacity:0;animation:cvWave 4.2s ease-out ' + delay + 's infinite"></path>';
+    root.setAttribute('data-stage', kind);
+    root.setAttribute('data-tp', '1');
+    root.style.cssText = 'position:fixed;inset:0;z-index:2147483300;overflow:hidden;box-sizing:border-box;'
+      + "font-family:Sora,system-ui,sans-serif;-webkit-font-smoothing:antialiased;animation:foxyIn .18s ease";
+    const fig = "font-family:Figtree,Sora,system-ui,sans-serif";
     root.innerHTML =
-      '<div data-tap-fur style="position:absolute;inset:0;background-image:url(snow-fur.jpg);background-size:cover;'
-      + 'mix-blend-mode:soft-light;opacity:0;pointer-events:none;transition:opacity .35s ease"></div>'
-      + '<div style="position:relative;width:100%;max-width:430px;margin:0 auto;flex:1 1 auto;min-height:0;display:flex;flex-direction:column">'
-      + '<div style="position:relative;flex:0 0 auto;height:269px;overflow:hidden">'
-      // 150px wide and 54 by 85.6 (237.8px tall), the corners its 3.18mm to scale
-      + '<div data-tap-card style="position:absolute;left:50%;top:30px;width:150px;margin-left:-75px;aspect-ratio:54 / 85.6;'
-      + 'border-radius:8.83px;overflow:hidden;animation:cvBehind 4.2s cubic-bezier(.5,0,.3,1) infinite">'
-      + '<div data-card-portrait data-card-design="FX1" style="position:relative;width:100%;height:100%">'
-      + '<div data-card-picture style="position:absolute;inset:0;background:url(img/card-fx1-portrait.jpg) center/cover no-repeat"></div>'
-      + '<div data-card-turn style="position:absolute;left:50%;top:50%;width:237.8px;transform:translate(-50%,-50%) rotate(90deg);container-type:inline-size">'
-      + this.FC_TAP_FACE + '</div></div></div>'
-      + '<svg viewBox="0 0 220 60" width="220" height="60" fill="none" style="position:absolute;left:50%;top:83px;margin-left:-110px;z-index:2;overflow:visible">'
-      + '<g stroke="' + BLUE + '" stroke-width="4" stroke-linecap="round">'
-      + wave('M70 40 Q110 14 150 40', 0) + wave('M52 34 Q110 -4 168 34', .25) + wave('M34 28 Q110 -22 186 28', .5)
-      + '</g></svg>'
-      + '<div style="position:absolute;left:50%;top:119px;width:300px;height:150px;margin-left:-150px;z-index:3;'
-      + 'border-radius:46px 46px 0 0;background:#0F2A33;box-shadow:0 -8px 24px rgba(15,42,51,.25);padding:8px 8px 0;box-sizing:border-box">'
-      + '<div style="width:100%;height:100%;border-radius:38px 38px 0 0;background:linear-gradient(180deg,#1E4450,#163842);position:relative">'
-      + '<div style="position:absolute;left:50%;top:12px;width:70px;height:20px;margin-left:-35px;border-radius:999px;background:#0A1B21"></div>'
-      + '</div></div></div>'
-      + '<div style="position:relative;padding:22px 32px 0;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center">'
-      + '<h1 style="margin:0;font-weight:800;font-size:31px;line-height:1.05;white-space:nowrap;letter-spacing:-.01em;'
-      + 'text-transform:uppercase"></h1>'
-      + '<div data-tap-amount style="margin-top:6px;font-weight:800;font-size:42px;letter-spacing:-.02em"></div>'
-      + '</div></div>';
-    /* CANCEL, where the phone's sheet would be: under it on a phone, whose sheet has its own, and the way out wherever
-     * there is no sheet. */
-    const wrap = document.createElement('div');
-    wrap.style.cssText = 'position:relative;z-index:1;margin-top:auto;padding:20px 24px calc(44px + env(safe-area-inset-bottom))';
-    const b = document.createElement('div');
-    b.style.cssText = 'width:100%;height:60px;border-radius:18px;box-sizing:border-box;border:2px solid;'
-      + 'background:rgba(255,255,255,.35);font-family:Sora,system-ui,sans-serif;font-weight:800;font-size:17px;'
-      + 'letter-spacing:.04em;text-transform:uppercase;display:flex;align-items:center;justify-content:center;cursor:pointer';
-    b.textContent = 'CANCEL';
-    b.setAttribute('data-stage-button', '1');
-    // the session ends as cancelled, and that is what takes this screen down
-    b.addEventListener('click', () => { const W = this.fcW(); if (W) W.cardStop(); });
-    wrap.appendChild(b);
-    root.firstElementChild.nextElementSibling.appendChild(wrap);
+      // the arrow bobbing up to the top of the phone, where the card goes
+      '<div data-tp-hint style="position:absolute;left:0;right:0;top:0;height:110px;overflow:hidden;pointer-events:none">'
+      + '<div style="position:absolute;left:0;right:0;top:max(28px, env(safe-area-inset-top));display:flex;flex-direction:column;align-items:center;gap:2px">'
+      + '<svg data-tp-move viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="animation:tpArrow 1.2s ease-in-out infinite"><path d="M6 14l6-6 6 6"></path></svg>'
+      + '<span style="' + fig + ';font-weight:700;font-size:15px;letter-spacing:.08em">TAP CARD BEHIND THE TOP</span></div></div>'
+      + '<div data-tp-body style="position:absolute;left:0;right:0;top:0;display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;'
+      + 'box-sizing:border-box;padding:calc(max(54px, env(safe-area-inset-top)) + min(130px, 15vh)) 36px 0">'
+      + '<h1 style="margin:0;font-weight:800;font-size:34px;line-height:1.05;letter-spacing:.1em;white-space:nowrap"></h1>'
+      + '<div data-tap-amount style="font-weight:800;font-size:76px;line-height:1;letter-spacing:-.04em;white-space:nowrap"></div>'
+      + '<div data-tap-amount-sub style="margin-top:-4px;' + fig + ';font-weight:600;font-size:19px;opacity:.6"></div>'
+      + '<p data-tp-words style="margin:22px 0 0;' + fig + ';font-weight:500;font-size:19px;line-height:1.45;text-wrap:balance"></p>'
+      + '<div data-tp-chip style="margin-top:6px;display:flex;align-items:center;gap:10px;padding:12px 18px;border-radius:999px;' + fig + ';font-weight:700;font-size:15px">'
+      + '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex:none"></svg><span></span></div>'
+      + '<div data-tp-dots style="margin-top:22px;display:flex;gap:10px">'
+      + '<span data-tp-move></span><span data-tp-move></span><span data-tp-move></span></div>'
+      + '</div>';
+    const foot = document.createElement('div');
+    foot.setAttribute('data-tp-foot', '1');
+    foot.style.cssText = 'position:absolute;left:0;right:0;bottom:0;padding:0 24px max(40px, calc(env(safe-area-inset-bottom) + 16px));display:flex;flex-direction:column;gap:12px';
+    const pill = (solid) => {
+      const b = document.createElement('div');
+      b.style.cssText = 'height:58px;border-radius:999px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;'
+        + 'font-family:Sora,system-ui,sans-serif;font-weight:800;font-size:17px;letter-spacing:.08em;cursor:pointer;'
+        + (solid ? '' : 'border:2px solid currentColor');
+      b.setAttribute(solid ? 'data-tp-solid' : 'data-stage-button', '1');
+      b.addEventListener('click', () => { const go = /** @type {any} */ (b)._go; if (typeof go === 'function') go(); });
+      foot.appendChild(b);
+      return b;
+    };
+    pill(true);
+    pill(false);
+    root.appendChild(foot);
     document.body.appendChild(root);
+    return root;
+  }
+
+  /* Fill the screen for `spec` (`fcTapSpec`'s shape): its ground and ink, the words, the dots' pace, and the pills. */
+  fcFamilyFill(root, spec) {
+    const S = this.FC_TAP_SCREENS[spec.screen] || this.FC_TAP_SCREENS['1a'];
+    const q = (sel) => /** @type {HTMLElement | null} */ (root.querySelector(sel));
+    root.setAttribute('data-scheme', spec.screen);
+    root.style.background = S.bg;
+    root.style.color = S.ink;
+    const shown = (el, on) => { if (el) el.style.display = on ? '' : 'none'; };
+    const hint = q('[data-tp-hint]');
+    shown(hint, !!spec.hint);
+    this.fcFamilyTitle(root, String(spec.title || ''));
+    const amount = q('[data-tap-amount]');
+    if (amount) { amount.textContent = spec.amount || ''; shown(amount, !!spec.amount); }
+    const sub = q('[data-tap-amount-sub]');
+    if (sub) { sub.textContent = spec.amountSub || ''; shown(sub, !!spec.amountSub); }
+    const words = q('[data-tp-words]');
+    if (words) { words.textContent = spec.words || ''; words.style.color = S.words || S.ink; shown(words, !!spec.words); }
+    const chip = q('[data-tp-chip]');
+    if (chip) {
+      const c = spec.chip;
+      shown(chip, !!c);
+      chip.style.background = S.chip || 'transparent';
+      if (c) {
+        const svg = chip.querySelector('svg');
+        const icon = this.FC_TAP_ICONS[c.icon] || '';
+        if (svg && svg.getAttribute('data-icon') !== c.icon) { svg.innerHTML = icon; svg.setAttribute('data-icon', c.icon); }
+        const span = chip.querySelector('span');
+        if (span) span.textContent = c.text;
+      }
+    }
+    const dots = q('[data-tp-dots]');
+    if (dots) {
+      shown(dots, !!spec.dots);
+      const pace = spec.dots === 'fast' ? [0.8, 0.12] : [1.2, 0.18];
+      Array.from(dots.children).forEach((d, i) => {
+        const el = /** @type {HTMLElement} */ (d);
+        el.style.cssText = 'width:12px;height:12px;border-radius:50%;background:currentColor;'
+          + (spec.dots ? 'animation:tpDot ' + pace[0] + 's ease-in-out ' + (i * pace[1]).toFixed(2) + 's infinite' : '');
+      });
+    }
+    const pill = (el, b, solid) => {
+      if (!el) return;
+      /** @type {any} */ (el)._go = b ? b.go : null;
+      el.textContent = b ? b.label : '';
+      el.style.display = b ? 'flex' : 'none';
+      el.style.visibility = b ? 'visible' : 'hidden';
+      if (solid) { el.style.background = S.solid || '#0A0A0A'; el.style.color = S.solidInk || '#FFFFFF'; }
+    };
+    pill(q('[data-tp-solid]'), spec.solid, true);
+    pill(q('[data-stage-button]'), spec.plain, false);
+  }
+
+  /* The title on one line: 34px, smaller only where a phone is too narrow for it. */
+  fcFamilyTitle(root, text) {
+    const h = /** @type {HTMLElement | null} */ (root.querySelector('h1'));
+    if (!h) return;
+    if (h.textContent !== text) h.textContent = text;
+    try {
+      h.style.fontSize = '34px';
+      const col = h.parentElement;
+      const room = col ? col.clientWidth - 48 : 0;
+      const need = h.scrollWidth;
+      if (room > 0 && need > room) h.style.fontSize = Math.max(18, Math.floor(340 * room / need) / 10) + 'px';
+    } catch (e) { /* no layout to measure */ }
+  }
+
+  /* A screen of the family that is not the one behind the sheet: GETTING READY (1b), CHECKING (1d), TAP AGAIN (1e, 1f). `kind`
+   * names it, so whatever put it up can take down its own and nothing else's; a pill pressed takes it down first, and a wait
+   * (`forMs`) takes it down by itself when it outlives what it waited for, as every stage does. */
+  fcFamilyScreen(kind, spec, forMs) {
+    const root = this.fcFamilyBuild(kind);
+    const wrap = (b) => (b ? { label: b.label, go: () => { this.hideStage(kind); if (typeof b.go === 'function') b.go(); } } : null);
+    this.fcFamilyFill(root, Object.assign({}, spec, { solid: wrap(spec.solid), plain: wrap(spec.plain) }));
+    if (forMs > 0) this._stageT = setTimeout(() => this.hideStage(kind), forMs);
+    if (this.syncPreview) this.syncPreview();
+    console.log('[foxy] screen: ' + kind + ', ' + String(spec.title || '').toLowerCase());
+    return root;
+  }
+
+  /* ---- the screen behind the sheet ---------------------------------------------------------------------------------- */
+
+  /* Made once for a tap and kept: what changes is filled in place, so the dots do not start again when only the title moves. */
+  fcTapBuild() {
+    const root = this.fcFamilyBuild('card');
+    root.setAttribute('data-look', 'hold');
     // the rule every stage keeps: one that outlives what it waited for hides a working app
     this._stageT = setTimeout(() => this.hideStage('card'), 120000);
     return root;
   }
 
-  /* Draw the screen for where the tap has got to: made if it is not up, and otherwise changed in place, so that the
-   * card does not start again when only the title has moved. */
+  /* Draw the screen for where the tap has got to: made if it is not up, and otherwise changed in place. A screen CLOSE took
+   * down is not drawn again for the same tap. */
   fcTapDraw() {
-    const o = this._fcTapO || {};
+    const t = this.fcTapState();
+    if (t.closed) return;
     const k = this.fcTapLook();
     let root = document.getElementById('foxy-stage');
     const fresh = !(root && root.getAttribute('data-stage') === 'card' && root.getAttribute('data-look'));
     if (fresh) root = this.fcTapBuild();
     if (!root) return;
-    const g = this.FC_TAP_GROUNDS[k.scheme];
     const was = root.getAttribute('data-look');
     root.setAttribute('data-look', k.key);
-    root.setAttribute('data-scheme', k.scheme);
-    root.style.backgroundColor = g.ground;
-    root.style.color = g.ink;
-    const fur = /** @type {HTMLElement | null} */ (root.querySelector('[data-tap-fur]'));
-    if (fur) fur.style.opacity = k.scheme === '03' ? '.5' : '0';
-    // the card's design: FX1 is its picture and FL1 the face drawn in CSS (build/markup.html)
-    const t = this.fcTapState();
-    const design = t.design || (this.state && this.state.fc ? this.fcDesignOf(this.state.fc) : 'FX1');
-    const face = root.querySelector('[data-card-design]');
-    if (face && face.getAttribute('data-card-design') !== design) face.setAttribute('data-card-design', design);
-    const card = /** @type {HTMLElement | null} */ (root.querySelector('[data-tap-card]'));
-    if (card) card.style.boxShadow = g.shadow;
-    // the loop starts when a card is wanted and stops where it is when it is there
-    const looping = root.getAttribute('data-loop') === '1';
-    if (k.loop !== looping || fresh) {
-      root.setAttribute('data-loop', k.loop ? '1' : '0');
-      if (card) card.style.animation = k.loop ? 'cvBehind 4.2s cubic-bezier(.5,0,.3,1) infinite' : 'none';
-      Array.from(root.querySelectorAll('[data-tap-wave]')).forEach((w, i) => {
-        /** @type {HTMLElement} */ (w).style.animation = k.loop ? 'cvWave 4.2s ease-out ' + (i * 0.25) + 's infinite' : 'none';
-      });
-    }
-    const amount = /** @type {HTMLElement | null} */ (root.querySelector('[data-tap-amount]'));
-    if (amount) {
-      amount.textContent = o.amount || '';
-      amount.style.display = o.amount ? '' : 'none';
-    }
-    /* A dollar receive paid by a card: the sats the card pays, under the dollars asked, as every bitcoin figure is shown
-     * beside its dollars. Made only when there is such a line, so every other tap's screen is as it always was. */
-    let sub = /** @type {HTMLElement | null} */ (root.querySelector('[data-tap-amount-sub]'));
-    if (o.amountSub && !sub && amount && amount.parentNode) {
-      sub = document.createElement('div');
-      sub.setAttribute('data-tap-amount-sub', '1');
-      sub.style.cssText = 'margin-top:-8px;font-weight:600;font-size:19px;letter-spacing:-.01em;opacity:.6';
-      amount.parentNode.insertBefore(sub, amount.nextSibling);
-    }
-    if (sub) {
-      sub.textContent = o.amountSub || '';
-      sub.style.display = o.amountSub ? '' : 'none';
-    }
-    this.fcTapTitle(root, k);
-    const btn = /** @type {HTMLElement | null} */ (root.querySelector('[data-stage-button]'));
-    if (btn) { btn.style.visibility = k.cancel ? 'visible' : 'hidden'; btn.style.color = g.ink; btn.style.borderColor = g.ink; }
-    // the count runs only while it is on the screen
-    if (k.key === 'keep' && !this._fcCountT) this._fcCountT = setInterval(() => this.fcTapTick(), 500);
-    else if (k.key !== 'keep') { clearInterval(this._fcCountT); this._fcCountT = null; }
-    if (fresh || was !== k.key) console.log('[foxy] screen: card, ' + k.key);
+    root.setAttribute('data-loop', k.loop ? '1' : '0');
+    this.fcFamilyFill(root, this.fcTapSpec(k));
+    if (fresh || was !== k.key) console.log('[foxy] screen: card, ' + k.key + ' (' + k.scheme + ')');
     if (fresh && this.syncPreview) this.syncPreview();
     /* A look that comes of time alone is drawn when it is due, and the timer goes with the screen (`hideStage`). */
     clearTimeout(this._fcLookT);
@@ -333,41 +459,3 @@
       }, due);
     }
   }
-
-  /* The title, one line: KEEP HOLDING carries the seconds, whose unit stays lowercase. */
-  fcTapTitle(root, k) {
-    const h = /** @type {HTMLElement | null} */ (root.querySelector('h1'));
-    if (!h) return;
-    const secs = k.key === 'keep' ? this.fcHeldSeconds() : -1;
-    const sig = k.key + ':' + secs;
-    if (h.getAttribute('data-sig') !== sig) {
-      h.setAttribute('data-sig', sig);
-      h.textContent = this.FC_TAP_TITLES[k.key];
-      if (secs >= 0) {
-        const u = document.createElement('span');
-        u.style.textTransform = 'none';
-        u.textContent = secs + ' s';
-        h.appendChild(u);
-      }
-    }
-    // one line, whatever the phone's width: smaller when it would not fit (the design is 31px on 430)
-    try {
-      h.style.fontSize = '31px';
-      const col = h.parentElement;
-      const room = col ? col.clientWidth - 64 : 0;
-      const need = h.scrollWidth;
-      if (room > 0 && need > room) h.style.fontSize = Math.max(18, Math.floor(310 * room / need) / 10) + 'px';
-    } catch (e) { /* no layout to measure */ }
-  }
-
-  /* One turn of the count: it stops by itself when the screen it was counting for is gone. */
-  fcTapTick() {
-    const root = document.getElementById('foxy-stage');
-    if (!root || root.getAttribute('data-stage') !== 'card' || root.getAttribute('data-look') !== 'keep') {
-      clearInterval(this._fcCountT);
-      this._fcCountT = null;
-      return;
-    }
-    this.fcTapTitle(root, { key: 'keep' });
-  }
-

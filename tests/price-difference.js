@@ -146,8 +146,8 @@ async function run() {
     };
     const agreed = conf({ req: { id: 'agreed-1', unit: 'sat', sats: 5000, mints: ['https://m.test'], transports: [], viaTap: true },
       tapQuoteFor: 'agreed-1', tapQuoteUsd: 500, tapQuoteRate: 100000, tapQuoteAgeMs: 60000 });
-    ok(agreed.amount === '₿ 5,000' && agreed.amountSub === '$ 5.00' && agreed.cta === 'SEND ₿ 5,000',
-      'the sats this phone holds are the big number, the dollars asked under them, and the button says the sats',
+    ok(agreed.amount === '₿ 5,000' && agreed.amountSub === '$ 5.00' && agreed.cta === 'PAY ₿ 5,000',
+      'the sats this phone holds are the big number, the dollars asked under them, and the button says PAY and the sats (the keeper, 2026-11-06)',
       agreed.amount + ' / ' + agreed.amountSub + ' / ' + agreed.cta);
     ok(!agreed.diffLine, 'a request in dollars carries no price of the asker’s, so there is no line');
     ok(row(agreed, 'FEE') && row(agreed, 'FEE').sub2 === FEES && row(agreed, 'FEE').value === '$ 0.00',

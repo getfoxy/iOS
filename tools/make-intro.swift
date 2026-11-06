@@ -1,6 +1,16 @@
 // make-intro.swift — the launch intro, from the source animation to what ships.
 //
 //     swift tools/make-intro.swift "<the mp4>"
+//     swift tools/make-intro.swift --wait "<the mp4>"
+//
+// --wait writes the fox of the waiting screen instead (build/app/26r-fox-wait.js):
+// Web/img/foxy-wait.mp4, the drawing as it comes at half its size (584x384),
+// every frame a key frame, so the page can put the video on any frame at the
+// cost of decoding that one frame; and Web/img/foxy-wait-first.png, its first
+// frame (the fox asleep), shown until the video has a frame of its own. The
+// waiting screen moves the video with its percentage rather than playing it,
+// and a file with a key frame every second would decode up to a second of
+// frames for each step.
 //
 // The drawing arrives white on black already (1168x768, 24fps, 9.6s), which is
 // how Foxy shows it, so nothing here touches colour: this scales it down and
@@ -29,10 +39,25 @@ import ImageIO
 import CoreGraphics
 import UniformTypeIdentifiers
 
-let args = CommandLine.arguments
+var args = CommandLine.arguments
+let WAIT = args.count > 2 && args[1] == "--wait"
+if WAIT { args.remove(at: 1) }
 guard args.count > 1 else {
-    FileHandle.standardError.write("usage: swift tools/make-intro.swift <mp4>\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: swift tools/make-intro.swift [--wait] <mp4>\n".data(using: .utf8)!)
     exit(2)
+}
+// the waiting screen's fox: the drawing as it comes, at half its size
+let WAIT_W = 584, WAIT_H = 384
+
+func halved(_ img: CGImage) -> CGImage {
+    let ctx = CGContext(data: nil, width: WAIT_W, height: WAIT_H, bitsPerComponent: 8, bytesPerRow: 0,
+                        space: CGColorSpaceCreateDeviceRGB(),
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    ctx.interpolationQuality = .high
+    ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+    ctx.fill(CGRect(x: 0, y: 0, width: WAIT_W, height: WAIT_H))
+    ctx.draw(img, in: CGRect(x: 0, y: 0, width: WAIT_W, height: WAIT_H))
+    return ctx.makeImage()!
 }
 /* The canvas everything is drawn on: the splash's shape (1321 x 2869) at a
  * size a phone can use. Even numbers, which the encoder wants. */
@@ -110,7 +135,7 @@ let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
 reader.add(output)
 reader.startReading()
 
-let out = URL(fileURLWithPath: "Web/foxy-intro.mp4")
+let out = URL(fileURLWithPath: WAIT ? "Web/img/foxy-wait.mp4" : "Web/foxy-intro.mp4")
 try? FileManager.default.removeItem(at: out)
 let writer = try! AVAssetWriter(outputURL: out, fileType: .mp4)
 var input: AVAssetWriterInput?
@@ -129,7 +154,7 @@ while let sample = output.copyNextSampleBuffer() {
                         space: CGColorSpaceCreateDeviceRGB(),
                         bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
                             | CGBitmapInfo.byteOrder32Little.rawValue)!
-    let frame = composited(ctx.makeImage()!)
+    let frame = WAIT ? halved(ctx.makeImage()!) : composited(ctx.makeImage()!)
     CVPixelBufferUnlockBaseAddress(pb, .readOnly)
 
     if input == nil {
@@ -145,10 +170,16 @@ while let sample = output.copyNextSampleBuffer() {
                 AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
                 AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
             ],
-            AVVideoCompressionPropertiesKey: [
+            AVVideoCompressionPropertiesKey: WAIT ? [
+                // every frame a key frame, and none reordered: a seek decodes the one frame it lands on
+                AVVideoAverageBitRateKey: 1_000_000,
+                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+                AVVideoMaxKeyFrameIntervalKey: 1,
+                AVVideoAllowFrameReorderingKey: false,
+            ] as [String: Any] : [
                 AVVideoAverageBitRateKey: 2_000_000,
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-            ],
+            ] as [String: Any],
         ])
         inp.expectsMediaDataInRealTime = false
         let ad = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: inp,
@@ -185,11 +216,16 @@ guard writer.status == .completed else {
     FileHandle.standardError.write("the video would not write: \(writer.error?.localizedDescription ?? "?")\n".data(using: .utf8)!)
     exit(1)
 }
-writePNG(last!, "Web/foxy-intro-last.png")
-// the splash, from the first frame, so the still and the animation cannot drift
-writePNG(first!, "Web/foxy-splash-still.png")
+if WAIT {
+    // the fox asleep, for the moment before the video has a frame of its own
+    writePNG(first!, "Web/img/foxy-wait-first.png")
+} else {
+    writePNG(last!, "Web/foxy-intro-last.png")
+    // the splash, from the first frame, so the still and the animation cannot drift
+    writePNG(first!, "Web/foxy-splash-still.png")
+}
 let bytes = ((try? FileManager.default.attributesOfItem(atPath: out.path)[.size] as? Int) ?? 0) ?? 0
 let f = foxBox(first!), l = foxBox(last!)
-print("Web/foxy-intro.mp4  \(count) frames, \(Int(size.width))x\(Int(size.height)), \(bytes / 1024)KB")
+print("\(out.relativePath)  \(count) frames, \(Int(size.width))x\(Int(size.height)), \(bytes / 1024)KB")
 print(String(format: "first frame fox: x %.4f…%.4f  y %.4f…%.4f", f.x0, f.x1, f.y0, f.y1))
 print(String(format: "last  frame fox: x %.4f…%.4f  y %.4f…%.4f", l.x0, l.x1, l.y0, l.y1))

@@ -123,6 +123,36 @@ enum CardGate {
         }
     }
 
+    /// A debug build's `-FoxyFirstDepth N`: how many of each size a card's first load is cut to for that run, from 1 (one
+    /// binary set, the default) to 8 (the whole drawer); nil for anything else, and the default stands.
+    static func firstDepth(_ n: Int) -> Int? {
+        (1...8).contains(n) ? n : nil
+    }
+
+    /// The most commands one batch carries (`cardSendMany`): a few seconds of a card's work at the most, so that the
+    /// sheet's line is told how far it has got between batches.
+    static let batchMost = 16
+
+    /// A batch from the page, as commands: one to `batchMost` of them, each a load (LOAD, 0x30) to this app's own applet once
+    /// it has been chosen; never the choosing itself, never any other command. Nil, with nothing to be sent, where any one is
+    /// not.
+    static func batch(_ hexes: [String], selected: Bool) -> [Data]? {
+        guard selected, !hexes.isEmpty, hexes.count <= batchMost else { return nil }
+        var out = [Data]()
+        for hex in hexes {
+            // a card's load (LOAD, 0x30) and nothing else: the one command a load sends many of
+            guard let apdu = bytes(hex: hex), read(apdu) == .applet(0x30) else { return nil }
+            out.append(apdu)
+        }
+        return out
+    }
+
+    /// A batch's answers for the page: each as hex, in order, joined by commas, with `lost` last where the card left
+    /// before the next was answered.
+    static func batchAnswer(_ answers: [Data], lost: Bool) -> String {
+        (answers.map { hex($0) } + (lost ? ["lost"] : [])).joined(separator: ",")
+    }
+
     /// Whether an answer says the command was carried out (9000).
     static func succeeded(_ answer: Data) -> Bool {
         answer.count >= 2 && answer[answer.endIndex - 2] == 0x90 && answer[answer.endIndex - 1] == 0x00

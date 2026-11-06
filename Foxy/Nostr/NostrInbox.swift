@@ -56,28 +56,10 @@ final class NostrInbox {
     var connect: (URL, String) -> NostrRelaySocket? = { url, circuit in
         Route.startSocket(url, circuit: circuit).map { URLSessionRelaySocket(task: $0.task, session: $0.session) }
     }
-    /// The circuit every socket of this inbox leaves on; nil: each socket a circuit of its own (MintCircuit.label(nil)).
-    var circuit: String?
-    /// The relays `open` goes to; nil: `relays`, at most `mostRelays`. One contact's messages go to one relay
-    /// (CashuMsgListen.swift).
-    var listensOn: [String]?
-    /// Told once, on the main queue, when every relay that was listening has gone (a socket that dies is not opened
-    /// again in this listen).
-    var onDropped: (() -> Void)?
-    /// True when the last `open` found no route at all: no socket could be made to any relay (Tor not running), so
-    /// no relay was tried.
-    private(set) var noRoute = false
     private var seen = Set<String>()
     private var closed = false
     /// Internal, not private, so that a test can hand `took` a relay's message.
     let subscription: String
-    /// The inbox on many keys at once (`init(keys:)`, the messages between Cashu IDs): each key's private half by
-    /// its x-only public half in hex, and who is told of each rumor that opens, with the key it was addressed to. Empty
-    /// and nil for an inbox on one key.
-    private var keyed: [String: [UInt8]] = [:]
-    let onRumor: ((_ pubkey: String, _ rumor: NostrEvent.Event) -> Void)?
-    /// Every key this inbox asks the relays for, in order: one, or `keyed`'s.
-    private(set) var pubkeys: [[UInt8]] = []
     /// What the log calls this inbox. The request's keeps the words it always
     /// had; a till's says which, so four of them closing are not one line four times.
     let label: String
@@ -117,8 +99,6 @@ final class NostrInbox {
         self.limit = 64
         self.seenCap = 128
         self.pages = 1
-        self.onRumor = nil
-        self.pubkeys = [p]
     }
 
     /// An inbox on a key that was made earlier and kept: a cashier code's,
@@ -153,39 +133,6 @@ final class NostrInbox {
         self.seenCap = 4096
         self.pages = max(1, pages)
         self.askSince = since
-        self.onRumor = nil
-        self.pubkeys = [p]
-    }
-
-    /// An inbox on many keys at once, in one REQ (`askMany`): the keys one contact's next messages may come to
-    /// (CashuMsg.swift, CashuMsgListen.swift: one such inbox a contact, never two contacts' keys in one), each used for
-    /// one message and never again. A wrap is opened by the key its
-    /// `p` tag names and by no other, and `onRumor` is told the rumor and that key; nothing reaches `onPayment`. One
-    /// answer of `limit` per filter, no pages: a key used once holds one message. nil when there is no key or one is
-    /// not a secp256k1 key.
-    init?(keys: [[UInt8]], since: Int, label: String, onRumor: @escaping (_ pubkey: String, _ rumor: NostrEvent.Event) -> Void) {
-        guard !keys.isEmpty else { return nil }
-        var map = [String: [UInt8]]()
-        var order = [[UInt8]]()
-        for k in keys {
-            guard k.count == 32, let p = try? NostrCrypto.publicKey(of: k) else { return nil }
-            let name = NostrEvent.hex(p)
-            if map[name] == nil { order.append(p) }
-            map[name] = k
-        }
-        self.secret = keys[0]
-        self.pubkey = order[0]
-        self.onPayment = { _ in }
-        self.onRumor = onRumor
-        self.keyed = map
-        self.pubkeys = order
-        self.subscription = NostrEvent.hex((try? NostrCrypto.newKey())?.prefix(8).map { $0 } ?? [0, 1, 2, 3])
-        self.label = label
-        self.since = since
-        self.limit = 500
-        self.seenCap = 4096
-        self.pages = 1
-        self.askSince = since
     }
 
     /// What the payment request names: this inbox's key and its relays.
@@ -200,7 +147,7 @@ final class NostrInbox {
     func open(_ done: @escaping (Bool) -> Void) {
         dispatchPrecondition(condition: .onQueue(.main))
         guard !closed else { done(false); return }
-        let urls = NostrDelivery.relays(Array((listensOn ?? Self.relays).prefix(Self.mostRelays)))
+        let urls = NostrDelivery.relays(Array(Self.relays.prefix(Self.mostRelays)))
         guard !urls.isEmpty else { done(false); return }
 
         /* Only gift wraps, and only ones addressed to this key.
@@ -222,15 +169,11 @@ final class NostrInbox {
          * proofs it has seen and takes each once (`_tillArrived`). */
         let backdating = 172_800                            // NIP-59's two days
         let since = self.since ?? (Int(Date().timeIntervalSince1970) - backdating - 3600)
-        let ask = keyed.isEmpty
-            ? Self.ask(subscription: subscription, pubkey: pubkey, since: since, until: nil, limit: limit)
-            : Self.askMany(subscription: subscription, pubkeys: pubkeys, since: since, limit: limit)
+        let ask = Self.ask(subscription: subscription, pubkey: pubkey, since: since, until: nil, limit: limit)
         askSince = since
 
         var answered = false
         var left = urls.count
-        var made = 0
-        noRoute = false
         let report: (Bool) -> Void = { [weak self] ok in
             guard let self, !self.closed else { return }
             if ok, !answered { answered = true; done(true); return }
@@ -239,11 +182,10 @@ final class NostrInbox {
         }
 
         for (place, relay) in urls.enumerated() {
-            guard let socket = connect(relay, circuit ?? MintCircuit.label(nil)) else {
+            guard let socket = connect(relay, MintCircuit.label(nil)) else {
                 DispatchQueue.main.async { report(false) }
                 continue
             }
-            made += 1
             sockets.append(socket)
             paging[place] = Paging()
             if sendAsk == nil {
@@ -273,7 +215,6 @@ final class NostrInbox {
                 }
             }
         }
-        if made == 0 { noRoute = true }
     }
 
     /// The REQ for gift wraps addressed to `pubkey`, from `since`, and up to
@@ -282,22 +223,6 @@ final class NostrInbox {
         let upTo = until.map { ",\"until\":\($0)" } ?? ""
         let filter = "{\"kinds\":[1059],\"#p\":[\"\(NostrEvent.hex(pubkey))\"],\"since\":\(since)\(upTo),\"limit\":\(limit)}"
         return "[\"REQ\",\"\(subscription)\",\(filter)]"
-    }
-
-    /// The REQ for gift wraps addressed to any of `pubkeys`, from `since`: one filter for each hundred keys
-    /// (CashuMsg.keysPerFilter), so that no relay is handed a filter longer than it takes.
-    ///
-    ///     ["REQ", <sub>, {"kinds":[1059],"#p":[<up to 100 hex>],"since":<s>,"limit":<n>}, …]
-    static func askMany(subscription: String, pubkeys: [[UInt8]], since: Int, limit: Int, perFilter: Int = 100) -> String {
-        var filters = [String]()
-        var at = 0
-        while at < pubkeys.count {
-            let slice = pubkeys[at..<min(at + max(1, perFilter), pubkeys.count)]
-            let keys = slice.map { "\"" + NostrEvent.hex($0) + "\"" }.joined(separator: ",")
-            filters.append("{\"kinds\":[1059],\"#p\":[\(keys)],\"since\":\(since),\"limit\":\(limit)}")
-            at += max(1, perFilter)
-        }
-        return "[\"REQ\",\"\(subscription)\"," + filters.joined(separator: ",") + "]"
     }
 
     private var askSince = 0
@@ -362,7 +287,6 @@ final class NostrInbox {
                 DispatchQueue.main.async {
                     guard !self.closed else { return }
                     self.drop(socket, relay: relay)
-                    if self.sockets.isEmpty, let gone = self.onDropped { self.onDropped = nil; gone() }
                 }
                 return
             }
@@ -381,15 +305,6 @@ final class NostrInbox {
               let data = text.data(using: .utf8),
               let parts = (try? JSONSerialization.jsonObject(with: data)) as? [Any],
               parts.count >= 2, (parts[1] as? String) == subscription else { return }
-        /* A relay that closes this subscription (rate-limited:, auth-required:, restricted:) is not serving it: for
-         * an inbox whose holder asked to be told (`onDropped`, one contact's at one relay), that relay is let go as a
-         * dead socket would be, so the holder tries another. The others keep their sockets and the relays left. */
-        if (parts[0] as? String) == "CLOSED", onDropped != nil, relay >= 0, let socket = relaySockets[relay] {
-            print("[foxy] \(label): a relay closed the request; left for this listen")
-            drop(socket, relay: relay)
-            if sockets.isEmpty, let gone = onDropped { onDropped = nil; gone() }
-            return
-        }
         if (parts[0] as? String) == "EOSE" {
             if pages > 1 { pageEnded(relay: relay) }
             return
@@ -413,16 +328,7 @@ final class NostrInbox {
         // cannot make the genuine one from every other relay drop as a copy.
         guard !wrap.id.isEmpty, !seen.contains(wrap.id) else { return }
 
-        // an inbox on many keys opens a wrap only by the key it names
-        var key = secret
-        var addressed = NostrEvent.hex(pubkey)
-        if !keyed.isEmpty {
-            guard let p = wrap.tags.first(where: { $0.count >= 2 && $0[0] == "p" })?[1].lowercased(),
-                  let k = keyed[p] else { return }
-            key = k
-            addressed = p
-        }
-        guard let rumor = NostrEvent.unwrap(wrap, to: key) else {
+        guard let rumor = NostrEvent.unwrap(wrap, to: secret) else {
             #if DEBUG
             print("[foxy] \(label): a wrap did not open, or did not check out")
             #endif
@@ -430,11 +336,6 @@ final class NostrInbox {
         }
         if seen.count >= seenCap { seen.removeAll() }
         seen.insert(wrap.id)
-        if let onRumor {
-            print("[foxy] \(label): a message arrived")
-            onRumor(addressed, rumor)
-            return
-        }
         print("[foxy] \(label): a payment arrived")
         onPayment(rumor.content)
     }
@@ -449,10 +350,7 @@ final class NostrInbox {
         sockets.removeAll()
         relaySockets.removeAll()
         sendAsk = nil
-        onDropped = nil
         seen.removeAll()
-        for name in Array(keyed.keys) { NUT13.wipe(&keyed[name]!) }
-        keyed.removeAll()
         NUT13.wipe(&secret)
         print("[foxy] \(label) closed")
     }

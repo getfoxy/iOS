@@ -6,11 +6,36 @@
     /* And the till's lists, in the same rows (26p-till-tips.js, `tillListVals`): who its tips go to, a group's shares, and its
      * CASHIER CODES with those that have ended under PAST. Null outside them. */
     const L = (sc === 'switchMint' && s.tillList && this.tillListVals) ? this.tillListVals() : null;
-    const tillOn = L ? !!L.next.on : s.tillPick === 'set' && !!this.tillSetNow && this.tillSetNow().length > 0;
+    /* The lists of mints are drawn as tiles (the keeper's design of 2026-11-06, "To which mint?"): the name large, its host, a rule,
+     * and under it what is held there. The till's lists of people and codes, and BANK ACCOUNT's exchanges, keep their rows. */
+    const tiles = !L && !s.bankPick;
+    /* A card's WITHDRAW TO (`wdPick`) and TRANSFER TO (`fcPick`): the card's own mint first, ticked, then the others, the line under
+     * each rule what the crossing there costs where that is asked (26n-card-withdraw-to.js). A tap picks a mint, NEXT goes on. */
+    const cardList = tiles && (!!s.wdPick || !!s.fcPick);
+    const cardNextOn = cardList && !!this.fcListNextOn && this.fcListNextOn();
+    const tillOn = L ? !!L.next.on : cardList ? cardNextOn : s.tillPick === 'set' && !!this.tillSetNow && this.tillSetNow().length > 0;
+    const nowLine = L ? L.line
+      : s.bankPick ? 'Trade your Foxy balance for dollars with one of these exchanges.'
+      : s.wdPick ? (this.fcWdLine ? this.fcWdLine() : '')
+      : s.tillPick === 'default' ? 'Payments from mints you did not pick are moved here. Invoices are made here.'
+      : s.tillPick ? 'Pick every mint this till takes. Payments from other mints cross into the default, the payer paying the fee.'
+      : s.fcPick ? 'This card is at ' + this.mintNameOf(s.fc && s.fc.mint) + '. Other mints cost a Lightning fee.'
+      : s.trStep === 'from' ? 'Move money between the mints you use.'
+      : s.trStep === 'to' ? 'Moving from ' + this.mintNameOf(s.trFrom) + '.'
+      /* switching: no line, as designed; the mint you are on is the ticked tile, and each tile says what it holds in every unit.
+       * Only a phone on no mint is told so, which no tile says. */
+      : this.mintHost() ? '' : 'Connected to no mint.';
     const FUR = "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),"
       + "linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),url('foxy-fur.webp')";
     return {
       isSwitchMint: sc === 'switchMint',
+      mintTilesShown: tiles,
+      mintRowsShown: !tiles,
+      // the tiles sit closer to the screen's edges than the rows did, as designed, and a card's list closer to each other
+      mintListPad: tiles ? '22px 18px 12px' : '12px 24px 12px',
+      mintListGap: cardList ? '12px' : tiles ? '16px' : '12px',
+      // the foot holds NEXT, or the till's second button; with neither, only the room the screen's edge wants
+      mintFootPad: (L ? (!!L.next.shown || !!L.add.shown) : (cardList || s.tillPick === 'set')) ? '12px 24px 30px' : '0 0 22px',
       // adding a mint belongs to switching, not to picking one to move between
       mintPickers: !s.trStep && !s.fcPick && !s.tillPick && !s.wdPick && !s.tillList && !s.bankPick,
       /* The same list does three jobs: switching, and the two steps of a
@@ -27,25 +52,17 @@
         : s.wdPick ? 'WITHDRAW TO'
         : s.tillPick === 'default' ? 'DEFAULT MINT'
         : s.tillPick ? 'TILL AT WHICH MINTS?'
-        : s.fcPick ? 'TO WHICH MINT?'
+        : s.fcPick ? 'TRANSFER TO'
         : s.trStep === 'from' ? 'FROM WHICH MINT?'
-        : s.trStep === 'to' ? 'TO WHICH MINT?' : 'SWITCH MINT',
-      mintNowLine: L ? L.line
-        : s.bankPick ? 'Trade your Foxy balance for dollars with one of these exchanges.'
-        : s.wdPick ? (this.fcWdLine ? this.fcWdLine() : '')
-        : s.tillPick === 'default' ? 'Payments from mints you did not pick are moved here. Invoices are made here.'
-        : s.tillPick ? 'Pick every mint this till takes. Payments from other mints cross into the default, the payer paying the fee.'
-        : s.fcPick ? 'This card is at ' + this.mintNameOf(s.fc && s.fc.mint) + '.'
-        : s.trStep === 'from' ? 'Move money between the mints you use.'
-        : s.trStep === 'to' ? 'Moving from ' + this.mintNameOf(s.trFrom) + '.'
-        : 'Connected to ' + (this.mintHost() || 'no mint')
-        // balances in other units, which no sat figure on this screen includes
-        + (this.otherUnitsLine() ? '. ' + this.otherUnitsLine() : ''),
+        : 'TO WHICH MINT?',
+      mintNowLine: nowLine,
+      mintNowShown: !!nowLine,
       /* The mint you are on comes first and looks different. It used to be
        * filtered out, which left the screen showing every mint except the one
        * that matters. */
       mintRows: L ? L.rows : (() => {
         const all = this.allMints();
+        const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
         const row = (m, here) => {
           const pile = this.mintPile(m.url);
           const busy = s.mintBusy === m.url.replace(/\/+$/, '');
@@ -55,8 +72,27 @@
            * be connected to. Greyed out, with the reason under its name, and a
            * tap says it rather than doing nothing. */
           const reach = this.mintReachable(m.url);
+          /* The tile's line: what is held there, the sat sign and the sats, then each other unit ('25,066 + $10.33'), and what it all
+           * comes to in dollars ('≈ $29.12') where there is a price and nothing in a unit that has none. */
+          const rate = (this.satUsd && this.satUsd()) || 0;
+          const dol = (v) => '$' + (this.usd ? this.usd(v) : v.toFixed(2));
+          const held = (pile.units || []).filter(b => b && b.amount > 0);
+          const satSign = pile.sats > 0 || !held.length;
+          const usdOnly = held.every(b => b.unit === 'usd');
+          const cents = held.reduce((n, b) => n + (b.unit === 'usd' ? Number(b.amount) || 0 : 0), 0);
+          const balMain = (satSign ? [this.group(pile.sats)] : []).concat(held.map(b => b.unit === 'usd' ? dol(b.amount / 100) : this.unitMoney(b.amount, b.unit))).join(' + ');
+          const balAbout = (rate > 0 && usdOnly && pile.sats > 0) ? '\u2248 ' + dol(pile.sats * rate + cents / 100) : '';
           return {
             name: m.name, host: m.host,
+            big: String(m.name || '').toUpperCase(),
+            // under the rule: the balance, or a word in grey (CONNECTING…), or a fee (a card's lists, 26n-card-withdraw-to.js), or nothing
+            lineBal: !busy, lineWait: busy, lineFee: false,
+            balSym: satSign, balMain: balMain, balAbout: balAbout, balAboutShown: !!balAbout,
+            wait: busy ? 'CONNECTING\u2026' : '', fee: '', feeNote: '', feeNoteShown: false,
+            linePad: cardList ? '12px' : '16px',
+            nameSize: cardList ? '32px' : '38px', hostSize: cardList ? '16px' : '17px',
+            pad: cardList ? '20px 22px' : '24px 22px', radius: cardList ? '26px' : '28px', gap: cardList ? '14px' : '18px',
+            edge: here ? '2px' : '1px',
             dim: reach ? '1' : '0.4',
             down: !!downText, downText: downText,
             initial: m.name.slice(0, 1).toUpperCase(),
@@ -67,7 +103,7 @@
             ink: (here || busy) ? 'var(--acc-ink)' : pile.ink,
             busy: busy,
             bg: here ? 'rgba(var(--acc-rgb),.12)' : 'var(--surface)',
-            border: here ? 'rgba(var(--acc-rgb),.75)' : 'rgba(var(--ink-rgb),.12)',
+            border: here ? 'var(--acc)' : 'rgba(var(--ink-rgb),.12)',
             // tapping the one you are already on should do nothing at all
             tap: !reach ? (() => this.offlineNo('Switching to ' + m.name))
               : s.tillPick === 'default' ? (() => this.tillMintPick(m.url))
@@ -86,11 +122,8 @@
         }
         if (s.bankPick) return this.bankRows ? this.bankRows() : [];
         if (s.wdPick) return this.fcWdRows ? this.fcWdRows(row) : [];
-        if (s.fcPick) {
-          // every mint but the one the card is at
-          const at = String((s.fc && s.fc.mint) || '').replace(/\/+$/, '');
-          return all.filter(m => m.url.replace(/\/+$/, '') !== at).map(m => row(m, false));
-        }
+        // a card's TRANSFER TO (26n-card-withdraw-to.js), each other mint with what the move there costs
+        if (s.fcPick) return this.fcMoveRows ? this.fcMoveRows(row) : [];
         if (s.trStep === 'from') {
           // only mints with something at them can be moved from (dollars too: a mint holding only dollars is one to move from)
           return all.filter(m => this.mintPile(m.url).sats > 0 || (this.mintPile(m.url).units || []).some(b => b && b.unit === 'usd' && b.amount > 0))
@@ -104,8 +137,9 @@
           .concat(all.filter(m => !this.onMint(m.url)).map(m => row(m, false)));
       })(),
       // NEXT under the till's set list: the fur once a mint is ticked, grey and nothing before (26m-till.js, `tillSetNext`)
-      tillNextShown: L ? !!L.next.shown : s.tillPick === 'set',
-      tillNext: L ? L.next.tap : () => this.tillSetNext(),
+      // (and under a card's WITHDRAW TO and TRANSFER TO, in fur once a mint it can go to is picked: 26n-card-withdraw-to.js, `fcListNext`)
+      tillNextShown: L ? !!L.next.shown : cardList || s.tillPick === 'set',
+      tillNext: L ? L.next.tap : cardList ? () => this.fcListNext() : () => this.tillSetNext(),
       tillNextLabel: L ? L.next.label : 'NEXT',
       // the till's lists' second button (ADD, PASTE A CASHU ID), and CASHIER CODES' PAST
       tillAddShown: !!(L && L.add.shown),

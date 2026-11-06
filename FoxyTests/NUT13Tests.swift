@@ -762,9 +762,28 @@ final class NUT13Tests: XCTestCase {
         info[12...15] = [0, 0, 0x03, 0xE8]
         info[30...33] = [0, 0, 0, 0xC8]
         info[34...37] = [0, 0, 0, 0x32]
-        XCTAssertEqual(CardOwner.limitsSeen(info), [.day: 1000, .tap: 200, .noPin: 50])
-        XCTAssertEqual(CardOwner.limitsSeen(Array(info.prefix(42))), [.day: 1000, .tap: 200, .noPin: 50])
-        XCTAssertNil(CardOwner.limitsSeen(Array(info.prefix(30))), "an answer with no limit on one payment")
+        XCTAssertEqual(CardOwner.limitsSeen(info, granted: false), [.day: 1000, .tap: 200, .noPin: 50], "a card that is not quick says its limit on one payment to anybody")
+        XCTAssertEqual(CardOwner.limitsSeen(Array(info.prefix(42)), granted: false), [.day: 1000, .tap: 200, .noPin: 50])
+        XCTAssertEqual(CardOwner.limitsSeen(info + [0, 0, 0, 0], granted: true), [.day: 1000, .tap: 200, .noPin: 50], "a card of 1.25 asked with P1 = 4: the 51 and four more")
+        XCTAssertNil(CardOwner.limitsSeen(info + [0], granted: true))
+        // a quick card says its limit on one payment only to its owner's grant in the tap, and 0 before it: not known then
+        var quick = info
+        quick[6] = 31
+        quick[30...33] = [0, 0, 0, 0]
+        XCTAssertEqual(CardOwner.limitsSeen(quick + [0, 0, 0, 0], granted: false), [.day: 1000, .noPin: 50], "read before the grant: no figure for one payment")
+        quick[30...33] = [0, 0, 0, 0xC8]
+        XCTAssertEqual(CardOwner.limitsSeen(quick + [0, 0, 0, 0], granted: true), [.day: 1000, .tap: 200, .noPin: 50], "after it")
+        // thirty bytes, the day's alone, only from a card before 1.3, which has no limit on one payment
+        var old = info
+        old[0] = 1
+        old[1] = 2
+        XCTAssertEqual(CardOwner.limitsSeen(Array(old.prefix(30)), granted: false), [.day: 1000], "a card of 1.2")
+        XCTAssertEqual(CardOwner.limitsSeen(Array(old.prefix(29)), granted: false), [.day: 1000])
+        var later = info
+        later[0] = 1
+        later[1] = 25
+        XCTAssertNil(CardOwner.limitsSeen(Array(later.prefix(30)), granted: true), "a card of 1.25 asked with P1 = 0: thirty bytes that say nothing of the limit on one payment")
+        XCTAssertTrue(CardOwner.unownedSeen(info + [0, 0, 0, 1]) == false && CardOwner.unownedSeen({ var x = info + [0, 0, 0, 0]; x[16] = 0; return x }()))
         XCTAssertFalse(CardOwner.unownedSeen(info))
         info[16] = 0
         XCTAssertTrue(CardOwner.unownedSeen(info))
@@ -805,5 +824,136 @@ final class NUT13Tests: XCTestCase {
             XCTAssertFalse(question.message.contains("31323334") || question.message.contains("1234"), "the PIN is never shown")
         }
         XCTAssertNotEqual(try q(["label": "reset", "value": ""]).title, try q(["label": "reset", "value": "03"]).title)
+        // a lift said in the same alert as the command it goes with, or alone for a withdrawal
+        let alone = try q(["label": "set-limit", "lift": true, "card": card])
+        XCTAssertFalse(alone.askOwner)
+        XCTAssertTrue(alone.message.contains("lifted for this withdrawal") && alone.message.contains("put back"), alone.message)
+        let reset = try q(["label": "reset", "value": "", "lift": true])
+        XCTAssertTrue(reset.askOwner && reset.message.hasSuffix(CardOwner.liftWords), reset.message)
+        XCTAssertFalse(try q(["label": "reset", "value": ""]).message.contains(CardOwner.liftWords))
+    }
+
+    private func u32(_ n: UInt32) -> [UInt8] { [UInt8(n >> 24), UInt8(n >> 16 & 0xff), UInt8(n >> 8 & 0xff), UInt8(n & 0xff)] }
+
+    /// A taking-off lifts the card's limits for its tap and puts them back. The yes
+    /// for it is named with the flow's own (or alone, for a withdrawal) and kept
+    /// apart from it: it matches a lift, to nothing from what the card said, and
+    /// nothing else; and a card already lifted is not lifted again.
+    func testAYesToALiftMatchesALiftAndNothingElse() throws {
+        let key = bytes("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+        let other = bytes("03" + String(repeating: "11", count: 32))
+        let nonce = [UInt8](repeating: 7, count: 16)
+        func request(_ value: [UInt8], key k: [UInt8]? = nil, label: CardOwner.Label = .setLimit) -> CardOwner.SignRequest {
+            CardOwner.SignRequest(key: k ?? key, label: label, nonce: nonce, value: value)
+        }
+        func approval(_ body: [String: Any]) -> CardOwner.Approval? { CardOwner.approval(body, at: 5) }
+        // the shapes: with reset, set-card and set-limit; true or nothing; never with a PIN, a new owner or a load
+        let alone = try XCTUnwrap(approval(["label": "set-limit", "lift": true]))
+        XCTAssertEqual(alone.lift, true)
+        XCTAssertNil(alone.figures)
+        XCTAssertEqual(try XCTUnwrap(approval(["label": "reset", "value": "", "lift": true])).lift, true)
+        XCTAssertEqual(try XCTUnwrap(approval(["label": "set-card", "mint": "https://m.example", "lift": true])).lift, true)
+        XCTAssertEqual(try XCTUnwrap(approval(["label": "set-limit", "figures": ["tap"], "lift": true])).figures, [.tap])
+        XCTAssertNil(approval(["label": "change-pin", "value": "31323334", "lift": true]))
+        XCTAssertNil(approval(["label": "set-limit", "lift": false]), "a lift said no to is no shape")
+        XCTAssertNil(approval(["label": "set-limit", "lift": "yes"]))
+        XCTAssertNil(approval(["label": "set-limit", "lift": 1]), "true, not a number")
+        XCTAssertNil(approval(["label": "set-limit"]), "no figures and no lift is nothing")
+        // kept apart: the command's own yes with no lift in it, and a lift's for the same card
+        let named = try XCTUnwrap(approval(["label": "reset", "value": "", "lift": true, "card": NUT13.hex(key)]))
+        let kept = CardOwner.split(named)
+        XCTAssertEqual(kept.count, 2)
+        XCTAssertEqual(kept[0].label, "reset")
+        XCTAssertNil(kept[0].lift)
+        XCTAssertEqual(kept[1].label, "set-limit")
+        XCTAssertEqual(kept[1].lift, true)
+        XCTAssertEqual(kept[1].card, key)
+        XCTAssertNil(kept[1].figures)
+        XCTAssertEqual(CardOwner.split(alone), [alone])
+        XCTAssertEqual(CardOwner.split(try XCTUnwrap(approval(["label": "reset", "value": ""]))).count, 1)
+        // what matches it: a lift, as the card said its limits in this tap
+        var seen = CardOwner.Seen()
+        seen.limits = [.day: 1000, .tap: 200, .noPin: 50]
+        let lift = kept[1]
+        XCTAssertTrue(CardOwner.matches(request(u32(0) + u32(0)), lift, seen: seen), "a card before 1.23: the day's and the one payment's")
+        XCTAssertTrue(CardOwner.matches(request(u32(0) + u32(0) + u32(50) + u32(97_000)), lift, seen: seen), "1.23: the allowance as the card has it")
+        XCTAssertFalse(CardOwner.matches(request(u32(0)), lift, seen: seen), "the day's alone, on a card that said a limit on one payment: that limit would stay")
+        var dayOnly = CardOwner.Seen()
+        dayOnly.limits = [.day: 1000]
+        XCTAssertTrue(CardOwner.matches(request(u32(0)), lift, seen: dayOnly), "the day's alone, on a card that has no limit on one payment")
+        XCTAssertFalse(CardOwner.matches(request(u32(0) + u32(0)), lift, seen: dayOnly), "and nothing it did not say")
+        XCTAssertFalse(CardOwner.matches(request(u32(0) + u32(50)), lift, seen: seen), "a lift to other figures is no lift")
+        XCTAssertFalse(CardOwner.matches(request(u32(9_999) + u32(0)), lift, seen: seen), "nor a day raised")
+        XCTAssertFalse(CardOwner.matches(request(u32(0) + u32(0) + u32(999) + u32(97_000)), lift, seen: seen), "nor an allowance changed")
+        XCTAssertFalse(CardOwner.matches(request(u32(1000) + u32(200) + u32(50) + u32(97_000)), lift, seen: seen), "nor the limits put back")
+        XCTAssertFalse(CardOwner.matches(request(u32(0) + u32(0), key: other), lift, seen: seen), "another card")
+        XCTAssertFalse(CardOwner.matches(request(u32(0) + u32(0)), lift, seen: CardOwner.Seen()), "the card said nothing of its limits")
+        XCTAssertFalse(CardOwner.matches(request([], label: .reset), lift, seen: seen), "it is a lift's yes, and no reset's")
+        // a second lift before the first is put back is none: the card is seen as lifted once the first is signed
+        let after = CardOwner.seen(after: request(u32(0) + u32(0) + u32(50) + u32(97_000)), seen)
+        XCTAssertEqual(after.limits, [.day: 0, .tap: 0, .noPin: 50])
+        XCTAssertFalse(CardOwner.matches(request(u32(0) + u32(0) + u32(50) + u32(97_000)), lift, seen: after), "a second lift")
+        var none = CardOwner.Seen()
+        none.limits = [.day: 0, .tap: 0, .noPin: 50]
+        XCTAssertFalse(CardOwner.matches(request(u32(0) + u32(0)), lift, seen: none), "a card with no limit has none to lift")
+        // and a limit's own yes is not a lift's: the figures the keeper chose, every other the card's
+        let tap = try XCTUnwrap(approval(["label": "set-limit", "figures": ["tap"]]))
+        XCTAssertFalse(CardOwner.matches(request(u32(0) + u32(0)), tap, seen: seen))
+    }
+
+    /// What the card's limits were before a lift is kept for that card, and the
+    /// set-limit that puts exactly that back is what it signs: in the tap, or later.
+    func testALiftIsPutBackToWhatTheCardSaidAndNothingElse() throws {
+        let key = bytes("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+        let other = bytes("03" + String(repeating: "11", count: 32))
+        let nonce = [UInt8](repeating: 7, count: 16)
+        func request(_ value: [UInt8], key k: [UInt8]? = nil) -> CardOwner.SignRequest {
+            CardOwner.SignRequest(key: k ?? key, label: .setLimit, nonce: nonce, value: value)
+        }
+        let lift = CardOwner.Lift(card: key, from: [.day: 1000, .tap: 200, .noPin: 50])
+        let kept = CardOwner.keepLift([CardOwner.Lift(card: other, from: [.day: 5])], lift)
+        var lifted = CardOwner.Seen()
+        lifted.limits = [.day: 0, .tap: 0, .noPin: 50]
+        XCTAssertEqual(CardOwner.putsBack(request(u32(1000) + u32(200)), kept, seen: lifted), 1)
+        XCTAssertEqual(CardOwner.putsBack(request(u32(1000) + u32(200) + u32(50) + u32(96_000)), kept, seen: lifted), 1, "with a rate, which is the phone's price")
+        XCTAssertNil(CardOwner.putsBack(request(u32(1000)), kept, seen: lifted), "the day's alone leaves the limit on one payment at 0")
+        XCTAssertNil(CardOwner.putsBack(request(u32(2000) + u32(200)), kept, seen: lifted), "another day's limit")
+        XCTAssertNil(CardOwner.putsBack(request(u32(1000) + u32(0)), kept, seen: lifted), "the one payment's left lifted")
+        XCTAssertNil(CardOwner.putsBack(request(u32(1000) + u32(200) + u32(999) + u32(96_000)), kept, seen: lifted), "another allowance")
+        XCTAssertNil(CardOwner.putsBack(request(u32(1000) + u32(200), key: bytes("03" + String(repeating: "22", count: 32))), kept, seen: lifted), "a card with no lift kept")
+        XCTAssertNil(CardOwner.putsBack(CardOwner.SignRequest(key: key, label: .reset, nonce: nonce, value: []), kept, seen: lifted))
+        // only to a card seen lifted: not over limits it holds, nor to one that said nothing
+        var holding = CardOwner.Seen()
+        holding.limits = [.day: 700, .tap: 100, .noPin: 50]
+        XCTAssertNil(CardOwner.putsBack(request(u32(1000) + u32(200)), kept, seen: holding), "a card not lifted")
+        XCTAssertNil(CardOwner.putsBack(request(u32(1000) + u32(200)), kept, seen: CardOwner.Seen()))
+        var hidden = CardOwner.Seen()
+        hidden.limits = [.day: 0, .noPin: 50]
+        XCTAssertNil(CardOwner.putsBack(request(u32(1000) + u32(200)), kept, seen: hidden), "nor one whose limit on one payment is not known")
+        XCTAssertTrue(CardOwner.holds(lift, [.day: 1000, .tap: 200, .noPin: 50]))
+        XCTAssertFalse(CardOwner.holds(lift, [.day: 1000, .tap: 0, .noPin: 50]))
+        // one a card: a newer lift replaces the one before it
+        let newer = CardOwner.keepLift(kept, CardOwner.Lift(card: key, from: [.day: 3000]))
+        XCTAssertEqual(newer.count, 2)
+        XCTAssertNil(CardOwner.putsBack(request(u32(1000) + u32(200)), newer, seen: lifted))
+        XCTAssertEqual(CardOwner.putsBack(request(u32(3000)), newer, seen: lifted), 1)
+        // and no lift over a kept one, unless the card is seen holding its figures again
+        XCTAssertFalse(CardOwner.mayLift(key, seen: lifted, kept: kept))
+        XCTAssertTrue(CardOwner.mayLift(key, seen: holding.with([.day: 1000, .tap: 200, .noPin: 50]), kept: kept))
+        XCTAssertTrue(CardOwner.mayLift(bytes("03" + String(repeating: "22", count: 32)), seen: lifted, kept: kept))
+        XCTAssertEqual(CardOwner.Lift(card: key, from: [.day: 7]).figures, [.day: 7], "a card that said its day's alone")
+        // kept and read back as the Keychain holds it
+        XCTAssertEqual(try JSONDecoder().decode([CardOwner.Lift].self, from: try JSONEncoder().encode(kept)), kept)
+        // a move kept before lifts were named still reads
+        let old = #"[{"label":"set-card","mint":[104],"card":[2],"keep":true,"at":1}]"#
+        XCTAssertNil(try JSONDecoder().decode([CardOwner.Approval].self, from: Data(old.utf8)).first?.lift)
+    }
+}
+
+private extension CardOwner.Seen {
+    func with(_ limits: [CardOwner.Figure: UInt32]) -> CardOwner.Seen {
+        var out = self
+        out.limits = limits
+        return out
     }
 }

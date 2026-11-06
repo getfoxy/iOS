@@ -4,6 +4,13 @@
   renderConfirmShell(c) {
     const { s, sc } = c;
     const cf = CONFIRM_SCREENS.indexOf(sc) >= 0 ? this.confirmSpec() : {};
+    /* The confirmations of the keeper's 2026-11-06 design (1k, 1l, 1m): the figures stacked down the middle, the last of
+     * them in the accent, MORE DETAILS where the spec has details (a transfer's, for now), and PAYING FROM as a pill at the
+     * foot. A spec with no `stack` is drawn as it always was. */
+    const stack = (Array.isArray(cf.stack) && cf.stack.length) ? cf.stack : null;
+    const details = (stack && Array.isArray(cf.details) && cf.details.length) ? cf.details : null;
+    const moreOpen = !!details && s.cfMore === sc;
+    const from = stack ? (cf.from || null) : null;
     return {
       // ---- CONFIRM shell: title, amount, rows, cta. One block renders them all ----
       isConfirmShell: CONFIRM_SCREENS.indexOf(sc) >= 0,
@@ -11,10 +18,38 @@
       cfTitleInk: cf.titleInk || 'var(--ink)',
       /* The title between the round buttons, level with them (CONFIRM PAYMENT
        * at a mint with two balances), or under them as everywhere else. */
-      cfTitleUp: !!cf.titleUp,
-      cfTitleDown: !cf.titleUp,
+      // (level with them on the new confirmations, as drawn)
+      cfTitleUp: !!cf.titleUp || !!stack,
+      cfTitleDown: !cf.titleUp && !stack,
+      // the new confirmations' stack: each label over its figure, 48px, the last 68px in the accent, a name 24px
+      cfStackShown: !!stack,
+      cfOldShown: !stack,
+      cfStack: (stack || []).map((x) => ({
+        label: String(x.label || ''), value: String(x.value == null ? '' : x.value),
+        // (a long figure a size down, so it stays on one line in the phone's width)
+        size: x.small ? '24px' : x.big ? (String(x.value).length <= 8 ? '68px' : String(x.value).length <= 10 ? '56px' : '44px')
+          : (String(x.value).length <= 10 ? '48px' : String(x.value).length <= 13 ? '38px' : '30px'),
+        ink: x.ink || (x.big ? 'var(--acc)' : 'var(--ink)'),
+        sub: String(x.sub || ''), subShown: !!x.sub,
+      })),
+      // MORE DETAILS, closed until tapped, and the grid it opens: two to a row, a wide one across both
+      cfMoreShown: !!details,
+      cfMoreOpen: moreOpen,
+      cfMoreRot: moreOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+      cfMoreTap: () => this.cfMoreToggle(),
+      cfDetails: (details || []).map((d) => ({ label: String(d.label || ''), value: String(d.value == null ? '' : d.value),
+        span: d.wide ? '1 / -1' : 'auto' })),
+      cfDetailNote: details ? String(cf.detailNote || '') : '',
+      cfDetailNoteShown: !!details && !!cf.detailNote,
+      // PAYING FROM at the foot: the pill names the balance that pays, and opens the choice where there is one
+      cfFromShown: !!from,
+      cfFromWord: from ? String(from.word || '') : '',
+      cfFromMany: !!(from && from.go),
+      cfFromGo: (from && from.go) || (() => {}),
+      cfFromCursor: (from && from.go) ? 'pointer' : 'default',
       // the WALLET button, last under the rows: which balance pays, and the way to change it
-      cfWalletShown: !!cf.wallet,
+      // (not on the new confirmations: PAYING FROM's pill is their way to change it)
+      cfWalletShown: !!cf.wallet && !stack,
       cfWalletWord: (cf.wallet || {}).word || '',
       // WALLET between a mint's two balances; PAY FROM where there is a choice of mints (26l-pay-from.js)
       cfWalletLabel: (cf.wallet || {}).label || 'WALLET',
@@ -73,6 +108,37 @@
       cfCtaGlow: cf.ctaTone === 'warn' ? 'rgba(247,147,26,.3)' : cf.ctaTone === 'money' ? 'rgba(58,181,74,.32)' : 'rgba(var(--acc-rgb),.32)',
       cfGo: cf.go || (() => {}),
     };
+  }
+
+  /* MORE DETAILS, tapped: open on this screen, or closed again. */
+  cfMoreToggle() {
+    const sc = this.state.screen;
+    this.setState({ cfMore: this.state.cfMore === sc ? '' : sc });
+  }
+
+  /* 1l and 1m, from a payment's own figures: RECEIVER GETS, FEE, PAYING in the accent (red where the spec's amount is), and
+   * RECEIVER where there is one to name; PAYING FROM as the pill at the foot, which opens PAY FROM, or the WALLET choice at a
+   * mint with two balances, where there is a choice (`o.go`) and opens nothing where there is not. No note button: the
+   * design has none (a confirmation at a mint with two balances had none already); a note already written is drawn. */
+  cfPayLook(spec, o) {
+    const red = spec.amountInk === '#FF5C5C';
+    /* Each { label, value }: `big` the last, 68px in the accent (red where it cannot be paid), `small` a name or an invoice at
+     * 24px, `sub` a line under it. */
+    /** @type {Array<{ label: string, value: string, big?: boolean, small?: boolean, ink?: string, sub?: string }>} */
+    const stack = [
+      { label: 'RECEIVER GETS', value: String(o.gets || ''), sub: o.getsSub || '' },
+      { label: 'FEE', value: String(o.fee || '') },
+      { label: 'PAYING', value: String(o.paying || spec.amount || ''), big: true, ink: red ? '#FF5C5C' : 'var(--acc)', sub: o.payingSub || '' },
+    ];
+    if (o.receiver) stack.push({ label: 'RECEIVER', value: String(o.receiver), small: true });
+    // a note already written travels with the payment, so it is drawn; there is no button to add one (as drawn)
+    const note = String((this.state && this.state.note) || '').trim();
+    if (note) stack.push({ label: 'NOTE', value: note, small: true });
+    // back and the X, as drawn: the X home where the spec has no way out of its own
+    const look = Object.assign({}, spec, { stack: stack, from: { word: o.word || '', go: o.go || null },
+      close: spec.close || (() => this.setState({ screen: 'home', stack: [] })) });
+    delete look.secondary;
+    return look;
   }
 
   /* The BLOCKED screens: an action that did not happen, and why. */
@@ -176,11 +242,25 @@
       LOOK.both = { bg: 'linear-gradient(115deg,#D6EEF7 0%,#B9DCEA 49.8%,transparent 50.2%),' + LOOK.sat.bg, ink: '#FFFFFF', inkRgb: '255,255,255',
         blend: 'normal,' + LOOK.sat.blend, edge: 'rgba(255,255,255,.22)', badgeBg: '#FFFFFF', badgeInk: '#10161B', sym: '$\u20bf' };
     }
+    /* The tiles' look (the keeper's design of 2026-11-06, "Currency"): dollars in frost, bitcoin in orange, BOTH split between the
+     * two, each with its sign large and faint at the right and its word at the bottom left. Their own colours, not LOOK's, which PAY
+     * FROM's rows still wear; the question of what to hold wears these too (`holdRows`). */
+    const TILE = {
+      usd: { bg: 'linear-gradient(160deg,#D6EEF4 0%,#BFE3EC 100%)', ink: '#0F2A33', inkRgb: '15,42,51', blend: 'normal', edge: 'rgba(255,255,255,.22)',
+        sign: '$', signInk: 'rgba(15,42,51,.14)' },
+      sat: { bg: 'linear-gradient(160deg,#F78A4A 0%,#EB6A2E 55%,#D9561C 100%)', ink: '#1A0A02', inkRgb: '26,10,2', blend: 'normal', edge: 'rgba(255,255,255,.22)',
+        sign: '\u20bf', signInk: 'rgba(26,10,2,.16)' },
+      both: { bg: 'linear-gradient(105deg,#CDEAF1 0%,#BFE3EC 49.8%,#EB6A2E 50.2%,#D9561C 100%)', ink: '#0A0A0A', inkRgb: '10,10,10', blend: 'normal',
+        edge: 'rgba(255,255,255,.22)', sign: '', signInk: 'rgba(15,42,51,.16)' },
+      grey: { sign: '', signInk: 'rgba(255,255,255,.08)' },
+    };
+    // (and the question of what to hold, below: its three choices by the tile each wears)
+    const HOLD_TILE = { dollars: 'usd', bitcoin: 'sat', both: 'both' };
     const cards = (sc === 'currency' || pick) ? units.map(u => {
       const tag = u === 'both' ? '' : whyNot(u);
       // (a card's question may mark a currency it still offers, `curCard.mark`: said where a greyed one says why, and not greyed)
       const mark = (!tag && cc && cc.mark && cc.mark[u]) || '';
-      const look = Object.assign({}, LOOK[u], tag ? LOOK.grey : {});
+      const look = Object.assign({}, LOOK[u], TILE[u] || {}, tag ? LOOK.grey : {}, tag ? { signInk: TILE.grey.signInk } : {});
       const chosen = pick && u === current && !tag;
       return Object.assign(look, {
         sym: LOOK[u].sym,
@@ -189,16 +269,22 @@
         balance: (setUp || receiving) ? '' : u === 'both' ? balanceText('usd') + ' \u00b7 ' + balanceText('sat') : balanceText(u),
         labelShown: u !== 'both' && !setUp && !receiving,
         badgePx: setUp ? '60px' : three ? '52px' : '92px', badgeFont: setUp ? (u === 'both' ? '20px' : '30px') : three ? '28px' : '50px',
-        nameSize: setUp ? '28px' : three ? '26px' : '34px',
+        nameSize: '40px',
         balSize: three ? '20px' : '24px', gap: setUp ? '8px' : three ? '4px' : '10px', pad: three ? '12px 22px' : '22px',
-        radius: setUp ? '30px' : '34px',
-        // (the big faint sign behind each card, and a balance line, are not on the set-up's tiles nor a receive's; BOTH's badge has the two signs, the ₿ in fur)
-        markShown: !setUp, balShown: !setUp && !receiving,
+        radius: '30px',
+        /* The tile: its sign large and faint at the right (BOTH has the two, side by side at the top), its word 40px at the bottom
+         * left, and under the word, where one is shown, the balance and why it cannot pay. The badge's keys are kept for the
+         * questions that still read them; the tiles draw no badge. */
+        sign: u === 'both' ? '' : (TILE[u] ? TILE[u].sign : LOOK[u].sym), signOne: u !== 'both', signTwo: u === 'both',
+        signA: '$', signB: '\u20bf', signInkA: 'rgba(15,42,51,.16)', signInkB: 'rgba(26,10,2,.18)',
+        labelPx: '40px',
+        balShown: !setUp && !receiving,
         symOne: !(setUp && u === 'both'), symTwo: setUp && u === 'both',
-        nameShadow: (setUp && u === 'both') ? '0 2px 8px rgba(0,0,0,.45),0 0 2px rgba(0,0,0,.5)' : 'none',
+        // (BOTH's word is in dark ink on its split, as the others', and needs no shadow)
+        nameShadow: 'none',
         tag: tag || mark, tagShown: !!(tag || mark),
-        shadow: tag ? 'none' : SHADOW,
-        outline: chosen ? '3px solid rgba(255,255,255,.9)' : 'none',
+        shadow: tag ? 'none' : 'inset 0 1px 0 rgba(255,255,255,.35)',
+        outline: chosen ? '3px solid var(--ink)' : 'none',
         cursor: tag ? 'default' : 'pointer',
         tap: () => ((cc && tag) ? this.toast(String(cc.why || 'That one cannot do this.'), true) : pick ? this.walletPickChoose(u, tag ? (tag === 'NEEDS A CONNECTION'
           ? 'Your ' + this.unitWord(u).toLowerCase() + ' need a connection to pay this.'
@@ -240,7 +326,10 @@
       curNextFur: pfOn ? FUR_CTA : 'none,none,none',
       curNextInk: pfOn ? '#fff' : 'rgba(var(--ink-rgb),.4)',
       curNextSh: pfOn ? 'inset 0 2px 0 rgba(255,255,255,.4),inset 0 -4px 0 rgba(0,0,0,.16),0 12px 24px rgba(var(--acc-rgb),.34)' : 'none',
-      curGap: setUp ? '14px' : three ? '12px' : '16px',
+      // (the tiles 12px apart, as designed; PAY FROM's empty column as it was)
+      curGap: pf ? '16px' : '12px',
+      // the question: in grey under the rule on the tiles' screens (as designed); PAY FROM has its title alone (1p)
+      curAskAbove: false, curAskBelow: !pf,
       // (the set-up's tiles stand alone, with nothing under them)
       // (PAY FROM has no line under its tiles either: the keeper, 2026-11-06)
       curFootShown: !setUp && !pf,
@@ -269,9 +358,14 @@
       holdDoneLabel: holdFrom ? 'NEXT' : 'DONE',
       holdNote: holdFrom ? 'Your ' + this.unitFigure(this.unitBalance(holdFrom), holdFrom) + ' in ' + this.unitWord(holdFrom).toLowerCase()
         + ' is swapped into ' + this.unitWord(holdFrom === 'usd' ? 'sat' : 'usd').toLowerCase() + ' first. You see the fee before anything moves.' : '',
-      holdRows: HOLD.map(h => Object.assign({}, h.look, {
+      /* In the currency tiles' look (`TILE`, the keeper's design of 2026-11-06): each choice a tile with its sign faint at the
+       * right and its word 40px at the bottom left, the line under it smaller. */
+      holdRows: HOLD.map(h => Object.assign({}, h.look, TILE[HOLD_TILE[h.key]], {
         name: h.name, sub: h.sub,
-        outline: holding === h.key ? '3px solid rgba(255,255,255,.9)' : 'none',
+        sign: TILE[HOLD_TILE[h.key]].sign, signOne: h.key !== 'both', signTwo: h.key === 'both',
+        signA: '$', signB: '\u20bf', signInkA: 'rgba(15,42,51,.16)', signInkB: 'rgba(26,10,2,.18)',
+        labelPx: '40px', radius: '30px', shadow: 'inset 0 1px 0 rgba(255,255,255,.35)',
+        outline: holding === h.key ? '3px solid var(--ink)' : 'none',
         tap: () => this.setState({ holdPick: h.key }),
       })),
       holdBack: () => this.holdLater(),

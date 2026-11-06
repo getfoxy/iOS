@@ -315,7 +315,8 @@ async function oneBalance() {
   await wait(400);
   ok(app.spec().cta === 'CHECKING…' && app.fee() === 'CHECKING…', 'e. one balance: CHECKING while its quote is out, as before', app.spec().cta);
   const liveAt = (await until(() => app.live(), 4000)) ? app.since() : -1;
-  ok(liveAt >= 900 && /^SEND /.test(app.spec().cta) && /^UP TO/.test(app.fee()) && app.quotes().length === 1 && both === 0 && !app._feeQuotes,
+  // (PAY and what leaves, on the keeper's 1l, 2026-11-06)
+  ok(liveAt >= 900 && /^PAY /.test(app.spec().cta) && /^UP TO/.test(app.fee()) && app.quotes().length === 1 && both === 0 && !app._feeQuotes,
      'e. then SEND with the fee: one quote, asked on its own', 'live at ' + liveAt + ' ms, ' + app.quotes().length + ' quote(s)');
   app.spec().go();
   await until(() => app.melts().length === 1 && app.state.sendPhase === 'settled', 4000);
@@ -406,7 +407,7 @@ async function backAfterRefusal(usdCents, reconnecting) {
   const s = app.spec();
   if (covers) {
     const uq = fq(app, 'usd') || {};
-    ok(app.quoteFits('usd') === true && s.cta === 'PAY' && !s.ctaBusy && app.fee() === app.unitFigure(uq.feeReserve, 'usd')
+    ok(app.quoteFits('usd') === true && s.cta === 'PAY ' + app.unitFigure(uq.amount + uq.feeReserve, 'usd') && !s.ctaBusy && app.fee() === app.unitFigure(uq.feeReserve, 'usd')
        && s.amount === app.unitFigure(uq.amount + uq.feeReserve, 'usd'),
        tag + 'once it is in: PAY from dollars, with their fee and total', s.cta + ' ' + app.fee() + ' ' + s.amount);
     s.go();

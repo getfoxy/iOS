@@ -423,9 +423,12 @@ async function world(pin, o) {
     await H.W.cardSetLimit(card, { sats: 300, noPin: true });
     card.tap();
     await R.W.cardPay(card, { sats: 200 });
+    /* (what the payment counted: 200, or the piece it was paid from where the card's first load, one binary set, has no exact 200
+     * left by now and the change is made here) */
+    const counted = card.state.noPinSpent;
     card.tap();
     await H.W.cardSetLimit(card, { sats: 300, noPin: true });
-    ok(card.state.noPinSpent === 200, 'and an allowance set to the number it has keeps its count');
+    ok(counted >= 200 && card.state.noPinSpent === counted, 'and an allowance set to the number it has keeps its count', String(counted));
     // the daily limit applies to a no-PIN payment as to any
     card.tap();
     const limit = await why(R.W.cardPay(card, { sats: 101 }));
@@ -452,15 +455,21 @@ async function world(pin, o) {
     D.card.sent.length = 0;
     const same = await D.H.W.cardLook(D.card, { mine: true, price: 101000 });
     ok(same.info.noPin.limit === 1000 && !same.repacedNoPin && count(D.card, '34') === 0, 'a price that has moved a little leaves the card as it is', String(same.info.noPin.limit));
+    /* Only a read the keeper said yes to a re-peg for writes one (`repeg`): the phone signs a limit only against a yes, and a re-peg
+     * in another flow's tap would be refused, or would use up the yes that tap's own command was given. */
     D.card.tap();
-    const moved = await D.H.W.cardLook(D.card, { mine: true, price: 80000 });
+    D.card.sent.length = 0;
+    const unasked = await D.H.W.cardLook(D.card, { mine: true, price: 80000 });
+    ok(unasked.info.noPin.limit === 1000 && !unasked.repacedNoPin && count(D.card, '34') === 0, 'a read with no yes for it leaves the card as it is, however far the price has moved', String(unasked.info.noPin.limit));
+    D.card.tap();
+    const moved = await D.H.W.cardLook(D.card, { mine: true, price: 80000, repeg: true });
     ok(moved.info.noPin.limit === 1250 && moved.repacedNoPin === 1250 && moved.noPin.limit === 1250 && D.card.state.noPinLimit === 1250 && D.card.state.tapLimit === 1000 && moved.repaced === 1000,
        'a price that has moved is followed: the allowance is set to what the dollars are worth now (and so is the limit on one tap)', JSON.stringify([moved.info.noPin, moved.repaced]));
     ok(D.card.state.record.limit === 0, 'with the day’s limit as it was');
     D.card.tap();
-    const read = await D.R.W.cardLook(D.card, { mine: true, price: 50000 });
+    const read = await D.R.W.cardLook(D.card, { mine: true, price: 50000, repeg: true });
     D.card.tap();
-    const still = await D.H.W.cardLook(D.card, { mine: true, price: 80000 });
+    const still = await D.H.W.cardLook(D.card, { mine: true, price: 80000, repeg: true });
     ok(!read.repacedNoPin && still.info.noPin.limit === 1250 && !still.repacedNoPin, 'another phone, which did not set it, changes nothing');
     D.card.tap();
     await D.H.W.cardSetLimit(D.card, { sats: 0, noPin: true });

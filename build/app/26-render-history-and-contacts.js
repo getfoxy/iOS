@@ -706,9 +706,12 @@
       contactAll: this.contactRows(),
       contactLetter: (this.contactRows()[0] || {}).ini || '',
       contactRecents: this.contactRows().slice(0, 3),
-      // people who are not contacts and wrote by Cashu ID (26p-cashu-msg.js)
-      contactNew: sc === 'contacts' ? this.cmNewRows() : [],
-      contactNewShown: sc === 'contacts' && this.cmNewRows().length > 0,
+      // ADD A CASHU ID and SCAN A CASHU ID, on the empty CONTACTS (26o-cashu-id.js); not offered where the wallet cannot
+      // read an ID, nor SCAN where it cannot scan
+      ctAddShown: !!(window.FoxyWallet && window.FoxyWallet.cashuIdCheck),
+      ctAddGo: () => this.cidPasteAsk(),
+      ctScanShown: !!(window.FoxyWallet && window.FoxyWallet.cashuIdCheck && window.FoxyWallet.scan),
+      ctScanGo: () => this.cidScanAsk(),
       /* A contact is paid at a Lightning address, which offline can be neither
        * resolved nor paid. The list itself is local and could be shown, but a
        * screen of people none of whom can be paid is a worse answer than saying

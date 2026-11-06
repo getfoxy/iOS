@@ -289,7 +289,7 @@ function remindStub(o) {
     await fresh(W, { open0: false });
     A.remindMaybeAsk();
     await settle();
-    ok(/REMIND YOU\?/.test(card()) && card().indexOf('Foxy can remind you after 15 days away, so a payment or message waiting for you is not missed.') >= 0, 'the first time: the card, with Foxy\'s words', card());
+    ok(/REMIND YOU\?/.test(card()) && card().indexOf('Foxy can remind you after 15 days away, so a payment waiting for you is not missed.') >= 0 && !/message/i.test(card()), 'the first time: the card, with Foxy\'s words', card());
     ok(/TURN ON/.test(card()) && /NOT NOW/.test(card()), 'TURN ON and NOT NOW');
     press(A._blockedEl, 'NOT NOW');
     await settle();

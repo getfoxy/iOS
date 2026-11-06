@@ -154,6 +154,13 @@ phone mending at its next tap (`cardMend`), VIEW AS GUEST mending in its held ta
 the owner's proof and under the PIN and the hold, 1.21's "This card’s software cannot do that.", and
 the card screen's FINISH THIS CHANGE and GIVE UP THIS CHANGE, the second only where an opening is stuck.
 
+**`flashcard-tap-time.js`** holds five seconds a tap: the budget (110 ms a piece and the tap's own
+commands), a first load of one binary set ($25.00 is sixteen pieces), later loads and change deepening
+the drawer a whole set at a time inside the budget (the table of pieces and exact payments), the load
+sent to the phone as lists of constant-size commands (and one at a time by a phone that cannot), a
+card that leaves part way through a list, no read after a write that went whole, and the page's
+background work waiting while a card's sheet is up.
+
 **`flashcard-units.js`** holds the card of software 1.23, dollars and bitcoin on one card at
 its one mint, against the model taught 1.23 (`software: 23`, held by `flashcard-model.js` to the
 part of the applet's 1.23 recording that is its own): the table of keysets and its mark, 6A99 to

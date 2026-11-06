@@ -45,6 +45,8 @@
 const fs = require('fs');
 const path = require('path');
 const { page, funded, newCard, settle, history, MINT, OTHER_WORDS } = require('./flashcard-kit');
+// (a first load cut eight deep, as before 2026-11-06: this suite's drawers are such a load's; the five seconds a tap stay on; flashcard-tap-time.js holds the binary set)
+require('./flashcard-kit').deepFirstLoads(8);
 const { booksWrong } = require('./harness');
 const { appOn, until, pad, card, explainer, behind, vals, limits, speed, welcome, restore } = require('./flashcard-ui-kit');
 
@@ -71,7 +73,7 @@ const LIFTS = [
   ['01-ui-basics.js', ['currencyPick(unit) {']],
   ['25-render-confirm-and-blocked.js', ['renderCurrency(c) {']],
   ['23-render-home-and-amount.js', ['usdKeypad() {']],
-  ['24-render-receive-and-send.js', ['renderPaid(c) {', 'renderPaidBase(c) {']],
+  ['24-render-receive-and-send.js', ['renderPaid(c) {', 'renderPaidBase(c) {', 'renderPaidRest(c, v) {']],
   ['16-history-lists.js', ['loadHistory() {', 'histAudit() {', 'histAuditUsd() {', 'histAuditIn(unit) {', 'arrivingNow() {', 'arrivingBucket(unit) {',
                            'topUpFeeSats() {', 'recoveringSats() {', 'txTotalOut(t) {', 'txTotalUnit(t) {', 'txWhen(t) {', 'txLabel(d, now) {', 'txStamp(d, now) {',
                            'txDay(d, now) {', 'txClock(d) {', 'txWho(t) {', 'txCardName(t) {']],
@@ -241,8 +243,8 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
        'SET UP at a mint with two balances: the CURRENCY screen first, nothing tapped yet', holder.state.screen + ' ' + holder.state.currencyFlow);
     let cv = holder.renderCurrency({ s: holder.state, sc: 'currency' });
     ok(cv.curTitle === 'CURRENCY' && cv.curQuestion === 'What will this card hold?' && cv.curCards.map((x) => x.name).join() === 'DOLLARS,BITCOIN'
-       && cv.curCards[0].balance === '' && cv.curCards[1].balance === '' && cv.curCards.every((x) => !x.balShown && !x.markShown && x.radius === '30px'),
-       'it asks "What will this card hold?", with the two balances as designed: a badge and a word, no figure on either (the phone\'s would read as the card\'s)', JSON.stringify([cv.curQuestion, cv.curCards.map((x) => x.balance)]));
+       && cv.curCards[0].balance === '' && cv.curCards[1].balance === '' && cv.curCards.every((x) => !x.balShown && x.signOne && !!x.sign && x.radius === '30px'),
+       'it asks "What will this card hold?", with the two balances as designed: the sign and the word, no figure on either (the phone\'s would read as the card\'s)', JSON.stringify([cv.curQuestion, cv.curCards.map((x) => x.balance)]));
     ok(cv.curFootShown === false && cv.curTilesOnly === true, 'and nothing under the tiles', cv.curFoot);
     // back is the card's screen, with nothing tapped
     cv.curBack();
@@ -1185,12 +1187,12 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
        'what is owed is said in the unit of the card on show, or the one asked: sats and cents never added', JSON.stringify({ shown, other, asked }));
     holder.setState({ fc: { key: 'kUsd', unit: 'usd', balance: 100 } });
     holder.fcStillWaiting({});
-    ok(card(holder) && /\$ 4\.75 is still waiting/.test(card(holder).reason), 'and a tap that read no card says the dollar card’s $ 4.75', card(holder) && card(holder).reason);
+    ok(card(holder) && card(holder).title === 'TAP AGAIN' && card(holder).amount === '$4.75' && /still waiting/.test(card(holder).reason), 'and a tap that read no card says the dollar card’s $4.75 (TAP AGAIN, 1e)', card(holder) && card(holder).all + ' ' + card(holder).amount);
     shut(holder);
     // a change tap for the dollar card, with a bitcoin card on show: the dollars it is for
     holder.setState({ fc: { key: 'kSat', unit: 'sat', balance: 100 } });
     holder.fcStillWaiting({ unit: 'usd' });
-    ok(card(holder) && /\$ 4\.75 is still waiting/.test(card(holder).reason), 'and one for a dollar card’s change says its dollars, whatever card is on show', card(holder) && card(holder).reason);
+    ok(card(holder) && card(holder).amount === '$4.75' && /still waiting/.test(card(holder).reason), 'and one for a dollar card’s change says its dollars, whatever card is on show', card(holder) && card(holder).all + ' ' + card(holder).amount);
     shut(holder);
     H.W.cardOwed = real;
     holder.setState({ fc: null });

@@ -18,7 +18,8 @@
    * back from mempool's onion to the clearnet; and it keeps the newest header that passes what is
    * checked below. A tap uses what is kept and never waits for
    * the fetch (`cardClock`, 08a-flashcard.js): the fetch happens when Tor comes up, when the app
-   * comes back to the front and when a card is tapped, if the one kept is older than two minutes
+   * comes back to the front, when a card is tapped and when a DEPOSIT's invoice goes up and its money comes in
+   * (`headerWarm`), if the one kept is older than two minutes
    * and the phone is online, and never more than once a minute after a failure. There is no timer
    * here: nothing runs that has to be stopped.
    *
@@ -164,7 +165,9 @@
     return String(body === undefined || body === null ? '' : body).trim().replace(/^"([^"]*)"$/, '$1').trim();
   }
 
-  /* One source's tip and its header, on the circuit `label` (both requests ride it). Rejects with why not. */
+  /* One source's tip and its header, on the circuit `label` (all its requests ride it). Rejects with why not.
+   * Two rounds over Tor, not three: the tip's hash, then its header and its height together. Each round to an onion is seconds
+   * (a phone's log, 2026-11-06: three in series took 10.3 s), and the height waited on the header for nothing. */
   function headerAsk(source, label) {
     var get = function (path) {
       return headerWithin(FoxyWallet.nativeRequest({ endpoint: source.url + path, method: 'GET', foxyText: true, foxyCircuit: label }),
@@ -173,15 +176,16 @@
     return Promise.resolve().then(function () { return get('/api/blocks/tip/hash'); }).then(function (text) {
       var tip = headerText(text).toLowerCase();
       if (!/^[0-9a-f]{64}$/.test(tip)) throw new Error('what it called the tip is not a block hash');
+      /* Its height, for the screen alone ("Block #…"): a header does not carry it, the source says it, and nothing is
+       * decided by it. A source that will not say it leaves it 0. Asked beside the header, and its failure fails nothing. */
+      var height = get('/api/blocks/tip/height').then(function (h) {
+        var n = parseInt(headerText(h), 10);
+        return (n > 0 && n < 100000000) ? n : 0;
+      }, function () { return 0; });
       return get('/api/block/' + tip + '/header').then(function (body) {
         var header = headerParse(headerText(body));
         if (header.hash !== tip) throw new Error('the header it gave is not the block it named');
-        /* Its height, for the screen alone ("Block #…"): a header does not carry it, the source says it, and nothing is
-         * decided by it. A source that will not say it leaves it 0. */
-        return get('/api/blocks/tip/height').then(function (h) {
-          var height = parseInt(headerText(h), 10);
-          return { source: source.name, tip: tip, header: header, height: (height > 0 && height < 100000000) ? height : 0 };
-        }, function () { return { source: source.name, tip: tip, header: header, height: 0 }; });
+        return height.then(function (n) { return { source: source.name, tip: tip, header: header, height: n }; });
       });
     });
   }

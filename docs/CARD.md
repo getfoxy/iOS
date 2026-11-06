@@ -138,7 +138,7 @@ iOS hands Foxy the address and no session with the card. Foxy checks the address
 (`Foxy/Flashcard/CardAddress.swift`) and tells its page one thing, that a card
 was tapped. Nothing of the address goes with it. The page then does what
 MENU > FLASHCARD does: it goes to the Flashcard screen and begins the tap
-(TAP BEHIND PHONE, and the phone's own sheet), and the card, which is usually
+(TAP TO READ, and the phone's own sheet), and the card, which is usually
 still behind the phone, is read by that sheet. A card that is no longer there is
 asked for like any other: hold it again.
 
@@ -412,13 +412,35 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
 
    More than this phone holds in the card's currency, online and at this phone's
    own mint: the app's receive invoice for the whole amount (RECEIVE's screen,
-   with its tap to pay), the card behind it. When the money has come in, the
-   card's screen and TAP THE CARD AGAIN ("₿5,000 came in on this phone. Tap the
-   card to put it on."): TAP CARD loads the amount typed by the steps below; LATER,
-   the card closed any other way, or two minutes with no tap leave it on this
-   phone, its history row titled "For the card · kept on this phone"
-   (`fcDepOpen`, `fcDepArrived`, `fcDepHold`). What the phone held before is not
-   touched. With no connection it says what this phone holds, as before.
+   with its tap to pay), the card behind it. The newest block header for the
+   card's clock is asked for as the invoice goes up, while the payer pays
+   (`fcDepOpen`, `headerWarm`). When the money has come in, PAID shows for the
+   moment it takes to reach the card's screen, and the card's PIN pad comes up at
+   once (a card with no PIN: the sheet), with nothing asked in between. The pieces
+   for the card are made at the same moment, while the PIN is typed, so the sheet
+   opens as the PIN goes in, with no GETTING IT READY (`fcDepArrived`,
+   `fcDepLoad`, `fcAddPrep`). The load is the amount typed by the steps below.
+   Backed out of the PIN: pieces already made, or still being made, are owed to
+   the card like anything made for a card. They are locked to it, kept on this
+   phone, and written at its next tap ("… is ready for the card. It goes on at
+   the next tap."). Where none could be made, the money stays on this phone and
+   can be spent, its history row titled "For the card · kept on this phone"
+   (`fcDepKept`). What the phone held before is not touched. With no connection
+   it says what this phone holds, as before.
+
+   Where the time goes (a phone's log, 2026-11-06, $25.00 at a card of two
+   balances, 51 pieces). Before: PAID, then TAP THE CARD AGAIN and the PIN (13 s of
+   pressing and typing), the swap that makes the pieces (1.2 s under GETTING IT
+   READY), the card found (1.4 s), its read (2.8 s, of which 2.45 s is the card
+   proving its key), the PIN, the owner's grant and freeing used places (1.2 s),
+   the write (51 pieces with the mint's proof, one command each, 11.3 s, about
+   220 ms a piece: a slowed tap, made just after Foxy came back; a settled phone
+   writes a piece in about 89 ms), and the read after it (0.3 s). The header fetch
+   (10.3 s, three requests in series to each explorer, the two explorers side by
+   side) ran while the person pressed and typed. The tap never waits for it,
+   before or now. Now: the PIN pad at once, the swap under the PIN, and the
+   header in two rounds, not three. On a card held still, the critical path after
+   the PIN is the card: its read, the grant and the write.
 2. On the owner's phone no PIN is asked: the card is given the owner's proof and
    lets the money in for that tap. On any other phone, CARD PIN, and the button
    `ADD $2.00 TO CARD`.
@@ -468,25 +490,65 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
    in a row was already being paid with a piece too big and made up for in
    change. Such a card signs once for a payment however many pieces it is
    made of, so pieces cost nothing at a till, and it has the places: it gets
-   **eight of each size from 1 to 1,024**, smallest first as far as the money
-   goes, and the rest of the amount in powers of two. 16,376 sats fill that
-   drawer, in eighty-eight pieces, and it pays eight prices in a row exactly,
-   whatever they are, up to 2,047 sats each. A card with less on it has the
-   small sizes eight deep and its money in nothing large: 6,070 sats are
-   eighty-two pieces, none over 512. A load may be most of the card (112
-   pieces, a dozen places kept free), and takes as long to write: about nine
-   seconds for a hundred pieces. What the card holds counts towards each
+   **eight of each size from 1 to 1,024**, a whole set at a time (one of every
+   size, then two of every size, and so on, the smallest first), and the rest
+   of the amount in powers of two. 16,376 sats fill that drawer, in
+   eighty-eight pieces, and it pays eight prices in a row exactly, whatever
+   they are, up to 2,047 sats each. What the card holds counts towards each
    size, so a top-up fills what has been spent from first.
+
+   **Five seconds a tap** (decided 2026-11-06: "the first load should not
+   spend more than 5 seconds signing/loading"). The drawer is not written in
+   one tap. A tap is budgeted at 110 ms for each piece written (89 ms was
+   measured on a phone held well; the margin is for a phone less settled),
+   plus what the tap does besides: 1.6 s for a load's read, the card's proof
+   of its key and the PIN or grant, and 3 s for a payment's read, signing and
+   wait. So a load writes at most 30 pieces and a payment's change at most 18
+   (`cardTapBudget`, 08a-flashcard.js "five seconds a tap"). A card's
+   **first load** is one binary set ("one binary set on first load"): one of
+   each size from 1 to 1,024, and the rest cut so that every price up to the
+   whole stays exact (each piece no more than one past what the pieces before
+   it reach). $25.00 is sixteen pieces, about 3.4 s by the budget; $123.45 is
+   eighteen and $1,000.00 twenty-two. Only an amount in the millions is more
+   than thirty pieces would make whole: 1,310,000 sats is exact for every price
+   up to 261,424. So a first load pays **one** price exactly offline, any price
+   up to the whole, and any number online. **A second payment to a phone that
+   is offline is refused** unless its price happens to be made of what is left
+   (NO CHANGE WHILE OFFLINE): the drawer deepens at the next online tap that
+   writes to the card. A debug build launched with `-FoxyFirstDepth N` cuts
+   first loads N deep for that run, to test the depth on a phone (DEVICE-TESTS
+   §23g). Every later tap that writes, a
+   top-up or a payment's change, deepens the drawer with what it writes, the
+   smallest size still short first, a whole set at a time, inside the tap's
+   pieces. With $25.00 top-ups the card holds 1, 2, 3, 4 and then 6 whole sets
+   after the first load and each of four top-ups (16, 36, 46, 59 and 78 pieces,
+   no tap over 3.8 s; `flashcard-tap-time.js`). A payment's change refills only
+   with what comes back: a payment is not made to overpay for it, since on a
+   card of 1.13 and on what the card signs for counts against its limit and its
+   wait.
+
+   The phone's own part is kept short. Pieces with the mint's proof go to the
+   phone in lists of eight (`cardSendMany`), which sends them to the card back
+   to back and stops at the first it refuses: one trip each way for eight
+   pieces, every command the size it always was. The sheet's "Writing i of n"
+   changes at most every half second. While a card's sheet is up, the page's
+   background work waits for it (`cardAfter`): the held quote sweep, the
+   Cashu ID's inbox opened again, the small-change top-up, the adding up of
+   the books. A write that went whole is not followed by a read: the card is
+   known from what was read before and what went on (`cardAfterWrite`). Any
+   other write reads it again. The card's proof of its key (AUTH, 0.6 s on a
+   contact reader, up to 2.6 s on a phone) is kept in the read before a load:
+   leaving it out is the keeper's to decide.
    A card with a **per tap limit** is cut to it: nothing larger than the
    largest power of two under the limit, so a payment under the limit is never
    made from a piece the card waits for. Where that is more pieces than the
    places left (a small limit on a large balance), the places fill with pieces
    under the limit and the rest goes in larger ones; the card's screen says how
    much, `$X IN PIECES ABOVE THE LIMIT · A TILL HOLDS LONGER FOR THOSE`.
-4. A tap writes them, and reads them back. The screen says `GETTING IT READY`
+4. A tap writes them; a write that went whole is not read back (what went on is known), any other is. The screen says `GETTING IT READY`
    while the swap runs, then the states of a tap. Then the card's own screen is back, and no card is raised
    over it: the balance on it counts up, from the figure it showed to what the card holds now (the card as that tap
-   read it after the write: its balance, its limits, what is left today), over about a second, with home's own ease
+   knows it after the write: its balance, its limits, what is left today), over about a second, with home's own ease
    (`runBalanceAnim`'s: 1.15 seconds, an ease out; a phone set to reduce motion is shown the new figure at once).
    What the balance cannot say is a line: that the card was moved to this phone's mint by the same tap, and that
    more than was asked for went on, so that the card holds fewer pieces. (Money put on a card from the send screen,
@@ -611,11 +673,12 @@ mint refuses*.
 
 Apple's sheet comes up whenever the phone is looking for a card. Its big title
 and its CANCEL belong to iOS and cannot be changed. One line of text on it is
-Foxy's and changes during a tap. Foxy's own screen sits behind it, from the
-design (`build/app/26h-tap-screen.js`): a card comes down behind a phone with
-three waves rising, and under it a title and the amount. The sheet takes the
-bottom of the screen; nothing is drawn there but CANCEL, under the sheet's own.
-iOS ends a session after a minute.
+Foxy's and changes during a tap. Foxy's own screen sits behind it, one of the
+card tap family of the keeper's 2026-11-06 design (`build/app/26h-tap-screen.js`):
+a title at 34px spaced out, the amount at 76px under it, and over the top of the
+screen an arrow bobbing up and TAP CARD BEHIND THE TOP. The sheet takes the bottom
+of the screen; nothing is drawn there but a pill under the sheet's own. iOS ends a
+session after a minute.
 
 The sheet's line, by step:
 
@@ -634,35 +697,96 @@ The sheet's line, by step:
 | the card wants its PIN | Enter the card's PIN (a note, not an error) |
 | the mint refused a payment | Payment did not go through. |
 
-The screen behind it has two grounds and says one thing in each state. While no card
-is connected it is light blue (ink #0F2A33, no fur); from the moment the phone's
-link reports a card connected until the card is lost or the sheet ends it is orange
-(#EB6A2E, ink #1A0A04, the fur over it). The card in the picture is the card
-screen's own face at 250 px: FX1 is the picture and FL1 the face drawn in CSS, by
-the card's design, and FX1 at a till until a card has been read. It loops (comes
-down, the waves rise) while a card is wanted, and stays settled behind the phone
-once it is there; for a person who asks for less motion it is just drawn settled.
+The screens of a card tap are one family, and only the words change from one flow
+to the next. Each is a ground, the title, the amount, three dots where something is
+being waited on, a paragraph and a chip where there is something to say, and its
+pills at the foot. The status bar is the phone's own. For a person who asks for less
+motion the dots and the arrow stand still.
 
-| Title | When | Ground | Card |
+| Screen | Ground (ink) | When | Pills |
 |---|---|---|---|
-| TAP BEHIND PHONE | waiting for the first contact (CANCEL is here only) | light | loops |
-| KEEP HOLDING · 7 s | in contact, the card being asked; the seconds count up from the contact, a whole second at a time, with no estimate (change takes it past two seconds, a wait over the limit past five) | orange | settled |
-| VERIFYING CARD | the card has signed and is still there: the mint is asked, and change is fetched or written | orange | settled |
-| REMOVE | the card has signed and is let go, nothing more is wanted of it: said for as long as the phone's sheet may still be showing, which is until it is seen to go (the app has the screen back) or a second and a half after the card signed, whichever is first | orange | settled |
-| CHECKING | then, while the mint has not answered the swap of what the card signed: there is nothing to remove, and the mint is asked. The words and the wait are those of the CHECKING card (`fcChecking`) | orange | settled |
-| STILL CHECKING | once that wait has run out: a first asking 3 seconds after the card is let go and then one every 5, a dozen in all, so 58 seconds after CHECKING came up. The phone goes on asking | orange | settled |
-| TAP FOR CHANGE | the card has signed and contact broke before the change went on, or the second tap of a payment is waiting for the card | light | loops |
-| PLEASE TAP AGAIN | contact broke part way and the same sheet asks for the card again (also the tap after the PIN pad, and a refused payment going back on the card) | light | loops |
-| ENTER PIN | the sheet ended asking for the PIN; the pad is up over the screen, which goes with the pad's back button, or is taken up by the tap that follows it as PLEASE TAP AGAIN | light | settled |
+| 1a WAITING | light blue #D6EEF4 to #A9D6E2 (#0F2A33) | the sheet is up and no card is in contact: the flow's TAP TO ..., with the arrow and TAP CARD BEHIND THE TOP; ENTER PIN while the PIN pad is up over it | CANCEL until the card has been asked anything |
+| 1b GETTING READY | light blue | the phone is making the pieces it will write (ADD FUNDS), before any sheet; slower dots | CLOSE (the pieces then wait for the next tap) |
+| 1c IN CONTACT | orange #FF9A5C to #D9561C (#1A0A02) | the card is being read or is signing, and while it has signed and is still there for its change; faster dots | CLOSE |
+| 1d CHECKING | teal #1A3C47 to #081C22 (#F2FAFC) | the card has signed and been let go, and the mint is asked; STILL ... once the wait the CHECKING screen makes has run out (a first asking 3 seconds after the card is let go and then one every 5, a dozen in all). The same screen is the CHECKING screen after a tap (`fcChecking`) and the one over a code a card paid (`fcCardVerifying`) | CLOSE |
+| 1e TAP AGAIN | yellow #FFE7A8 to #EDB236 (#2A1A00) | a load whose card was not read: "The card wasn't read. This money is still waiting to go onto it." (back onto it, for a payment's change) and the lock, "Only this card can receive it." (`fcStillWaiting`) | TAP CARD, LATER (it stays owed, as before) |
+| 1f TAP AGAIN | yellow | a payment whose card was not read and signed nothing: "The card wasn't read. Nothing has been paid yet." and the shield, "Your money is still on your card." (`fcMissedPay`) | TAP CARD, CANCEL |
+| 1g CARD LOST | red #E8503F to #B82A1E (white) | the instant the phone's link says the card has gone mid-tap: "The card moved away too soon. Hold it still behind the top of the phone." with the shield where the card had signed nothing, the lock where money is to go onto it (a load, or a payment's change), and no chip for a payment taken up again after the card left part way | TRY AGAIN (the same sheet is asking already: back to 1a), CANCEL (ends the sheet) |
 
-A payment that makes change keeps the titles it had: VERIFYING CARD while the card
-is there and the mint is asked, TAP FOR CHANGE and PLEASE TAP AGAIN where it must be
-tapped again. A mint that answers inside the second and a half, or answers while the
-screen says CHECKING (the change is then being made), leaves the screen saying what it
-said until it comes down.
+The words by flow (`FC_TAP_FLOWS`; a tap names its flow, `fcTap`'s `o.flow`):
+
+| Flow | 1a | 1c | 1d |
+|---|---|---|---|
+| a card paying an invoice or a request (`pay`) | TAP TO PAY | PAYING | CHECKING |
+| money going onto a card: ADD FUNDS, SEND to a card, a card set up and loaded, owed money written (`load`) | TAP TO LOAD | RECEIVING | CHARGING |
+| a payment's second tap, its change; a till's bound change put back (`change`) | TAP FOR CHANGE | RECEIVING | CHARGING |
+| reading a card, its owner's or a guest's (`read`) | TAP TO READ | READING | VERIFYING |
+| WITHDRAW (`withdraw`) | TAP TO WITHDRAW | WITHDRAWING | CHECKING |
+| SWAP (`swap`) | TAP TO SWAP | SWAPPING | CHECKING |
+| TRANSFER to another mint, and its write (`move`) | TAP TO MOVE | MOVING | CHECKING |
+| RENEW, and a backup moved to this phone (`renew`) | TAP TO RENEW | RENEWING | CHECKING |
+| RESET (`reset`) | TAP TO RESET | RESETTING | CHECKING |
+| SET UP (`setup`) | TAP TO SET UP | SETTING UP | CHECKING |
+| CHANGE PIN, ADD PIN (`pin`) | TAP TO SET PIN | WRITING | CHECKING |
+| LIMITS (`limit`) | TAP TO SET LIMIT | WRITING | CHECKING |
+| the card's rate (`rate`) | TAP TO SET RATE | WRITING | CHECKING |
+| giving up change owed (`write`) | TAP CARD | WRITING | CHECKING |
+| tying a card to this phone, and any tap that names no flow (`card`) | TAP CARD | READING | CHECKING |
+
+Which screen the one behind the sheet is, by where the tap has got to (the look is
+kept on the screen as `data-look`, the screen as `data-scheme`):
+
+| Look | Screen | When |
+|---|---|---|
+| hold | 1a | waiting for the first contact |
+| keep | 1c | in contact, the card being asked |
+| verify | 1c | the card has signed and is still there: the mint is asked, and change is fetched or written (RECEIVING once the change has been asked for) |
+| remove | 1d | the card has signed and is let go, for as long as the phone's sheet may still be showing (until it is seen to go, or a second and a half after the card signed) |
+| checking | 1d | then, while the mint has not answered |
+| still | 1d | once the wait has run out: STILL CHECKING (STILL CHARGING, STILL VERIFYING) |
+| change | 1a | the second tap of a payment, waiting for the card: TAP FOR CHANGE |
+| change | 1g | contact broke after the card signed and before its change went on |
+| again | 1g | contact broke part way, and the same sheet asks for the card again |
+| again | 1a | a tap that begins again with nothing asked of the card yet: the tap after the PIN pad, a refused payment going back on the card |
+| pin | 1a | the sheet ended asking for the PIN; the pad is up over the screen, which goes with the pad's back button, or is taken up by the tap that follows it |
+
+**How CARD LOST settles.** It is shown the moment the phone's link reports the card
+gone (`Foxy/Flashcard/CardLink.swift` sends `lost` when a command to the card fails
+or the session ends; 26f's `fcTap` is told the same when the wallet asks the sheet
+for the card again), but only for a card that was in the field: CardLink sends
+`lost` too when iOS ends a sheet no card came near (its own Cancel, its minute run
+out), and then the screen stays as it was and the cancel says nothing, as before.
+It stays until one of three things:
+
+1. The card is found again (`connected`): the tap goes on, 1c.
+2. The card had signed before it went (the wallet's steps reached `mint` or
+   `checking`): the payment goes on at the mint, 1d, and then RECEIVED (1h) at the
+   phone being paid.
+3. The tap ends without it. The wallet's error says what happened (`card` in
+   `build/wallet/21a-flashcard.js` and `08a-flashcard.js`), and the tap's own record
+   of what its screen saw goes with it (`tapLost`, `tapSigned`, `tapAmount`):
+   - a payment whose card left before it signed (`gone`, the sheet then closed
+     on it), or whose sheet was dismissed after CARD LOST (`cancelled` with
+     `tapLost`): TAP AGAIN, 1f;
+   - a load whose card left with nothing written (`gone`), or whose sheet closed
+     with no card read: TAP AGAIN, 1e;
+   - any other flow (withdraw, swap, reset, a read, ...) ends on the card it always
+     did (THE CARD LEFT TOO SOON); whether those get a TAP AGAIN of their own is the
+     keeper's to decide;
+   - a card that left part way through signing (`interrupted`) is taken up again in
+     the same sheet as it always was (`Hold to finish paying`), and where that sheet
+     is dismissed it is NOT PAID YET, as before, with CANCEL putting back what it
+     signed: not 1f, for some of it was signed.
+
+1e asks for the card as the card it replaced did, so a payment's confirmation held for
+its change still waits while it is up; 1f rests, and holds nothing.
+
+CLOSE on 1c and 1d takes Foxy's screen down and nothing else (its time-out goes with it): the tap goes on under
+the phone's sheet, or at the mint, to its end, which is said as it always is, and
+the same tap does not draw the screen again.
 
 There is no countdown anywhere: the till cannot know the count, and the card does
-not say it. Each title is one line, made smaller on a narrow phone if it would not
+not say it (the seconds KEEP HOLDING once counted are gone with it). Each title is one line, made smaller on a narrow phone if it would not
 fit. The screen is drawn from what the wallet reports and what the phone's link
 says (`connected`, `lost`); the sheet's lines are not repeated on it.
 
@@ -816,7 +940,7 @@ What that changes:
 
 - **The sheet goes as soon as the card has signed**, where no change is coming:
   with no words on it, only the phone's own tick as it closes. The wait for the
-  mint is on Foxy's own screen (VERIFYING CARD), and then PAYMENT RECEIVED.
+  mint is on Foxy's own screen (CHECKING, 1d), and then RECEIVED (1h).
   Where change is coming the sheet stays, as below.
 - **The PIN is sealed to the card (software 1.9).** A PIN typed at a till
   crossed the air to the card as it was typed, and anybody listening to the
@@ -973,20 +1097,20 @@ later part of a bigger change.)
 A card payment is two taps, and is said as two every time, so a person learns
 one way of paying:
 
-1. **SEND.** The PIN, and the first tap, under KEEP HOLDING. The card signs its
+1. **SEND.** The PIN, and the first tap, under PAYING (1c). The card signs its
    one or two pieces and may be taken away.
 2. **VERIFY.** The phone's sheet stays up and says `Hold for change.` while the swap runs and the change is made; Foxy's screen
-   behind it says VERIFYING CARD. "Paid" first, since the card's part is over
+   behind it says PAYING, the card still in contact. "Paid" first, since the card's part is over
    the moment it has signed, and the words are what say so: iOS plays no
    haptic of an app's while its own sheet is up. (The sheet used to say `Remove
    the card`, which beside its own Cancel read as finished, and it was closed
    before the change.)
 3. **RECEIVE.** The same sheet says `Tap the card again for its change` and the
-   screen says TAP FOR CHANGE (VERIFYING CARD once it is found); the tap writes it, with no PIN: the card allows
+   screen says TAP FOR CHANGE (RECEIVING once it is found); the tap writes it, with no PIN: the card allows
    the tap after a payment to load. The sheet ends `Done. ₿212 of change is back
    on the card.` A card that leaves while its change is being written has used
    that one tap up, and wants its PIN for the rest: the same sheet asks for it
-   again (PLEASE TAP AGAIN) and gives it the PIN typed for this payment, so nobody is
+   again (CARD LOST, then RECEIVING) and gives it the PIN typed for this payment, so nobody is
    asked for it twice. The PIN is held for the length of the one payment's sheet
    and no longer; a change tap in a sheet of its own, later, asks for it on the
    pad as it always did.
@@ -1357,7 +1481,21 @@ follows is the one a card has now.
   typed in sats stays in sats.
 - **The owner takes money off at any limit**: both limits are lifted in one
   command and put back in one, and written down first, as the daily limit is.
-  Its own withdrawal does not wait.
+  Its own withdrawal does not wait. The phone signs that lift only against the
+  keeper's yes, asked before the card is held up with the flow's own (WITHDRAW,
+  SWAP, RENEW, RESET of a card with money, TRANSFER, the backup's move, a per tap
+  limit that recuts the money): limits to nothing from what the card said in the
+  tap (after the owner's grant, where a quick card says its limit on one payment),
+  and then back to exactly those. The phone keeps them until it sees the card
+  holding them again, so a put-back that never reached the card is made at the
+  next tap that finds it lifted; no second lift is signed over a kept one.
+- **The re-peg needs a yes too.** The phone signs no limit the keeper did not
+  say yes to, and the sats a dollar limit becomes are the page's sum, not the
+  card's: a card before 1.23 has its sats re-pegged only in a read whose tap the
+  keeper said yes to that figure for (`repeg`), and in no other flow's tap. No
+  screen asks for that yet (a FOLLOW THE PRICE question is a later job), so until
+  then such a card keeps the sats it was given. A card of 1.23 keeps cents, and
+  only its rate follows the price, which signs unasked.
 
 ## The card's own log
 
@@ -1807,8 +1945,8 @@ said a card's pieces were good, so a phone with no connection can say `Verified 
 characters (`docs/CARD-DESIGNS.md` in the card repository): FL1 is Flash's,
 FX1 is Foxy's, a picture of orange fur with a sleeping fox; EL1 is the beaker, drawn
 in CSS and SVG with its liquid flowing and bubbling and the beaker swaying (still
-under Reduce Motion), the same block in `build/markup.html` and, for the face
-behind the sheet, `FC_EL1_FACE`. A card of software
+under Reduce Motion), the same block in `build/markup.html` (and `FC_EL1_FACE`, which
+no screen behind the sheet draws now). A card of software
 1.10 carries its code in its record, written at set-up and read back by every
 phone; for a card before that, the phone that set it up writes the code it
 chose on a note of its own (`foxy.flashcard.designs`, by the card's key: not

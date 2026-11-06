@@ -3070,11 +3070,13 @@ const eq = (got, want, what) =>
     return storage.getItem('flash.leftover') === 'x' ? null : 'step 1 ran again on an install already past it';
   });
 
-  await test('the stores of two removed features go at boot; the lock-key rows stay', async () => {
+  await test('the stores of removed features go at boot (the wake, the LNURL, the messages); the lock-key rows stay', async () => {
     const rows = JSON.stringify([{ name: 'lnurl-00ff', index: 3 }]);
-    const { storage } = load({ storage: { 'foxy.wake': '{"on":true}', 'foxy.lnurl.codes': '[{"id":"x"}]', 'foxy.req.lockkeys': rows } });
-    if (storage.getItem('foxy.wake') !== null) return 'foxy.wake is still there';
-    if (storage.getItem('foxy.lnurl.codes') !== null) return 'foxy.lnurl.codes is still there';
+    const { storage } = load({ storage: { 'foxy.wake': '{"on":true}', 'foxy.lnurl.codes': '[{"id":"x"}]', 'foxy.req.lockkeys': rows,
+      'foxy.msg.threads': '{"v":1,"threads":{}}', 'foxy.msg.outbox': '[]', 'foxy.msg.seen': '[]' } });
+    for (const k of ['foxy.wake', 'foxy.lnurl.codes', 'foxy.msg.threads', 'foxy.msg.outbox', 'foxy.msg.seen']) {
+      if (storage.getItem(k) !== null) return k + ' is still there';
+    }
     return storage.getItem('foxy.req.lockkeys') === rows ? null : 'the lock-key rows were touched';
   });
 

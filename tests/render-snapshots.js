@@ -206,54 +206,14 @@ const SERIES = { '1D': { pts: [[0, 60], [50, 40], [100, 20]], d: 'M0 60L50 40L10
 // a representative state of a screen, against the stand-in wallet
 const at = (screen, state, extra) => Object.assign({ wallet: true, state: Object.assign({ screen, stack: [] }, LIVE, state || {}) }, extra || {});
 
-/* Messages between Cashu IDs, last so that the views before keep their numbers: the bare screen, as every screen the app
- * names is drawn with no wallet, and its representative states. */
-function messageViews() {
+/* Contacts that are Cashu IDs, and the empty CONTACTS, last so that the views before keep their numbers. */
+function cashuIdViews() {
   const v = [];
   const add = (label, view) => v.push([label, view]);
-  add('screen cidChat', { state: { screen: 'cidChat', stack: [] } });
-  /* Messages between Cashu IDs (26p-cashu-msg.js): a contact that is a Cashu ID with unread messages, someone who is not
-   * a contact under NEW MESSAGES, and a contact's screen with the ID in use, empty, and with no ID in use. */
-  const CID_A = '02' + 'a1'.repeat(32), CID_S = '03' + 'b2'.repeat(32);
-  const MSG_CONTACTS = CONTACTS.concat([{ name: 'Carol', handle: 'foxyid1' + 'C'.repeat(179), cid: { id: CID_A, nostr: 'c3'.repeat(32), sig: '' } }]);
-  const MSGS = [
-    { id: 'a', dir: 'in', text: 'Lunch at noon?', at: Date.UTC(2026, 10, 4, 9, 0), mark: '' },
-    { id: 'b', dir: 'out', text: 'Yes, see you there', at: Date.UTC(2026, 10, 4, 9, 1), mark: 'sent' },
-    { id: 'c', dir: 'out', text: 'Bringing the receipt\nand the change', at: Date.UTC(2026, 10, 4, 9, 2), mark: 'sent' },
-  ];
-  const MSG_ON = { cashuMsgOn: () => true,
-    cashuMsgThreads: () => [{ peer: CID_A, name: 'Carol', contact: true, unread: 3, lastAt: 1, lastText: '' },
-      { peer: CID_S, name: 'A Cashu ID', contact: false, unread: 1, lastAt: 2, lastText: '' }],
-    cashuMsgThread: (p) => (p === CID_A ? { peer: CID_A, name: 'Carol', contact: true, card: '', unread: 0, msgs: MSGS }
-      : { peer: CID_S, name: 'A Cashu ID', contact: false, card: 'foxyid1' + 'S'.repeat(179), unread: 0, msgs: MSGS.slice(0, 1) }),
-    cashuMsgSeen: () => {} };
-  add('contacts, a Cashu ID with unread messages, and a new one', at('contacts', { contacts: MSG_CONTACTS }, { wallet: MSG_ON }));
-  add('cidChat, a contact\u2019s messages', at('cidChat', { contacts: MSG_CONTACTS, cmPeer: CID_A, cmDraft: 'On my way' }, { wallet: MSG_ON }));
-  add('cidChat, someone who is not a contact', at('cidChat', { contacts: MSG_CONTACTS, cmPeer: CID_S }, { wallet: MSG_ON }));
-  add('cidChat, no messages yet', at('cidChat', { contacts: MSG_CONTACTS, cmPeer: CID_A },
-    { wallet: Object.assign({}, MSG_ON, { cashuMsgThread: () => ({ peer: CID_A, name: 'Carol', contact: true, card: '', unread: 0, msgs: [] }) }) }));
-  add('cidChat, a refusal under the field', at('cidChat', { contacts: MSG_CONTACTS, cmPeer: CID_A, cmErr: 'That message is too long. A message is at most 1000 characters.' }, { wallet: MSG_ON }));
-  add('cidChat, no Cashu ID in use', at('cidChat', { contacts: MSG_CONTACTS, cmPeer: CID_A }, { wallet: { cashuMsgOn: () => false } }));
-  /* With the keyboard up (kbInset, watchKeyboard in 15-paid-wake-keyboard.js): the frame padded by its height, the field
-   * and SEND at the foot of what is left, the list above them shortened. */
-  add('cidChat, a contact\u2019s messages, keyboard up', at('cidChat', { contacts: MSG_CONTACTS, cmPeer: CID_A, cmDraft: 'On my way', kbInset: 336 }, { wallet: MSG_ON }));
-  add('cidChat, no messages yet, keyboard up', at('cidChat', { contacts: MSG_CONTACTS, cmPeer: CID_A, kbInset: 336 },
-    { wallet: Object.assign({}, MSG_ON, { cashuMsgThread: () => ({ peer: CID_A, name: 'Carol', contact: true, card: '', unread: 0, msgs: [] }) }) }));
-  /* CHAT, home's round button at the top left, with the unread count on its corner, and INBOX, which it opens (26p-cashu-msg.js
-   * `renderInbox`): messages and payments either way, newest first; empty; with no ID in use. */
-  add('screen inbox', { state: { screen: 'inbox', stack: [] } });
-  const INBOX_ON = Object.assign({}, MSG_ON, {
-    cashuMsgThreads: () => [{ peer: CID_A, name: 'Carol', contact: true, unread: 3, lastAt: Date.UTC(2026, 10, 4, 9, 2), lastText: 'Bringing the receipt\nand the change' },
-      { peer: CID_S, name: 'A Cashu ID', contact: false, unread: 1, lastAt: Date.UTC(2026, 10, 4, 8, 0), lastText: 'Hi, is this Foxy?' }],
-    cashuMsgPayments: () => [{ peer: CID_A, dir: 'out', unit: 'usd', amount: 125, at: Date.UTC(2026, 10, 3, 18, 0) },
-      { peer: '02' + 'c4'.repeat(32), dir: 'in', unit: 'sat', amount: 500, at: Date.UTC(2026, 10, 4, 8, 30) }] });
-  const INBOX_CONTACTS = MSG_CONTACTS.concat([{ name: 'Dave', handle: 'foxyid1' + 'D'.repeat(179), cid: { id: '02' + 'c4'.repeat(32), nostr: 'd5'.repeat(32), sig: '' } }]);
-  add('home, CHAT with unread messages', at('home', { contacts: INBOX_CONTACTS }, { wallet: INBOX_ON }));
-  add('inbox, messages and payments', at('inbox', { contacts: INBOX_CONTACTS, stack: ['home'] }, { wallet: INBOX_ON }));
-  add('inbox, nothing yet', at('inbox', { contacts: MSG_CONTACTS, stack: ['home'] },
-    { wallet: Object.assign({}, MSG_ON, { cashuMsgThreads: () => [], cashuMsgPayments: () => [], cashuIdCheck: () => Promise.resolve({}), scan: () => Promise.resolve('') }) }));
-  add('contacts, empty', at('contacts', { contacts: [], stack: ['home'] }, { wallet: Object.assign({}, MSG_ON, { cashuIdCheck: () => Promise.resolve({}), scan: () => Promise.resolve('') }) }));
-  add('inbox, no Cashu ID in use', at('inbox', { contacts: MSG_CONTACTS, stack: ['home'] }, { wallet: { cashuMsgOn: () => false, cashuMsgPayments: () => [] } }));
+  const CID_A = '02' + 'a1'.repeat(32);
+  const ID_CONTACTS = CONTACTS.concat([{ name: 'Carol', handle: 'foxyid1' + 'C'.repeat(179), cid: { id: CID_A, nostr: 'c3'.repeat(32), sig: '' } }]);
+  add('contacts, a Cashu ID among them', at('contacts', { contacts: ID_CONTACTS }));
+  add('contacts, empty', at('contacts', { contacts: [], stack: ['home'] }, { wallet: { cashuIdCheck: () => Promise.resolve({}), scan: () => Promise.resolve('') } }));
   // the menu with BACKUP ACCOUNT at the very top: money in the wallet, the words not checked
   add('home, the menu with BACKUP ACCOUNT', at('home', { open0: true }, { wallet: { backedUp: () => false } }));
   /* A card's HISTORY opened from the card, with what its screen does not say at the top (26f-flashcard.js, `fcHistNotes`): the mint's
@@ -388,6 +348,23 @@ function representative(logic) {
   add('fcLimitConfirm, no limit for paying without the PIN, to be confirmed', at('fcLimitConfirm', { fc: FC({ noPinKnown: true }), fcLimit: { sats: 0 } }, { wallet: CARDS(), before: (a) => { a._fcLimitNoPin = true; } }));
   // a card moved to another mint: the list asking which, and the confirmation as it is asked, answered and refused
   add('switchMint, asking which mint a card moves to', at('switchMint', { fcPick: true, fc: FC() }, { wallet: CARDS() }));
+  // and the card's TRANSFER TO with another mint picked, NEXT lit, one mint's fee in and one still asked (26n-card-withdraw-to.js, `fcMoveAsk`)
+  add('switchMint, a card\u2019s TRANSFER TO, another mint picked', at('switchMint', { fcPick: true, fc: FC(), mintSel: OTHER,
+    wdQuotes: { [OTHER]: { state: 'ok', fee: 67, rank: 67 }, 'https://mint.macadamia.cash': { state: 'asking' } } }, { wallet: CARDS() }));
+  /* a card's WITHDRAW TO (26n-card-withdraw-to.js): its own mint first and ticked, then a crossing priced, one still asked and one
+   * that did not answer, NEXT at the foot */
+  const WD_QUOTES = { [OTHER]: { state: 'ok', fee: 67, rank: 67 }, 'https://forge.flashapp.me': { state: 'asking' },
+    'https://mint.macadamia.cash': { state: 'no', why: 'macadamia is not answering' } };
+  // (every mint on the list counted as one this phone uses)
+  const WD_MINTS = (a) => { a.tillMints = () => a.allMints(); };
+  add('switchMint, a card\u2019s WITHDRAW TO, a fee, CALCULATING\u2026 and NOT AVAILABLE', at('switchMint', { wdPick: true, wdQuotes: WD_QUOTES, fc: FC() },
+    { wallet: CARDS(), before: (a) => { WD_MINTS(a); a._fcWd = { run: 1, go: null, unit: 'sat', amount: 2048, card: MINT }; },
+      after: (a) => { a._fcWd = null; delete a.tillMints; } }));
+  // the other lists of mints, as tiles: the till's two questions and a transfer's two steps
+  add('switchMint, TILL AT WHICH MINTS?, the mint this phone is on ticked', at('switchMint', { tillPick: 'set', tillSet: [MINT] }));
+  add('switchMint, DEFAULT MINT', at('switchMint', { tillPick: 'default', tillSet: [MINT, OTHER] }));
+  add('switchMint, a transfer: FROM WHICH MINT?', at('switchMint', { trStep: 'from' }));
+  add('switchMint, a transfer: TO WHICH MINT?', at('switchMint', { trStep: 'to', trFrom: MINT }));
   // (TRANSFER: the quote is the wallet's `cardTransferQuote`, its three fees and what lands)
   const MOVE = (over) => Object.assign({ from: MINT, to: OTHER, unit: 'sat', have: 2048, sats: 2048, quote: null, fee: null, lands: 0, err: '', busy: false }, over || {});
   const QUOTE = (over) => Object.assign({ from: MINT, to: OTHER, unit: 'sat', toUnit: 'sat', converts: false, have: 2048, lands: 2026, cost: 2048,
@@ -1251,25 +1228,37 @@ function cards() {
   add('overlay: PIN set-up', (a) => a.pinSetup(() => {}));
   // the same pad asking for a card's PIN, and for an amount with a second answer (26f-flashcard.js)
   add('overlay: a card\u2019s PIN, to pay, after a wrong one', (a) => a.fcAskPin({ title: 'CARD PIN', subtitle: 'To pay $0.43 (\u20bf500). The card\u2019s owner types its PIN here.', warn: 'Wrong PIN. 2 tries left.', cta: 'PAY $0.43' }, () => {}));
-  /* The screen behind the card sheet (26h-tap-screen.js), one view for each of its states, and the card in each design; the
-   * seconds of KEEP HOLDING are fixed so the view does not move with the clock */
-  const behind = (o, fn) => (a) => { a.FC_TAP_REMOVE_MS = 1500; a._fcTapO = Object.assign({ amount: '$25.75' }, o || {}); a.fcHeldSeconds = () => 7; a.fcStage('hold'); if (fn) fn(a); };
+  /* The card tap screens (26h-tap-screen.js, the keeper's 1a to 1g), one view for each state of the screen behind the sheet, each
+   * flow's words, and the screens of the family that come before and after the sheet (GETTING READY, CHECKING, TAP AGAIN). */
+  const behind = (o, fn) => (a) => { a.FC_TAP_REMOVE_MS = 1500; a._fcTapO = Object.assign({ amount: '$25.75', flow: 'pay' }, o || {}); a.fcStage('hold'); if (fn) fn(a); };
   const link = (a, stage) => a.fcTapEvent({ stage, text: '' });
-  add('stage: tap behind phone', behind());
-  add('stage: keep holding', behind({}, (a) => link(a, 'connected')));
-  add('stage: verifying card', behind({}, (a) => { link(a, 'connected'); a.fcStage('mint'); }));
+  add('stage: 1a tap to pay', behind());
+  add('stage: 1c paying', behind({}, (a) => link(a, 'connected')));
+  add('stage: 1c paying, signed with the card still there', behind({}, (a) => { link(a, 'connected'); a.fcStage('mint'); }));
   // (REMOVE gives way to CHECKING a second and a half after the card signed: held here, so the view does not move with the clock)
-  add('stage: remove', behind({}, (a) => { a.FC_TAP_REMOVE_MS = 3600 * 1000; link(a, 'connected'); a.fcStage('checking'); }));
-  // the mint not heard from once the card is gone: CHECKING, and after the wait the CHECKING card makes (58 seconds), STILL CHECKING
-  add('stage: checking', behind({}, (a) => { link(a, 'connected'); a.fcStage('checking'); a._fcTapO.t.goneAt = Date.now() - 5000; a.fcTapDraw(); }));
-  add('stage: still checking', behind({}, (a) => { link(a, 'connected'); a.fcStage('checking'); a._fcTapO.t.goneAt = Date.now() - 100000; a.fcTapDraw(); }));
-  add('stage: tap for change', behind({ look: 'receive' }));
-  add('stage: please tap again', behind({}, (a) => { link(a, 'connected'); link(a, 'lost'); }));
-  add('stage: enter pin', behind({}, (a) => { link(a, 'connected'); a.fcTapPin(); }));
-  add('stage: keep holding, a card of the drawn design', behind({}, (a) => { link(a, 'connected'); a.fcTapSeen(''); }));
-  add('stage: tap behind phone, no amount', behind({ amount: '' }));
-  add('stage: checking a card payment', (a) => { a.fcChecking('card-x', { paying: true, taken: true }); clearTimeout(a._fcCheckT); },
+  add('stage: 1d checking, the card just let go', behind({}, (a) => { a.FC_TAP_REMOVE_MS = 3600 * 1000; link(a, 'connected'); a.fcStage('checking'); }));
+  // the mint not heard from once the card is gone: CHECKING, and after the wait the CHECKING screen makes (58 seconds), STILL CHECKING
+  add('stage: 1d checking', behind({}, (a) => { link(a, 'connected'); a.fcStage('checking'); a._fcTapO.t.goneAt = Date.now() - 5000; a.fcTapDraw(); }));
+  add('stage: 1d still checking', behind({}, (a) => { link(a, 'connected'); a.fcStage('checking'); a._fcTapO.t.goneAt = Date.now() - 100000; a.fcTapDraw(); }));
+  add('stage: 1a tap for change', behind({ look: 'receive', flow: '' }));
+  add('stage: 1g card lost, before it signed', behind({}, (a) => { link(a, 'connected'); link(a, 'lost'); }));
+  add('stage: 1g card lost, its change still to go on', behind({}, (a) => { link(a, 'connected'); a.fcStage('mint'); link(a, 'lost'); }));
+  add('stage: 1a enter pin', behind({}, (a) => { link(a, 'connected'); a.fcTapPin(); }));
+  add('stage: 1a tap to pay, no amount', behind({ amount: '' }));
+  // the other flows' words, 1a and 1c
+  add('stage: 1a tap to load', behind({ flow: 'load', amount: '$1.00' }));
+  add('stage: 1c receiving', behind({ flow: 'load', amount: '$1.00' }, (a) => link(a, 'connected')));
+  add('stage: 1d charging', behind({ flow: 'load', amount: '$1.00' }, (a) => { a.FC_TAP_REMOVE_MS = 3600 * 1000; link(a, 'connected'); a.fcStage('checking'); }));
+  add('stage: 1c reading', behind({ flow: 'read', amount: '' }, (a) => link(a, 'connected')));
+  add('stage: 1a tap to withdraw', behind({ flow: 'withdraw' }));
+  add('stage: 1a tap to set up', behind({ flow: 'setup', amount: '' }));
+  add('stage: checking a card payment', (a) => { a.fcChecking('card-x', { paying: true, taken: true, tapAmount: '$15.25' }); clearTimeout(a._fcCheckT); },
     { wallet: { cardSession: () => Promise.resolve(), cardSettle: () => new Promise(() => {}) } });
+  add('stage: 1b getting ready', (a) => a.fcFamilyScreen('cardReady', { screen: '1b', title: 'GETTING READY', amount: '$1.00', dots: 'slow', plain: { label: 'CLOSE', go() {} } }));
+  add('stage: 1e tap again, a load', (a) => { a.fcOwedSum = () => ({ unit: 'sat', amount: 3550 }); a.fcOwedAfterPaying = () => false; a.fcStillWaiting({}); },
+    { wallet: { cardSession: () => Promise.resolve() } });
+  add('stage: 1f tap again, a payment', (a) => a.fcFailed(Object.assign(new Error('Card taken away too soon.'), { card: 'gone', tapAmount: '$15.25' }), { paying: true, taken: true, again() {} }),
+    { wallet: { cardSession: () => Promise.resolve() } });
   // a limit's first step (no daily limit is asked for), what making this phone a card's owner says, and what a till says when a card cannot cover a payment
   add('card: set per tap limit, the warning', (a) => a.fcLimitAsk(() => {}));
   add('card: set no PIN limit, the warning', (a) => a.fcLimitAsk(() => {}, 'nopin'));
@@ -1331,13 +1320,9 @@ function cards() {
   // money from this phone onto a card at another mint: what is refused before anything is asked (26f-flashcard.js, fcXlOffline, fcXlSend)
   add('card: a card at another mint, loaded with no connection', (a) => a.fcXlOffline());
   add('card: a dollar card at another mint, the amount typed in sats', (a) => a.blockedCard('fc-xl-unit', { tone: 'warn', title: 'A DOLLAR CARD', reason: 'This card holds dollars. Type the amount in dollars.' }));
-  // DEPOSIT above the phone's balance (26f-flashcard.js `fcDepArrived`): the invoice's money in, and the card asked for again
-  add('card: a deposit came in, tap the card again', (a) => {
-    const d = { key: 'k', amount: 5000, unit: 'sat', flowUnit: null, hash: '', arrived: true };
-    a._fcDep = d;
-    a.fcDepArrived(d);
-    clearTimeout(a._fcDepHoldT);
-  });
+  /* DEPOSIT above the phone's balance (26f-flashcard.js `fcDepArrived`): the invoice's money in goes straight on to the card's PIN
+   * pad (`fcDepLoad`), its pieces made while it is typed. */
+  add('card: a deposit came in, its PIN asked', (a) => a.fcAddAskPin(5000, null, () => {}));
   add('card: a card at another mint, the melt refused', (a) => a.blockedCard('fc-xl-not', { tone: 'warn', title: 'NOT ON THE CARD', reason: 'The payment could not be routed. Nothing was taken.' }));
   /* A till with no route: a card that cannot pay it (too old to prove its money, unable to, or holding money the mint never
    * signed), and the price a card cannot make exactly. */
@@ -1501,7 +1486,7 @@ const INSTANCE = ['_lastFee', '_returnTo', '_blockedEl', '_blockedKind', '_cardQ
   const views = [['home (first render)', {}]]
     .concat(screens.map((s) => ['screen ' + s, { state: { screen: s, stack: [] } }]))
     .concat(popups.map((p) => ['popup ' + p, { state: { screen: 'home', stack: [], [p]: true } }]))
-    .concat(representative(logic), cards(), messageViews());
+    .concat(representative(logic), cards(), cashuIdViews());
 
   const recorded = fs.existsSync(path.join(DIR, 'index.json'))
     ? JSON.parse(fs.readFileSync(path.join(DIR, 'index.json'), 'utf8')) : {};

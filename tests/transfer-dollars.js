@@ -129,7 +129,8 @@ async function run() {
     const row = (l) => (spec.rows.find((r) => r.label === l) || {}).value;
     ok(row('LANDING') === '₿ 5000' && row('LEAVING') === 'UP TO $ 5.12', 'the confirmation: the sats that land and the dollars that leave', JSON.stringify(spec.rows));
     ok(row('FEE') === 'UP TO $ 0.07' && /DOLLARS/.test(row('PAYING FROM')), 'the fee in dollars, paid from the dollars', JSON.stringify(spec.rows));
-    ok(spec.cta === 'MOVE ₿ 5000' && !spec.ctaBusy, 'and MOVE, once the quote is in', spec.cta);
+    // (TRANSFER and the dollars that leave, as the keeper drew it: 1k, 2026-11-06)
+    ok(spec.cta === 'TRANSFER $ 5.12' && !spec.ctaBusy, 'and TRANSFER with what leaves, once the quote is in', spec.cta);
   }
   {
     // one balance at the source: nothing asked

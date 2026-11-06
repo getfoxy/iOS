@@ -10,9 +10,8 @@ import Foundation
 ///
 /// What Foxy sends is always wrapped this way. What it listens for is a
 /// request's own key, a till's cashier code's, the Cashu ID's delivery key
-/// once MY CASHU ID has been shown (CASHU-ID.md), and the keys its contacts'
-/// next messages may come to, each used once (CashuMsg.swift); it has no other
-/// Nostr identity and reads nothing else.
+/// once MY CASHU ID has been shown (CASHU-ID.md), and its recovery key after a
+/// restore; it has no other Nostr identity and reads nothing else.
 enum NostrDelivery {
 
     /// Relays Foxy will fall back to when a request names none. The ones
@@ -45,13 +44,11 @@ enum NostrDelivery {
             done(.failure(NostrCrypto.Failure.badPeer))
             return
         }
-        send(payload: payload, receiver: pubkey, relays: listed, seal: nil, done: done)
+        send(payload: payload, receiver: pubkey, relays: listed, done: done)
     }
 
-    /// The same, to a key and a list of relays (Foxy's own three when it is empty), the seal signed by `seal` where
-    /// the receiver checks who sealed it (a message between two Cashu IDs, CashuMsg.swift) and by a key made for the
-    /// wrap otherwise.
-    static func send(payload: String, receiver pubkey: [UInt8], relays listed: [String], seal: [UInt8]?,
+    /// The same, to a key and a list of relays (Foxy's own three when it is empty).
+    static func send(payload: String, receiver pubkey: [UInt8], relays listed: [String],
                      done: @escaping (Swift.Result<Result, Error>) -> Void) {
         let urls = relays(listed)
         guard pubkey.count == 32, !urls.isEmpty else {
@@ -60,7 +57,7 @@ enum NostrDelivery {
         }
         let wrap: NostrEvent.Event
         do {
-            wrap = try NostrEvent.giftWrapped(payload: payload, receiver: pubkey, seal: seal)
+            wrap = try NostrEvent.giftWrapped(payload: payload, receiver: pubkey)
         } catch {
             done(.failure(error))
             return

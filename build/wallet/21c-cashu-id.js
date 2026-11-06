@@ -61,10 +61,7 @@
       if (!r.id) return Promise.reject(new Error(String(r.why || 'That is not a Cashu ID.')));
       return cidMine().then(function (mine) {
         if (mine.id === r.id) throw new Error('That is your own Cashu ID.');
-        var row = cidKeep(r, name);
-        // a new contact's keys are listened on for its messages (08f-cashu-msg.js)
-        if (cidInUse()) cmsgReopenSoon();
-        return row;
+        return cidKeep(r, name);
       });
     },
 
@@ -93,8 +90,6 @@
      * for real, taken once it is) or 'refused'; never rejects. One every check on this phone has passed is said to the app
      * as arriving (`_onCashuIdArriving({ unit, amount, name, mint })`) before the mint swaps it, and as paid once it has. */
     _cashuIdArrived: function (body) {
-      // a message's first, to the public key, is not a payment (08f-cashu-msg.js)
-      if (cmsgIsFirst(body)) return cmsgFirstArrived(body);
       // read before the mint was connected for real: held until it is ('held', `cidHoldEarly`)
       if (cidHoldEarly(body)) return Promise.resolve('held');
       return cidArrived(body).then(null, function (e) {

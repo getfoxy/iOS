@@ -304,36 +304,6 @@ final class NostrInboxTests: XCTestCase {
     }
 
 
-    // MARK: an inbox on many keys (messages between Cashu IDs, CashuMsg.swift)
-
-    /// One REQ, a filter for each hundred keys, and a wrap opened only by the key its p tag names, its rumor handed
-    /// over with that key and its seal's author, never to onPayment.
-    func testAnInboxOnManyKeys() throws {
-        let keys = try (0..<3).map { _ in try NostrCrypto.newKey() }
-        let pubs = try keys.map { try NostrCrypto.publicKey(of: $0) }
-        var got: [(String, NostrEvent.Event)] = []
-        let inbox = try XCTUnwrap(NostrInbox(keys: keys, since: 1000, label: "messages", onRumor: { got.append(($0, $1)) }))
-        defer { inbox.close() }
-        XCTAssertEqual(inbox.pubkeys.count, 3)
-        let many = (0..<150).map { _ in [UInt8](repeating: 2, count: 32) }
-        let req = NostrInbox.askMany(subscription: "s", pubkeys: many, since: 5, limit: 500)
-        XCTAssertTrue(req.hasPrefix("[\"REQ\",\"s\",{\"kinds\":[1059],\"#p\":["))
-        XCTAssertEqual(req.components(separatedBy: "{\"kinds\"").count - 1, 2, "150 keys: two filters")
-        // a wrap to the second key, sealed by a key the test chose
-        let seal = try NostrCrypto.newKey()
-        let wrap = try NostrEvent.giftWrapped(payload: "{\"v\":1}", receiver: pubs[1], seal: seal)
-        inbox.took("[\"EVENT\",\"\(inbox.subscription)\",\(NostrEvent.json(wrap))]")
-        XCTAssertEqual(got.count, 1)
-        XCTAssertEqual(got.first?.0, NostrEvent.hex(pubs[1]))
-        XCTAssertEqual(got.first?.1.pubkey, NostrEvent.hex(try NostrCrypto.publicKey(of: seal)))
-        XCTAssertEqual(got.first?.1.content, "{\"v\":1}")
-        // the same wrap again is one message; a wrap to a key not listened on is nothing
-        inbox.took("[\"EVENT\",\"\(inbox.subscription)\",\(NostrEvent.json(wrap))]")
-        let other = try NostrEvent.giftWrapped(payload: "{}", receiver: try NostrCrypto.publicKey(of: try NostrCrypto.newKey()))
-        inbox.took("[\"EVENT\",\"\(inbox.subscription)\",\(NostrEvent.json(other))]")
-        XCTAssertEqual(got.count, 1)
-    }
-
     // MARK: a relay Tor cannot reach
 
     /// A relay's socket for these tests: says what it was sent, fails every send

@@ -62,8 +62,8 @@ const method = (sig) => {
 };
 // several, as one object
 const lift = (sigs) => new Function('return {' + sigs.map(method).join(',\n') + '}')();
-const { confirmSpec, reqMints, reqCanon, reqPayMint, requestSpec, requestNeedsRoute, requestHere, tellPayerShort, shortForReceiver, saidToReceiver } =
-  lift(['confirmSpec() {', 'reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'requestSpec() {', 'requestNeedsRoute(req) {', 'requestHere(req) {', 'tellPayerShort(req) {', 'shortForReceiver() {', 'saidToReceiver(why) {']);
+const { confirmSpec, reqMints, reqCanon, reqPayMint, requestSpec, requestNeedsRoute, requestHere, tellPayerShort, shortForReceiver, saidToReceiver, cfPayLook } =
+  lift(['confirmSpec() {', 'reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'requestSpec() {', 'requestNeedsRoute(req) {', 'requestHere(req) {', 'tellPayerShort(req) {', 'shortForReceiver() {', 'saidToReceiver(why) {', 'cfPayLook(spec, o) {']);
 
 /* The sentence, as it is to be said: the wallet's (Web/foxy-wallet.js pins the
  * wallet's own copy), written out here so a change to it fails in two places. */
@@ -110,12 +110,15 @@ function spec(invoiceSats, balance, quotedFee, held, o) {
     back() { sent.back += 1; }, startSend() { sent.start += 1; }, px: () => 0, peerRateRow: () => [],
     connecting: () => !!opt.connecting, sendToAsk: () => false,
     sendSatsNow: () => sats,
+    // the keeper's 1l (2026-11-06): the figures stacked over the same spec
+    cfPayLook,
   };
   // anything else the screen asks of the app is not what is being tested
   const any = new Proxy(app, { get: (t, k) => (k in t ? t[k] : () => '') });
   const s = confirmSpec.call(any);
   s.sent = sent;
-  s.fee = (s.rows.find((r) => r.label === 'FEE') || {}).value;
+  // FEE as drawn: the stack's on the new confirmations (the keeper's 1l and 1m), the row's where there is no stack (a card's)
+  s.fee = ((s.stack || []).find((x) => x.label === 'FEE') || s.rows.find((r) => r.label === 'FEE') || {}).value;
   return s;
 }
 
@@ -126,7 +129,7 @@ function spec(invoiceSats, balance, quotedFee, held, o) {
      'a quote the balance cannot cover holds the button, which reads NOT ENOUGH', s.cta + ' / ' + s.ctaTone);
   ok(s.warn === words(161158, 160931), 'with the wallet\'s sentence under the rows, at its figures', s.warn);
   ok(s.amountInk === '#FF5C5C', 'and the amount in red');
-  ok(s.fee === 'UP TO ₿ 1158', 'the fee it was quoted stays in its row', s.fee);
+  ok(s.fee === '₿ 1158', 'the fee it was quoted stays under FEE', s.fee);
   s.go();
   ok(s.sent.start === 0 && s.sent.back === 0 && !s.ctaBusy, 'pressing it does nothing: nothing starts, nothing closes, no spinner', JSON.stringify(s.sent));
 }
@@ -139,14 +142,14 @@ function spec(invoiceSats, balance, quotedFee, held, o) {
 }
 {
   const s = spec(100000, 160931, 1000);
-  ok(/^SEND /.test(s.cta) && !s.warn && !s.ctaBusy && s.ctaTone === 'go',
+  ok(/^PAY /.test(s.cta) && !s.warn && !s.ctaBusy && s.ctaTone === 'go',
      'a balance that covers it goes on to SEND, as it did', String(s.cta));
   s.go();
   ok(s.sent.start === 1, 'and pressing it sends');
 }
 {
   const s = spec(100000, 160931, 1000, 0, { wallet: { payNeed: needOf(101000) } });
-  ok(/^SEND /.test(s.cta), 'one that fits to the sat is SEND, not NOT ENOUGH', String(s.cta));
+  ok(/^PAY /.test(s.cta), 'one that fits to the sat is SEND, not NOT ENOUGH', String(s.cta));
 }
 {
   const s = spec(160000, 160931, 1158, 5000);
@@ -154,11 +157,11 @@ function spec(invoiceSats, balance, quotedFee, held, o) {
 }
 {
   const none = spec(160000, 160931, 1158, 0, { wallet: { payNeed: () => null } });
-  ok(/^SEND /.test(none.cta), 'a wallet that cannot say leaves SEND as it was: the payment itself refuses', String(none.cta));
+  ok(/^PAY /.test(none.cta), 'a wallet that cannot say leaves SEND as it was: the payment itself refuses', String(none.cta));
   const broke = spec(160000, 160931, 1158, 0, { wallet: { payNeed: () => { throw new Error('no wallet'); } } });
-  ok(/^SEND /.test(broke.cta), 'and one that throws does not break the screen', String(broke.cta));
+  ok(/^PAY /.test(broke.cta), 'and one that throws does not break the screen', String(broke.cta));
   const old = spec(160000, 160931, 1158, 0, { wallet: { payNeed: undefined } });
-  ok(/^SEND /.test(old.cta), 'nor does a wallet with no such question');
+  ok(/^PAY /.test(old.cta), 'nor does a wallet with no such question');
 }
 
 // ---- CHECKING: the question being asked, and the connection it needs ----------
@@ -176,18 +179,19 @@ function spec(invoiceSats, balance, quotedFee, held, o) {
      'a connection on its way holds the button the same, and the FEE row says it too', s.cta + ' / ' + s.fee);
   s.go();
   ok(s.sent.start === 0 && s.sent.back === 0, 'nothing happens when it is pressed');
-  ok(!!s.secondary, 'and the note is still there to be added: only what needs the connection waits');
+  // (no note button on the keeper's 1l, 2026-11-06: the figures are what is drawn while it waits)
+  ok(!s.secondary && Array.isArray(s.stack) && s.stack.length === 4, 'and the figures are still drawn: only what needs the connection waits');
 }
 {
   const s = spec(100000, 160931, 1000, 0, { connecting: true });
-  ok(s.cta === 'CHECKING…' && s.fee === 'UP TO ₿ 1000',
+  ok(s.cta === 'CHECKING…' && s.fee === '₿ 1000',
      'a quote already in hand stays in its row while the connection it needs is on its way again', s.cta + ' / ' + s.fee);
   const short = spec(160000, 160931, 1158, 0, { connecting: true });
   ok(short.cta === 'NOT ENOUGH', 'and a payment that does not fit says so, connection or not', short.cta);
 }
 {
   const s = spec(100000, 160931, null, 0, {});
-  ok(/^SEND /.test(s.cta) && s.fee === 'UNKNOWN',
+  ok(/^PAY /.test(s.cta) && s.fee === 'UNKNOWN',
      'with no connection and none coming nothing is waited for: SEND, and the fee UNKNOWN', s.cta + ' / ' + s.fee);
   s.go();
   ok(s.sent.start === 1, 'and SEND sends, to be told so by the payment itself');
@@ -217,12 +221,12 @@ function spec(invoiceSats, balance, quotedFee, held, o) {
   const asked = spec(0, 50000, null, 0, { kind: 'email', sats: 2100, asking: true });
   ok(asked.cta === 'CHECKING…' && asked.fee === 'CHECKING…', 'and while it is looked up and quoted', asked.cta + ' / ' + asked.fee);
   const live = spec(0, 50000, 7, 0, { kind: 'email', sats: 2100 });
-  ok(/^SEND /.test(live.cta) && live.fee === 'UP TO ₿ 7', 'then SEND, with the fee in the FEE row', live.cta + ' / ' + live.fee);
+  ok(/^PAY /.test(live.cta) && live.fee === '₿ 7', 'then PAY, with the fee under FEE', live.cta + ' / ' + live.fee);
   const short = spec(0, 2105, 7, 0, { kind: 'email', sats: 2100 });
   ok(short.cta === 'NOT ENOUGH' && short.warn === words(2107, 2105),
      'an address whose invoice, quoted, the balance cannot cover is held the same', short.cta + ' / ' + short.warn);
   const none = spec(0, 50000, null, 0, { kind: 'email', sats: 2100 });
-  ok(/^SEND /.test(none.cta) && none.fee === 'UNKNOWN', 'an address that could not be looked up is SEND with the fee UNKNOWN: SEND does all of it, as it did', none.cta + ' / ' + none.fee);
+  ok(/^PAY /.test(none.cta) && none.fee === 'UNKNOWN', 'an address that could not be looked up is SEND with the fee UNKNOWN: SEND does all of it, as it did', none.cta + ' / ' + none.fee);
 }
 
 // ---- a scanned request: held only where a connection would change what it does -------
@@ -243,11 +247,13 @@ function reqSpec(sats, balance, shortfall, o) {
     mintName: () => 'MINT', px: () => 0, peerRateRow: () => [],
     connecting: () => !!opt.connecting, offlineNow: () => !!opt.connecting,
     requestNeedsRoute, requestHere, reqMints, reqCanon, reqPayMint, makeTokenForRequest() { sent.made += 1; },
+    cfPayLook,
   };
   const any = new Proxy(app, { get: (t, k) => (k in t ? t[k] : () => '') });
   const s = requestSpec.call(any);
   s.sent = sent;
-  s.fee = (s.rows.find((r) => r.label === 'FEE') || {}).value;
+  // FEE as drawn: the stack's on the new confirmations (the keeper's 1l and 1m), the row's where there is no stack (a card's)
+  s.fee = ((s.stack || []).find((x) => x.label === 'FEE') || s.rows.find((r) => r.label === 'FEE') || {}).value;
   return s;
 }
 const NOSTR = { delivery: { kind: 'nostr', target: 'npub1…' }, transports: ['nostr'] };
@@ -257,7 +263,7 @@ const NOSTR = { delivery: { kind: 'nostr', target: 'npub1…' }, transports: ['n
      'a request that is delivered over the route is held while the connection is on its way, its FEE row the same', s.cta + ' / ' + s.fee);
   s.go();
   ok(s.sent.made === 0, 'and pressing it makes nothing');
-  ok(!!s.secondary && typeof s.close === 'function', 'with the note and the way out still there');
+  ok(!s.secondary && typeof s.close === 'function', 'with the way out still there (the X; no note button on the keeper’s 1m)');
   const up = reqSpec(900, 979, { need: 911, fee: 11, have: 979, short: false }, { req: NOSTR });
   ok(/^PAY /.test(up.cta) && !up.ctaBusy && up.fee === '₿ 11', 'once the connection is up it reads what it read', up.cta + ' / ' + up.fee);
   up.go();
@@ -287,7 +293,7 @@ const NOSTR = { delivery: { kind: 'nostr', target: 'npub1…' }, transports: ['n
   ok(s.rows.some((r) => r.label === 'FEE' && r.value === '₿ 11'), 'and the fee row says what the fee is');
   ok(s.amountInk === '#FF5C5C' && s.code === '1234', 'the amount goes red and the four digits stay', s.amountInk + ' / ' + s.code);
   s.go();
-  ok(s.sent.made === 0 && !s.ctaBusy && !s.secondary && !s.close, 'pressing it does nothing: nothing is made, nothing closes, no spinner, no second button', JSON.stringify(s.sent));
+  ok(s.sent.made === 0 && !s.ctaBusy && !s.secondary, 'pressing it does nothing: nothing is made, nothing closes, no spinner, no second button', JSON.stringify(s.sent));
 }
 {
   // the amount fits the balance and the mint's fee for making it does not: the case the card used to say SEND to
@@ -300,7 +306,8 @@ const NOSTR = { delivery: { kind: 'nostr', target: 'npub1…' }, transports: ['n
 }
 {
   const s = reqSpec(900, 979, lack(911, 979, 11), { tap: true, req: { viaTap: true } });
-  ok(/^SEND /.test(s.cta) && !s.warn, 'one that fits with its fee goes on to SEND', String(s.cta));
+  // (PAY and what leaves, a tap's too: the keeper, 2026-11-06)
+  ok(s.cta === 'PAY ₿ 911' && !s.warn, 'one that fits with its fee goes on to PAY, the fee in its figure', String(s.cta));
 }
 {
   const s = reqSpec(980, 979, null, { tap: true, req: { viaTap: true } });

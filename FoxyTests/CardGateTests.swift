@@ -204,9 +204,39 @@ final class CardGateTests: XCTestCase {
         XCTAssertTrue(page.contains("var CARD_AID = '\(name)';"), "the page chooses the applet by the same name")
     }
 
+    /// A batch is the applet's own commands and nothing else: none before the applet is chosen, never the choosing, none
+    /// that is not well formed, and no more than `batchMost`; any one wrong refuses the whole of it.
+    func testABatchIsTheAppletsOwnCommands() throws {
+        let load = "b0" + "30" + "0101" + "b2" + String(repeating: "ab", count: 178) + "02"
+        XCTAssertNotNil(CardGate.bytes(hex: load))
+        XCTAssertEqual(CardGate.batch([load, load], selected: true)?.count, 2)
+        XCTAssertNil(CardGate.batch([load], selected: false), "not before the applet is chosen")
+        XCTAssertNil(CardGate.batch([], selected: true), "an empty batch is none")
+        let select = "00a40400" + "0a" + "f0464f58594341524401" + "00"
+        XCTAssertNil(CardGate.batch([load, select], selected: true), "the choosing is said alone")
+        XCTAssertNil(CardGate.batch([load, "b030"], selected: true), "one that is not well formed refuses the batch")
+        let verify = "b0400000" + "04" + "31323334"
+        XCTAssertNotNil(CardGate.bytes(hex: verify))
+        XCTAssertNil(CardGate.batch([load, verify], selected: true), "a load and nothing else: not a PIN, nor any other command")
+        XCTAssertNil(CardGate.batch(Array(repeating: load, count: CardGate.batchMost + 1), selected: true))
+        XCTAssertEqual(CardGate.batch(Array(repeating: load, count: CardGate.batchMost), selected: true)?.count, CardGate.batchMost)
+        XCTAssertEqual(CardGate.batchAnswer([Data([0x01, 0x90, 0x00]), Data([0x6a, 0x80])], lost: false), "019000,6a80")
+        XCTAssertEqual(CardGate.batchAnswer([Data([0x90, 0x00])], lost: true), "9000,lost")
+    }
+
+    /// `-FoxyFirstDepth N` is taken from 1 to 8 and nothing else (0 is the argument not given).
+    func testTheFirstDepthArgument() {
+        XCTAssertEqual(CardGate.firstDepth(1), 1)
+        XCTAssertEqual(CardGate.firstDepth(4), 4)
+        XCTAssertEqual(CardGate.firstDepth(8), 8)
+        XCTAssertNil(CardGate.firstDepth(0))
+        XCTAssertNil(CardGate.firstDepth(9))
+        XCTAssertNil(CardGate.firstDepth(-4))
+    }
+
     /// The four actions refuse, with nothing open, what they must.
     func testTheActionsAreInTheTable() {
-        for action in ["cardBegin", "cardSend", "cardSay", "cardEnd"] {
+        for action in ["cardBegin", "cardSend", "cardSendMany", "cardSay", "cardEnd"] {
             guard case .run = FoxyBridge.dispatch(["action": action, "id": "1"]) else {
                 XCTFail("\(action) is not served")
                 continue

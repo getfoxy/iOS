@@ -1143,24 +1143,6 @@ function cashuIdPieceKey(baseHex, j) {
   if (e === 0n || e >= SECP_ORDER) throw new Error('no throwaway key');
   return e;
 }
-/* Messages between two Cashu IDs (Foxy/Keychain/CashuMsg.swift), a second time from
- * docs/CASHU-ID.md: the pair secret SHA-256("foxy-msg-pair-v1" ‖ x(d·peer)), the
- * direction (0 from the lower ID key's 33 bytes to the higher), and message i's key
- * SHA-256("foxy-msg-recv-v1" ‖ secret ‖ dir ‖ i as 4 bytes) and its seal's
- * SHA-256("foxy-msg-seal-v1" ‖ …), once more with 0xFF where not below n. */
-const cashuMsgPair = (d, peerHex) => sha(Buffer.from('foxy-msg-pair-v1'), sharedX(d, peerHex)).toString('hex');
-const cashuMsgDir = (fromHex, toHex) => (Buffer.compare(Buffer.from(fromHex, 'hex'), Buffer.from(toHex, 'hex')) < 0 ? 0 : 1);
-function cashuMsgKey(kind, pairHex, dir, i) {
-  const at = Buffer.alloc(4);
-  at.writeUInt32BE(i >>> 0, 0);
-  const head = Buffer.concat([Buffer.from('foxy-msg-' + kind + '-v1'), Buffer.from(pairHex, 'hex'), Buffer.from([dir]), at]);
-  let k = big(sha(head));
-  if (k === 0n || k >= SECP_ORDER) k = big(sha(head, Buffer.from([0xff])));
-  if (k === 0n || k >= SECP_ORDER) throw new Error('no message key');
-  return k;
-}
-// the x-only public half of a key, as the relays see it
-const xOnlyOf = (k) => n32(ptMul(k, SECP_G)[0]).toString('hex');
 // BIP-340 signing, auxiliary randomness all zero (a test model's)
 function schnorrSign(k, msg) {
   const P = ptMul(k, SECP_G);
@@ -1212,6 +1194,156 @@ function p256Verify(pubHex, message, sig) {
   } catch (e) { return false; }
 }
 
+/* ---- the keeper's yes, as the phone holds it (a model, for the suites) -----------------------------------------------
+ *
+ * NativeSeedBridge.swift `cardOwnerAllows` and CardOwner (NUT13.swift), rule for rule: the yeses given before a card session, the
+ * card's own answers as the session carried them (`saw`: its key, its limits after the owner's grant, its record), what signs
+ * unasked, a lift and the limits it put back, kept moves. A suite that sets `phone.gate = cardGate()` has every owner's signature
+ * but a top-up go through it, the card's answers given to it by flashcard-kit.js, so a flow whose bytes the phone would refuse fails
+ * there as it would on the phone. `trace` is every step, for FoxyTests to replay through the Swift itself (CardGateReplayTests,
+ * tests/fixtures/card-gate-flows.json): the model is checked against the real rule, and the rule against the page's real bytes. */
+function cardGate() {
+  const hex = (b) => Buffer.from(b).toString('hex');
+  const bytes = (h) => [...Buffer.from(String(h || ''), 'hex')];
+  const eq = (a, b) => a != null && b != null && hex(a) === hex(b);
+  const u32 = (b, i) => ((b[i] << 24) >>> 0) + (b[i + 1] << 16) + (b[i + 2] << 8) + b[i + 3];
+  const figuresOf = (v) => { const o = {}; if (v.length >= 4) o.day = u32(v, 0); if (v.length >= 8) o.tap = u32(v, 4); if (v.length >= 12) o.noPin = u32(v, 8); return o; };
+  const limitsSeen = (a, granted) => {
+    if (a.length === 29 || a.length === 30) return (a[0] === 0 || (a[0] === 1 && a[1] < 3)) ? { day: u32(a, 12) } : null;
+    if (![42, 51, 55].includes(a.length)) return null;
+    const o = { day: u32(a, 12), noPin: u32(a, 34) };
+    if (granted || (a[6] & 16) === 0) o.tap = u32(a, 30);
+    return o;
+  };
+  const recordMint = (v) => (v.length > 100 && v.length >= 100 + v[99]) ? { unit: v[0], mint: hex(v.slice(100, 100 + v[99])) } : null;
+  const g = { trace: [], approvals: [], moves: [], lifts: [], session: 0, open: false, seen: {}, declined: [] };
+  const fresh = () => ({ limits: null, unowned: false, granted: false, key: null, unit: null, mint: null, moveSigned: null });
+  g.seen = fresh();
+  const isLift = (asked, seen) => {
+    const l = seen.limits;
+    if (!l || !((l.day || 0) > 0 || (l.tap || 0) > 0)) return false;
+    if (!Object.keys(asked).every((f) => l[f] !== undefined) || asked.day !== 0) return false;
+    if (l.tap !== undefined && asked.tap !== 0) return false;
+    if (asked.noPin !== undefined && asked.noPin !== l.noPin) return false;
+    return true;
+  };
+  const holds = (lift, l) => !!l && Object.keys(lift.from).every((f) => l[f] === lift.from[f]);
+  const matches = (m, value, a) => {
+    if (a.label !== m.label) return false;
+    if (a.card && a.card !== m.key) return false;
+    if (['change-pin', 'reset', 'set-owner'].includes(m.label)) return hex(a.value || []) === hex(value);
+    if (m.label === 'set-card') { const r = recordMint(value); return !!r && r.mint === a.mint && (!a.units || a.units.includes(r.unit)); }
+    if (m.label === 'set-limit') {
+      const asked = figuresOf(value);
+      if (a.lift) return isLift(asked, g.seen);
+      return Object.keys(asked).every((f) => (a.figures || []).includes(f) || (g.seen.limits && g.seen.limits[f] === asked[f]));
+    }
+    return false;
+  };
+  const unasked = (m, value) => {
+    if (m.label === 'set-limit') {
+      if (g.seen.unowned) return true;
+      const l = g.seen.limits, asked = figuresOf(value);
+      return value.length === 16 && !!l && Object.keys(asked).every((f) => l[f] === asked[f]);
+    }
+    if (m.label === 'set-card') { const r = recordMint(value); return !!r && g.seen.unit != null && r.unit === g.seen.unit && r.mint === g.seen.mint; }
+    return false;
+  };
+  // a lift kept for the card that a GET_INFO answer shows it holding again is done with: from that answer's own figures alone
+  const settle = (l) => {
+    if (!g.seen.key || !l) return;
+    g.lifts = g.lifts.filter((x) => !(x.card === g.seen.key && holds(x, l)));
+  };
+  // a yes lasts 90 seconds, or the session it is for, and four at the most are kept (NativeSeedBridge.swift `dropSpentCardApprovals`)
+  g.now = () => Date.now();
+  const dropSpent = () => {
+    const now = g.now();
+    g.approvals = g.approvals.filter((x) => !((now - x.at > 90000 && !(x.a.lift && x.session !== null))
+      || (x.session !== null && (x.session !== g.session || !g.open))));
+  };
+  g.approve = (m) => {
+    g.trace.push({ step: 'approve', body: m });
+    const a = { label: m.label, value: m.value !== undefined ? bytes(m.value) : null, mint: m.mint ? hex(Buffer.from(String(m.mint), 'ascii')) : null,
+                units: m.units ? m.units.map((u) => (u === 'usd' ? 1 : 0)) : null, figures: m.figures || null, card: m.card || null, keep: !!m.keep, lift: !!m.lift };
+    const own = Object.assign({}, a, { lift: false });
+    const liftOnly = a.label === 'set-limit' && !a.figures;
+    const list = a.lift ? (liftOnly ? [Object.assign({}, a, { lift: true })] : [own, { label: 'set-limit', card: a.card, lift: true }]) : [a];
+    list.forEach((x) => {
+      if (x.keep) g.moves = g.moves.filter((y) => y.card !== x.card).concat([x]);
+      else { g.approvals.push({ a: x, session: null, at: g.now() }); if (g.approvals.length > 4) g.approvals.splice(0, g.approvals.length - 4); }
+    });
+  };
+  g.begin = () => {
+    g.trace.push({ step: 'begin' });
+    g.session += 1; g.open = true; g.seen = fresh();
+    dropSpent();
+    g.approvals.forEach((x) => { x.session = g.session; });
+  };
+  g.again = () => { g.trace.push({ step: 'again' }); g.seen = fresh(); };
+  g.end = () => { g.trace.push({ step: 'end' }); g.open = false; g.seen = fresh(); g.approvals = g.approvals.filter((x) => x.session === null); };
+  g.saw = (apdu, answer) => {
+    const c = bytes(apdu), a = bytes(answer);
+    if (c.length < 4 || a.length < 2 || a[a.length - 2] !== 0x90 || a[a.length - 1] !== 0x00) return;
+    // (only the answers the rule reads: GET_INFO, GET_KEY, GET_CARD and the owner's grant)
+    if ([0x01, 0x10, 0x16, 0x32, 0x45].includes(c[1])) g.trace.push({ step: 'saw', apdu, answer });
+    const body = a.slice(0, -2);
+    if (c[1] === 0x01) {
+      const l = limitsSeen(body, g.seen.granted);
+      if (l) { g.seen.limits = l; settle(l); }
+      if ([29, 30, 42, 51, 55].includes(body.length) && body[16] === 0) g.seen.unowned = true;
+    } else if (c[1] === 0x10) { if (body.length === 33) g.seen.key = hex(body); }
+    else if (c[1] === 0x16) {
+      if (body.length >= 107 && body[105] >= 1 && body[105] <= 80 && (body.length === 106 + body[105] || body.length === 109 + body[105])) {
+        g.seen.unit = body[2]; g.seen.mint = hex(body.slice(106, 106 + body[105]));
+      }
+    } else if (c[1] === 0x45) g.seen.granted = true;
+    else if (c[1] === 0x32 && g.seen.moveSigned) { const k = g.seen.moveSigned; g.moves = g.moves.filter((x) => x.card !== k); g.seen.moveSigned = null; }
+  };
+  // cardOwnerAllows: true where the phone signs `m` ({ key, label, nonce, value }, a label other than load)
+  g.allows = (m) => {
+    // a wallet call a suite makes with the card as its link has no session the phone carried: nothing to hold it to
+    if (!g.open) { g.unwatched = (g.unwatched || 0) + 1; return true; }
+    const value = bytes(m.value);
+    const key = String(m.key).toLowerCase();
+    const r = Object.assign({}, m, { key });
+    let yes = false;
+    dropSpent();
+    const inSession = (x) => x.session === g.session && g.open;
+    const asked = figuresOf(value);
+    // the card held gave its key in this tap, and what is signed is for it
+    if (!g.seen.key || g.seen.key !== key) yes = false;
+    else if (m.label === 'set-limit' && g.approvals.some((x) => inSession(x) && x.a.lift && matches(r, value, x.a))
+             && (() => { const k = g.lifts.find((x) => x.card === key); return !k || holds(k, g.seen.limits); })() && g.seen.limits) {
+      g.lifts = g.lifts.filter((x) => x.card !== key).concat([{ card: key, from: Object.assign({}, g.seen.limits) }]);
+      yes = true;
+    } else if (unasked(r, value)) yes = true;
+    else if (m.label === 'set-limit' && g.seen.limits && g.lifts.some((x) => x.card === key && asked.day === x.from.day
+             && (x.from.tap === undefined || asked.tap === x.from.tap) && Object.keys(asked).every((f) => x.from[f] === asked[f])
+             && g.seen.limits.day === 0 && (x.from.tap === undefined || g.seen.limits.tap === 0))) yes = true;
+    else {
+      const i = g.approvals.findIndex((x) => inSession(x) && !x.a.lift && matches(r, value, x.a));
+      if (i >= 0) {
+        g.approvals.splice(i, 1);
+        if (m.label === 'set-limit') g.lifts = g.lifts.filter((x) => x.card !== key);
+        yes = true;
+      } else if (m.label === 'set-card') {
+        // a kept move: used up only when the card takes the record (SET_CARD answered 9000, `saw`)
+        const j = g.moves.findIndex((x) => x.keep && x.card === key && matches(r, value, x));
+        if (j >= 0) { g.seen.moveSigned = key; yes = true; }
+      }
+    }
+    if (yes && m.label === 'set-limit' && g.seen.limits) g.seen.limits = Object.assign({}, g.seen.limits, asked);
+    g.trace.push({ step: 'sign', body: { key: m.key, label: m.label, nonce: m.nonce, value: m.value }, allowed: yes });
+    if (!yes) {
+      g.declined.push(m.label + ' ' + m.value);
+      console.log('[gate] not signed: ' + m.label + ' ' + m.value + ' | the card said ' + JSON.stringify({ limits: g.seen.limits, granted: g.seen.granted, unit: g.seen.unit, mint: g.seen.mint && Buffer.from(g.seen.mint, 'hex').toString() })
+        + ' | yeses ' + JSON.stringify(g.approvals.map((x) => [x.a.label, x.session, g.session])) + ' | moves ' + g.moves.length);
+    }
+    return yes;
+  };
+  return g;
+}
+
 function nativePhone(opts) {
   const o = opts || {};
   const R = NATIVE_RULES, SAYS = NATIVE_SAYS;
@@ -1239,6 +1371,8 @@ function nativePhone(opts) {
     clockMs: () => Date.now(),
     page: null,
     hooks: { enter: null, show: null, adopt: null, wipe: null, refuse: null, unlock: null, cardApprove: null },
+    // the keeper's yes as the phone holds it, where a suite turns it on (`cardGate`); null signs as before
+    gate: null,
     toSeed: null, generate: null, wordlist: null, derive: null, validate: null,
     /* seedMigrate's one-time window (SeedMigrationWindow.swift): open as on an
      * install that had page storage before this launch (o.migration false:
@@ -1662,6 +1796,8 @@ function nativePhone(opts) {
       }[m.label];
       if (!shaped) return no(SAYS.bad);
       // a record's refund key, only where it is this phone's own: derived again at the lock-key index the page names
+      // (the keeper's yes, where the suite holds the phone to it: NativeSeedBridge.swift `cardOwnerAllows`)
+      if (phone.gate && m.label !== 'load' && !phone.gate.allows(m)) return no('Nothing was changed on the card.');
       if (m.label === 'set-card' && !(Number.isInteger(m.refundIndex) && m.refundIndex >= 0)) return no('Nothing was changed on the card.');
       if (!words()) return no(SAYS.noSeed);
       if (!unlock('cardOwnerSign', 'read')) return no(SAYS.unreadable);
@@ -1675,6 +1811,7 @@ function nativePhone(opts) {
       if (typeof m.label !== 'string' || !CARD_LABELS.includes(m.label) || m.label === 'load') return no(SAYS.bad);
       phone.cardApprovals = (phone.cardApprovals || []).concat([m]);
       const yes = phone.hooks.cardApprove ? phone.hooks.cardApprove(m) : true;
+      if (yes && phone.gate) phone.gate.approve(m);
       return yes ? ok({ approved: true }) : no('Nothing was changed on the card.');
     },
     // handleSeedShow, SeedScreens: one screen at a time, and none within 10 s of a cancelled Face ID
@@ -1783,7 +1920,7 @@ function nativePhone(opts) {
   return phone;
 }
 
-module.exports = { load, proof, stubCashu, connected, loadReal, fakeMint, books, booksWrong, rebook, noBooks, nativePhone, NATIVE_RULES, NATIVE_SAYS, counterSlot, PHONE_WORDS,
+module.exports = { cardGate, load, proof, stubCashu, connected, loadReal, fakeMint, books, booksWrong, rebook, noBooks, nativePhone, NATIVE_RULES, NATIVE_SAYS, counterSlot, PHONE_WORDS,
                    p2pkParent, p2pkAt, cardOwnerScalar, p256Public, p256Sign, p256Verify, CARD_LABELS,
                    cashuIdKeys, cashuIdOneTime, cashuIdBlind, cashuIdTag, cashuIdPayBase, cashuIdPieceKey, cashuIdBindDigest,
-                   p2bkTweak, sharedX, schnorrSign, cashuMsgPair, cashuMsgDir, cashuMsgKey, xOnlyOf };
+                   p2bkTweak, sharedX, schnorrSign };

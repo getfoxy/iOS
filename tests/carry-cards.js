@@ -40,7 +40,9 @@ function app(W) {
   const window = { FoxyWallet: W };
   const lifted = new Function('window', 'return {'
     + ['carryHomeNow() {', 'carryOutcome(r, ctx) {', 'crossFailed(e, mine) {', 'hushMove(plan) {',
-       'tapPayFromThere(offer, want, theirs, mine, there) {'].map(method).join(',\n') + '};')(window);
+       'tapPayFromThere(offer, want, theirs, mine, there) {',
+       // (the walk home and back under the fox, or the melt loader where none is drawn, as here: 26d-tap.js)
+       'carryFoxUp(label, o) {', 'carryFoxDown(fox, landed) {'].map(method).join(',\n') + '};')(window);
   const a = Object.assign({
     cards: [], said: [], melts: [], state: {}, quoted: [], paidNow: 0, toasts: [],
     showMelt(t) { this.melts.push(t); }, hideMelt() {}, syncTap() {}, refreshBalance() {}, loadHistory() {},

@@ -487,7 +487,13 @@ enum CardOwner {
     ///    must be what the card itself said in this tap (`Seen`).
     ///  - `card`: the card it is for, where the page knows it; then no other.
     ///  - `keep`: a move to another mint whose record is written at a later tap:
-    ///    kept on the phone, beside nothing else, until that write uses it.
+    ///    kept on the phone, beside nothing else, until the card takes that record.
+    ///  - `lift`: the command's tap also takes money off the card, and its limits
+    ///    are lifted for that and put back after (a withdrawal, a reset of a card
+    ///    with money on it, a transfer, a renewal): the yes covers that too. It is
+    ///    kept apart from the command's own (`split`), as a set-limit whose only
+    ///    match is a lift (`isLift`), and the limits it lifted are put back from
+    ///    what the card said before it (`Lift`, `putsBack`).
     struct Approval: Codable, Equatable {
         let label: String
         let value: [UInt8]?
@@ -497,6 +503,7 @@ enum CardOwner {
         let card: [UInt8]?
         let keep: Bool
         let at: TimeInterval
+        var lift: Bool? = nil
     }
 
     /// What the page is told when the owner key will not sign: no yes for it,
@@ -506,8 +513,10 @@ enum CardOwner {
     /// How long a yes given before the tap lasts, unless its card session ends first.
     static let approvalLife: TimeInterval = 90
 
-    /// cardOwnerApprove {label, value | mint, units, card?, keep? | figures}: the
+    /// cardOwnerApprove {label, value | mint, units, card?, keep? | figures, lift?}: the
     /// shape each label's approval takes, and nothing else. Load is asked nothing.
+    /// `lift` (true, or absent) is taken with reset, set-card and set-limit, which
+    /// with it alone and no figures is the yes to a withdrawal's lift and no more.
     static func approval(_ body: [String: Any], at: TimeInterval) -> Approval? {
         guard let name = body["label"] as? String, let label = Label(rawValue: name), label != .load else { return nil }
         var card: [UInt8]?
@@ -515,12 +524,18 @@ enum CardOwner {
             guard let key = key(from: given) else { return nil }
             card = key
         }
+        var lift: Bool?
+        if let given = body["lift"] {
+            guard let yes = given as? NSNumber, CFGetTypeID(yes) == CFBooleanGetTypeID(), yes.boolValue,
+                  [.reset, .setCard, .setLimit].contains(label) else { return nil }
+            lift = true
+        }
         switch label {
         case .changePin, .reset, .setOwner:
             guard let text = body["value"] as? String, text.utf8.count <= 2 * mostValueBytes,
                   let value = try? NUT13.bytes(hex: text), label.accepts(value) else { return nil }
             if label == .setOwner, !isOwnerKey(value) { return nil }
-            return Approval(label: name, value: value, mint: nil, units: nil, figures: nil, card: card, keep: false, at: at)
+            return Approval(label: name, value: value, mint: nil, units: nil, figures: nil, card: card, keep: false, at: at, lift: lift)
         case .setCard:
             guard let text = body["mint"] as? String, (1...80).contains(text.utf8.count),
                   text.utf8.allSatisfy({ (0x21...0x7E).contains($0) }) else { return nil }
@@ -540,18 +555,35 @@ enum CardOwner {
             let keep = body["keep"] as? Bool ?? false
             // a move kept for a later tap is for one card, named
             if keep, card == nil { return nil }
-            return Approval(label: name, value: nil, mint: Array(text.utf8), units: units, figures: nil, card: card, keep: keep, at: at)
+            return Approval(label: name, value: nil, mint: Array(text.utf8), units: units, figures: nil, card: card, keep: keep, at: at, lift: lift)
         case .setLimit:
+            // the lift alone: no figure the keeper sets
+            if lift == true, body["figures"] == nil {
+                return Approval(label: name, value: nil, mint: nil, units: nil, figures: nil, card: card, keep: false, at: at, lift: true)
+            }
             guard let list = body["figures"] as? [String], !list.isEmpty, list.count <= 3 else { return nil }
             var figures: [Figure] = []
             for f in list {
                 guard let figure = Figure(rawValue: f), !figures.contains(figure) else { return nil }
                 figures.append(figure)
             }
-            return Approval(label: name, value: nil, mint: nil, units: nil, figures: figures, card: card, keep: false, at: at)
+            return Approval(label: name, value: nil, mint: nil, units: nil, figures: figures, card: card, keep: false, at: at, lift: lift)
         case .load:
             return nil
         }
+    }
+
+    /// What a yes is kept as: the command's own approval with no lift in it, and,
+    /// where it named one, a set-limit approval that matches a lift and nothing
+    /// else (`isLift`), for the same card. A yes to the lift alone is that one.
+    static func split(_ approval: Approval) -> [Approval] {
+        guard approval.lift == true else { return [approval] }
+        let lift = Approval(label: Label.setLimit.rawValue, value: nil, mint: nil, units: nil, figures: nil,
+                            card: approval.card, keep: false, at: approval.at, lift: true)
+        if approval.label == Label.setLimit.rawValue && approval.figures == nil { return [lift] }
+        var own = approval
+        own.lift = nil
+        return [own, lift]
     }
 
     /// What the card itself said in this tap, as the phone carried its answers:
@@ -562,21 +594,131 @@ enum CardOwner {
         var mint: [UInt8]?
         /// The card said it had no owner in this tap: this tap is its set-up, and the owner it has now is this phone.
         var unowned = false
+        /// The owner's grant (ALLOW_LOAD) was answered 9000 in this tap: a quick card says its limit on one payment only after it.
+        var granted = false
+        /// The card's key, as it gave it in this tap (GET_KEY): what is signed is for this card and no other.
+        var key: [UInt8]?
+        /// A record signed in this tap against a move kept for this card: the move is done with when the card answers 9000 to it.
+        var moveSigned: [UInt8]?
     }
 
-    /// Whether a GET_INFO answer (29, 30, 42 or 51 bytes) says the card has no owner: byte 16.
+    /// Whether a GET_INFO answer (29, 30, 42, 51 or 55 bytes) says the card has no owner: byte 16.
     static func unownedSeen(_ answer: [UInt8]) -> Bool {
-        [29, 30, 42, 51].contains(answer.count) && answer[16] == 0
+        [29, 30, 42, 51, 55].contains(answer.count) && answer[16] == 0
     }
 
-    /// A card's limits from its GET_INFO answer of 42 bytes (P1 = 1) or 51 (P1 =
-    /// 3), the status bytes off: the day's at 12, the one payment's at 30 and the
-    /// no-PIN allowance at 34, four bytes each, as the page reads them
-    /// (build/wallet/08a-flashcard.js, cardInfoOf). Nil for any other answer.
-    static func limitsSeen(_ answer: [UInt8]) -> [Figure: UInt32]? {
-        guard answer.count == 42 || answer.count == 51 else { return nil }
+    /// A card's limits from its GET_INFO answer of 42 bytes (P1 = 1), 51 (P1 = 3)
+    /// or 55 (P1 = 4, card software 1.25: the 51 and four more), the status bytes
+    /// off: the day's at 12, the one payment's at 30 and the no-PIN allowance at 34,
+    /// four bytes each, as the page reads them (build/wallet/08a-flashcard.js,
+    /// cardInfoOf). A quick card (byte 6, bit 16) says its limit on one payment only
+    /// to its owner's grant, given in this tap (`granted`), and 0 to anyone else: read
+    /// before it, that figure is not known and is left out. From 29 or 30 bytes, the
+    /// day's alone, and only from a card before 1.3, which has no limit on one
+    /// payment: a later card answers P1 = 0 with thirty bytes that say nothing of it.
+    /// Nil for any other answer.
+    static func limitsSeen(_ answer: [UInt8], granted: Bool) -> [Figure: UInt32]? {
         func u32(_ i: Int) -> UInt32 { answer[i..<(i + 4)].reduce(0) { $0 << 8 | UInt32($1) } }
-        return [.day: u32(12), .tap: u32(30), .noPin: u32(34)]
+        switch answer.count {
+        case 29, 30:
+            guard answer[0] == 0 || (answer[0] == 1 && answer[1] < 3) else { return nil }
+            return [.day: u32(12)]
+        case 42, 51, 55:
+            var out: [Figure: UInt32] = [.day: u32(12), .noPin: u32(34)]
+            if granted || answer[6] & 16 == 0 { out[.tap] = u32(30) }
+            return out
+        default:
+            return nil
+        }
+    }
+
+    /// The card as it will be once it takes a limit just signed: its figures in
+    /// the value, every other as it said it. So a lift is seen as lifted, and a
+    /// second lift before it is put back is no lift (`isLift`).
+    static func seen(after request: SignRequest, _ seen: Seen) -> Seen {
+        guard request.label == .setLimit, var limits = seen.limits else { return seen }
+        for (figure, number) in figures(request.value) { limits[figure] = number }
+        var out = seen
+        out.limits = limits
+        return out
+    }
+
+    /// A lift: the limits taken off for the money the tap takes off the card. The
+    /// day's figure 0, and the one payment's 0, carried wherever the card said one;
+    /// the no-PIN allowance (where the value carries it) as the card said it; no
+    /// figure the card did not say; and a card that said in this tap that it has a
+    /// limit to lift. Nothing else is a lift.
+    static func isLift(_ request: SignRequest, seen: Seen) -> Bool {
+        guard request.label == .setLimit, let limits = seen.limits,
+              (limits[.day] ?? 0) > 0 || (limits[.tap] ?? 0) > 0 else { return false }
+        let asked = figures(request.value)
+        guard asked.keys.allSatisfy({ limits[$0] != nil }), asked[.day] == 0 else { return false }
+        if limits[.tap] != nil, asked[.tap] != 0 { return false }
+        if let noPin = asked[.noPin], noPin != limits[.noPin] { return false }
+        return true
+    }
+
+    /// Whether this card may be lifted now: no lift is kept for it, or the card is
+    /// seen holding that lift's figures again (put back, as between the two
+    /// currencies of one withdrawal). So a lift kept is never written over by a
+    /// second one from figures that are already lifted.
+    static func mayLift(_ card: [UInt8], seen: Seen, kept: [Lift]) -> Bool {
+        guard let lift = kept.first(where: { $0.card == card }) else { return true }
+        guard let limits = seen.limits else { return false }
+        return lift.figures.allSatisfy { limits[$0.key] == $0.value }
+    }
+
+    /// Whether the card is seen holding a kept lift's figures, so that it is done with.
+    static func holds(_ lift: Lift, _ limits: [Figure: UInt32]) -> Bool {
+        lift.figures.allSatisfy { limits[$0.key] == $0.value }
+    }
+
+    /// A card's limits as they were before a lift, kept on the phone until they
+    /// are put back: in the same tap, or by the next tap that finds the card still
+    /// lifted (the page's `cardLiftedAll`, as a card that left mid-withdrawal is).
+    struct Lift: Codable, Equatable {
+        let card: [UInt8]
+        let day: UInt32
+        let tap: UInt32?
+        let noPin: UInt32?
+
+        init(card: [UInt8], from limits: [Figure: UInt32]) {
+            self.card = card
+            day = limits[.day] ?? 0
+            tap = limits[.tap]
+            noPin = limits[.noPin]
+        }
+
+        var figures: [Figure: UInt32] {
+            var out: [Figure: UInt32] = [.day: day]
+            if let tap { out[.tap] = tap }
+            if let noPin { out[.noPin] = noPin }
+            return out
+        }
+    }
+
+    /// Which kept lift `request` puts back, if any: a set-limit for that card that
+    /// carries the day's figure, and the one payment's where the lift has one, each
+    /// the card's before it was lifted, and no other figure but those; to a card seen
+    /// lifted (the day's 0, and the one payment's 0 where the lift has one), in this
+    /// tap or a later one. (A rate after them is the phone's price, as everywhere.)
+    /// It is not used up by being signed: the lift is done with when the card is seen
+    /// holding its figures (`holds`), so a put-back that never reached the card is
+    /// asked again at the next tap.
+    static func putsBack(_ request: SignRequest, _ kept: [Lift], seen: Seen) -> Int? {
+        guard request.label == .setLimit, let limits = seen.limits else { return nil }
+        let asked = figures(request.value)
+        return kept.firstIndex { lift in
+            lift.card == request.key
+                && asked[.day] == lift.day && (lift.tap == nil || asked[.tap] == lift.tap)
+                && asked.allSatisfy { lift.figures[$0.key] == $0.value }
+                && limits[.day] == 0 && (lift.tap == nil || limits[.tap] == 0)
+        }
+    }
+
+    /// The lifts kept, with this card's replaced by `lift`, sixteen at the most.
+    static func keepLift(_ kept: [Lift], _ lift: Lift) -> [Lift] {
+        Array((kept.filter { $0.card != lift.card } + [lift]).suffix(16))
     }
 
     /// A card's unit and mint from its record answer (the status bytes off):
@@ -620,6 +762,8 @@ enum CardOwner {
             guard let record = recordMint(request.value), record.mint == approval.mint else { return false }
             return approval.units.map { $0.contains(record.unit) } ?? true
         case .setLimit:
+            // a yes to a lift is matched by a lift, and by nothing else
+            if approval.lift == true { return isLift(request, seen: seen) }
             let set = Set(approval.figures ?? [])
             for (figure, number) in figures(request.value) where !set.contains(figure) {
                 guard seen.limits?[figure] == number else { return false }
@@ -683,12 +827,27 @@ enum CardOwner {
     }
 
     static func question(for approval: Approval) -> Question? {
+        guard let asked = ownQuestion(for: approval) else { return nil }
+        guard approval.lift == true else { return asked }
+        // the lift, said in the same alert: what it is for, and that it is put back
+        return Question(title: asked.title, message: asked.message + " " + liftWords,
+                        yes: asked.yes, askOwner: asked.askOwner, reason: asked.reason)
+    }
+
+    /// What a yes that names a lift adds to its question.
+    static let liftWords = "Its limit is lifted for the money that comes off it, then put back as it was."
+
+    private static func ownQuestion(for approval: Approval) -> Question? {
         guard let label = Label(rawValue: approval.label) else { return nil }
         let card = approval.card.map { "The card whose key begins \(shortHex(Array($0.dropFirst()), 8))." }
             ?? "The next card held to this phone."
         switch label {
         case .load:
             return nil
+        case .setLimit where approval.lift == true && approval.figures == nil:
+            return Question(title: "Lift this card's limit?",
+                            message: card + " Its limit is lifted for this withdrawal, so that it signs for the whole amount, then put back as it was.",
+                            yes: "Lift", askOwner: false, reason: "")
         case .setLimit:
             let names: [Figure: String] = [.day: "its daily limit", .tap: "its limit on one payment", .noPin: "its allowance without a PIN"]
             let chosen = (approval.figures ?? []).compactMap { names[$0] }

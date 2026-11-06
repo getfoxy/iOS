@@ -24,11 +24,6 @@ import Foundation
 /// payments to contacts, read back only after its words were restored, each
 /// reaching the page as `FoxyWallet._cashuIdCopy(body)`. It is closed with the
 /// other (`cashuIdInboxClose`, and Foxy leaving the foreground).
-///
-/// `cashuIdMsgSend` and `cashuIdMsgOpen` are the messages between two Cashu IDs
-/// (CashuMsg.swift): a message wrapped to the next key of a chain only the two
-/// phones can work out, and an inbox for each contact on its next keys. The pair
-/// secret, the keys and the seals' keys stay here; the page gets plaintexts.
 extension FoxyBridge {
 
     /// The furthest back the page may ask the relays to reach, and what is asked
@@ -133,121 +128,16 @@ extension FoxyBridge {
         }
     }
 
-    // MARK: Messages between Cashu IDs (CashuMsg.swift)
-
-    /// {peer, i, body} → how many relays took it: the body gift-wrapped (NIP-17) to the x-only half of k_i, this
-    /// phone's message `i` to `peer`, its seal signed by s_i, and published to Foxy's three relays over Tor. Both keys
-    /// come from the pair secret on the seed queue and neither is answered.
-    func handleCashuIdMsgSend(id: String, body: [String: Any]) {
-        guard let request = CashuMsg.sendCheck(body) else { resolve(id: id, text: nil, error: "bad request"); return }
-        Self.seedQueue.async {
-            let keys = Result { try SeedActions.cashuMsgSendKeys(peer: request.peer, index: request.index, env: .live) }
-            DispatchQueue.main.async {
-                switch keys {
-                case .failure(let error):
-                    self.resolve(id: id, text: nil, error: SeedActions.problem(error))
-                case .success(var k):
-                    // the wrap is made before `send` returns; the seal's key is not kept past it
-                    NostrDelivery.send(payload: request.body, receiver: k.to, relays: [], seal: k.seal) { [weak self] result in
-                        switch result {
-                        case .success(let answer) where !answer.accepted.isEmpty:
-                            print("[foxy] cashu id messages: \(answer.accepted.count) relay(s) took a message")
-                            self?.resolve(id: id, text: String(answer.accepted.count), error: nil)
-                        case .success(let answer):
-                            self?.resolve(id: id, text: nil, error: "No relay took the message: " + (answer.refused.values.first ?? "no relay took it"))
-                        case .failure:
-                            self?.resolve(id: id, text: nil, error: "The message could not be sent over Nostr.")
-                        }
-                    }
-                    NUT13.wipe(&k.seal)
-                }
-            }
-        }
-    }
-
-    /// {since, peers: [{peer, in, out}]} → "1" when a relay is listening, "0" when none would: gift wraps to every key
-    /// named (each contact's next keys from it, and while this phone has lost its place after a restore, its own next
-    /// keys to it), each contact's in a REQ of its own on a circuit of its own at one relay (CashuMsgListen.swift). A
-    /// wrap opens only by the key it names, and reaches the page (`_cashuMsgArrived(peer, way, i, body)`) only when its
-    /// seal is by that key's s_i. No key is answered. A contact asked for with the keys it had keeps its inbox.
-    func handleCashuIdMsgOpen(id: String, body: [String: Any]) {
-        guard let wants = CashuMsg.openCheck(body) else { resolve(id: id, text: nil, error: "bad request"); return }
-        // an open still waiting is answered; the inboxes stay until this one says which are still wanted
-        let waiting = cashuMsgAnswer
-        cashuMsgAnswer = nil
-        waiting?(0)
-        let since = Self.cashuIdSince(body["since"], now: Int(Date().timeIntervalSince1970))
-        let ticket = UUID()
-        cashuMsgTicket = ticket
-        Self.seedQueue.async {
-            let keys = Result { try SeedActions.cashuMsgListenKeys(wants: wants, env: .live) }
-            DispatchQueue.main.async { self.listenCashuMsg(id: id, keys: keys, since: since, ticket: ticket) }
-        }
-    }
-
-    /// Internal, not private, so that a test can hand it keys and a rigged listener (BridgeTests).
-    func listenCashuMsg(id: String, keys read: Result<[CashuMsg.Listened], Error>, since: Int, ticket: UUID) {
-        dispatchPrecondition(condition: .onQueue(.main))
-        var list: [CashuMsg.Listened]
-        switch read {
-        case .failure(let error): resolve(id: id, text: nil, error: SeedActions.problem(error)); return
-        case .success(let got): list = got
-        }
-        defer { for i in list.indices { NUT13.wipe(&list[i].secret) } }
-        guard cashuMsgTicket == ticket else { resolve(id: id, text: "0", error: nil); return }
-        // each contact's keys on their own: the listener asks for them in a REQ of their own, never with another's
-        var byPeer = [String: [CashuMsg.Listened]]()
-        for k in list { byPeer[k.peer, default: []].append(k) }
-        list.removeAll()        // moved, not copied: the listener wipes or keeps the only copy
-        let contacts = byPeer.count
-        let listen = cashuMsgInbox ?? CashuMsgListen(rotation: cashuMsgRotation, onMessage: { [weak self] peer, inward, index, body in
-            self?.cashuMsgArrived(peer: peer, inward: inward, index: index, body: body)
-        })
-        cashuMsgInbox = listen
-        var answered = false
-        let answer: (Int) -> Void = { [weak self] count in
-            guard !answered else { return }
-            answered = true
-            if self?.cashuMsgTicket == ticket { self?.cashuMsgAnswer = nil }
-            print("[foxy] cashu id messages: " + (count > 0 ? "listening for \(contacts) contact(s)" : "not listening: no relay would"))
-            self?.resolve(id: id, text: String(count), error: nil)
-        }
-        cashuMsgAnswer = answer
-        listen.listen(&byPeer, since: since, answer: answer)
-    }
-
-    /// Ends the messages' inboxes, and answers an open still waiting on them with "0".
-    func closeCashuMsgInbox() {
-        dispatchPrecondition(condition: .onQueue(.main))
-        cashuMsgTicket = nil
-        let open = cashuMsgInbox
-        cashuMsgInbox = nil
-        let waiting = cashuMsgAnswer
-        cashuMsgAnswer = nil
-        open?.close()
-        waiting?(0)
-    }
-
-    /// One message, opened and sealed by the right key. The page decides whether it is one it keeps.
-    private func cashuMsgArrived(peer: String, inward: Bool, index: UInt32, body: String) {
-        evaluate("window.FoxyWallet && window.FoxyWallet._cashuMsgArrived && window.FoxyWallet._cashuMsgArrived("
-                 + Self.literalStatic(peer) + "," + Self.literalStatic(inward ? "in" : "out") + "," + String(index) + ","
-                 + Self.literalStatic(body) + ")")
-    }
-
     /// Stop listening, on both keys. The keys are the seed's; nothing is thrown away.
     func handleCashuIdInboxClose(id: String, body: [String: Any]) {
         closeCashuIdInbox()
         resolve(id: id, text: "ok", error: nil)
     }
 
-    /// Ends every inbox of the ID's, the messages' too (Foxy leaving the foreground, `closeInboxForBackground`), and
-    /// wipes the pair secrets worked out this session (CashuMsg.Cache).
+    /// Ends every inbox of the ID's (Foxy leaving the foreground, `closeInboxForBackground`).
     func closeCashuIdInbox() {
         closeCashuIdInbox(.delivery)
         closeCashuIdInbox(.copies)
-        closeCashuMsgInbox()
-        CashuMsg.cache.clear()
     }
 
     /// Ends one, and answers an open still waiting on it with "0": a NostrInbox

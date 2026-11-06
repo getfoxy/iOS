@@ -2221,15 +2221,17 @@
     const W = window.FoxyWallet;
     let done = false;
     let t = null;
-    const close = () => {
+    // the fox's ALL SET where the invoice came (26r-fox-wait.js), down at once where it did not
+    const close = (landed) => {
       clearTimeout(t);
       if (W.onTapTerms) W.onTapTerms(null);
-      if (this.hideStage) this.hideStage('invWait');
+      if (this.foxEnd) this.foxEnd('invWait', landed);
+      else if (this.hideStage) this.hideStage('invWait');
     };
     const finish = (inv) => {
       if (done) return;
       done = true;
-      close();
+      close(!!inv);
       if (inv) { this.tapConvertPay(inv, from, offer); return; }
       console.log('[foxy] tap: no invoice came in five seconds; nothing was sent');
       this.tapRefuseUnit('They have no invoice for this yet. Nothing was sent.', 'The payer could not pay without an invoice.');
@@ -2243,7 +2245,7 @@
     }
     t = setTimeout(() => finish(''), 5000);
     this.waitingScreen('invWait', {
-      art: 'mints', title: 'Getting<br>their invoice', dots: true, forMs: 6000,
+      fox: 'fee', art: 'mints', title: 'Getting<br>their invoice', dots: true, forMs: 6000,
       body: 'Waiting a moment for their Lightning invoice.',
       button: 'CANCEL',
       go: () => { if (done) return; done = true; close(); this.tapGaveNothing('cancelled'); this.back(); },
@@ -2323,16 +2325,18 @@
     const W = window.FoxyWallet;
     let done = false;
     let t = null;
-    const close = () => {
+    // the fox's ALL SET where the invoice came (26r-fox-wait.js), down at once where it did not
+    const close = (landed) => {
       clearTimeout(t);
       if (W.onTapTerms) W.onTapTerms(null);
       this.dismissCard('invWait');
-      if (this.hideStage) this.hideStage('invWait');
+      if (this.foxEnd) this.foxEnd('invWait', landed);
+      else if (this.hideStage) this.hideStage('invWait');
     };
     const finish = (inv) => {
       if (done) return;
       done = true;
-      close();
+      close(!!inv);
       console.log(inv ? '[foxy] tap: their invoice came after the offer; paying it over Lightning'
         : '[foxy] tap: no invoice in five seconds; moving the sats to their mint instead');
       this.tapPayOffer(Object.assign({}, offer, { invWaited: true }, inv ? { inv: inv } : {}), sats);
@@ -2347,7 +2351,7 @@
     console.log('[foxy] tap: they are online at another mint and their invoice is not in yet; waiting up to 5s for it');
     t = setTimeout(() => finish(''), 5000);
     this.waitingScreen('invWait', {
-      art: 'mints', title: 'Getting<br>their invoice', dots: true, forMs: 6000,
+      fox: 'fee', art: 'mints', title: 'Getting<br>their invoice', dots: true, forMs: 6000,
       body: 'The receiver uses another mint. Waiting a moment for their Lightning invoice.',
       button: 'CANCEL',
       go: () => { if (done) return; done = true; close(); this.tapGaveNothing('cancelled'); this.back(); },
@@ -2681,7 +2685,9 @@
     this._crossRun = run;
     const free = () => { if (this._crossRun === run) this._crossRun = null; };
     this.hushMove(plan);
-    this.showMelt('Moving your sats to ' + (this.mintNameOf(theirs) || 'their mint') + '\u2026',
+    // the fox, the figure following the move's own stages (26r-fox-wait.js); the melt loader where it cannot be drawn
+    const fox = !!(this.foxUp && this.foxUp('crossMove', 'move', { forMs: this.MELT_PATIENCE_MS }));
+    if (!fox) this.showMelt('Moving your sats to ' + (this.mintNameOf(theirs) || 'their mint') + '\u2026',
                   0, { sats: plan.net, mint: this.mintNameOf(theirs) });
     /* On the mint the money leaves, which is where the melt has to run from —
      * the same step the transfer screen takes for the same reason. `moveRun`
@@ -2707,12 +2713,12 @@
     return start
       /* The plan's own melt quote paid with, not asked for again (`quoted`), and the far mint made ready while the melt
        * runs (`warm`): the plan was quoted moments ago, on PAY FROM or the crossing card, and the person agreed to its fee. */
-      .then(() => W.moveRun(plan, () => {}, { visit: true, quoted: true, warm: true })).then((done) => {
+      .then(() => W.moveRun(plan, fox ? this.foxHears('crossMove') : () => {}, { visit: true, quoted: true, warm: true })).then((done) => {
       const quiet = this.hushSweepEntries ? this.hushSweepEntries() : Promise.resolve();
       return quiet.then(() => done, () => done);
     }).then(() => {
       loud();
-      this.hideMelt();
+      if (fox) this.foxEnd('crossMove', true); else this.hideMelt();
       this.refreshBalance();
       /* From here the money is at their mint whatever happens next, and that is
        * worth knowing about: a failure now leaves the balance at a mint the
@@ -2724,7 +2730,7 @@
        * request payment's visit) wrote the mint being visited as home, and
        * that trip's ending took the phone there and not home. */
       if (!this._crossCameFrom) this._crossCameFrom = visit ? home : mine;
-    }).then(() => { free(); }, (e) => { free(); throw e; });
+    }).then(() => { free(); }, (e) => { free(); if (fox) this.foxEnd('crossMove', false); throw e; });
   }
 
   /* Whatever went wrong, the wallet goes back to the mint it was on: a failed
@@ -2733,6 +2739,7 @@
     const W = window.FoxyWallet;
     this._quiet = false;
     this.hideMelt();
+    if (this.hideStage) this.hideStage('crossMove');
     if (W.mintUrl !== mine) W.connect(mine).then(() => this.refreshBalance(), () => {});
     const why = W.reason ? W.reason(e) : String((e && e.message) || e);
     console.warn('[foxy] tap: could not pay across mints:', why);
@@ -3066,11 +3073,14 @@
     this._hushUntil = Date.now() + 120000;
     W.transactions(50).then(list => { this._sweepBefore = new Set(list.map(x => x.hash)); })
       .catch(() => { this._sweepBefore = null; });
-    this.showMelt('Bringing the payment to your mint\u2026', 0,
+    // the fox, the figure following the walk's own stages (26r-fox-wait.js); the melt loader where it cannot be drawn
+    const fox = !!(this.foxUp && this.foxUp('carryMove', 'move', { forMs: this.MELT_PATIENCE_MS }));
+    if (!fox) this.showMelt('Bringing the payment to your mint\u2026', 0,
                   { sats: Math.round(Number(job.terms.net) || 0), mint: this.mintNameOf(home) });
     this.hushMove(job.terms.plan);
-    const settle = () => {
-      this.hideMelt();
+    // ALL SET only where it landed at home
+    const settle = (landed) => {
+      if (fox) this.foxEnd('carryMove', landed); else this.hideMelt();
       this._quiet = false;
       this._carryingHome = false;
       this._hushUntil = Date.now() + 20000;
@@ -3080,18 +3090,19 @@
      * landed, it is on its way, it has to wait, it would cost more than was
      * paid for, or it went back to the payer. The phone is at its own mint
      * when the answer comes, whichever it is. */
+    const heard = fox ? this.foxHears('carryMove') : () => {};
     const walk = (W.carryHome && job.id)
-      ? W.carryHome(job.id, job.terms.plan, () => {})
-      : W.moveRun(job.terms.plan, () => {}).then(done => ({ state: 'home', sats: done && done.sats, done: done }),
+      ? W.carryHome(job.id, job.terms.plan, heard)
+      : W.moveRun(job.terms.plan, heard).then(done => ({ state: 'home', sats: done && done.sats, done: done }),
           e => ({ state: 'stuck', why: W.reason ? W.reason(e) : String((e && e.message) || e) }));
     return walk.then((r) => {
       const quiet = (r && r.state === 'home' && this.hushSweepEntries) ? this.hushSweepEntries() : Promise.resolve();
       return quiet.then(() => r, () => r);
     }).then((r) => {
-      settle();
+      settle(!!(r && r.state === 'home'));
       this.carryOutcome(r, { home: home, heldThere: heldThere, paid: paid, net: job.terms.net });
     }).catch(e => {
-      settle();
+      settle(false);
       console.warn('[foxy] tap: bringing the payment home:', (e && e.message) || e);
       this.loadHistory();
     });
@@ -3104,6 +3115,20 @@
    * received when it is at this phone's own mint and at no moment before:
    * until then it is money at a mint this person did not choose, and every
    * card here says which of those it is. */
+  /* A payment's walk home, or back to the payer, started from one of the cards below: the fox (26r-fox-wait.js), or the
+   * melt loader with `label` where it cannot be drawn. True for the fox. */
+  carryFoxUp(label, o) {
+    const fox = !!(this.foxUp && this.foxUp('carryMove', 'move', { forMs: this.MELT_PATIENCE_MS }));
+    if (!fox) this.showMelt(label, 0, o);
+    return fox;
+  }
+
+  /* Its end: ALL SET where it `landed` at home; down at once otherwise, a payment sent back included, since the card
+   * that follows says what became of it. */
+  carryFoxDown(fox, landed) {
+    if (fox) this.foxEnd('carryMove', landed); else this.hideMelt();
+  }
+
   carryOutcome(r, ctx) {
     const W = window.FoxyWallet;
     const c = ctx || {};
@@ -3165,12 +3190,13 @@
         chip: 'It is not received until it is at ' + homeName + '.',
         retry: 'BRING ' + this.group(lands) + ' HOME',
         go: () => {
-          this.showMelt('Bringing the payment to your mint\u2026', 0, { sats: lands, mint: homeName });
-          W.carryHome(job.id, null, () => {}, { less: true }).then(x => { this.hideMelt(); this.carryOutcome(x, { home: home }); });
+          const fox = this.carryFoxUp('Bringing the payment to your mint\u2026', { sats: lands, mint: homeName });
+          W.carryHome(job.id, null, fox ? this.foxHears('carryMove') : () => {}, { less: true })
+            .then(x => { this.carryFoxDown(fox, x && x.state === 'home'); this.carryOutcome(x, { home: home }); });
         },
         shut: { label: 'SEND IT BACK', tap: () => {
-          this.showMelt('Sending the payment back\u2026');
-          W.carryRefund(job.id).then(x => { this.hideMelt(); this.carryOutcome(x, { home: home }); });
+          const fox = this.carryFoxUp('Sending the payment back\u2026');
+          W.carryRefund(job.id).then(x => { this.carryFoxDown(fox, false); this.carryOutcome(x, { home: home }); });
         } },
       });
       return;
@@ -3199,12 +3225,13 @@
         chip: 'It is not received until it is at ' + homeName + '.',
         retry: 'TRY AGAIN',
         go: () => {
-          this.showMelt('Bringing the payment to your mint\u2026', 0, { sats: Math.round(Number(job.net) || 0), mint: homeName });
-          W.carryHome(job.id, null, () => {}).then(x => { this.hideMelt(); this.carryOutcome(x, { home: home }); });
+          const fox = this.carryFoxUp('Bringing the payment to your mint\u2026', { sats: Math.round(Number(job.net) || 0), mint: homeName });
+          W.carryHome(job.id, null, fox ? this.foxHears('carryMove') : () => {})
+            .then(x => { this.carryFoxDown(fox, x && x.state === 'home'); this.carryOutcome(x, { home: home }); });
         },
         shut: job.payerKey ? { label: 'SEND IT BACK', tap: () => {
-          this.showMelt('Sending the payment back\u2026');
-          W.carryRefund(job.id).then(x => { this.hideMelt(); this.carryOutcome(x, { home: home }); });
+          const fox = this.carryFoxUp('Sending the payment back\u2026');
+          W.carryRefund(job.id).then(x => { this.carryFoxDown(fox, false); this.carryOutcome(x, { home: home }); });
         } } : { label: 'CLOSE' },
       });
       return;
@@ -3273,7 +3300,9 @@
       clearTimeout(this._tapQuoteT);
       if (W.onTapTerms) W.onTapTerms(null);
       this.dismissCard('priceSent');
-      if (this.hideStage) this.hideStage('priceSent');
+      /* An answer is the fox's real end, ALL SET over the fee screen it opens (26r-fox-wait.js); an answer that is
+       * refused below takes the fox down at once. */
+      if (over || !this.foxDone || !this.foxDone('priceSent')) { if (this.hideStage) this.hideStage('priceSent'); }
       // a talk that ended with no payment leaves nothing to protect
       if (over) { this._crossReady = null; this.tapGaveNothing(over); }
       return true;
@@ -3291,6 +3320,7 @@
         }
         if (!done()) return;
         if (!terms || !terms.req || !(Number(terms.sats) > 0)) {
+          if (this.hideStage) this.hideStage('priceSent');
           this.toast(terms && terms.why ? String(terms.why)
             : 'They could not take a payment from your mint. Nothing was sent.', true);
           this.back();
@@ -3315,6 +3345,7 @@
           console.warn('[foxy] tap: their terms and their request do not agree ('
             + (read ? 'the request is for ' + reqSats + ' sats' + (reqMint && reqMint !== myMint ? ' at ' + reqMint : '') : 'the request could not be read')
             + ', the terms say ' + shownSats + '); nothing was sent');
+          if (this.hideStage) this.hideStage('priceSent');
           this.toast(!read ? 'Their request could not be read. Nothing was sent.'
             : 'Their request does not match the amount they quoted. Nothing was sent.', true);
           this.back();
@@ -3347,7 +3378,7 @@
      * the arithmetic is not something the person paying needs to hold in
      * their head. */
     this.waitingScreen('priceSent', {
-      art: 'mints', title: 'Calculating<br>fee', dots: true,
+      fox: 'fee', art: 'mints', title: 'Calculating<br>fee', dots: true,
       body: 'The receiver uses another mint, wait while I calculate the fee to pay them.',
       button: 'CANCEL', go: () => { if (done('cancelled')) this.back(); },
     });

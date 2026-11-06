@@ -15,6 +15,9 @@
  */
 const crypto = require('crypto');
 const { funded, binaryLoad, why, history, settle, MINT, OTHER_WORDS, PHONE_WORDS } = require('./flashcard-kit');
+// (a first load cut eight deep and written in one tap, as before 2026-11-06: this suite's drawers are such a load's; flashcard-tap-time.js holds the defaults)
+require('./flashcard-kit').deepFirstLoads(8);
+require('./flashcard-kit').uncappedTaps();
 const { makeCard } = require('./flashcard-card');
 const { appOn, until, pad, stage, card: uiCard, explainer: uiExplainer, vals, limits: uiLimits } = require('./flashcard-ui-kit');
 
@@ -414,23 +417,29 @@ async function world(feePpk, sats, make) {
     D.card.sent.length = 0;
     const same = await D.H.W.cardLook(D.card, { mine: true, price: 101000 });
     ok(same.info.tapLimit === 1000 && !same.repaced && count(D.card, '34') === 0, 'a price that has moved a little leaves the card as it is', String(same.info.tapLimit));
+    /* Only a read the keeper said yes to a re-peg for writes one (`repeg`): the phone signs a limit only against a yes, and a re-peg
+     * in another flow's tap would be refused, or would use up the yes that tap's own command was given. */
     D.card.tap();
-    const moved = await D.H.W.cardLook(D.card, { mine: true, price: 80000 });
+    D.card.sent.length = 0;
+    const unasked = await D.H.W.cardLook(D.card, { mine: true, price: 80000 });
+    ok(unasked.info.tapLimit === 1000 && !unasked.repaced && count(D.card, '34') === 0, 'a read with no yes for it leaves the card as it is, however far the price has moved', String(unasked.info.tapLimit));
+    D.card.tap();
+    const moved = await D.H.W.cardLook(D.card, { mine: true, price: 80000, repeg: true });
     ok(moved.info.tapLimit === 1250 && moved.repaced === 1250 && moved.tap.limit === 1250, 'a price that has moved is followed: the card’s sats are set to what the dollars are worth now', String(moved.info.tapLimit));
     D.card.tap();
-    const read = await D.R.W.cardLook(D.card, { mine: true, price: 50000 });
+    const read = await D.R.W.cardLook(D.card, { mine: true, price: 50000, repeg: true });
     D.card.tap();
-    const still = await D.H.W.cardLook(D.card, { mine: true, price: 80000 });
+    const still = await D.H.W.cardLook(D.card, { mine: true, price: 80000, repeg: true });
     ok(read.info.tapLimit === 0 && !read.repaced && still.info.tapLimit === 1250 && !still.repaced,
        'another phone, which did not set it, is not told the limit and changes nothing', 'the other reads ' + read.info.tapLimit + ', the card still has ' + still.info.tapLimit);
     D.card.tap();
-    const noPrice = await D.H.W.cardLook(D.card, { mine: true });
+    const noPrice = await D.H.W.cardLook(D.card, { mine: true, repeg: true });
     ok(noPrice.info.tapLimit === 1250 && !noPrice.repaced, 'nor does the holder’s phone with no price to go by');
     D.card.tap();
     await D.H.W.cardSetLimit(D.card, { sats: 700, tap: true });
     ok(D.H.W.cardPaceUsd(D.card.key) === 0, 'and a limit set in sats is left in sats');
     D.card.tap();
-    const sats = await D.H.W.cardLook(D.card, { mine: true, price: 20000 });
+    const sats = await D.H.W.cardLook(D.card, { mine: true, price: 20000, repeg: true });
     ok(sats.info.tapLimit === 700 && !sats.repaced, 'whatever the price does', String(sats.info.tapLimit));
     await settle();
   }
@@ -707,13 +716,18 @@ async function world(feePpk, sats, make) {
     holder.fcLimitSpec().go();
     await until('the limit to be set', () => holder.toasts.some((t) => /Per second limit set/.test(t)));
     ok(V.card.state.tapLimit === 500 && V.H.W.cardPaceUsd(V.card.key) === 0.5, 'the card is given the sats, and the phone keeps the dollars', V.card.state.tapLimit + ' sats, $' + V.H.W.cardPaceUsd(V.card.key));
-    // the price moves, and the holder opens FLASHCARD again: the card follows, with nothing asked
+    /* the price moves, and the holder opens FLASHCARD again: the phone signs no limit the keeper did not say yes to, and the sats
+     * a dollar limit becomes are the page's sum, so a plain read leaves the card as it is (`repeg`, 08a-flashcard.js) */
     holder.price = 50000;
     holder.setState({ fc: null, screen: 'home', stack: [] });
     holder.goFlashcard();
     await until('the card to be read again', () => !!holder.state.fc);
     await settle();
-    ok(V.card.state.tapLimit === 1000, 'when the price has halved, the next read sets the card to twice the sats: the same dollars', String(V.card.state.tapLimit));
+    ok(V.card.state.tapLimit === 500, 'when the price has halved, a read with no yes for it writes no limit', String(V.card.state.tapLimit));
+    // a read the keeper said yes to the figure for sets it: twice the sats, the same dollars
+    V.card.tap();
+    await V.H.W.cardLook(V.card, { mine: true, price: 50000, repeg: true });
+    ok(V.card.state.tapLimit === 1000, 'and a read with that yes sets the card to twice the sats: the same dollars', String(V.card.state.tapLimit));
 
     // a till, charging more than the limit: it says to keep holding, and counts
     const till = appOn(V.R, { screen: 'confirm' });
@@ -896,8 +910,11 @@ async function world(feePpk, sats, make) {
       ok(count(D.card, '30') <= 11 && d1[1] >= 4 && d1[2] >= 4 && d1[4] >= 4,
          'in thirty-two pieces at the most, smallest sizes first: the card has 1s, 2s and 4s again', count(D.card, '30') + ' LOAD commands; ' + JSON.stringify({ 1: d1[1], 2: d1[2], 4: d1[4], 8: d1[8] }));
     }
-    ok(D.card.sent.filter((a) => /^b017..00/.test(a)).length === 0 && D.card.sent.filter((a) => /^b017..03/.test(a)).length === 2,
-       'and the till read the card the short way before and after: it wants what the card comes to, not what is on it', D.card.sent.filter((a) => /^b017/.test(a)).length + ' listing commands');
+    /* (after the write only where it is not known from what went on: since 2026-11-06 a write of this phone's own pieces that went whole
+     * is not read again, `cardAfterWrite`, and one of the card's own change is) */
+    const shortReads = D.card.sent.filter((a) => /^b017..03/.test(a)).length;
+    ok(D.card.sent.filter((a) => /^b017..00/.test(a)).length === 0 && (shortReads === 1 || shortReads === 2),
+       'and the till read the card the short way, before and where need be after: it wants what the card comes to, not what is on it', D.card.sent.filter((a) => /^b017/.test(a)).length + ' listing commands');
     let again = 0, allPaid = true;
     for (const p of [613, 303, 1215, 81]) {
       D.card.tap();

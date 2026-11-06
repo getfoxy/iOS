@@ -494,9 +494,12 @@
     // the balances before, for the count-up on home once the screen is dismissed
     this._preSettle = this.balNow();
     this.setState({ swapBusy: true, swapNewRate: false, swapErr: '', swapErrAmount: false });
-    this.showMelt('Swapping ' + this.unitWord(from).toLowerCase() + ' into ' + this.unitWord(to).toLowerCase() + '…', 120000);
+    // the fox, the figure following the swap's own stages (26r-fox-wait.js); the melt loader where it cannot be drawn
+    const fox = !!(this.foxUp && this.foxUp('swapMove', 'swap', { forMs: 120000 }));
+    if (!fox) this.showMelt('Swapping ' + this.unitWord(from).toLowerCase() + ' into ' + this.unitWord(to).toLowerCase() + '…', 120000);
     console.log('[foxy] swap: running ' + this.unitFigure(q.total, from) + ' into ' + this.unitFigure(q.get, to));
-    this._swapRun = W.swapRun(q, (stage) => console.log('[foxy] swap: ' + stage)).then(r => {
+    const heard = (stage) => console.log('[foxy] swap: ' + stage);
+    this._swapRun = W.swapRun(q, fox ? this.foxHears('swapMove', heard) : heard).then(r => {
       /* One leg unanswered is, most of the time, a mint a few seconds slow rather than a mint stuck, and the card for
        * "still going through" read as a verdict one round trip after SWAP. The swapping screen stays up for a short while,
        * asking the mint again every few seconds, and the card comes only if it is still not settled (`swapAwait`). */
@@ -506,7 +509,9 @@
       return r;
     }).then(r => {
       this._swapRun = null;
-      this.hideMelt();
+      // ALL SET where it landed, or settled while the screen waited; down at once where it did not
+      if (fox) this.foxEnd('swapMove', !!(r && (r.state === 'done' || (r.state === 'pending' && r.held === false))));
+      else this.hideMelt();
       this.refreshBalance();
       this.loadHistory();
       // the next probe from this balance asks at this size, the likeliest next figure
@@ -552,7 +557,7 @@
           + ' are where they were.' });
     }).catch(e => {
       this._swapRun = null;
-      this.hideMelt();
+      if (fox) this.foxEnd('swapMove', false); else this.hideMelt();
       this._preSettle = null;
       const why = W.reason ? W.reason(e) : String((e && e.message) || e);
       console.warn('[foxy] swap: did not run:', why);

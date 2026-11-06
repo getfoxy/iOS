@@ -400,7 +400,8 @@ function wire(Rw, Pw, R) {
     eq([P.A.state.screen, P.A.state.wallet, (P.A.state.req || {}).unit], ['reqOffer', 'usd', 'usd'],
       'the payer: the request opens on its offer screen, paid from dollars');
     const spec = P.A.requestSpec();
-    eq([spec.amount, spec.amountSub, spec.code, spec.cta], ['$ 5.00', '', '4821', 'SEND $ 5.00'], 'SENDING $ 5.00, the four digits, SEND $ 5.00');
+    // (PAY on a tap too: the keeper, 2026-11-06)
+    eq([spec.amount, spec.amountSub, spec.code, spec.cta], ['$ 5.00', '', '4821', 'PAY $ 5.00'], 'SENDING $ 5.00, the four digits, PAY $ 5.00');
     ok(spec.rows.some((r) => r.label === 'FROM' && r.value === 'DOLLARS') && !spec.rows.some((r) => r.label === 'BITCOIN PRICE'),
       'FROM DOLLARS, and no bitcoin price row', JSON.stringify(spec.rows.map((r) => r.label + '=' + r.value)));
     ok(Pw.rec.shortfalls.indexOf('usd') >= 0 && Pw.rec.shortfalls.indexOf('sat') < 0, 'the shortfall is asked in dollars, never in sats');

@@ -109,7 +109,6 @@ let package = Package(
                 "NUT13Tests.swift",
                 "P2PKTests.swift",
                 "CashuIDTests.swift",
-                "CashuMsgTests.swift",
                 "BIP39Tests.swift",
                 "CounterStoreTests.swift",
                 "CounterRulesTests.swift",

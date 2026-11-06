@@ -128,9 +128,9 @@ Three exceptions leave Foxy's Tor:
   the first time one is due. With a Cashu ID in use, Foxy also sets a reminder
   after 15 days away: if notifications are already allowed it is simply on,
   otherwise Foxy asks once ("Foxy can remind you after 15 days away, so a
-  payment or message waiting for you is not missed."). The one notification,
-  "You have not opened Foxy in 15 days. A payment or message may be waiting for
-  you.", is set for 15 days after you last had Foxy
+  payment waiting for you is not missed."). The one notification,
+  "You have not opened Foxy in 15 days. A payment may be waiting for you.",
+  is set for 15 days after you last had Foxy
   open and set again each time you open or leave it. It is made on the phone and
   sent by nobody. REMIND ME AFTER 15 DAYS in SETTINGS turns it off.
 - **Clipboard.** When you copy a sensitive value, such as an ecash token, Foxy

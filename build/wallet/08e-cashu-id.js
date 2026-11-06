@@ -895,8 +895,7 @@
           cidInboxDrop(at);
           cidOfferDrop(at);
           if (r && r.hash) {
-            // and, where the payer proved to be a contact, whose it was, for INBOX (`cmsgPaymentsNow`)
-            try { amendTx(r.hash, name ? { memo: memo, cid: 'in', cidPeer: String(got.from).toLowerCase() } : { memo: memo, cid: 'in' }); } catch (x) {}
+            try { amendTx(r.hash, { memo: memo, cid: 'in' }); } catch (x) {}
             var note = got.note ? cidCleanName(String(got.note).slice(0, CID_NOTE_MAX)) : '';
             if (note) { try { FoxyWallet.tag(r.hash, { note: note }); } catch (x) {} }
           }
@@ -1666,11 +1665,6 @@
       });
     }).then(function (n) {
       return cidDrain().then(function () { return n; }, function () { return n; });
-    }).then(function (n) {
-      // and the messages between Cashu IDs: the contacts' next keys listened on, what waits to go sent (08f-cashu-msg.js)
-      Promise.resolve().then(function () { return cmsgListenNow(); }).then(null, function () {});
-      Promise.resolve().then(function () { return cmsgDeliverAll(); }).then(null, function () {});
-      return n;
     });
     cidListenRun = run;
     var done = function () { if (cidListenRun === run) cidListenRun = null; };
@@ -2229,7 +2223,6 @@
       Promise.resolve().then(function () { return cidListenNow({ ifClosed: true }); }).then(null, function () {});
       if (cidOutboxRows().some(function (r) { return cidDue(r, Date.now()); })) setTimeout(function () { cidDeliverAll().then(null, function () {}); }, 0);
       if (cidOutboxRows().some(function (r) { return cidCopyDue(r, Date.now()); })) setTimeout(function () { cidCopyAll().then(null, function () {}); }, 0);
-      cmsgOnRoute();
     }
     catch (e) { console.warn('[foxy] cashu id: sending on the route’s return:', (e && e.message) || e); }
   }

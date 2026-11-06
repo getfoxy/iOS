@@ -733,7 +733,7 @@ async function run() {
       '12: the dollars asked go to the screen only with a payment to be swapped; one agreed in dollars that stays bitcoin carries none',
       JSON.stringify(raised));
     // and `renderPaid` heads it with them only then
-    const r = Object.assign(lift({}, COMMON.concat(['renderPaid(c) {'])), {
+    const r = Object.assign(lift({}, COMMON.concat(['renderPaid(c) {', 'renderPaidRest(c, v) {'])), {
       renderPaidBase: () => ({ paidHeadline: '₿ 6,502', paidHeadlineSub: '$ 5.00', paidAddedTo: '' }),
       twoUnitsOn: () => true,
     });

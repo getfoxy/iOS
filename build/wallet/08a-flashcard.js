@@ -1430,8 +1430,14 @@
   /* Ask the card one thing. `ask` answers { data, sw } whatever the status;
    * `want` answers the data and throws anything but 9000 as what it means. */
   function cardTalk(link) {
+    /* When the card first answered in this sheet and when it last did, on the link: a write's log line says the time the card was
+     * held for, from the one to the other (`cardWrite`). */
+    var heard = function () {
+      try { var now = Date.now(); if (!link.firstAnswerAt) link.firstAnswerAt = now; link.lastAnswerAt = now; } catch (e) {}
+    };
     function ask(apdu) {
       return Promise.resolve().then(function () { return link.send(apdu); }).then(function (hex) {
+        heard();
         var h = String(hex || '').toLowerCase();
         if (h.length < 4 || h.length % 2 || /[^0-9a-f]/.test(h)) throw cardError('gone', 'Card taken away too soon.');
         return { data: h.slice(0, -4), sw: h.slice(-4) };
@@ -1439,9 +1445,31 @@
         throw (e && e.card) ? e : cardError('gone', 'Card taken away too soon.');
       });
     }
+    /* Several commands at once, where the link can (`link.sendMany`): resolves [{ data, sw }] in order, the last the first that
+     * was not 9000, with `lost` on the list where the card left part way; null where the link cannot, and the caller sends them
+     * one at a time. Rejects as `ask` does when the card is gone before any answer. */
+    function many(apdus) {
+      if (!link || typeof link.sendMany !== 'function') return Promise.resolve(null);
+      return Promise.resolve().then(function () { return link.sendMany(apdus); }).then(function (got) {
+        heard();
+        var out = /** @type {any} */ ((got && got.answers || []).map(function (hex) {
+          var h = String(hex || '').toLowerCase();
+          if (h.length < 4 || h.length % 2 || /[^0-9a-f]/.test(h)) throw cardError('gone', 'Card taken away too soon.');
+          return { data: h.slice(0, -4), sw: h.slice(-4) };
+        }));
+        out.lost = !!(got && got.lost);
+        return out;
+      }, function (e) {
+        if (e && e.unsupported) return null;
+        throw (e && e.card) ? e : cardError('gone', 'Card taken away too soon.');
+      });
+    }
     return {
       link: link,
       ask: ask,
+      many: many,
+      // whether the link can be handed several commands at once (a phone that answered it cannot is not asked again)
+      canMany: function () { return !!(link && typeof link.sendMany === 'function' && !link.noMany); },
       want: function (apdu, doing) {
         return ask(apdu).then(function (r) {
           if (r.sw !== '9000') throw cardRefused(r.sw, doing);
@@ -1557,6 +1585,9 @@
    *                                             tap, and kept on the phone for the card until then
    *   { label: 'set-limit', figures }           which of 'day', 'tap' and 'noPin' the keeper set
    *   and `card`, the card's key, where the screen is the card's.
+   * `lift: true` (with reset, set-card or set-limit): the same tap takes money off the card, under its limits lifted and put back
+   * (`cardUnderPin`), and the one yes covers that too; `{ label: 'set-limit', lift: true }` with no figures is the lift alone, for a
+   * withdrawal. The phone then signs set-limit to nothing from what the card said in the tap, and back to exactly that, and no other.
    * Resolves true at a yes; a no, or no answer, rejects `declined`. */
   function cardApprove(op) {
     var o = op || {};
@@ -1569,7 +1600,8 @@
         body.mint = canonicalMint(o.mint || mintOf(wallet));
         if (Array.isArray(o.units) && o.units.length) body.units = o.units.map(function (u) { return unitOf(u) || u; });
         if (o.keep) body.keep = true;
-      } else if (o.label === 'set-limit') body.figures = (o.figures || []).slice();
+      } else if (o.label === 'set-limit' && !(o.lift && !(o.figures || []).length)) body.figures = (o.figures || []).slice();
+      if (o.lift && (o.label === 'reset' || o.label === 'set-card' || o.label === 'set-limit')) body.lift = true;
     } catch (e) { return Promise.reject(e); }
     return nativeJson('cardOwnerApprove', body, 60000).then(function (j) {
       if (!j || j.approved !== true) throw new Error('not approved');
@@ -1981,6 +2013,25 @@
   /* The last card any flow read here: its key and what it is (`info`), for the app to know the card in hand off its own screen. */
   var lastCardRead = null;
 
+  /* While a card's sheet is up (`cardSession`, from the sheet asked for until the card is let go or the tap has settled), the
+   * page's own background work waits (`cardAfter`): the held quote sweep, the inboxes opened again on a return, the small-change
+   * top-up. Every command to the card and every answer from it rides the one thread that work also runs on, and a tap made
+   * just after Foxy came back took 2 to 4 times as long a command as one made with the phone settled (2026-11-06). The work
+   * waiting runs once the last sheet is down, each in a turn of its own. */
+  var cardSheets = 0;
+  var cardAfterQ = [];
+  function cardSheetUp() { return cardSheets > 0; }
+  function cardAfter(fn) {
+    if (typeof fn !== 'function') return;
+    if (!cardSheets) { fn(); return; }
+    cardAfterQ.push(fn);
+  }
+  function cardSheetDown() {
+    cardSheets = Math.max(0, cardSheets - 1);
+    if (cardSheets) return;
+    cardAfterQ.splice(0).forEach(function (fn) { setTimeout(function () { try { fn(); } catch (e) {} }, 0); });
+  }
+
   function cardLook(link, opts) {
     var o = opts || {};
     var t = cardTalk(link);
@@ -2205,7 +2256,11 @@
          * moved: the card's sats are set to match, with the owner's proof.
          * Only a bitcoin card's: a dollar card's limits are cents already,
          * and no price ever moves them. */
-        var want = (c.mine && c.info.paced && c.record.unit === 'sat') ? cardPaceSats(c.key, o.price) : 0;
+        /* Only in a read whose tap the keeper said yes to that figure for (`o.repeg`): the phone signs a limit only against the
+         * keeper's yes, and the sats this one becomes are the page's sum, not a figure the card said, so a re-peg in any other tap
+         * would be refused, or would use up the yes the keeper gave that tap's own command. (A card of 1.23 keeps cents, and only
+         * its rate follows the price, which the phone signs unasked: `cardRepeg23` above.) */
+        var want = (o.repeg && c.mine && c.info.paced && c.record.unit === 'sat') ? cardPaceSats(c.key, o.price) : 0;
         var has = Number(c.info.tapLimit) || 0;
         if (!(want > 0) || !(has > 0) || Math.abs(want - has) <= has * CARD_PACE_DRIFT) return c;
         return cardLimitTo(t, c.key, c.info.limit, want).then(function () {
@@ -2219,7 +2274,7 @@
       }).then(function (c) {
         /* And the no-PIN allowance, set in dollars the same way (software 1.16): the card's sats are set to match when the
          * price has moved, in the one command that carries the day's limit and the tap's as they stand. */
-        var wantNp = (c.mine && c.info.noPinKnown && c.info.pinSet && c.record.unit === 'sat' && !cardIs123(c)) ? cardPaceNoPinSats(c.key, o.price) : 0;
+        var wantNp = (o.repeg && c.mine && c.info.noPinKnown && c.info.pinSet && c.record.unit === 'sat' && !cardIs123(c)) ? cardPaceNoPinSats(c.key, o.price) : 0;
         var hasNp = Number(c.info.noPin && c.info.noPin.limit) || 0;
         if (!(wantNp > 0) || !(hasNp > 0) || Math.abs(wantNp - hasNp) <= hasNp * CARD_PACE_DRIFT) return c;
         return cardLimitTo(t, c.key, c.info.limit, Number(c.info.tapLimit) || 0, wantNp).then(function () {
@@ -3040,7 +3095,9 @@
    *
    * A card of 128 places (`info.wide`) is cut deep instead: CARD_DEEP of each
    * size from 1 up to CARD_DEEP_TOP, smallest first as far as the money goes,
-   * and what is left of the amount in powers of two. Smallest first, because
+   * and what is left of the amount in powers of two. Where that is more pieces
+   * than a tap writes (five seconds, since 2026-11-06), a whole set at a time
+   * instead, as far as the tap's pieces go, and the next taps carry on. Smallest first, because
    * the small sizes are the ones a payment cannot do without; and the money
    * that does not reach a size is no loss to it, since a payment is one
    * signature however many pieces it is made of, and smaller pieces make a
@@ -3073,13 +3130,57 @@
   var CARD_WIDE_LOAD = 112;
   var CARD_WIDE_CHANGE = 32;
 
+  /* ---- five seconds a tap ------------------------------------------------------
+   * Decided 2026-11-06: a load should not hold the card for more than five seconds of signing and loading. A tap is
+   * budgeted at CARD_PIECE_MS for each piece written (89 ms was measured on a phone held well, 2026-11-06 08:01; the margin
+   * is for a phone less settled) and, besides the pieces, what the tap itself does: for a load, the read with the card's
+   * proof of its key and the PIN or the owner's grant (CARD_LOAD_OWN_MS); for a payment whose change goes back on in the
+   * same sheet, the read, the signing and the wait the card's software makes (CARD_PAY_OWN_MS). The mint's own time between
+   * the signing and the change is not the card's and is not counted. What is left is how many pieces one tap writes: a load
+   * (CARD_TAP_LOAD), and change (CARD_TAP_CHANGE).
+   *
+   * So a card's drawer is not written in one go. Its first load is one binary set of the amount (CARD_FIRST_DEPTH of each
+   * size, 1 to 1,024, and what is left in powers of two: $25.00 is sixteen pieces), which pays one price exactly offline,
+   * whatever it is, and any number online. Every later tap that writes (a top-up, or a payment whose change comes back)
+   * deepens it with what it writes, at most what fits the five seconds, the smallest sizes still short first, a whole set
+   * at a time (`cardDeepLadder`), so that a second exact payment is there as early as can be; three or four such taps fill
+   * the drawer's whole plan (CARD_DEEP of each). */
+  var CARD_TAP_MS = 5000;
+  var CARD_PIECE_MS = 110;
+  var CARD_LOAD_OWN_MS = 1600;
+  var CARD_PAY_OWN_MS = 3000;
+  var CARD_TAP_LOAD = Math.floor((CARD_TAP_MS - CARD_LOAD_OWN_MS) / CARD_PIECE_MS);
+  var CARD_TAP_CHANGE = Math.floor((CARD_TAP_MS - CARD_PAY_OWN_MS) / CARD_PIECE_MS);
+  // how many of each size a card's first load is: one binary set
+  var CARD_FIRST_DEPTH = 1;
+  /* For a phone test, a debug build launched with `-FoxyFirstDepth N` (Foxy/FoxyWebView.swift) cuts first loads N deep for that
+   * run: read once, and only where the page is a debug build's. 0: not given, and CARD_FIRST_DEPTH stands. */
+  var cardFirstDepthRun = null;
+  function cardFirstDepthNow() {
+    if (cardFirstDepthRun === null) {
+      var n = 0;
+      try { var win = /** @type {any} */ (window); n = (win.FOXY_DEBUG === true) ? Math.floor(Number(win.__foxyFirstDepth) || 0) : 0; } catch (e) { n = 0; }
+      cardFirstDepthRun = (n >= 1 && n <= CARD_DEEP) ? n : 0;
+      if (cardFirstDepthRun) console.log('[foxy] card: a first load is cut ' + cardFirstDepthRun + ' deep for this run (a debug build\u2019s launch argument)');
+    }
+    return cardFirstDepthRun || CARD_FIRST_DEPTH;
+  }
+  // the time a tap holds the card for, by the budget above: `kind` 'load' or 'change', `pieces` written in it
+  function cardTapEstimate(kind, pieces) {
+    return (kind === 'change' ? CARD_PAY_OWN_MS : CARD_LOAD_OWN_MS) + Math.max(0, Math.floor(Number(pieces) || 0)) * CARD_PIECE_MS;
+  }
+
   /* As `cardLadder`, for a card with a deep drawer. `extra` is always 0, but
    * where not even the plain powers of two fit `most` pieces: then the amount
    * is cut as a card of fewer places would have it (`cardLadder`), which may
    * round it up. */
   /* `depth`: how many of each size the drawer is cut to (CARD_DEEP where not given). A card of 1.23 that holds both units, or is about to,
    * is cut to CARD_DEEP_BOTH of each in each unit (`cardDepthFor`, design 9.2): both units deep are the 88 pieces one unit eight deep was. */
-  function cardDeepLadder(sats, most, biggest, have, depth) {
+  /* `sets`: where the plan is more pieces than `most`, deepen it a whole set at a time (pieces this phone writes, at a load's speed);
+   * without it, the plan one shallower until it fits, as the card's own change is cut (each of those is the card's work to make). */
+  /* `exact` (a card's first load): what is left after the drawer is cut so that every price up to the whole stays exact (`cardExactRest`),
+   * where those pieces fit `most`. */
+  function cardDeepLadder(sats, most, biggest, have, depth, sets, exact) {
     var n = Math.max(0, Math.floor(Number(sats) || 0));
     var deepest = Math.max(0, Math.min(CARD_DEEP, Math.floor(Number(depth) || CARD_DEEP)));
     var cap = Math.max(1, Math.floor(Number(most) || CARD_WIDE_LOAD));
@@ -3098,6 +3199,7 @@
       }
       return out;
     };
+    // the drawer as it has always been cut: `deep` of each size, the smallest first, as far as the money goes
     var build = function (deep) {
       var out = [], rest = n;
       for (var d = 1; d <= CARD_DEEP_TOP && (!top || d <= top); d *= 2) {
@@ -3108,22 +3210,106 @@
         // the money has run out at this size: what is left is less than one more of it
         if (take < short) break;
       }
-      return out.concat(cut(rest));
+      var res = /** @type {any} */ (out.concat(cut(rest)));
+      res.drawn = out;
+      res.rest = rest;
+      return res;
     };
-    for (var deep = deepest; deep >= 0; deep--) {
-      var pieces = build(deep);
-      if (pieces.length <= cap) {
-        pieces.sort(function (a, b) { return b - a; });
-        return { sats: n, extra: 0, denominations: pieces };
+    // how many pieces the whole plan is: `deep` of every size this mint makes up to CARD_DEEP_TOP, less what the card holds
+    var sizesUpTo = function (deep) {
+      var k = 0;
+      for (var d = 1; d <= CARD_DEEP_TOP && (!top || d <= top); d *= 2) k += Math.max(0, deep - (held[d] || 0));
+      return k;
+    };
+    var whole = build(deepest);
+    if (exact) {
+      // the drawer's own pieces, and the rest cut so that no price up to the whole falls in a gap
+      var exactly = cardExactRest(whole.drawn, whole.rest, top, have);
+      if (exactly && whole.drawn.length + exactly.length <= cap) {
+        var all = whole.drawn.concat(exactly).sort(function (a, b) { return b - a; });
+        return { sats: n, extra: 0, denominations: all };
       }
+      /* More pieces than the tap writes (an amount in the millions): as many of those as leave room for the rest in powers of two,
+       * so that the prices that are exact reach as far as the pieces allow. */
+      if (exactly) {
+        var taken = [], left = whole.rest;
+        for (var e = 0; e < exactly.length; e++) {
+          if (whole.drawn.length + taken.length + 1 + cut(left - exactly[e]).length > cap) break;
+          taken.push(exactly[e]);
+          left -= exactly[e];
+        }
+        var most2 = whole.drawn.concat(taken, cut(left));
+        if (most2.length <= cap) {
+          most2.sort(function (a, b) { return b - a; });
+          return { sats: n, extra: 0, denominations: most2 };
+        }
+      }
+    }
+    var setwise = !!sets && !FoxyWallet._cardTapUncapped;
+    // (the whole plan, or the plan as far as the money goes the old way, where pieces are not cut a set at a time)
+    if (whole.length <= cap && (!setwise || whole.rest === 0 || whole.drawn.length >= sizesUpTo(deepest))) {
+      whole.sort(function (a, b) { return b - a; });
+      return { sats: n, extra: 0, denominations: whole };
+    }
+    if (!setwise) {
+      for (var shallower = deepest - 1; shallower >= 0; shallower--) {
+        var fewer = build(shallower);
+        if (fewer.length <= cap) {
+          fewer.sort(function (a, b) { return b - a; });
+          return { sats: n, extra: 0, denominations: fewer };
+        }
+      }
+      return cardLadder(sats, most, biggest, have);
+    }
+    /* Cut a set at a time (pieces this phone writes): the drawer deepens a whole set at a time, every
+     * size from 1 up one deeper, the smallest first, before any is two deeper, so that the next exact payment is there as early
+     * as can be; as far as the money and the tap's pieces go, and what is left in powers of two. The taps after carry on. */
+    var sizes = [];
+    for (var z = 1; z <= CARD_DEEP_TOP && (!top || z <= top); z *= 2) sizes.push(z);
+    var out = [], rest = n, added = {};
+    level: for (var L = 1; L <= deepest; L++) {
+      for (var i = 0; i < sizes.length; i++) {
+        var d = sizes[i];
+        if ((held[d] || 0) + (added[d] || 0) >= L) continue;
+        // the money has run out at this size, or the tap's pieces have: what is left goes in powers of two
+        if (rest < d || out.length + 1 + cut(rest - d).length > cap) break level;
+        out.push(d);
+        added[d] = (added[d] || 0) + 1;
+        rest -= d;
+      }
+    }
+    var pieces = out.concat(cut(rest));
+    if (pieces.length <= cap) {
+      pieces.sort(function (a, b) { return b - a; });
+      return { sats: n, extra: 0, denominations: pieces };
     }
     return cardLadder(sats, most, biggest, have);
   }
 
+  /* What is left of a first load after its drawer (`drawn`), cut so that every price up to the whole is exact: each piece the largest
+   * power of two no more than one past what the pieces so far reach (`cardReach`), and no more than what is left or the mint's largest
+   * (`top`). A plain cut of the rest left gaps: 12,345 cut 2,047 of drawer and then 8,192 and 2,048 and so on reached 4,153 and no
+   * further. Null where the mint's largest stops the reach short of the whole. */
+  function cardExactRest(drawn, rest, top, have) {
+    var reach = cardReach((Array.isArray(have) ? have : []).concat(drawn));
+    var out = [], left = Math.max(0, Math.floor(Number(rest) || 0));
+    for (var guard = 0; left > 0 && guard < 64; guard++) {
+      var limit = Math.min(left, reach + 1);
+      var p = 1;
+      while (p * 2 <= limit && (!top || p * 2 <= top)) p *= 2;
+      if (p > reach + 1) return null;
+      out.push(p);
+      reach += p;
+      left -= p;
+    }
+    return left > 0 ? null : out;
+  }
+
   /* The pieces for `sats` to go onto `card`: a deep drawer where the card has
    * the places for one, and the drawer of a card of sixty-four where not. */
-  function cardCutFor(card, sats, most, biggest, have) {
-    return cardIsDeep(card) ? cardDeepLadder(sats, most, biggest, have, cardDepthFor(card)) : cardLadder(sats, most, biggest, have);
+  /* `depth`, where given: how deep the drawer is cut on this card (a deep card's first load, CARD_FIRST_DEPTH). */
+  function cardCutFor(card, sats, most, biggest, have, depth, exact) {
+    return cardIsDeep(card) ? cardDeepLadder(sats, most, biggest, have, depth || cardDepthFor(card), true, exact) : cardLadder(sats, most, biggest, have);
   }
 
   /* Whether a card is cut deep: it has the places for it (`wide`), and it
@@ -3164,19 +3350,19 @@
    * the places at that size, as much of it as fits is cut under the cap and
    * the rest goes in the plain powers of two, no larger than the mint's own
    * (`biggest`): `above` says how much is in such pieces, for the screen. */
-  function cardCutUnder(card, sats, room, cap, biggest, have) {
+  function cardCutUnder(card, sats, room, cap, biggest, have, depth, exact) {
     var n = Math.max(0, Math.floor(Number(sats) || 0));
     var most = Math.max(1, Math.floor(Number(room) || 1));
     var top = Math.max(0, Math.floor(Number(biggest) || 0));
     var fits = function (cut, places) { return !!cut && !(cut.extra > 0) && cut.denominations.length <= places; };
-    if (!(cap > 0) || (top > 0 && cap >= top)) return Object.assign({ above: 0 }, cardCutFor(card, n, most, top, have));
-    var whole = cardCutFor(card, n, most, cap, have);
+    if (!(cap > 0) || (top > 0 && cap >= top)) return Object.assign({ above: 0 }, cardCutFor(card, n, most, top, have, depth, exact));
+    var whole = cardCutFor(card, n, most, cap, have, depth, exact);
     if (fits(whole, most)) return Object.assign({ above: 0 }, whole);
     for (var under = n - cap; under >= 0; under -= cap) {
       var over = cardLadder(n - under, most, top, null, true);
       var left = most - over.denominations.length;
       if (over.extra > 0 || left < 1) continue;
-      var small = under > 0 ? cardCutFor(card, under, left, cap, have) : { sats: 0, extra: 0, denominations: [] };
+      var small = under > 0 ? cardCutFor(card, under, left, cap, have, depth) : { sats: 0, extra: 0, denominations: [] };
       if (!fits(small, left)) continue;
       return { sats: n, extra: 0, above: n - under,
                denominations: over.denominations.concat(small.denominations).sort(function (a, b) { return b - a; }) };
@@ -3226,7 +3412,11 @@
     var hold = Math.max(4, Number(keep) || 0);
     var room = (Number(info.empty) || 0) + (Number(info.spent) || 0) + ((signed && signed.length) || 0) - hold;
     // a card cut deep: a load (it is a load that keeps places back) may be most of the card; change is kept short
-    var most = !cardIsDeep(card) ? CARD_LOAD_PIECES : (Number(keep) > 0 ? CARD_WIDE_LOAD : CARD_WIDE_CHANGE);
+    /* (and no more than five seconds of the card's time a tap, CARD_TAP_LOAD and CARD_TAP_CHANGE: what is more waits for the next) */
+    // (`_cardTapUncapped`: for the suites whose subject is a drawer written in one tap, as before 2026-11-06)
+    var timed = !FoxyWallet._cardTapUncapped;
+    var most = !cardIsDeep(card) ? CARD_LOAD_PIECES : (Number(keep) > 0 ? (timed ? Math.min(CARD_WIDE_LOAD, CARD_TAP_LOAD) : CARD_WIDE_LOAD)
+                                                                      : (timed ? Math.min(CARD_WIDE_CHANGE, CARD_TAP_CHANGE) : CARD_WIDE_CHANGE));
     return Math.max(1, Math.min(most, room));
   }
 
@@ -3241,7 +3431,16 @@
   var CARD_FULL_WORDS = 'The card has no room for that. Take some money off it first.';
   function cardLoadCut(w, card, want) {
     var biggest = cardMaxPiece(w);
-    var ladder = cardCutUnder(card, want, cardRoomFor(card, null, CARD_CHANGE_ROOM), cardLimitCap(card, biggest), biggest, cardHeldAmounts(card));
+    var have = cardHeldAmounts(card);
+    /* A card's first load (nothing on it in either unit, nothing owed to it): one binary set, CARD_FIRST_DEPTH of each size, and
+     * never deeper than the card is cut (`cardDepthFor`). (`_cardFirstDepth`: for the suites whose subject is a drawer as a first
+     * load cut it before 2026-11-06.) */
+    var empty = !have.length && !(((card.whole || card).pieces) || []).length
+      && !cardStore(CARD_OWED).some(function (r) { return r && r.card === card.key && !r.stuck; });
+    var first = empty && cardIsDeep(card);
+    var firstDepth = Number(FoxyWallet._cardFirstDepth) > 0 ? Math.floor(Number(FoxyWallet._cardFirstDepth)) : cardFirstDepthNow();
+    var ladder = cardCutUnder(card, want, cardRoomFor(card, null, CARD_CHANGE_ROOM), cardLimitCap(card, biggest), biggest, have,
+                              first ? Math.min(firstDepth, cardDepthFor(card)) : 0, first);
     var room = card.info.empty + card.info.spent;
     return { ladder: ladder, room: room, full: ladder.denominations.length + 4 > room };
   }
@@ -3256,14 +3455,16 @@
     var top = cardMaxPiece(w);
     // no card read (a lost answer found later): its drawer is not known, so the plain powers of two
     if (!card) return cardLadder(sats, 64, top, null, true).denominations;
-    return cardChangeFor(sats, cardRoomFor(card, except), top, cardHeldAmounts(card, except), cardIsDeep(card), cardDepthFor(card));
+    return cardChangeFor(sats, cardRoomFor(card, except), top, cardHeldAmounts(card, except), cardIsDeep(card), cardDepthFor(card), true);
   }
 
   /* The same cut from its parts: `sats` of change in no more than `room` pieces
    * for a card that holds `held` (amounts). A payment is chosen by what this
    * would give back (`cardPick`), so the choosing and the making are one rule. */
-  function cardChangeFor(sats, room, top, held, wide, depth) {
-    var cut = wide ? cardDeepLadder(sats, room, top, held, depth) : cardLadder(sats, room, top, held);
+  /* `sets`: change this phone makes and writes (`cardChangeCut`), deepened a whole set at a time where the plan is more than the
+   * tap writes; the card's own change (`cardOwnChangeCut`) is cut as it was. */
+  function cardChangeFor(sats, room, top, held, wide, depth, sets) {
+    var cut = wide ? cardDeepLadder(sats, room, top, held, depth, sets) : cardLadder(sats, room, top, held);
     return (cut.extra > 0 ? cardLadder(sats, 64, top, null, true) : cut).denominations;
   }
 
@@ -3657,9 +3858,51 @@
    *         written first, at this phone's price, with the figures as the card says them, and the load sent again; otherwise said plainly;
    *   6A9D, a new currency on a card with no owner under the PIN alone: the holder's say is the history held for in the tap
    *         (`cardHoldOn`), and the load is sent again. */
-  function cardLoadSend(t, card, p1, body, le, doing, unit) {
+  /* The card as it is after a write that went whole, from what was read of it in this tap and what the write put on it
+   * (`cardWriteOwed`'s `pieces`): no read after the write, which was a fifth to a third of a second of every load. Null, and the
+   * card is read again, wherever what it is now is not known for certain from that: a row not written or refused, the card's own
+   * change (finished from its openings), a rate or a mint written to it in the tap, a piece of a keyset its table does not
+   * name yet, or a count that does not add up. */
+  function cardAfterWrite(card, wrote) {
+    if (!card || !card.info || !card.slots || !wrote || !Array.isArray(wrote.pieces)) return null;
+    if (wrote.blind || (wrote.left && wrote.left.length) || wrote.why || card.repointed || card.rated) return null;
+    if (card.table && wrote.pieces.some(function (p) { return !card.table.of[p.keyset]; })) return null;
+    // a card with no table yet given a piece of the other unit has one now (and another format), which only a read says
+    var ru0 = (card.record && card.record.unit) || 'sat';
+    if (!card.table && wrote.pieces.some(function (p) { return p.unit && p.unit !== ru0; })) return null;
+    var info = Object.assign({}, card.info);
+    var slots = card.slots.filter(function (x) { return !(wrote.cleared && x.state !== 'unspent'); });
+    if (wrote.cleared) { info.empty = (Number(info.empty) || 0) + (Number(info.spent) || 0); info.spent = 0; }
+    var n = wrote.pieces.length;
+    if (!(Number(info.empty) >= n)) return null;
+    // a PIN typed right in this tap gives the card its tries back, which only a read says: a card that had lost some is read again
+    if (card.pinGiven && !(Number(info.tries) >= 3)) return null;
+    // and the owner's grant ends a card of 1.25's no-PIN window (its total and its start), which only a read says
+    if (card.granted && info.noPinOwn) return null;
+    info.empty -= n;
+    info.unspent = (Number(info.unspent) || 0) + n;
+    wrote.pieces.forEach(function (p) {
+      // (where it stands on the card is not known without a read: a till's payment reads the card afresh, and chooses by what it reads)
+      slots.push(card.bare ? { state: 'unspent', i: -1, bare: true, keyset: p.keyset, amount: p.amount, nonce: '', C: '', date: p.date }
+                           : { state: 'unspent', i: -1, keyset: p.keyset, amount: p.amount, nonce: p.nonce, C: p.C, date: p.date });
+    });
+    var out = /** @type {any} */ (Object.assign({}, card, { info: info, slots: slots, written: true }));
+    out.pieces = slots.filter(function (x) { return x.state === 'unspent'; });
+    cardSortUnits(out);
+    out.balance = out.pieces.reduce(function (sum, x) { return sum + x.amount; }, 0);
+    if (out.units) out.balance = out.units[out.record.unit === 'usd' ? 'usd' : 'sat'].balance;
+    return out;
+  }
+
+  // LOAD_PROOF as `cardLoadSend` sends it, and as a batch of them is (`cardWriteOwed`): the same bytes either way
+  function cardLoadApdu(card, p1, body, le, unit) {
     var labelled = cardIs123(card);
-    var apdu = cardCommand(CARD_INS.load, p1, (labelled ? cardUnitByte(unit) : '') + body, le, labelled ? 1 : 0);
+    return cardCommand(CARD_INS.load, p1, (labelled ? cardUnitByte(unit) : '') + body, le, labelled ? 1 : 0);
+  }
+  // how many proved pieces go to the phone in one list (`t.many`): about three-quarters of a second of a card held well
+  var CARD_BATCH = 8;
+  function cardLoadSend(t, card, p1, body, le, doing, unit) {
+    var apdu = cardLoadApdu(card, p1, body, le, unit);
     var tried = { rate: false, hold: false };
     var go = function () {
       return t.want(apdu, doing).then(null, function (e) {
@@ -3686,6 +3929,7 @@
       if (!(rate > 0)) throw cardError('no-rate', 'This card has a limit and no rate, and this phone has no Bitcoin price to give it one. Get online once and try again.');
       ['limit', 'windowStart', 'spentToday', 'tapLimit', 'noPin', 'rate', 'rateSaid', 'book'].forEach(function (k) { card.info[k] = now[k]; });
       console.log('[foxy] card: it has a limit and no rate; its rate is written first, ' + rate + ' sats a dollar');
+      card.rated = true;
       return cardLimit23(t, card, { day: now.limit, tap: now.tapLimit, noPin: now.noPin.limit, rate: rate });
     });
   }
@@ -3695,7 +3939,8 @@
     /* From 1.21 the card's own change goes on with no PIN and anything else wants it: the change first, so that a refusal of a
      * later row for want of the PIN never stops the change from going on. */
     if (cardIs121(card)) mine = mine.filter(function (r) { return !!r.blind; }).concat(mine.filter(function (r) { return !r.blind; }));
-    if (!mine.length) return Promise.resolve({ unit: (card.record && card.record.unit) || 'sat', amount: 0, sats: 0, back: 0, change: 0, refund: 0, done: [], left: [], mended: 0, refused: 0 });
+    if (!mine.length) return Promise.resolve({ unit: (card.record && card.record.unit) || 'sat', amount: 0, sats: 0, back: 0, change: 0, refund: 0, done: [], left: [], mended: 0, refused: 0,
+                                               pieces: [], blind: false, cleared: false });
     /* What is on the card already, by nonce, where the read gave nonces. A
      * short read gives none: then the card itself says which pieces it
      * holds, by refusing them (`on-card`, below). */
@@ -3720,9 +3965,12 @@
     /* For the one line this write leaves in the log (how many pieces went on, how many with the mint's proof, how many of those the card kept,
      * and how long the loading took), and for the real store: the nonces of the pieces that went on and are from the mint itself. A card that
      * says it has no room for proofs (`noRoom`, once, as the answer to a load with one) is sent the rest plain, three to a command. */
-    var sentWith = 0, kept = 0, noRoom = false, loadBegan = 0, fresh = [];
+    var sentWith = 0, kept = 0, noRoom = false, loadBegan = 0, fresh = [], batches = 0;
+    /* What this write put on the card that was not on it, piece by piece; whether any was the card's own change (finished from its
+     * openings); and whether its used places were freed: what the card is after the write, with no read of it (`cardAfterWrite`). */
+    var newly = [], blindWrote = false, cleared = false;
     // its used places freed first, where it has any: a card with none is not asked
-    var walk = !(card.info && card.info.spent > 0) ? Promise.resolve() : t.want(cardCommand(CARD_INS.clear, 0, '', 1), 'to free its used places').then(function () {}, function (e) {
+    var walk = !(card.info && card.info.spent > 0) ? Promise.resolve() : t.want(cardCommand(CARD_INS.clear, 0, '', 1), 'to free its used places').then(function () { cleared = true; }, function (e) {
       // a locked card frees nothing, and may still have room; nor does a 1.21 card with no PIN given in this tap
       if (!(e && (e.card === 'locked' || e.card === 'pin-needed'))) throw e;
     });
@@ -3759,6 +4007,7 @@
             throw cardError('wrong-unit', 'That money is in ' + balanceWord(ru) + ', and this card holds ' + balanceWord(cu) + '.', { cardUnit: cu, unit: ru });
           }
           // the card's own change is finished from its openings; any other row is the pieces its token holds
+          if (row.blind) blindWrote = true;
           got = row.blind ? openingsOf().then(function (list) {
                               return cardIs121(card) ? cardLoadChange(t, card, row, list, function (piece) {
                                 onCard[piece.nonce] = true; written += 1; sentWith += 1; kept += 1; fresh.push(piece.nonce);
@@ -3795,7 +4044,7 @@
             if (!loadBegan) loadBegan = Date.now();
             return cardLoadSend(t, card, 0, some.map(cardPieceBytes).join(''), some.length, some.length > 1 ? 'some pieces' : 'a piece', ru).then(function (d) {
               var stored = some.length === 1 ? 1 : Math.min(some.length, Math.floor(String(d || '').length / 2));
-              for (var k = 0; k < stored; k++) { onCard[some[k].nonce] = true; written += 1; if (fromMint) fresh.push(some[k].nonce); }
+              for (var k = 0; k < stored; k++) { onCard[some[k].nonce] = true; written += 1; newly.push(Object.assign({ unit: ru }, some[k])); if (fromMint) fresh.push(some[k].nonce); }
               return some.slice(stored).reduce(function (chain, piece) {
                 return chain.then(function () { return send([piece]); });
               }, Promise.resolve());
@@ -3820,6 +4069,7 @@
               var h = String(d || '').toLowerCase();
               onCard[piece.nonce] = true;
               written += 1;
+              newly.push(Object.assign({ unit: ru }, piece));
               sentWith += 1;
               if (fromMint) fresh.push(piece.nonce);
               if (h.length === 4 && h.substr(2, 2) === '01') kept += 1;
@@ -3834,8 +4084,46 @@
               return null;
             });
           };
+          /* Pieces with the mint's proof one after another go to the phone as one list (`t.many`), CARD_BATCH at a time, each
+           * command as `sendProved` sends it: the phone sends them back to back and stops at the first the card refuses. What
+           * went on is counted as `sendProved` counts it; the one refused is sent again by itself, to be met as one always is,
+           * and the rest carry on from it. A link that cannot send several is sent them one at a time. */
+          var batched = function (from) {
+            var some = [];
+            while (some.length < CARD_BATCH && from + some.length < todo.length && proved(todo[from + some.length])) some.push(todo[from + some.length]);
+            if (some.length < 2 || !t.canMany()) return null;
+            tell({ step: 'writing', i: written + 1, n: Math.max(toWrite, written + 1) });
+            if (!loadBegan) loadBegan = Date.now();
+            var apdus = some.map(function (piece) { return cardLoadApdu(card, 1, cardPieceBytes(piece) + piece.proof.e + piece.proof.s + piece.proof.r, 2, ru); });
+            return t.many(apdus).then(function (got) {
+              if (!got) return null;
+              var k = 0;
+              for (; k < got.length && got[k].sw === '9000'; k++) {
+                var h = String(got[k].data || '').toLowerCase();
+                onCard[some[k].nonce] = true;
+                written += 1;
+                newly.push(Object.assign({ unit: ru }, some[k]));
+                sentWith += 1;
+                if (fromMint) fresh.push(some[k].nonce);
+                if (h.length === 4 && h.substr(2, 2) === '01') kept += 1;
+                else if (h.length === 4 && h.substr(2, 2) === '00' && !noRoom) {
+                  noRoom = true;
+                  console.log('[foxy] card: this card has no room for the mint\u2019s proofs; its pieces go on without them');
+                }
+              }
+              batches += 1;
+              // the card left part way: what went on stays on, and the write ends as a card gone does
+              if (got.lost && k >= got.length) throw cardError('gone', 'Card taken away too soon.');
+              // all of them on: on from the next
+              if (k >= some.length) return next(from + k);
+              // one refused (or a proof the card has no room for: the rest go plain): that one alone, as ever, then on
+              return (proved(some[k]) ? sendProved(some[k]) : send([some[k]])).then(function () { return next(from + k + 1); });
+            });
+          };
           var next = function (from) {
             if (from >= todo.length) return Promise.resolve();
+            var many = proved(todo[from]) ? batched(from) : null;
+            if (many) return many.then(function (r) { return r === null ? sendProved(todo[from]).then(function () { return next(from + 1); }) : r; });
             if (proved(todo[from])) return sendProved(todo[from]).then(function () { return next(from + 1); });
             var some = [todo[from]];
             while (some.length < size && from + some.length < todo.length && !proved(todo[from + some.length])) some.push(todo[from + some.length]);
@@ -3878,13 +4166,14 @@
       });
     });
     return walk.then(function () {
+      var loadMs = loadBegan ? Date.now() - loadBegan : 0;
       /* What went on, from the mint itself, is real (`cardRealNote`); and the one line of it, so that the time it took can be read off a phone:
        * how many pieces, how many of them were sent with the mint's proof (and how many of those the card kept), and the milliseconds from
        * the first load command to the last answer. No secret, nonce or point in it. */
       if (fresh.length && card.info && card.info.proofs) { try { cardRealNote(card.key, fresh); } catch (xr) {} }
       if (written > 0) {
         console.log('[foxy] card: wrote ' + written + ' piece(s), ' + sentWith + ' with the mint\u2019s proof' + (sentWith ? ' (' + kept + ' kept by the card)' : '')
-          + ', in ' + (Date.now() - (loadBegan || Date.now())) + ' ms');
+          + ', in ' + (Date.now() - (loadBegan || Date.now())) + ' ms' + (batches ? ', ' + batches + ' list(s) to the phone' : ''));
       }
       /* Nothing finished, but some pieces went on before the card left: said on
        * the error (`wrote`), so the screen can ask for the tap that finishes it
@@ -3908,6 +4197,11 @@
       var out = /** @type {any} */ ({ unit: cu2, amount: sats, sats: cu2 === 'sat' ? sats : 0, back: back, change: change, refund: refund, done: done, left: left,
                why: why ? (why.card || 'refused') : '', mended: mended, refused: refusedMend });
       if (also) out.also = also;
+      out.pieces = newly;
+      out.written = written;
+      out.loadMs = loadMs;
+      out.blind = blindWrote;
+      out.cleared = cleared;
       return out;
     });
   }
@@ -4999,7 +5293,8 @@
       });
       var back = changeFor(w, total - fee - want);
       var room = card ? cardRoomFor(card, picked) : CARD_LOAD_PIECES;
-      var after = back > 0 ? rest.concat(cardChangeFor(back, room, top, rest, cardIsDeep(card), cardDepthFor(card))) : rest;
+      // (as `cardChangeCut` will cut it: one rule)
+      var after = back > 0 ? rest.concat(cardChangeFor(back, room, top, rest, cardIsDeep(card), cardDepthFor(card), true)) : rest;
       var sum = 0;
       after.forEach(function (a) { sum += a; });
       return cardReach(after) === sum;

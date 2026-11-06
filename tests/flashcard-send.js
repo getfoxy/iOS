@@ -203,7 +203,8 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     holder.state.sendFrom = '';
     holder.state.balSats = 6000;
     const plain = holder.confirmSpec();
-    ok(/^SEND /.test(plain.cta) && !plain.rows.some((r) => r.label === 'FROM'), 'out of card mode the same invoice says SEND and has no FROM row', plain.cta);
+    // (PAY and what leaves on the keeper's 1l, 2026-11-06)
+    ok(/^PAY /.test(plain.cta) && !plain.rows.some((r) => r.label === 'FROM'), 'out of card mode the same invoice says PAY and has no FROM row', plain.cta);
     // PAYING FROM BITCOIN said the opposite of FROM FLASHCARD: in card mode it is gone, and a payment from this phone keeps it where it was
     ok(labels.indexOf('PAYING FROM') < 0 && labels.join() === 'DELIVERED TO,NETWORK,FROM,ARRIVES,FEE',
        'in card mode the confirmation has FROM / FLASHCARD and no PAYING FROM', labels.join());
@@ -836,9 +837,10 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     upd();
     const sp2 = two.confirmSpec();
     const labels2 = sp2.rows.map((r) => r.label);
-    ok(!two.cardSendNow() && sp2.title === 'CONFIRM PAYMENT' && !!sp2.wallet && sp2.wallet.word === 'USD' && labels2.indexOf('RATE') >= 0
-       && labels2.indexOf('FROM') < 0 && sp2.cta === 'PAY',
-       'leaving card mode restores the two-unit confirmation: CONFIRM PAYMENT, the WALLET button on USD (the answer to CURRENCY), the RATE row, PAY', labels2.join() + ' | ' + sp2.cta);
+    // (CONFIRMATION and PAY with what leaves, as the keeper drew 1l on 2026-11-06; the pill names the dollars)
+    ok(!two.cardSendNow() && sp2.title === 'CONFIRMATION' && !!sp2.wallet && sp2.wallet.word === 'USD' && labels2.indexOf('RATE') >= 0
+       && labels2.indexOf('FROM') < 0 && /^PAY \$ /.test(sp2.cta) && !!sp2.from && /DOLLARS|USD/.test(sp2.from.word),
+       'leaving card mode restores the two-unit confirmation: CONFIRMATION, PAYING FROM on the dollars (the answer to CURRENCY), the RATE row, PAY', labels2.join() + ' | ' + sp2.cta);
     two.setState({ screen: 'home', stack: [] });
     upd();
   }

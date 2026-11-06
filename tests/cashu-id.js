@@ -324,23 +324,24 @@ async function run() {
   await B.W.cashuIdPay(added.cid.id, 50);
   const m2 = JSON.parse(relay[0].body);
   ok(m2.from === bId.id && m2.tag === cashuIdTag(keysB.d, V.id, m2.E), 'M6: once its ID is in use, the payer names itself with the proving tag');
-  // a payment uses up no index of the message chain: nothing a server could be asked about, and the chain only counts messages
-  const bThreads = JSON.parse(B.storage.getItem('foxy.msg.threads') || '{}').threads || {};
-  ok(!('i' in m2) && !(Number((bThreads[V.id] || {}).out) > 0), 'a proved payment to a contact carries no chain index and leaves the message chain where it was',
-    JSON.stringify({ i: m2.i, out: (bThreads[V.id] || {}).out }));
+  // a payment carries no index: nothing a server could be asked about
+  ok(!('i' in m2), 'a proved payment to a contact carries no index', JSON.stringify({ i: m2.i }));
   const tagsBefore = A.said.tag;
   ok((await A.W._cashuIdArrived(relay[0].body)) === 'taken' && (logRows(A).filter((e) => e.dir === 'in')[0] || {}).memo === 'From Bob', 'a payer who is a contact and proves it: From Bob');
   ok(A.said.tag === tagsBefore + 1, 'the tag was worked out by the phone');
-  // INBOX's payments (08f-cashu-msg.js `cmsgPaymentsNow`): the proved payer's row carries its ID key; the one that named nobody does not
+  // with no INBOX to list it under, a row keeps no payer's ID key; the memo is what names them
   const proved = logRows(A).filter((e) => e.dir === 'in')[0] || {};
-  ok(proved.cidPeer === bId.id && !inRow.cidPeer, 'the row of a proved payer carries its ID key (`cidPeer`), the row of one that named nobody none',
+  ok(!('cidPeer' in proved) && !('cidPeer' in inRow) && proved.cid === 'in', 'the row of a proved payer keeps no ID key, as the row of one that named nobody',
     JSON.stringify([proved.cidPeer, inRow.cidPeer]));
-  const aPays = A.W.cashuMsgPayments();
-  ok(aPays.length === 1 && aPays[0].peer === bId.id && aPays[0].dir === 'in' && aPays[0].unit === 'sat' && aPays[0].amount === 50
-     && Math.abs(aPays[0].at - Date.now()) < 120000, 'INBOX’s payments on the receiver: 50 sats from Bob, in milliseconds', JSON.stringify(aPays));
-  const bPays = B.W.cashuMsgPayments();
-  ok(bPays.length === 2 && bPays.every((p) => p.peer === V.id && p.dir === 'out') && bPays[0].amount === 50 && bPays[1].amount === 100 && bPays[0].at >= bPays[1].at,
-    'and on the payer: both payments to that ID, newest first', JSON.stringify(bPays));
+  ok(typeof A.W.cashuMsgPayments === 'undefined' && typeof A.W.cashuMsgSend === 'undefined' && typeof A.W._cashuMsgArrived === 'undefined',
+    'no messages between Cashu IDs in the wallet');
+  {
+    // a message's first, as an older Foxy sends it to the delivery key, is no payment: refused, nothing kept
+    const before = await balance(A);
+    const first = JSON.stringify({ v: 1, type: 'foxy-msg', id: '0'.repeat(32), text: 'hello', at: Date.now(), i: 0, from: bId.id });
+    ok((await A.W._cashuIdArrived(first)) === 'refused' && (await balance(A)) === before
+      && A.storage.getItem('foxy.msg.threads') === null && A.storage.getItem('foxy.msg.seen') === null, 'an older Foxy’s first message to the delivery key: refused, nothing kept');
+  }
   ok(m2.E !== msg1.E, 'a new E for every payment');
 
   /* H1: a spoofed `from` — the attacker's own payment, naming Bob */
@@ -354,8 +355,6 @@ async function run() {
   const spoof = envelope(relay[0].body, { from: bId.id });
   ok((await A.W._cashuIdArrived(spoof)) === 'taken' && (logRows(A).filter((e) => e.dir === 'in')[0] || {}).memo === 'From a Cashu ID',
     'H1: a delivery naming Bob with somebody else’s tag: From a Cashu ID, not From Bob');
-  ok(!(logRows(A).filter((e) => e.dir === 'in')[0] || {}).cidPeer && A.W.cashuMsgPayments().length === 1,
-    'H1: and INBOX does not put it under Bob');
   relay = [];
   await D.W.cashuIdPay(mine.text, 6);
   const noTag = JSON.parse(relay[0].body);

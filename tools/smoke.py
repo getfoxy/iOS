@@ -1867,12 +1867,24 @@ if not declared32 or sorted(re.findall(r'"(\w+)"', declared32.group(1))) != sort
     problems32.append('nativeSeedActions is not the twenty-six seed actions')
 # a card's owner key signs every label but load only against the keeper's yes, asked before the card session and never in it
 sign32 = bridge_handler(both32, 'cardOwnerSign') or ''
+# (the handler asks cardOwnerAllows, whose body is the rule, as the tests drive it)
+if 'cardOwnerAllows(request)' in sign32:
+    allows32 = re.search(r'func cardOwnerAllows\(_ request: CardOwner\.SignRequest\) -> Bool \{(.*?)\n    \}\n', both32, re.S)
+    sign32 += allows32.group(1) if allows32 else ''
 approve32 = bridge_handler(both32, 'cardOwnerApprove') or ''
 if 'confirmSeedChange' in sign32 or 'deviceOwnerApproves' in sign32:
     problems32.append('cardOwnerSign asks during the card session again, where the alert sits under the card sheet')
-for need32 in ('CardOwner.matches(request', 'CardOwner.signsUnasked(request', 'CardMoves.use(for: request', 'error: CardOwner.declined'):
+for need32 in ('CardOwner.matches(request', 'CardOwner.signsUnasked(request', 'CardMoves.matches(request', 'error: CardOwner.declined'):
     if need32 not in sign32:
         problems32.append('cardOwnerSign no longer has ' + need32)
+# every card suite runs under the model of the keeper's yes (tests/harness.js `cardGate`, on in flashcard-kit.js): no suite turns it off
+for name32 in sorted(os.listdir('tests')):
+    if not name32.endswith('.js') or name32 in ('harness.js', 'flashcard-kit.js'):
+        continue
+    with open(os.path.join('tests', name32), encoding='utf-8') as f32:
+        text32 = f32.read()
+    if re.search(r'gate\s*=\s*null|gate:\s*false|FOXY_CARD_GATE', text32):
+        problems32.append('tests/' + name32 + " turns off the model of the keeper's yes")
 if not (0 <= approve32.find('confirmSeedChange(') < approve32.find('SeedVault.deviceOwnerApproves(')):
     problems32.append('cardOwnerApprove no longer asks the alert and then Face ID or the passcode')
 cardsign32 = action_body(acts32, 'cardOwnerSign')

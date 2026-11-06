@@ -744,7 +744,7 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     up(W);
     ok(await until(() => app.state.quotedFee != null), 'the route coming up looks the address up and quotes its invoice by itself, with nothing pressed');
     spec = app.confirmSpec();
-    ok(/^SEND /.test(spec.cta) && !spec.ctaBusy && feeOf(spec) === 'UP TO ₿ 10',
+    ok(/^PAY /.test(spec.cta) && !spec.ctaBusy && feeOf(spec) === 'UP TO ₿ 10',
        'and the button turns to SEND, with the fee in the FEE row', spec.cta + ' / ' + feeOf(spec));
     ok(app.addressAsks() === 2 && app.meltQuotes() === 1, 'one lookup of the address (its two requests) and one quote at the mint', app.addressAsks() + ' / ' + app.meltQuotes());
     ok(!app.log.cards.length, 'the connection that came says nothing: no card');
@@ -772,7 +772,7 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     ok(app.state.quotedAmt === 20 && app.state.quotingFee === false && app._found && app._found.sats === 20 && app.meltQuotes() === 1,
        'and the older answer, when it comes, changes nothing: the quote is the new amount\'s, and the mint was asked once',
        JSON.stringify({ amt: app.state.quotedAmt, found: app._found && app._found.sats, quotes: app.meltQuotes() }));
-    ok(/^SEND /.test(app.confirmSpec().cta) && feeOf(app.confirmSpec()) === 'UP TO ₿ 10', 'SEND, with the fee', app.confirmSpec().cta + ' / ' + feeOf(app.confirmSpec()));
+    ok(/^PAY /.test(app.confirmSpec().cta) && feeOf(app.confirmSpec()) === 'UP TO ₿ 10', 'SEND, with the fee', app.confirmSpec().cta + ' / ' + feeOf(app.confirmSpec()));
   }
 
   // an amount the balance covers and its fee does not: held at NOT ENOUGH, in the wallet's words, and the send says the same
@@ -884,7 +884,7 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     up(app.ctx.W);
     ok(await until(() => app.state.quotedFee != null), 'the route coming up asks the mint for the fee by itself');
     spec = app.confirmSpec();
-    ok(/^SEND /.test(spec.cta) && !spec.ctaBusy && feeOf(spec) === 'UP TO ₿ 10', 'and then it reads SEND, with the fee', spec.cta + ' / ' + feeOf(spec));
+    ok(/^PAY /.test(spec.cta) && !spec.ctaBusy && feeOf(spec) === 'UP TO ₿ 10', 'and then it reads SEND, with the fee', spec.cta + ' / ' + feeOf(spec));
     ok(app.meltQuotes() === 1, 'asked once', String(app.meltQuotes()));
   }
   {
@@ -904,7 +904,7 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     await wait(60);
     ok(app.confirmSpec().cta === 'CHECKING…', 'and its confirmation is held while the connection is on its way');
     up(app.ctx.W);
-    ok(await until(() => /^SEND /.test(app.confirmSpec().cta)), 'and SEND once it is up', app.confirmSpec().cta);
+    ok(await until(() => /^PAY /.test(app.confirmSpec().cta)), 'and SEND once it is up', app.confirmSpec().cta);
     await wait(60);
     ok(feeOf(app.confirmSpec()) === 'UNKNOWN' && app.meltQuotes() === 0,
        'with the fee UNKNOWN: a mint cannot quote an invoice that names no amount, and is not asked to', feeOf(app.confirmSpec()) + ' / ' + app.meltQuotes() + ' quote(s)');
@@ -924,7 +924,7 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     ok(app.state.screen === 'sendConfirm', 'with the confirmation under it, as after a send that is refused', app.state.screen);
     ok(JSON.stringify(app.state.stack) === '["home"]', 'on the stack as it was: the card pushed nothing, so there is nothing of it to drop', JSON.stringify(app.state.stack));
     const spec = app.confirmSpec();
-    ok(/^SEND /.test(spec.cta) && !spec.ctaBusy && feeOf(spec) === 'UNKNOWN', 'its button no longer held: SEND, the fee UNKNOWN', spec.cta + ' / ' + feeOf(spec));
+    ok(/^PAY /.test(spec.cta) && !spec.ctaBusy && feeOf(spec) === 'UNKNOWN', 'its button no longer held: SEND, the fee UNKNOWN', spec.cta + ' / ' + feeOf(spec));
     gaveUp(app.ctx.W); app.ctx.W.setOffline(true); await wait(60);
     ok(app.log.cards.length === 1, 'and said once, not again with every word from Tor');
     ok(app.meltQuotes() === 0 && app.addressAsks() === 0, 'nothing was asked of anyone');
@@ -940,7 +940,7 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     const card = app.log.cards[0] || {};
     ok(card.kind === 'offlineAddress' && card.title === 'YOU’RE OFFLINE' && /Lightning address can only be paid with a connection/.test(card.reason),
        'in a card that fits it', card.kind + ' / ' + card.reason);
-    ok(app.state.screen === 'sendConfirm' && /^SEND /.test(app.confirmSpec().cta), 'confirmation under it, its button SEND to be told the same by the payment', app.state.screen + ' / ' + app.confirmSpec().cta);
+    ok(app.state.screen === 'sendConfirm' && /^PAY /.test(app.confirmSpec().cta), 'confirmation under it, its button SEND to be told the same by the payment', app.state.screen + ' / ' + app.confirmSpec().cta);
     ok(JSON.stringify(app.state.stack) === '["home","amount"]', 'on the stack as it was, so one press of the back arrow leaves it', JSON.stringify(app.state.stack));
   }
 
@@ -956,7 +956,7 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     app.next();
     await wait(60);
     const spec = app.confirmSpec();
-    ok(/^SEND /.test(spec.cta) && !spec.ctaBusy && feeOf(spec) === 'UNKNOWN', 'an address goes to a confirmation that is not held: nothing is coming to wait for', spec.cta + ' / ' + feeOf(spec));
+    ok(/^PAY /.test(spec.cta) && !spec.ctaBusy && feeOf(spec) === 'UNKNOWN', 'an address goes to a confirmation that is not held: nothing is coming to wait for', spec.cta + ' / ' + feeOf(spec));
     ok(app.ctx.requests.filter((r) => /addr\.test/.test(r.url)).length === 0 && app.log.cards.length === 1, 'nothing asked, and no card by itself');
     app.ctx.window.console.error = () => {};
     spec.go();
@@ -1102,7 +1102,7 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     const onScreen = () => {
       const spans = Array.from(w.document.querySelectorAll('#dc-root .sc-interp')).map((e) => e.textContent);
       const at = spans.indexOf('FEE');
-      return { cta: spans.filter((t) => /^(CHECKING…|SEND |NOT ENOUGH)/.test(t)).pop() || '', fee: at >= 0 ? spans[at + 1] : '' };
+      return { cta: spans.filter((t) => /^(CHECKING…|PAY |NOT ENOUGH)/.test(t)).pop() || '', fee: at >= 0 ? spans[at + 1] : '' };
     };
     const cards = () => Array.from(w.document.body.children).filter((e) => e.localName === 'div' && e.id !== 'dc-root' && /YOU.RE OFFLINE/.test(e.textContent)).length;
 
@@ -1119,17 +1119,18 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     ok(asked.quote === 1 && onScreen().cta === 'CHECKING…', 'its invoice is quoted as soon as it is in, the button still held', JSON.stringify(asked));
     answerQuote(); await wait(250);
     seen = onScreen();
-    ok(/^SEND /.test(seen.cta) && /^UP TO/.test(seen.fee), 'and the button turns to SEND, with the fee in the FEE row', JSON.stringify(seen));
+    // (PAY and what leaves, and the fee as a figure in the stack: the keeper's 1l, 2026-11-06)
+    ok(/^PAY /.test(seen.cta) && /^(\$|< \$|₿)/.test(seen.fee), 'and the button turns to PAY, with the fee under FEE', JSON.stringify(seen));
     ok(!errors.length, 'with nothing thrown by the page', errors.join(' | '));
 
     // the connection going again with the quote in hand: held, and not asked for again when it returns
     route.coming = true; route.offline = true;
     await moved();
     seen = onScreen();
-    ok(seen.cta === 'CHECKING…' && /^UP TO/.test(seen.fee), 'the connection going again holds the button, with the quote still in its row', JSON.stringify(seen));
+    ok(seen.cta === 'CHECKING…' && /^(\$|< \$|₿)/.test(seen.fee), 'the connection going again holds the button, with the quote still in its row', JSON.stringify(seen));
     route.coming = false; route.offline = false;
     await moved();
-    ok(/^SEND /.test(onScreen().cta) && asked.lookup === 1 && asked.quote === 1, 'and it is SEND when it returns, with nothing asked twice', JSON.stringify(asked));
+    ok(/^PAY /.test(onScreen().cta) && asked.lookup === 1 && asked.quote === 1, 'and it is SEND when it returns, with nothing asked twice', JSON.stringify(asked));
 
     // an invoice, held, and Tor gives up
     asked.lookup = 0; asked.quote = 0;
@@ -1143,7 +1144,7 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
     route.coming = false; route.offline = true; route.gone = true;
     await moved();
     seen = onScreen();
-    ok(cards() === 1 && /^SEND /.test(seen.cta) && seen.fee === 'UNKNOWN' && logic.state.screen === 'sendConfirm',
+    ok(cards() === 1 && /^PAY /.test(seen.cta) && seen.fee === 'UNKNOWN' && logic.state.screen === 'sendConfirm',
        'Tor giving up puts the card for no connection over it and lets the button go', JSON.stringify(seen) + ' cards ' + cards());
     ok(!errors.length, 'with nothing thrown by the page', errors.join(' | '));
   }

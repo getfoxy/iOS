@@ -102,12 +102,14 @@
     }
   }());
 
-  /* Two stores an earlier test build kept for features Foxy no longer has, read by nothing now: removed at every boot
-   * (two lookups, nothing once they are gone). Not a schema step, so a phone can still go back to a build that knows
-   * fewer steps. The lock-key rows those codes were filed under stay: their keys are the seed's. */
+  /* Stores an earlier build kept for features Foxy no longer has, read by nothing now: removed at every boot (a lookup
+   * each, nothing once they are gone). Not a schema step, so a phone can still go back to a build that knows fewer steps.
+   * The push wake's and the private LNURL's (the lock-key rows those codes were filed under stay: their keys are the
+   * seed's), and the messages between Cashu IDs: the conversations, what waited to go, and the first messages read. */
+  var RETIRED_STORES = ['foxy.wake', 'foxy.lnurl.codes', 'foxy.msg.threads', 'foxy.msg.outbox', 'foxy.msg.seen'];
   (function dropRetiredStores() {
     if (storageNewer) return;
-    try { localStorage.removeItem('foxy.wake'); localStorage.removeItem('foxy.lnurl.codes'); } catch (e) {}
+    RETIRED_STORES.forEach(function (k) { try { localStorage.removeItem(k); } catch (e) {} });
   }());
 
   var K = {

@@ -59,6 +59,8 @@ const SEND_SIGS = {
   '15-paid-wake-keyboard.js': ['syncPreview() {', 'pasteUncovered(el, box) {'],
   '21-render-values.js': ['renderContext() {'],
   '24-render-receive-and-send.js': ['renderSend(c) {'],
+  // the new confirmations' figures and PAYING FROM (the keeper's 1l, 2026-11-06)
+  '25-render-confirm-and-blocked.js': ['cfPayLook(spec, o) {'],
 };
 const SEND_PARTS = Object.keys(SEND_SIGS).map((f) => SEND_SIGS[f].map((sig) => liftFrom(read([f]), sig)).join('\n')).join('\n')
   // the phone's own on-chain screens, which a card in card mode pays a bitcoin address through
@@ -82,6 +84,7 @@ function appOn(ctx, start, o) {
   const Parts = new Function('window', 'document', 'localStorage', 'React', 'navigator', 'CTA_INK', 'return class {\n' + body + '\n};')(
     ctx.window, ctx.window.document, ctx.window.localStorage, { createRef: () => ({ current: null }) }, ctx.window.navigator, () => '#fff');
   const a = new Parts();
+  a._fcDoc = ctx.window.document;
   a.state = Object.assign({ screen: 'home', stack: [], fc: null, invoice: '', invoiceIsAddress: false }, start || {});
   a.setState = (x) => { Object.assign(a.state, typeof x === 'function' ? x(a.state) : x); };
   a.forceUpdate = () => {};
@@ -101,7 +104,7 @@ function appOn(ctx, start, o) {
   a.offlineNo = (what) => a.toasts.push(what + ' needs a connection.');
   // as the app's own (01-ui-basics.js): the one way into the mint list, clearing what it was asking before
   a.goSwitchMint = (extra) => a.setState((p) => Object.assign({
-    screen: 'switchMint', stack: p.stack.concat([p.screen]), trStep: '', trFrom: '', trTo: '', fcPick: false,
+    screen: 'switchMint', stack: p.stack.concat([p.screen]), trStep: '', trFrom: '', trTo: '', fcPick: false, mintSel: '',
   }, extra || {}));
   // a mint by its address, so two can be told apart
   a.mintNameOf = (url) => String(url || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
@@ -229,10 +232,15 @@ function pad(a) {
     has(label) { return !!find(label); },
   };
 }
-/* The card that is up: its title, its words, and its buttons by their label. */
+/* The card that is up: its title, its words, and its buttons by their label. TAP AGAIN (1e, 1f) is a screen of the card tap
+ * family and not a card (26f-flashcard.js, `fcStillWaiting`, `fcMissedPay`), and is read the same way: its title, its paragraph,
+ * and its pills. */
 function card(a) {
   const root = a._blockedEl;
-  if (!root || !root.parentNode) return null;
+  if (!root || !root.parentNode) {
+    const up = family(a);
+    return up && up.kind === 'cardAgain' ? up : null;
+  }
   // past the glow and the mark in the circle (! or \u00d7; the asking card's is a drawing)
   const texts = leaves(root).map((d) => d.textContent).filter((t) => t && t !== '!' && t !== '\u00d7');
   return {
@@ -254,21 +262,46 @@ function explainer(a) {
     has(label) { return texts.indexOf(label) >= 0; },
   };
 }
-/* The screen behind the card sheet (build/app/26h-tap-screen.js), as a person sees it: which of its states, on which ground,
- * what it says, whether the card moves, whether CANCEL shows, and the design the card is drawn in. Null when it is not up. */
+/* A screen of the card tap family (build/app/26h-tap-screen.js, the keeper's 1a to 1g), as a person sees it: which stage it is
+ * (`kind`), which screen of the family (`scheme`, 1a to 1g), its title, amount, paragraph and chip, whether its dots and the arrow
+ * over the top are up, and its pills by their label. Null when none is up. */
+const family = (a) => {
+  // (an app of `appOn`, which keeps its page's document, or the page itself)
+  const doc = (a && a._fcDoc) || (a && a.window && a.window.document);
+  const up = doc ? doc.getElementById('foxy-stage') : null;
+  if (!up || up.getAttribute('data-tp') !== '1') return null;
+  const q = (sel) => up.querySelector(sel);
+  const vis = (el) => !!el && el.style.display !== 'none';
+  const pills = Array.from(up.querySelectorAll('[data-tp-foot] > div')).filter((b) => vis(b) && b.style.visibility !== 'hidden');
+  const chip = q('[data-tp-chip]');
+  const words = q('[data-tp-words]');
+  const title = q('h1').textContent;
+  const reason = vis(words) ? words.textContent : '';
+  const buttons = pills.map((b) => b.textContent);
+  return {
+    kind: up.getAttribute('data-stage'), scheme: up.getAttribute('data-scheme'), title, reason,
+    amount: vis(q('[data-tap-amount]')) ? q('[data-tap-amount]').textContent : '',
+    chip: vis(chip) ? chip.textContent : '', chipIcon: vis(chip) ? (chip.querySelector('svg').getAttribute('data-icon') || '') : '',
+    dots: vis(q('[data-tp-dots]')), hint: vis(q('[data-tp-hint]')), buttons,
+    all: [title, reason].concat(buttons).join(' | '),
+    press(label) { const b = pills.filter((x) => x.textContent === label)[0]; if (b) click(b); },
+    has(label) { return buttons.indexOf(label) >= 0; },
+  };
+};
+/* The screen behind the card sheet (build/app/26h-tap-screen.js), as a person sees it: which of its states (`look`), which screen
+ * of the family (`scheme`), what it says, whether the arrow over the top is up (`loop`), and whether CANCEL shows. Null when it is
+ * not up. */
 const behind = (ctx) => {
   const up = ctx.window.document.getElementById('foxy-stage');
   if (!up || up.getAttribute('data-stage') !== 'card' || !up.getAttribute('data-look')) return null;
+  const f = family(ctx);
   const q = (sel) => up.querySelector(sel);
   const btn = q('[data-stage-button]');
-  const fur = q('[data-tap-fur]');
-  return {
+  return Object.assign({}, f, {
     look: up.getAttribute('data-look'), scheme: up.getAttribute('data-scheme'),
     title: q('h1').textContent, amount: q('[data-tap-amount]').textContent,
-    loop: up.getAttribute('data-loop') === '1', cancel: !!btn && btn.style.visibility === 'visible',
-    design: q('[data-card-design]').getAttribute('data-card-design'), fur: fur ? fur.style.opacity : '',
-    cardMoves: q('[data-tap-card]').style.animation !== 'none',
-  };
+    loop: up.getAttribute('data-loop') === '1', cancel: !!btn && btn.style.visibility === 'visible' && btn.textContent === 'CANCEL',
+  });
 };
 /* Every state the screen goes through on `app` (a state is recorded when it differs from the one before), until `.stop()`. */
 const watchBehind = (app, ctx) => {
@@ -278,11 +311,14 @@ const watchBehind = (app, ctx) => {
     draw();
     const b = behind(ctx);
     // `at`: how many lines the sheet had shown when this state came up
-    if (b && (!seen.length || seen[seen.length - 1].look !== b.look)) seen.push(Object.assign({ at: ctx.sheet.length }, b));
+    // (a new look, or the same look on another screen of the family: `again` is CARD LOST, 1g, or the card asked for again, 1a)
+    const last = seen[seen.length - 1];
+    if (b && (!last || last.look !== b.look || last.scheme !== b.scheme)) seen.push(Object.assign({ at: ctx.sheet.length }, b));
   };
   seen.stop = () => { app.fcTapDraw = draw; };
   seen.path = () => seen.map((x) => x.look).join(' > ');
   seen.titles = () => seen.map((x) => x.title).join(' > ');
+  seen.schemes = () => seen.map((x) => x.scheme).join(' > ');
   return seen;
 };
 const stage = (ctx) => { const el = ctx.window.document.getElementById('foxy-stage'); return el ? el.getAttribute('data-stage') : ''; };
@@ -363,4 +399,4 @@ function named(a) {
 
 until.failed = 0;
 
-module.exports = { appOn, tick, until, pad, card, explainer, stage, behind, watchBehind, vals, settle, keyIn, welcome, limits, speed, named, restore };
+module.exports = { appOn, tick, until, pad, card, family, explainer, stage, behind, watchBehind, vals, settle, keyIn, welcome, limits, speed, named, restore };

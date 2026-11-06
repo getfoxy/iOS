@@ -545,7 +545,7 @@ densityDrives();
   check('the button and the FEE row read one state',
     /const held = asks && \(this\.connecting\(\) \|\| !!s\.quotingFee \|\| this\.sendToAsk\(\)\);/.test(hold)
     && /: held \? 'CHECKING…' : 'UNKNOWN'/.test(hold)
-    && /cta: held \? 'CHECKING…' : 'SEND '/.test(hold) && /ctaBusy: held,/.test(hold) && /go: held \? \(\) => \{\} : \(\) => this\.startSend\(\)/.test(hold),
+    && /cta: held \? 'CHECKING…' : \(asks && !out\) \? 'PAY '/.test(hold) && /ctaBusy: held,/.test(hold) && /go: held \? \(\) => \{\} : \(\) => this\.startSend\(\)/.test(hold),
     'one `held`');
   check('and the request\'s the same, where its route is part of how it is paid',
     /const held = !!\(sats > 0 && this\.connecting\(\) && this\.requestNeedsRoute\(req\)\);/.test(app)

@@ -454,9 +454,9 @@ const STATES = [
     const click = (el) => el.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
     const CARD_ICON = 'M4.6 5.5h14.8a2.1 2.1 0 0 1 2.1 2.1v8.8a2.1 2.1 0 0 1-2.1 2.1H4.6a2.1 2.1 0 0 1-2.1-2.1V7.6a2.1 2.1 0 0 1 2.1-2.1ZM2.5 10h19M6 15h4';
     const CLOCK = 'M12 7v5l3.5 2M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.5 8.5 0 0 0 12 3.5Z';
-    const chatBtn = q('[data-chat-button]');
-    ok(!!chatBtn && chatBtn.style.left === '22px' && chatBtn.style.top === '56px' && !q('[aria-label="Card"]') && !q('[aria-label="History"]'),
-      'home: the round button at the top left is CHAT (26p-cashu-msg.js), and there is no CARD or HISTORY button there', chatBtn ? chatBtn.innerHTML : 'none');
+    const idBtn = q('[data-cashu-id-button]');
+    ok(!!idBtn && idBtn.style.left === '22px' && idBtn.style.top === '56px' && !q('[data-chat-button]') && !q('[aria-label="Card"]') && !q('[aria-label="History"]'),
+      'home: the round button at the top left is MY CASHU ID (26o-cashu-id.js), and there is no CHAT, CARD or HISTORY button there', idBtn ? idBtn.innerHTML : 'none');
     const went = [];
     const realGo = A.goFlashcard;
     A.goFlashcard = function () { went.push([...arguments]); };

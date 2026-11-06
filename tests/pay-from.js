@@ -12,7 +12,7 @@
  *
  *   1  a Lightning invoice, two mints, one with two balances: every pile that
  *      covers it is a row, each CALCULATING and not choosable until its mint has
- *      answered, then cheapest first and chosen, with CHEAPEST on it
+ *      answered, then cheapest first and chosen, with the tick on it
  *   2  one that turns out short is greyed NOT ENOUGH, and cannot be chosen
  *   3  one source: no screen, and the confirmation is that mint's; every pile at
  *      this mint: nothing here at all (CURRENCY and WALLET as before)
@@ -59,7 +59,7 @@ const LIFTED = [
   'pfChosen() {', 'pfMany(flow) {', 'pfAway(flow) {', 'pfOpen(flow, list, o) {', 'pfAsk(e, run) {', 'pfIn(run, key, r) {',
   'pfSettled(run) {', 'pfTap(key) {', 'pfNext() {', 'pfBack() {', 'pfClose() {', 'pfCostText(e) {', 'pfRows(LOOK, SHADOW) {',
   'pfFoot() {', 'pfNextOn() {', 'pfTidy() {', 'syncPayFrom() {', 'pfQuoteHere(pr, unit) {', 'pfLnCost(e, q) {', 'pfPre(pr) {',
-  'pfSendGo(e, shown) {', 'pfAwayNow() {', 'pfRequote() {', 'payAwaySpec() {', 'reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'pfRequest(req) {', 'pfReqSource(req) {',
+  'pfSendGo(e, shown) {', 'pfAwayNow() {', 'pfRequote() {', 'payAwaySpec() {', 'cfPayLook(spec, o) {', 'pfReopen() {', 'reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'pfRequest(req) {', 'pfReqSource(req) {',
   'pfReqCrossing(want) {', 'pfTapCross(offer, want, theirs, mine, there) {', 'pfOnchain() {', 'pfOnchainGo(e, shown) {', 'pfOcHome() {',
   'crossComeHome() {', 'startSendNow(to, o) {', 'toConfirm() {', 'requestSpec() {', 'requestHere(req) {', 'requestNeedsRoute(req) {',
   'makeTokenForRequest(go) {', 'ocCancel() {', 'cfRow(label, value, opt) {', 'unitWord(unit) {', 'unitFigure(amount, unit) {',
@@ -217,9 +217,10 @@ async function run() {
     const keys = a.pfList().map((e) => e.key);
     ok('cheapest first: the other mint’s 2 sats, this one’s 10, then 6 cents (75 sats)',
       keys.join() === [AWAY + '|sat', HOME + '|sat', HOME + '|usd'].map((k) => k).join(), JSON.stringify(keys));
-    ok('the cheapest is chosen and ringed, with CHEAPEST on it', a.state.payFromPick === a.pfKey(AWAY, 'sat')
-      && a.pfRows(LOOK, 'sh')[0].bestShown && /solid/.test(a.pfRows(LOOK, 'sh')[0].outline) && a.pfNextOn());
-    ok('each says what it costs in its own unit', a.pfRows(LOOK, 'sh').map((r) => r.cost).join('|') === 'Costs ₿ 2,002|Costs ₿ 2,010|Costs $ 1.66',
+    // (the keeper's 1p, 2026-11-06: a tick and the accent's edge on the one chosen, no CHEAPEST, the fee line on each)
+    ok('the cheapest is chosen, first, with the tick and the accent’s edge', a.state.payFromPick === a.pfKey(AWAY, 'sat')
+      && a.pfRows(LOOK, 'sh')[0].pickOn && /var\(--acc\)/.test(a.pfRows(LOOK, 'sh')[0].edge) && a.pfRows(LOOK, 'sh').filter((r) => r.pickOn).length === 1 && a.pfNextOn());
+    ok('each says its fee in its own unit, sats in dollars', a.pfRows(LOOK, 'sh').map((r) => r.cost).join('|') === 'FEE < $ 0.01|FEE $ 0.01|FEE $ 0.06',
       a.pfRows(LOOK, 'sh').map((r) => r.cost).join('|'));
     ok('and still on PAY FROM: two or more can pay', a.state.screen === 'payFrom');
     a.pfNext();
@@ -227,7 +228,8 @@ async function run() {
     const spec = a.payAwaySpec();
     const paying = (spec.rows || []).filter((x) => x.label === 'PAYING FROM')[0];
     ok('its confirmation names MINIBITS · BITCOIN, its total, and PAY FROM to change it',
-      paying && paying.value === 'MINIBITS · BITCOIN' && spec.cta === 'PAY' && spec.wallet && spec.wallet.label === 'PAY FROM', JSON.stringify({ p: paying && paying.value, cta: spec.cta, w: spec.wallet }));
+      paying && paying.value === 'MINIBITS · BITCOIN' && spec.cta === 'PAY ' + spec.amount && spec.from && spec.from.word === 'MINIBITS · BITCOIN' && typeof spec.from.go === 'function',
+      JSON.stringify({ p: paying && paying.value, cta: spec.cta, f: spec.from }));
     ok('this mint’s own quotes are kept for its confirmation, not the other mint’s', !!a.pfPre(INV).sat && !!a.pfPre(INV).usd);
   }
   console.log('2. one that turns out short after its quote');
@@ -239,7 +241,7 @@ async function run() {
     await wait(5);
     const short = row(a, AWAY);
     const r = a.pfRows(LOOK, 'sh').filter((x) => x.key === a.pfKey(AWAY, 'sat'))[0];
-    ok('greyed, NOT ENOUGH, last', short.ok === false && r.tagShown && r.tag === 'NOT ENOUGH' && r.bg === 'grey' && a.pfList().slice(-1)[0].key === short.key,
+    ok('greyed, NOT ENOUGH, last', short.ok === false && r.tagShown && r.tag === 'NOT ENOUGH' && !r.feeShown && !r.pickOn && r.opacity === '.6' && a.pfList().slice(-1)[0].key === short.key,
       JSON.stringify(short));
     a.pfTap(short.key);
     ok('and it cannot be chosen', a.state.payFromPick !== short.key && a.log.toasts.length === 1, a.log.toasts.join('|'));
@@ -258,7 +260,7 @@ async function run() {
     a.waiting[AWAY + '|sat'].res({ amount: 2000, feeReserve: 2 });
     await wait(5);
     spec = a.payAwaySpec();
-    ok('then PAY, with no PAY FROM button where there is no choice', spec.cta === 'PAY' && !spec.wallet, spec.cta);
+    ok('then PAY, with no PAY FROM button where there is no choice', spec.cta === 'PAY ' + spec.amount && !spec.wallet && spec.from && !spec.from.go, spec.cta);
     const b = phone({ two: true, piles: [{ mint: HOME, unit: 'sat', amount: 5000 }, { mint: HOME, unit: 'usd', amount: 1000 }, { mint: AWAY, unit: 'sat', amount: 100 }] });
     onInvoice(b);
     ok('every pile that could pay at this mint: nothing asked here, nothing changed', b.syncPayFrom() === false && !b.state.payFromFlow && !b.log.quotes.length);
@@ -296,8 +298,8 @@ async function run() {
     ok('the crossing is quoted from the other mint, to theirs, to land there',
       a.log.transfers.length === 1 && a.log.transfers[0].from === AWAY && a.log.transfers[0].to === HOME && a.log.transfers[0].land, JSON.stringify(a.log.transfers));
     ok('their own mint first, chosen, with no fee', a.pfList()[0].key === a.pfKey(HOME, 'sat') && a.state.payFromPick === a.pfKey(HOME, 'sat')
-      && a.pfCostText(a.pfList()[0]) === 'Costs ₿ 1,000 · no fee', a.pfCostText(a.pfList()[0]));
-    ok('the other at the amount and the crossing’s fee', a.pfCostText(row(a, AWAY)) === 'Costs ₿ 1,003', a.pfCostText(row(a, AWAY)));
+      && a.pfCostText(a.pfList()[0]) === 'FEE $ 0.00', a.pfCostText(a.pfList()[0]));
+    ok('the other at the crossing’s fee', a.pfCostText(row(a, AWAY)) === 'FEE ' + a.money(3).main && row(a, AWAY).cost === 1003, a.pfCostText(row(a, AWAY)));
     a.pfTap(a.pfKey(AWAY, 'sat'));
     a.pfNext();
     ok('chosen: back on the offer, from the other mint', a.state.screen === 'reqOffer' && a.state.payMint === AWAY);
@@ -337,7 +339,7 @@ async function run() {
     a.setState({ screen: 'ocConfirm', stack: ['home', 'amount'], ocSats: 2000, ocTo: 'bc1qexample' });
     ok('PAY FROM is put up before the fee is asked', a.pfOnchain() === true && a.state.screen === 'payFrom' && a.log.ocQuotes === 0);
     ok('every mint’s sats, this one first and chosen, each with its fee on the next screen',
-      a.pfList()[0].key === a.pfKey(HOME, 'sat') && a.state.payFromPick === a.pfKey(HOME, 'sat') && a.pfList().every((e) => e.ok === true && a.pfCostText(e) === 'Fee on the next screen'),
+      a.pfList()[0].key === a.pfKey(HOME, 'sat') && a.state.payFromPick === a.pfKey(HOME, 'sat') && a.pfList().every((e) => e.ok === true && a.pfCostText(e) === 'FEE ON THE NEXT SCREEN'),
       JSON.stringify(a.pfList().map((e) => a.pfCostText(e))));
     a.pfTap(a.pfKey(AWAY, 'sat'));
     a.pfNext();
@@ -362,9 +364,10 @@ async function run() {
     ok('PAY FROM where the tap is decided', a.pfTapCross(offer, 1000, THEIRS, HOME, 1500) === true && a.state.screen === 'payFrom');
     await wait(5);
     ok('the crossing asked while they decided is reused, not asked again', a.log.transfers.length === 0, JSON.stringify(a.log.transfers));
-    ok('their mint first, chosen, with no fee; this phone’s own at the crossing’s fee',
-      a.pfList()[0].key === a.pfKey(THEIRS, 'sat') && a.state.payFromPick === a.pfKey(THEIRS, 'sat') && a.pfCostText(a.pfList()[0]) === 'Costs ₿ 1,000 · no fee'
-      && a.pfCostText(row(a, HOME)) === 'Costs ₿ 1,004', a.pfList().map((e) => a.pfCostText(e)).join('|'));
+    // (paid there on a visit, their mint's fee for its pieces is told only there: not said to be nothing)
+    ok('their mint first, chosen, its fee not known yet; this phone’s own at the crossing’s fee',
+      a.pfList()[0].key === a.pfKey(THEIRS, 'sat') && a.state.payFromPick === a.pfKey(THEIRS, 'sat') && a.pfCostText(a.pfList()[0]) === 'FEE NOT KNOWN YET'
+      && a.pfCostText(row(a, HOME)) === 'FEE ' + a.money(4).main && row(a, HOME).cost === 1004, a.pfList().map((e) => a.pfCostText(e)).join('|'));
     a.pfNext();
     ok('their mint chosen: paid from what is there, as before', a.log.tapThere === 1 && !a.log.tapCross.length && a.state.screen === 'home');
     const b = phone({ piles: [{ mint: HOME, unit: 'sat', amount: 5000 }, { mint: THEIRS, unit: 'sat', amount: 1500 }, { mint: THIRD, unit: 'sat', amount: 4000 }],
@@ -402,7 +405,7 @@ async function run() {
     ok('testnut is not among the balances offered', a.pfList().length === 2 && !a.pfList().some((e) => /testnut/.test(e.mint)), JSON.stringify(a.pfList().map((e) => e.key)));
     const rows = a.pfRows(LOOK, 'sh');
     const picked = rows.filter((r) => r.key === a.state.payFromPick)[0];
-    ok('the chosen tile wears the orange look, every other grey', picked && picked.bg !== 'grey' && rows.filter((r) => r.key !== picked.key).every((r) => r.bg === 'grey'),
+    ok('the chosen tile on the accent’s wash, every other on the surface', picked && picked.pickOn && picked.bg === 'rgba(var(--acc-rgb),.1)' && rows.filter((r) => r.key !== picked.key).every((r) => r.bg === 'var(--surface)' && !r.pickOn),
       JSON.stringify(rows.map((r) => [r.key, r.bg])));
     ok('each keeps its own sign', rows.every((r) => r.sym === '₿'));
   }
@@ -452,8 +455,8 @@ async function run() {
     t(a.log.swapQuotes.length === 1 && q0.from === 'usd' && q0.to === 'sat' && q0.amount === 151,
       'the swap is quoted as the SWAP screen quotes one: dollars into sats at this mint, sized for the 1,810 missing and a little over', JSON.stringify(a.log.swapQuotes));
     const e = row(a, HOME, 'usd');
-    t(!!e && e.swap === true && e.ok === true && a.pfCostText(e) === 'From your dollars at FORGE, fee about $ 0.02',
-      'its row: "From your dollars at FORGE, fee about $ 0.02", the swap’s cost as SWAP counts it', e && a.pfCostText(e));
+    t(!!e && e.swap === true && e.ok === true && a.pfCostText(e) === 'FEE $ 0.02' && a.pfSwapText(e, a.pfFull(e.key)) === 'From your dollars at FORGE, fee about $ 0.02',
+      'its tile: "FEE $ 0.02", the swap’s cost as SWAP counts it ("From your dollars at FORGE, fee about $ 0.02")', e && a.pfCostText(e));
     t(a.state.screen === 'reqOffer' && a.state.payMint === HOME && a.state.payUnit === 'usd',
       'the one balance that can pay is chosen with nothing asked, and the offer is back', a.state.screen + ' ' + a.state.payUnit);
     const spec = a.requestSpec();
@@ -487,8 +490,9 @@ async function run() {
     t(c.pfRequest(ureq) === true, 'a request in dollars short in dollars: PAY FROM, from the sats');
     await wait(5);
     const ce = row(c, HOME, 'sat');
-    t(c.log.swapQuotes.length === 1 && c.log.swapQuotes[0].from === 'sat' && ce && c.pfCostText(ce) === 'From your sats at FORGE, fee about ₿ 52',
-      'its row: "From your sats at FORGE, fee about ₿ 52"', ce && c.pfCostText(ce));
+    t(c.log.swapQuotes.length === 1 && c.log.swapQuotes[0].from === 'sat' && ce && c.pfCostText(ce) === 'FEE ' + c.money(52).main
+      && c.pfSwapText(ce, c.pfFull(ce.key)) === 'From your sats at FORGE, fee about ₿ 52',
+      'its tile: the swap’s 52 sats as FEE, in dollars ("From your sats at FORGE, fee about ₿ 52")', ce && c.pfCostText(ce));
     const cs = c.requestSpec();
     const cv = (l) => ((cs.rows || []).filter((x) => x.label === l)[0] || {}).value;
     t(cv('PAYING FROM') === 'FORGE · BITCOIN' && /From your sats/.test(cv('SWAP')) && !cv('FROM') && /^PAY /.test(cs.cta),

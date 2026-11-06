@@ -63,7 +63,7 @@
         const fee = w.unit === 'usd' ? Math.max(0, Math.round(Number(plan.feeUnit) || 0)) : Math.max(0, Math.round(Number(plan.feeSats) || 0));
         const px = (this.px && this.px()) || 0;
         const rank = w.unit === 'usd' ? (px > 0 ? Math.round(fee / 100 / px * 1e8) : fee * 1000) : fee;
-        console.log('[foxy] card: WITHDRAW TO ' + String(to).replace(/^https?:\/\//, '') + ' costs about ' + this.unitFigure(fee, w.unit));
+        console.log('[foxy] card: ' + (w.move ? 'TRANSFER TO ' : 'WITHDRAW TO ') + String(to).replace(/^https?:\/\//, '') + ' costs about ' + this.unitFigure(fee, w.unit));
         put({ state: 'ok', fee, rank });
       }, (e) => {
         put({ state: 'no', why: (W.reason ? W.reason(e) : String((e && e.message) || e)) });
@@ -75,11 +75,13 @@
     const w = this._fcWd;
     const fc = this.state.fc;
     const at = this.mintNameOf((w && w.card) || (fc && fc.mint) || '');
-    return 'This card is at ' + at + '. Any other mint costs a crossing by Lightning.';
+    return 'This card is at ' + at + '. Other mints cost a Lightning fee.';
   }
 
-  /* The rows, in the list's own look (`row`, 27-render-mints-restore-backup.js): the card's mint first at NO FEE, then the others
-   * the cheapest first, those still being asked after them, and those that cannot be reached last, greyed. */
+  /* The rows, in the list's tiles (`row`, 27-render-mints-restore-backup.js): the card's mint first with no line under its rule, then
+   * the others the cheapest first, those still being asked after them, and those that cannot be reached last, greyed. Under each
+   * other's rule what the crossing costs (FEE $0.05), CALCULATING… while it is asked, or NOT AVAILABLE. A tap picks one, the
+   * tick on it (`fcWdSel`); NEXT takes it (`fcListNext`). Nothing picked, the card's own mint is. */
   fcWdRows(row) {
     const w = this._fcWd;
     if (!w) return [];
@@ -87,6 +89,7 @@
     const quotes = this.state.wdQuotes || {};
     const all = this.allMints ? this.allMints() : [];
     const used = this.tillMints ? this.tillMints() : all;
+    const sel = strip(this.state.mintSel || w.card);
     const cardRow = all.find((m) => strip(m.url) === strip(w.card)) || { url: w.card, name: this.mintNameOf(w.card), host: strip(w.card), logo: '', tint: '#5A5A5A' };
     const q = (m) => quotes[String(m.url).replace(/\/+$/, '')] || { state: 'asking' };
     const order = (m) => { const x = q(m); return x.state === 'ok' ? 0 : x.state === 'asking' ? 1 : 2; };
@@ -95,23 +98,134 @@
       if (d) return d;
       return order(a) === 0 ? (q(a).rank - q(b).rank) : 0;
     });
-    const asLands = w.unit === 'usd' ? ' · AS BITCOIN' : '';
-    return [Object.assign(row(cardRow, true), { text: 'NO FEE', tap: () => this.fcWdPick(cardRow.url) })]
+    const none = { lineBal: false, lineWait: false, lineFee: false, fee: '', feeNote: '', feeNoteShown: false, wait: '' };
+    return [Object.assign(row(cardRow, sel === strip(w.card)), none, { text: 'NO FEE', tap: () => this.fcWdSel(cardRow.url) })]
       .concat(others.map((m) => {
-        const x = q(m);
-        const base = row(m, false);
-        const text = x.state === 'ok' ? 'FEE ABOUT ' + this.unitFigure(x.fee, w.unit) + asLands
-          : x.state === 'asking' ? 'CALCULATING…' : 'NOT AVAILABLE';
-        return Object.assign(base, {
-          text,
-          dim: x.state === 'no' ? '0.4' : base.dim,
-          ink: x.state === 'ok' ? 'var(--acc-ink)' : 'rgba(var(--ink-rgb),.45)',
-          tap: () => this.fcWdPick(m.url),
-        });
+        const base = row(m, sel === strip(m.url));
+        return Object.assign(base, this.fcFeeLine(q(m), w.unit, base), { tap: () => this.fcWdSel(m.url) });
       }));
   }
 
-  /* A row tapped: the card's own mint, or one whose crossing has been priced. Off the list, and on to the PIN (`go`). */
+  /* The line under a tile's rule on a card's WITHDRAW TO and TRANSFER TO, from that mint's answer (`wdQuotes`): FEE $0.05 once it
+   * has answered, CALCULATING… while it is asked, NOT AVAILABLE (greyed) where it could not be, and nothing where it was not asked.
+   * The fee in dollars first: cents as they are, sats at this phone's price, or in sats where there is none. A dollar card's money
+   * lands as bitcoin, said smaller after the fee so the line fits a small phone; not where it stays dollars (`keepsDollars`: a card's
+   * TRANSFER to a mint that issues dollars, 08a-flashcard.js `cardTransferQuote`). */
+  fcFeeLine(x, unit, base, keepsDollars) {
+    const none = { lineBal: false, lineWait: false, lineFee: false, fee: '', feeNote: '', feeNoteShown: false, wait: '', text: '' };
+    if (!x) return none;
+    const px = (this.px && this.px()) || 0;
+    const dol = (v) => (v > 0 && v < 0.005 ? '< $0.01' : '$' + (this.usd ? this.usd(v) : v.toFixed(2)));
+    const fee = Math.round(Number(x.fee) || 0);
+    const words = !(fee > 0) ? 'NO FEE'
+      : 'FEE ' + (unit === 'usd' ? dol(fee / 100) : px > 0 ? dol(fee / 1e8 * px) : this.unitFigure(fee, 'sat'));
+    const note = (unit === 'usd' && !keepsDollars) ? 'AS BITCOIN' : '';
+    if (x.state === 'ok') {
+      return Object.assign(none, { lineFee: true, fee: words, feeNote: note, feeNoteShown: !!note, text: words + (note ? ' \u00b7 ' + note : ''),
+        ink: 'var(--acc-ink)' });
+    }
+    const wait = x.state === 'asking' ? 'CALCULATING\u2026' : 'NOT AVAILABLE';
+    return Object.assign(none, { lineWait: true, wait, text: wait, ink: 'rgba(var(--ink-rgb),.45)',
+      dim: x.state === 'no' ? '0.4' : ((base && base.dim) || '1') });
+  }
+
+  /* A card's TRANSFER: the list of mints, TRANSFER TO, each other mint asked what the move there costs as WITHDRAW TO asks
+   * (`fcWdQuote`, an invoice there and the card's mint's quote for it, nothing paid), CALCULATING… meanwhile and NOT AVAILABLE
+   * where it does not answer. A card with nothing on it moves for nothing and asks nothing, and nothing is asked offline. Only the
+   * mints this phone uses are asked (`tillMints`, as WITHDRAW TO asks): a quote is not made at a mint it has never used. */
+  fcMoveAsk() {
+    const W = window.FoxyWallet;
+    const fc = this.state.fc;
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const card = String((fc && fc.mint) || (W && W.mintUrl) || '').replace(/\/+$/, '');
+    // the unit and the amount the move itself will take (26f-flashcard.js, `fcSwitchPick`)
+    const u0 = fc && fc.unit === 'usd' ? 'usd' : 'sat';
+    const unit = (fc && fc.bal && !(fc.bal[u0] > 0) && fc.bal[u0 === 'usd' ? 'sat' : 'usd'] > 0) ? (u0 === 'usd' ? 'sat' : 'usd') : u0;
+    const amount = Math.max(0, Math.round(Number(fc ? (fc.bal ? fc.bal[unit] : fc.balance) : 0) || 0));
+    const others = (this.tillMints ? this.tillMints() : []).filter((m) => strip(m.url) !== strip(card));
+    const ask = !!(W && W.transferQuote) && amount > 0 && others.length > 0 && !this.offlineNow();
+    const quotes = {};
+    let run = 0;
+    if (ask) {
+      run = (this._fcWdRun || 0) + 1;
+      this._fcWdRun = run;
+      this._fcWd = { run, go: null, unit, amount, card, move: true };
+      others.forEach((m) => { quotes[String(m.url).replace(/\/+$/, '')] = { state: 'asking' }; });
+      console.log('[foxy] card: TRANSFER TO, asking ' + others.length + ' mints what the move costs');
+    }
+    // through the one way into that list, which clears every other question it can be asking
+    this.goSwitchMint({ fcPick: true, wdQuotes: quotes });
+    if (ask) others.forEach((m) => this.fcWdQuote(String(m.url).replace(/\/+$/, ''), run));
+  }
+
+  /* TRANSFER TO's tiles (27-render-mints-restore-backup.js, `row`): the card's own mint first, ticked while no other is picked, with no
+   * line; then every other, its fee under the rule (`fcFeeLine`). A tap picks one (`mintSel`), except one that did not answer, which
+   * says why; NEXT moves the card (`fcListNext`). */
+  fcMoveRows(row) {
+    const W = window.FoxyWallet;
+    const s = this.state;
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const all = this.allMints ? this.allMints() : [];
+    const at = strip(s.fc && s.fc.mint);
+    const sel = s.mintSel ? strip(s.mintSel) : at;
+    const quotes = s.wdQuotes || {};
+    const own = all.find((m) => strip(m.url) === at) || { url: String((s.fc && s.fc.mint) || ''), name: this.mintNameOf(s.fc && s.fc.mint), host: at, logo: '', tint: '#5A5A5A' };
+    return [own].concat(all.filter((m) => strip(m.url) !== at)).map((m) => {
+      const r = row(m, strip(m.url) === sel);
+      const mine = strip(m.url) === at;
+      const x = mine ? null : quotes[String(m.url).replace(/\/+$/, '')];
+      const pick = () => {
+        if (x && x.state === 'no') { this.toast(String(x.why || (this.mintNameOf(m.url) + ' cannot be reached now.')), true); return; }
+        this.setState({ mintSel: mine ? '' : String(m.url).replace(/\/+$/, '') });
+      };
+      // a dollar card moved to a mint known to issue dollars stays dollars there: no AS BITCOIN under it
+      let units = [];
+      try { units = (W && typeof W.mintUnits === 'function') ? (W.mintUnits(m.url) || []) : []; } catch (e) { units = []; }
+      return Object.assign(r, this.fcFeeLine(x, (this._fcWd && this._fcWd.unit) || 'sat', r, units.indexOf('usd') >= 0),
+        { tap: this.mintReachable(m.url) ? pick : r.tap });
+    });
+  }
+
+  /* A tile tapped on WITHDRAW TO: the card's own mint, or one whose crossing has been priced, is picked (the tick moves to it); one
+   * still being asked, or that cannot be reached, says so and is not. */
+  fcWdSel(url) {
+    const w = this._fcWd;
+    if (!w || !this.state.wdPick) return;
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const own = strip(url) === strip(w.card);
+    const x = own ? { state: 'ok' } : ((this.state.wdQuotes || {})[String(url).replace(/\/+$/, '')] || { state: 'asking' });
+    if (x.state === 'asking') { this.toast('Still asking ' + this.mintNameOf(url) + ' what it costs.', true); return; }
+    if (x.state === 'no') { this.toast(String(x.why || (this.mintNameOf(url) + ' cannot be reached now.')), true); return; }
+    this.setState({ mintSel: own ? '' : String(url).replace(/\/+$/, '') });
+  }
+
+  /* NEXT under a card's WITHDRAW TO and TRANSFER TO: on with the mint picked. WITHDRAW TO always has one (the card's own, until
+   * another is picked); TRANSFER TO needs another mint than the card's. */
+  fcListNextOn() {
+    const s = this.state;
+    if (s.wdPick) return !!this._fcWd;
+    if (!s.fcPick) return false;
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    return !!s.mintSel && strip(s.mintSel) !== strip(s.fc && s.fc.mint);
+  }
+
+  fcListNext() {
+    const s = this.state;
+    if (s.wdPick) {
+      const w = this._fcWd;
+      if (w) this.fcWdPick(s.mintSel || w.card);
+      return;
+    }
+    if (!s.fcPick) return;
+    if (!this.fcListNextOn()) {
+      this.toast('This card is at ' + this.mintNameOf(s.fc && s.fc.mint) + '. Pick the mint to move it to.', true);
+      return;
+    }
+    this.fcSwitchPick(s.mintSel);
+  }
+
+  /* NEXT with a mint picked (`fcListNext`): the card's own mint, or one whose crossing has been priced. Off the list, and on to the
+   * PIN (`go`). */
   fcWdPick(url) {
     const w = this._fcWd;
     if (!w || !this.state.wdPick) return;
@@ -124,7 +238,7 @@
     this._fcWdFee = own ? 0 : Math.round(Number(x.fee) || 0);
     console.log('[foxy] card: WITHDRAW TO ' + strip(url) + (own ? ', the card’s own mint' : ', a crossing of about ' + this.unitFigure(this._fcWdFee, w.unit)));
     const go = w.go;
-    this.setState((p) => ({ wdPick: false, wdQuotes: {}, screen: p.stack.length ? p.stack[p.stack.length - 1] : 'flashcard', stack: p.stack.slice(0, -1) }));
+    this.setState((p) => ({ wdPick: false, wdQuotes: {}, mintSel: '', screen: p.stack.length ? p.stack[p.stack.length - 1] : 'flashcard', stack: p.stack.slice(0, -1) }));
     if (go) go();
   }
 
@@ -142,7 +256,9 @@
     const u = unit === 'usd' ? 'usd' : 'sat';
     const how = u === 'usd' ? { to, unit: 'usd' } : { to };
     const fee0 = Math.max(0, Math.round(Number(this._fcWdFee) || 0));
-    this.showMelt('Moving it to ' + name + '…', 0, { mint: name });
+    // the fox, the figure following the quote and the move's own stages (26r-fox-wait.js); the melt loader where it cannot be drawn
+    const fox = !!(this.foxUp && this.foxUp('wdMove', 'move', { forMs: this.MELT_PATIENCE_MS }));
+    if (!fox) this.showMelt('Moving it to ' + name + '…', 0, { mint: name });
     const ask = (n, left) => {
       if (!(n > 0)) return Promise.reject(new Error('What came off the card is too little to cross: the fees would take it all.'));
       return W.transferQuote(from, n, how).then(null, (e) => {
@@ -157,19 +273,22 @@
     console.log('[foxy] card: WITHDRAW TO ' + String(to).replace(/^https?:\/\//, '') + ': ' + this.unitFigure(got, u) + ' off the card cross from '
       + String(from).replace(/^https?:\/\//, ''));
     ask(first, 3)
-      .then((plan) => W.moveRun(plan, () => {}, { visit: true }))
+      .then((plan) => {
+        if (fox) this.foxStep('wdMove', 'answered');
+        return W.moveRun(plan, fox ? this.foxHears('wdMove') : () => {}, { visit: true });
+      })
       .then((done) => {
         const back = String(W.mintUrl || '').replace(/\/+$/, '') !== from ? W.connect(from).then(null, () => null) : Promise.resolve();
         return back.then(() => done);
       })
       .then((done) => {
-        this.hideMelt();
+        if (fox) this.foxEnd('wdMove', true); else this.hideMelt();
         this.refreshBalance();
         this.loadHistory();
         const sats = Math.round(Number(done && done.sats) || 0);
         this.toast('Moved ' + this.unitFigure(sats, 'sat') + ' to ' + name + '.');
       }, (e) => {
-        this.hideMelt();
+        if (fox) this.foxEnd('wdMove', false); else this.hideMelt();
         this.refreshBalance();
         // back at the card's mint, unless the crossing was paid and its claim is still being made where the phone is
         if (String(W.mintUrl || '').replace(/\/+$/, '') !== from && !(e && e.movePaid)) W.connect(from).then(null, () => null);

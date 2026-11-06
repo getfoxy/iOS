@@ -133,9 +133,6 @@ enum SeedActions {
             return "That ecash is not locked to this Cashu ID."
         case CashuID.Failure.badPoint, CashuID.Failure.badTweak:
             return "That is not a payment to this Cashu ID."
-        // messages between Cashu IDs (CashuMsg.swift)
-        case CashuMsg.Failure.badPeer, CashuMsg.Failure.badKey:
-            return "That is not another Cashu ID."
         default:
             // NUT13: an invalid BIP-32 child or r = 0, about 1 in 2^127, never a different key instead
             return "the secrets could not be derived"
@@ -583,20 +580,6 @@ enum SeedActions {
     static func cashuIdRecoverySecret(_ env: SeedEnvironment) throws -> [UInt8] {
         let seed = try readSavedSeed(env)
         return try CashuID.secret(seed: seed, path: CashuID.recoveryPath)
-    }
-
-    // MARK: Messages between Cashu IDs (CashuMsg.swift)
-
-    /// What `cashuIdMsgSend` wraps a message with: the x-only key message `index` to `peer` goes to and the seal's
-    /// private key. Native only: no action answers either. The caller wipes `seal`.
-    static func cashuMsgSendKeys(peer: [UInt8], index: UInt32, env: SeedEnvironment) throws -> (to: [UInt8], seal: [UInt8]) {
-        try CashuMsg.sendKeys(seed: try readSavedSeed(env), peer: peer, index: index)
-    }
-
-    /// The keys `cashuIdMsgOpen` listens on, private halves included, for the inbox and nothing else. Native only.
-    /// The caller wipes each one.
-    static func cashuMsgListenKeys(wants: [CashuMsg.Want], env: SeedEnvironment) throws -> [CashuMsg.Listened] {
-        try CashuMsg.listenKeys(seed: try readSavedSeed(env), wants: wants)
     }
 
     // MARK: A card's owner key

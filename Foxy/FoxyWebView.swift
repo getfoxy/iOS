@@ -208,6 +208,16 @@ final class WebHostController: UIViewController {
                 forMainFrameOnly: true))
             print("[foxy] net: a request mark goes to \(markHosts.joined(separator: ", ")) (launch argument)")
         }
+        /* How deep a card's first load is cut, for a phone test of the five seconds a tap: a debug build launched with
+         * `-FoxyFirstDepth N` (1, one binary set, is the default; 4, four of each size) hands the page N, which the wallet reads
+         * once (08a-flashcard.js, `cardFirstDepthNow`). A Release build never reads the argument. */
+        if let depth = CardGate.firstDepth(UserDefaults.standard.integer(forKey: "FoxyFirstDepth")) {
+            config.userContentController.addUserScript(WKUserScript(
+                source: "window.__foxyFirstDepth = \(depth);",
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true))
+            print("[foxy] card: a first load is cut \(depth) deep for this run (launch argument)")
+        }
         // the first-launch warning again, on a debug build launched with FOXY_SHOW_WARNING=1
         if ProcessInfo.processInfo.environment["FOXY_SHOW_WARNING"] == "1" {
             config.userContentController.addUserScript(WKUserScript(
@@ -1578,7 +1588,7 @@ final class WebHostController: UIViewController {
         if seeds.contains(true) { print("[foxy] a seed from a previous installation was removed") }
         // and its note that a seed was behind the passcode, which a new wallet must not inherit
         SeedStore.deleteIfPresent(key: SeedStore.heldKey)
-        for key in [HostApprovals.storeKey, HostApprovals.carriedKey, OrbotLink.tokenKey, CardMoves.key] {
+        for key in [HostApprovals.storeKey, HostApprovals.carriedKey, OrbotLink.tokenKey, CardMoves.key, CardLifts.key] {
             if SeedStore.deleteIfPresent(key: key) { print("[foxy] \(key) from a previous installation was removed") }
         }
 

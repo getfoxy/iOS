@@ -159,6 +159,11 @@
       + list.map((e) => this.pfName(e.mint).toLowerCase() + ' ' + e.unit).join(', ') + ')' + (o.show ? '; asking which' : ''));
     if (o.show) this.setState((p) => Object.assign(patch, { screen: 'payFrom', stack: p.stack.concat([p.screen]) }));
     else this.setState(patch);
+    /* While every tile is still asking there is nothing on them to choose between: the fox says the fee is being
+     * checked over the screen, CANCEL being the screen's own way out, and the first answer is its end (`pfIn`). */
+    if (o.show && list.length && list.every((e) => e.ok === null) && this.foxUp) {
+      this.foxUp('pfAsk', 'fee', { forMs: 45000, go: () => { if (this._pf && this._pf.run === run) this._pf.cancel(); } });
+    }
     list.forEach((e) => { if (e.ok === null) this.pfAsk(e, run); });
     this.pfSettled(run);
   }
@@ -190,6 +195,10 @@
       tag: r.ok === true ? '' : String(r.tag || 'NOT ENOUGH'), rank: r.rank != null ? r.rank : e.rank,
     })));
     const ranked = this.pfRanked(list);
+    /* The fox's wait (`pfOpen`) is over at the first balance that can pay, ALL SET; with none, once the last has
+     * answered, down at once for what follows to say so. */
+    if (r.ok === true) { if (this.foxDone) this.foxDone('pfAsk'); }
+    else if (!list.some((e) => e.ok === null) && this.hideStage) this.hideStage('pfAsk');
     const s = this.state;
     const patch = { payFromList: ranked };
     // the cheapest stays chosen until the person picks one, and a pick that turned out short is no pick
@@ -236,6 +245,14 @@
     this._pf.go(e, true);
   }
 
+  /* PAYING FROM's pill on a request's confirmation (24-render-receive-and-send.js `requestSpec`): PAY FROM again, the
+   * source it is paid from ticked, as `openWalletPick` opens it for a Lightning payment. */
+  pfReopen() {
+    const s = this.state;
+    this.setState({ payFromReopen: true, payFromTapped: true, payFromPick: s.payMint ? this.pfKey(s.payMint, s.payUnit) : (s.payFromPick || '') });
+    this.go('payFrom');
+  }
+
   /* Back: to the confirmation when it was opened from there, and out of the payment when it came first. */
   pfBack() {
     if (this.state.payFromReopen || !this._pf) { this.back(); return; }
@@ -247,46 +264,58 @@
     this.setState({ screen: 'home', stack: [] });
   }
 
-  /* What a tile says it costs: the whole of it in its own unit, "no fee" where there is none. */
+  /* What a tile's fee line says (the keeper's 1p, 2026-11-06): "FEE $ 0.06", the fee in the tile's own unit, sats said in
+   * dollars where there is a price ("FEE < $ 0.01"); a swap's, what it takes in the unit that leaves; CALCULATING… while
+   * the mint is asked; nothing for one that cannot pay, whose tag says NOT ENOUGH. */
   pfCostText(e) {
     if (e.ok === null) return 'CALCULATING…';
     if (e.ok === false) return '';
-    if (e.swap) return this.pfSwapText(e, this.pfFull(e.key));
-    if (e.cost == null) return e.note || '';
-    const fig = this.unitFigure(e.cost, e.unit);
-    return 'Costs ' + fig + (Number(e.fee) === 0 ? ' · no fee' : '');
+    const fig = (n) => (e.unit === 'usd' ? this.unitFigure(n, 'usd') : this.money(n).main);
+    if (e.swap) {
+      const q = this.pfFull(e.key);
+      return q ? 'FEE ' + fig(this.pfSwapFee(q, e.unit === 'usd' ? 'usd' : 'sat')) : 'CALCULATING…';
+    }
+    if (e.cost == null) return String(e.note || '').toUpperCase();
+    // paid on a visit to a mint whose fee for its pieces is known only there: not said to be nothing
+    if (e.feeThere) return 'FEE NOT KNOWN YET';
+    return 'FEE ' + fig(Math.max(0, Math.round(Number(e.fee) || 0)));
   }
 
-  /* The tiles, in the CURRENCY screen's looks (`renderCurrency`): the one chosen in fur (orange), every other grey, whether
-   * it is still being asked, offered or short (decided); its own sign in the badge; CHEAPEST on the first once every mint
-   * has answered. */
+  /* The tiles, as the keeper drew PAY FROM (1p, 2026-11-06): the mint's name, under it the balance and what it holds ("BITCOIN
+   * · ₿ 19,622 ($ 14.71)"), a tick in the accent on the one chosen, and under a rule the fee line with the unit's badge at
+   * its end. The one chosen on a dark wash of the accent with an accent edge, every other on the surface; a fee in the
+   * accent, lighter on the others; CALCULATING… in grey while its mint is asked. One that cannot pay keeps its tag, NOT
+   * ENOUGH, and no fee line. No CHEAPEST: the cheapest is first. (`LOOK` and `SHADOW` are the CURRENCY screen's, and no
+   * longer drawn here.) */
   pfRows(LOOK, SHADOW) {
     const s = this.state;
     const list = this.pfList();
-    const offered = list.filter((e) => e.ok === true);
-    const known = list.every((e) => e.ok !== null) && offered.length > 1 && offered.every((e) => e.cost != null);
-    const best = known ? offered[0].key : '';
+    const rate = this.satUsd ? Number(this.satUsd()) || 0 : 0;
     return list.map((e) => {
       const short = e.ok === false, asking = e.ok === null;
       const chosen = e.key === s.payFromPick && !short;
-      const look = Object.assign({}, chosen ? LOOK.sat : LOOK.grey);
-      return Object.assign(look, {
-        key: e.key, sym: LOOK[e.unit === 'usd' ? 'usd' : 'sat'].sym, name: this.pfName(e.mint),
+      const usd = e.unit === 'usd';
+      const cost = this.pfCostText(e);
+      const words = asking || (e.ok === true && e.cost == null && !e.swap) || (e.ok === true && !!e.feeThere);
+      return {
+        key: e.key, name: this.pfName(e.mint), sym: usd ? '$' : '₿',
         unitLine: this.unitWord(e.unit) + ' · ' + this.unitFigure(e.have, e.unit),
-        // the cost is not drawn on the tile (the keeper, 2026-11-06: no descriptions in a choice); CHEAPEST says which
-        cost: this.pfCostText(e), costShown: false,
-        // a ring at the end of every tile, so each reads as a choice
-        pickShown: true, pickOn: chosen,
-        pickEdge: chosen ? 'rgba(255,255,255,.95)' : 'rgba(var(--pill-ink-rgb),.45)',
-        pickBg: chosen ? 'rgba(255,255,255,.95)' : 'transparent',
+        // the sats' worth in dollars after them, a shade fainter
+        unitAlt: (!usd && rate > 0) ? '(' + this.money(e.have).main + ')' : '',
+        cost: cost, feeShown: !short && !!cost,
+        feeInk: words ? 'rgba(var(--ink-rgb),.43)' : chosen ? 'var(--acc)' : 'var(--acc-lt)',
+        feeSize: words ? '16px' : '24px',
+        feeSpacing: words ? '.14em' : '-0.01em',
+        badgeBg: asking ? 'rgba(var(--ink-rgb),.12)' : usd ? '#BFE3EC' : 'var(--acc)',
+        badgeInk: asking ? (usd ? '#BFE3EC' : 'var(--acc-lt)') : usd ? '#0F2A33' : '#FFFFFF',
+        pickOn: chosen,
+        bg: chosen ? 'rgba(var(--acc-rgb),.1)' : 'var(--surface)',
+        edge: chosen ? '2px solid var(--acc)' : '1px solid rgba(var(--ink-rgb),.1)',
         tag: short ? (e.tag || 'NOT ENOUGH') : '', tagShown: short,
-        bestShown: e.key === best,
-        outline: chosen ? '3px solid rgba(255,255,255,.9)' : 'none',
-        shadow: short ? 'none' : SHADOW,
         cursor: (short || asking) ? 'default' : 'pointer',
-        opacity: asking ? '.8' : '1',
+        opacity: short ? '.6' : asking ? '.8' : '1',
         tap: () => this.pfTap(e.key),
-      });
+      };
     });
   }
 
@@ -321,6 +350,7 @@
     if (f === 'send' && this._sendRun) return;
     if (f === 'req' && (s.reqBusy || s.reqSwapping)) return;
     if (f === 'oc' && s.ocBusy) return;
+    if (this.hideStage) this.hideStage('pfAsk');
     this._pf = null;
     this._pfRun = (this._pfRun || 0) + 1;
     this.setState({ payFromFlow: '', payFromList: null, payFromPick: '', payFromAsk: '', payFromTapped: false, payFromReopen: false,
@@ -471,26 +501,37 @@
     }
     if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
     const base = {
-      title: 'CONFIRM PAYMENT', titleUp: true, amountLabel: 'TOTAL', rows: rows,
+      title: 'CONFIRMATION', titleUp: true, amountLabel: 'TOTAL', rows: rows,
       wallet: this.pfMany('send') ? { label: 'PAY FROM', word: this.pfName(s.payMint), go: () => this.openWalletPick() } : undefined,
       close: () => this.setState({ screen: 'home', stack: [] }),
       amountInk: 'var(--ink)',
       amount: total != null ? fig(total).main : this.sendAmountText(),
       amountSub: (total != null && unit === 'sat') ? fig(total).sub : '',
     };
+    /* The keeper's 1l (2026-11-06): the figures stacked, from that mint's quote, and PAYING FROM's pill naming it, which
+     * opens PAY FROM again where there is a choice. */
+    const look = (sp) => (!this.cfPayLook ? sp : this.cfPayLook(sp, {
+      gets: q ? fig(q.amount).main : this.sendAmountText(),
+      getsSub: (unit === 'usd' && asked) ? '₿ ' + this.group(asked) : '',
+      fee: q ? fig(fee).main : asking ? 'CHECKING…' : 'UNKNOWN',
+      paying: total != null ? fig(total).main : asking ? 'CHECKING…' : sp.amount,
+      receiver: this.sendToText(),
+      word: this.pfLabel(s.payMint, unit),
+      go: this.pfMany('send') ? () => this.openWalletPick() : null,
+    }));
     if (e && e.ok === false) {
-      return Object.assign(base, {
+      return look(Object.assign(base, {
         amountInk: '#FF5C5C',
         warn: e.why || 'More than your ' + this.unitWord(unit).toLowerCase() + ' at ' + this.pfName(s.payMint) + '.',
         cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
-      });
+      }));
     }
     const held = asking || this.connecting();
-    return Object.assign(base, {
-      cta: held ? 'CHECKING…' : 'PAY', ctaBusy: held, ctaTone: 'go',
+    return look(Object.assign(base, {
+      cta: held ? 'CHECKING…' : 'PAY' + (total != null ? ' ' + fig(total).main : ''), ctaBusy: held, ctaTone: 'go',
       // a visit is a switch of mints, which waits for money already moving
       go: held ? () => {} : () => { if (this.refuseSwitchWhileBusy && this.refuseSwitchWhileBusy()) return; this.startSend(); },
-    });
+    }));
   }
 
   // ---- a Cashu request ----
@@ -526,7 +567,8 @@
           ? W.sendShortfall(need, { locked: !!(req.lockTo && !this.offlineNow()) }) : null;
       } catch (x) { lack = null; }
       const fee = lack ? Math.max(0, Number(lack.fee) || 0) : 0;
-      return this.pfEntry(p, { pref: true, cost: need + fee, fee: fee, rank: fee, ok: !(lack && lack.short),
+      // (paid there on a visit, its mint's fee for the pieces is known only there: `feeThere`, and the tile does not say none)
+      return this.pfEntry(p, { pref: true, cost: need + fee, fee: fee, rank: fee, ok: !(lack && lack.short), feeThere: p.mint !== here,
         why: lack && lack.short ? String(lack.why || '') : '', tag: lack && lack.short ? 'NOT ENOUGH' : '' });
     });
     return this.pfReqOpen(req, swap ? list.concat([swap]) : list, want, this.money(need).main);
@@ -703,14 +745,20 @@
     const from = e.unit === 'usd' ? 'usd' : 'sat', to = e.toUnit === 'usd' ? 'usd' : 'sat';
     const held = (q) => !!(q && q.state === 'quoted' && Number(q.expiresAt) - Date.now() >= 20000);
     this.setState({ reqSwapping: true });
-    this.showMelt('Swapping ' + this.unitWord(from).toLowerCase() + ' into ' + this.unitWord(to).toLowerCase() + '…', 120000);
+    // the fox, the figure following the swap's own stages (26r-fox-wait.js); the melt loader where it cannot be drawn
+    const fox = !!(this.foxUp && this.foxUp('swapMove', 'swap', { forMs: 120000 }));
+    if (!fox) this.showMelt('Swapping ' + this.unitWord(from).toLowerCase() + ' into ' + this.unitWord(to).toLowerCase() + '…', 120000);
     console.log('[foxy] request: paying it from ' + (from === 'usd' ? 'dollars' : 'sats') + ' at ' + this.pfName(e.mint).toLowerCase()
       + ', swapped first');
-    const done = () => { this.hideMelt(); this.setState({ reqSwapping: false }); this.refreshBalance(); };
+    const done = (landed) => {
+      if (fox) this.foxEnd('swapMove', landed); else this.hideMelt();
+      this.setState({ reqSwapping: false }); this.refreshBalance();
+    };
+    const heard = (st) => console.log('[foxy] request: swap ' + st);
     Promise.resolve().then(() => (held(src.swap.q) ? src.swap.q : this.pfSwapQuote(e)))
-      .then((q) => W.swapRun(q, (st) => console.log('[foxy] request: swap ' + st)))
+      .then((q) => W.swapRun(q, fox ? this.foxHears('swapMove', heard) : heard))
       .then((r) => {
-        done();
+        done(!!(r && r.state === 'done'));
         if (this.loadHistory) this.loadHistory();
         if (r && r.state === 'done') {
           this.makeTokenForRequest(Object.assign({}, go || {}, { req: req, swapped: true }));
@@ -743,7 +791,7 @@
     if (piles.length < 2) return false;
     const ready = this._crossReady;
     const list = piles.map((p) => (p.mint === to
-      ? this.pfEntry(p, { pref: true, cost: want, fee: 0, rank: 0, ok: true })
+      ? this.pfEntry(p, { pref: true, cost: want, fee: 0, rank: 0, ok: true, feeThere: p.mint !== this.pfHere() })
       : this.pfEntry(p)));
     const quote = (e) => {
       const same = !!(ready && ready.sats === want && ready.to === to && ready.from === e.mint);

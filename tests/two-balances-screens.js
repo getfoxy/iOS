@@ -648,17 +648,19 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq(A.state.screen, 'sendConfirm', 'an invoice: CONFIRM PAYMENT');
     ok(W.rec.quotes.length === 1, 'both balances quoted at once (quoteFeeBoth)');
     let v = V();
-    eq([v.cfTitle, v.cfTitleUp, v.cfAmountLabel], ['CONFIRM PAYMENT', true, 'TOTAL'], 'CONFIRM PAYMENT, the title up, TOTAL on top');
-    eq(v.cfRows.map((r) => r.label), ['TO', 'AMOUNT', 'FEE INCLUDED', 'NETWORK', 'RATE'], 'TO, AMOUNT, FEE INCLUDED, NETWORK, and RATE (dollars pay bitcoin)');
+    // (the keeper's 1l, 2026-11-06: CONFIRMATION level with the round buttons, the figures stacked, PAYING FROM's pill)
+    eq([v.cfTitle, v.cfTitleUp, v.cfStackShown], ['CONFIRMATION', true, true], 'CONFIRMATION, the title up, the figures stacked');
+    // (what is drawn: the stack; the old rows are hidden on the new confirmation)
     const cents = Math.ceil(6112 / 1e8 * MINT_RATE * 100);
-    eq(v.cfAmount, '$ ' + ((cents + 2) / 100).toFixed(2), 'TOTAL is the dollar melt with its fee');
-    eq(v.cfRows[1].sub, '(₿ 6,112)', 'AMOUNT says what the payee is paid in sats');
-    eq(v.cfRows[4].value, '₿ 1 = $ 76,900 · FORGE.EXAMPLE.COM’s rate'.replace('FORGE.EXAMPLE.COM', A.mintName()), 'RATE: the mint’s');
-    ok(v.cfRows.every((r) => r.cursor === 'default'), 'NETWORK and the rows are not selectable');
-    eq([v.cfWalletShown, v.cfWalletWord, v.cfCtaLabel], [true, 'USD', 'PAY'], 'the WALLET button last, reading USD; PAY');
-    ok(/CONFIRM PAYMENT/.test(textOf(w)) && /FEE INCLUDED/.test(textOf(w)) && /WALLET/.test(textOf(w)), 'the page draws it');
-    // the picker
-    v.cfWalletGo();
+    eq(v.cfStack.map((x) => [x.label, x.value]), [['RECEIVER GETS', '$ ' + (cents / 100).toFixed(2)], ['FEE', '$ 0.02'],
+      ['PAYING', '$ ' + ((cents + 2) / 100).toFixed(2)], ['RECEIVER', A.sendToText()]], 'RECEIVER GETS, FEE, PAYING (the total), RECEIVER');
+    eq(v.cfStack[0].sub, '₿ 6,112', 'RECEIVER GETS says what the payee is paid in sats');
+    ok(textOf(w).indexOf('₿ 6,112') >= 0 && textOf(w).indexOf('$ ' + ((cents + 2) / 100).toFixed(2)) >= 0, 'the page draws the sats and the total');
+    eq([v.cfWalletShown, v.cfFromShown, v.cfFromWord, v.cfFromMany, v.cfCtaLabel],
+      [false, true, A.pfName(MINT) + ' · DOLLARS', true, 'PAY $ ' + ((cents + 2) / 100).toFixed(2)], 'PAYING FROM’s pill on the dollars, with its chevron; PAY and the total');
+    ok(/CONFIRMATION/.test(textOf(w)) && /RECEIVER GETS/.test(textOf(w)) && /PAYING FROM/.test(textOf(w)) && !/FEE INCLUDED/.test(textOf(w)), 'the page draws it');
+    // the picker, from the pill
+    v.cfFromGo();
     await settle();
     v = V();
     eq([A.state.screen, v.curTitle], ['walletPick', 'WALLET'], 'WALLET opens the picker');
@@ -669,7 +671,8 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     ok(A.state.screen === 'sendConfirm' && A.state.wallet === 'sat' && A.state.walletTapped, 'BITCOIN picked by hand');
     eq(W.rec.sets.length, 0, 'and nothing kept for the next send');
     v = V();
-    eq(v.cfRows.map((r) => r.label), ['TO', 'AMOUNT', 'FEE INCLUDED', 'NETWORK'], 'bitcoin pays bitcoin: no RATE row');
+    eq([v.cfFromWord, v.cfStack[0].sub], [A.pfName(MINT) + ' · BITCOIN', ''], 'bitcoin picked: the pill names it, and no sats line under RECEIVER GETS');
+    eq(v.cfStack[2].value, A.money(6112 + 12).main, 'and PAYING is the bitcoin melt with its fee');
     v.cfGo();
     await settle(); await wait(700); await settle();
     eq(W.rec.pays[0].unit, 'sat', 'pay is called with the bitcoin balance');
@@ -686,7 +689,8 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     await settle(); await settle();
     ok(A.state.screen === 'sendConfirm' && A.state.wallet === 'sat' && A.state.walletAuto === true, 'dollars ($ 2.00) cannot cover it: bitcoin pays, nothing asked');
     eq(W.rec.sets.length, 0, 'nothing written');
-    V().cfWalletGo();
+    eq(V().cfFromWord, A.pfName(MINT) + ' · BITCOIN', 'the pill names the bitcoin chosen');
+    V().cfFromGo();
     await settle();
     const v = V();
     eq(v.curCards[0].tag, 'NOT ENOUGH FOR ' + A.sendAmountText(), 'the picker greys dollars: NOT ENOUGH FOR …');
@@ -709,9 +713,9 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     A.acceptTarget('lnbcsat-big');
     await settle(); await settle();
     const v = V();
-    eq([v.cfCtaLabel, v.cfAmountInk], ['NOT ENOUGH', '#FF5C5C'], 'neither covers it: TOTAL red, NOT ENOUGH');
+    eq([v.cfCtaLabel, v.cfStack[2].ink], ['NOT ENOUGH', '#FF5C5C'], 'neither covers it: PAYING red, NOT ENOUGH');
     eq(v.cfChip, 'Neither balance covers this. You hold $ 2.00 and ₿ 100.', 'and says what is held');
-    v.cfWalletGo(); await settle();
+    v.cfFromGo(); await settle();
     eq(V().curCards.map((k) => k.tagShown), [true, true], 'both greyed in the picker');
   }
 
@@ -1100,8 +1104,8 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     A.acceptTarget('lnbcsat-one-mint');
     await settle(); await settle();
     const v = V();
-    ok(A.state.screen === 'sendConfirm' && v.cfWalletShown === false && v.cfTitleUp === false, 'one balance: no WALLET button, the title where it was');
-    ok(v.cfRows.every((r) => r.label !== 'RATE') && W.rec.quotes.length === 0, 'one balance: no RATE, and no quote of both');
+    ok(A.state.screen === 'sendConfirm' && v.cfWalletShown === false && v.cfFromMany === false, 'one balance: no WALLET button, and PAYING FROM opens nothing');
+    ok(W.rec.quotes.length === 0 && v.cfStack[0].sub === '', 'one balance: no dollar line, and no quote of both');
     eq(V().sentFromShown, false, 'one balance: the sent screen has no FROM line');
     A.setState({ screen: 'history', stack: ['home'] }); await settle();
     eq([V().histTabsShown, V().histTabs.length], [false, 0], 'one balance: history has no DOLLARS / BITCOIN tab');

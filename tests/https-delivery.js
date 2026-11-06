@@ -222,7 +222,8 @@ async function run() {
     const near = at > 0 ? SRC.slice(at - 400, at + 60) : '';
     ok(/d\.kind === 'https' \? \(siteOverTor \? 'THEIR WEBSITE, OVER TOR' : 'THEIR WEBSITE'\)/.test(near),
       'says THEIR WEBSITE, OVER TOR for a web address, and THEIR WEBSITE when Tor does not carry it');
-    ok(/d\.kind === 'tap' \? 'SEND ' : 'PAY '/.test(SRC), 'and the button says PAY');
+    // (PAY on every request's button, a tap's too: the keeper, 2026-11-06)
+    ok(/: d \? 'PAY ' \+ payWords/.test(SRC), 'and the button says PAY');
   }
 
   console.log(failed ? '\n' + failed + ' FAILED' : '\nall passed');

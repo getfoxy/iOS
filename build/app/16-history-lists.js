@@ -12,12 +12,8 @@
       handle: c.cid ? 'CASHU ID' : c.handle,
       ini: String(c.name || c.handle).charAt(0).toUpperCase(),
       tint: c.tint || 'var(--acc)',
-      // a Cashu ID's messages not read yet (26p-cashu-msg.js): '' with none, or with no ID in use
-      unread: c.cid ? this.cmUnreadOf(String(c.cid.id || '')) : '',
-      unreadSay: 'unread messages',
-      // a Cashu ID opens its own screen, its messages and PAY, from the menu's CONTACTS; from SEND it goes straight to
-      // the amount (`cidPayStart`), as an address does: the sender came to pay, not to read
-      tap: c.cid ? () => ((s.stack || []).slice(-1)[0] === 'sendHow' ? this.cidPayStart(c) : this.cidOpen(c)) : () => this.setState(p => ({
+      // a Cashu ID goes to the amount (`cidPayStart`), from the menu's CONTACTS and from SEND's alike, as an address does
+      tap: c.cid ? () => this.cidPayStart(c) : () => this.setState(p => ({
         screen: 'amount',
         stack: p.stack.concat([p.screen]),
         flow: 'send',

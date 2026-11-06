@@ -908,10 +908,15 @@ The money owed to the card is on file either way (`cardOwed`). Pinned by
 
 **WITHDRAW TO.** WITHDRAW, ALL OF IT, on a phone that uses more than one mint
 asks first where it lands (`fcWdToAsk`, `26n-card-withdraw-to.js`), on the
-SWITCH MINT list: the card's own mint first at NO FEE, then each other mint the
-phone uses with what the crossing there costs, from `transferQuote(cardMint,
-sats, { to, quoteOnly: true })` (nothing is paid by asking), the cheapest
-first. A phone with one mint, or a typed amount, is asked nothing. The
+mint list titled WITHDRAW TO: the card's own mint first and ticked, with no
+fee, then each other mint the phone uses with what the crossing there costs
+(FEE, CALCULATING… while it is asked, NOT AVAILABLE where it does not answer),
+from `transferQuote(cardMint, sats, { to, quoteOnly: true })` (nothing is paid
+by asking), the cheapest first. A tap ticks a mint and NEXT takes it. A card's
+TRANSFER asks the same of every other mint the phone uses, on TRANSFER TO
+(`fcMoveAsk`); there a dollar card's line says AS BITCOIN only under a mint
+not known to issue dollars, since a move to one that does keeps them dollars
+(`cardTransferQuote`). A phone with one mint, or a typed amount, is asked nothing. The
 withdrawal itself is unchanged: the card's pieces come into this phone at the
 card's mint. Another mint picked, what came off then crosses there
 (`fcWdCross`: quoted again for what is in hand less the fee, `moveRun()` as a
@@ -919,6 +924,35 @@ visit) and the phone comes back to the card's mint; a dollar card's money
 crosses from the dollars, as above, and lands as sats. A crossing that does not
 go leaves the money in this phone at the card's mint and says so. Pinned by
 `tests/flashcard-screens.js`.
+
+**What the screen shows while it waits: the fox.** Every wait in which a fee is
+being asked or pieces are moving is one screen (`26r-fox-wait.js`, a stage
+screen drawn with `o.fox`): black, CHECKING THE FEE or MOVING YOUR MONEY, a
+percentage, and the fox across the middle. The percentage is the flow's real
+steps, from one table (`FOX_FLOWS`): a fee check heads for 60 while it is asked
+and finishes at the answer; a move heads for 25 while the quote is asked, 45
+once the mint has answered, 75 once the pieces are made, 95 once they have
+landed, and 100 only when it is confirmed, read from `moveRun()`'s,
+`swapRun()`'s and `carryHome()`'s own stages. The figure eases toward its
+step's number and then creeps on toward halfway to the next step's, paced by
+how long that step is expected to take, so a slow mint slows it without
+stopping it; at 100 the title says ALL SET for 400 ms, and a wait that did not
+land comes down at once. The fox is `Web/img/foxy-wait.mp4` (every frame a key
+frame, made by `tools/make-intro.swift --wait`), put each frame on the frame of
+the figure (figure / 100 × length × 0.92), standing at ALL SET; under Reduce
+Motion it moves only every tenth point. It covers: CALCULATING FEE before a
+crossing (`crossMintCard`, and the one asked of the other phone in a tap),
+Getting their invoice, a transfer (`runTransfer`), a swap (`swapGo`, and PAY
+FROM's swap before a payment), WITHDRAW TO's crossing (`fcWdCross`), a tap's
+crossing (`crossMove`), a payment brought home or sent back (`carryHomeNow` and
+its cards), a token from another mint (its fee, `nmQuote`, its move,
+`newMintRedeem`, and its change, `sweepChange`, on the same fox), and PAY FROM
+while every balance is still being asked. Each keeps the time limit and the
+CANCEL (or none) of the wait it replaced, except the token from another mint,
+whose two-banks screen had no limit: its fee check now comes down by itself
+after 45 s and its move after 120 s (the move itself goes on, guarded as
+before). None is drawn over another stage screen. Pinned by
+`tests/fox-wait.js`.
 
 ---
 
@@ -2060,7 +2094,7 @@ and a little over (2 sats or 1 %, or a cent), asked once more and larger when
 the first brings too little, and NOT ENOUGH when that is more than the balance
 holds. Its fee is the SWAP screen's FEE: what leaves less what arrives, at the
 quote's rate. Chosen, PAY on the offer runs `swapRun` (the quote shown while it
-holds 20 s more, else a fresh one) under the swapping overlay, and the request
+holds 20 s more, else a fresh one) under the fox (section 7), and the request
 is paid from what it brought with nothing more asked (`pfSwapThenPay`,
 `makeTokenForRequest` `go.swapped`): one confirmation, one PAID. A swap the mint
 has not finished is SWAP STILL GOING THROUGH and nothing is paid; one it did

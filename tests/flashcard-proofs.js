@@ -148,7 +148,7 @@ async function forge(ctx, card, o) {
     let readBack = true;
     for (const p of here) readBack = readBack && (await card.send('b01a' + hx(p.i) + 'ff00')) === '01' + want[p.nonce] + '9000';
     ok(readBack && !card.state.verified && !card.state.grant, 'GET_DLEQ gives each one back: 01 and the 96 bytes, to a reader that has shown no PIN and no grant');
-    const wroteLine = lines.filter((l) => /\bwrote \d+ piece/.test(l));
+    const wroteLine = lines.filter((l) => /\bwrote \d+ piece\(s\), /.test(l));
     ok(wroteLine.length === 1 && new RegExp('wrote ' + made + ' piece\\(s\\), ' + made + ' with the mint.s proof \\(' + made + ' kept by the card\\), in \\d+ ms$').test(wroteLine[0]) && !/[0-9a-f]{20}/.test(wroteLine[0]),
        'a write leaves one line in the log: how many pieces, how many with the proof, how many the card kept, and the milliseconds; no secret, nonce or point in it', wroteLine.join(' | '));
     const real = realOf(H, card);
@@ -356,8 +356,8 @@ async function forge(ctx, card, o) {
     const loads = sentOf(card, '30');
     ok(wrote.left === 0 && n >= 4 && card.state.dleq === null && loads[0].slice(0, 10) === 'b0300100b1' && loads.slice(1).every((a) => a.slice(0, 8) === 'b0300000') && loads.length === 1 + Math.ceil((n - 1) / 3),
        'a card the chip gave no room for proofs stores the piece and answers 00 for its proof: that is no error, and the rest of the write goes plain, three to a command', loads.length + ' loads for ' + n + ' pieces');
-    ok(lines.filter((l) => /no room for the mint.s proofs/.test(l)).length === 1 && lines.filter((l) => /\bwrote \d+ piece/.test(l)).length === 1
-       && lines.filter((l) => /\bwrote \d+ piece/.test(l))[0].indexOf('wrote ' + n + ' piece(s), 1 with the mint’s proof (0 kept by the card), in ') >= 0,
+    ok(lines.filter((l) => /no room for the mint.s proofs/.test(l)).length === 1 && lines.filter((l) => /\bwrote \d+ piece\(s\), /.test(l)).length === 1
+       && lines.filter((l) => /\bwrote \d+ piece\(s\), /.test(l))[0].indexOf('wrote ' + n + ' piece(s), 1 with the mint’s proof (0 kept by the card), in ') >= 0,
        'it is said once in the log, and the write’s line says one piece was sent with its proof and none was kept', lines.filter((l) => /no room|wrote/.test(l)).join(' | '));
     ok(realOf(c, card).length === n && (await card.send('b01a00ff00')).slice(0, 2) === '00', 'every piece is still real here, and the card gives `00` for any place it is asked about');
     const R3 = await funded({ sharedMint: c.mint, words: OTHER_WORDS }, 0);
@@ -460,7 +460,7 @@ async function forge(ctx, card, o) {
       const b = blind.filter((x) => x.B_ === blindedFor(op))[0];
       return !!at && !!b && card.state.dleq[at.i] === b.dleq.e + b.dleq.s + op.r;
     }), 'each carries e and s from the mint’s signature for it and the blinding factor r from the opening the card kept: the proof of its own piece');
-    ok(lines.filter((l) => /\bwrote \d+ piece/.test(l)).length === 1 && realOf(till, card).length === openings.length,
+    ok(lines.filter((l) => /\bwrote \d+ piece\(s\), /.test(l)).length === 1 && realOf(till, card).length === openings.length,
        'one line for the write, and the till notes the pieces real (it had them from the mint itself)');
     const good = await readAs(owner, card, { mine: true });
     const asked = sentOf(card, '1a');

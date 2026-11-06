@@ -527,11 +527,16 @@ extension FoxyBridge {
     /// reset and set-owner; the mint and unit chosen for set-card (a move written
     /// at a later tap uses the yes kept for that card); the figures chosen for
     /// set-limit, every other figure the card's own as it said it in this tap.
+    /// A yes that named a lift (a withdrawal's, a reset's, a transfer's) signs
+    /// lifts in its session: limits to 0 from what the card said, one at a time
+    /// (CardOwner.isLift); what they were is kept on the phone (CardLifts) and the
+    /// set-limit that puts exactly that back signs, in this tap or a later one.
     /// Two things sign with no yes because they change nothing the keeper chose
     /// (CardOwner.signsUnasked): a rate written before a top-up with the card's
     /// own figures, and a record at the card's own mint and unit, whose refund
-    /// key SeedActions checks is this phone's. Nothing is asked during the tap.
-    /// Anything else is CardOwner.declined.
+    /// key SeedActions checks is this phone's. These are looked at before any yes,
+    /// so that none of them uses up a yes the keeper gave for something else.
+    /// Nothing is asked during the tap. Anything else is CardOwner.declined.
     func handleCardOwnerSign(id: String, body: [String: Any]) {
         let request: CardOwner.SignRequest
         switch Self.cardOwnerSignCheck(body) {
@@ -545,22 +550,51 @@ extension FoxyBridge {
         guard request.label != .setOwner || CardOwner.isOwnerKey(request.value) else {
             return resolve(id: id, text: nil, error: "bad request")
         }
+        guard cardOwnerAllows(request) else { return resolve(id: id, text: nil, error: CardOwner.declined) }
+        onSeedQueue(id: id) { SeedActions.cardOwnerSign(request, env: $0) }
+    }
+
+    /// Whether the owner key signs `request` (any label but load), by the rules
+    /// above; a yes it uses is used up, a lift it signs is kept, and what the card
+    /// will hold after it is what the tap's next request is held to.
+    func cardOwnerAllows(_ request: CardOwner.SignRequest) -> Bool {
         dispatchPrecondition(condition: .onQueue(.main))
         let now = Date().timeIntervalSince1970
         dropSpentCardApprovals(now: now)
-        if let i = cardApprovals.firstIndex(where: { $0.session == cardSession && cardSessionOpen
-                                                    && CardOwner.matches(request, $0.approval, seen: cardSeen) }) {
-            cardApprovals.remove(at: i)
-            print("[foxy] card: \(request.label.rawValue) signed against the keeper's yes before the tap")
+        // the card held gave its key in this tap (GET_KEY), and what is signed is for it
+        guard let key = cardSeen.key, key == request.key else {
+            print("[foxy] card: \(request.label.rawValue) not signed: it is not for the card held, as it gave its key in this tap")
+            return false
+        }
+        let inSession: ((approval: CardOwner.Approval, session: Int?)) -> Bool = { $0.session == self.cardSession && self.cardSessionOpen }
+        let lifts = request.label == .setLimit ? CardLifts.kept() : []
+        if cardApprovals.contains(where: { inSession($0) && $0.approval.lift == true && CardOwner.matches(request, $0.approval, seen: cardSeen) }),
+           CardOwner.mayLift(request.key, seen: cardSeen, kept: lifts), let limits = cardSeen.limits {
+            // kept for its session: a card of two currencies is lifted once for each, and put back between
+            CardLifts.keep(CardOwner.Lift(card: request.key, from: limits))
+            print("[foxy] card: its limit lifted against the keeper's yes before the tap; what it was is kept until it is put back")
         } else if CardOwner.signsUnasked(request, seen: cardSeen) {
             print("[foxy] card: \(request.label.rawValue) signed unasked: it changes nothing the keeper chose")
-        } else if request.label == .setCard, CardMoves.use(for: request, seen: cardSeen) {
+        } else if CardOwner.putsBack(request, lifts, seen: cardSeen) != nil {
+            // kept until the card is seen holding it (cardSaw): one that never reached the card is asked again
+            print("[foxy] card: its limit put back as it was before it was lifted")
+        } else if let i = cardApprovals.firstIndex(where: { inSession($0) && $0.approval.lift != true
+                                                           && CardOwner.matches(request, $0.approval, seen: cardSeen) }) {
+            cardApprovals.remove(at: i)
+            // limits the keeper has just chosen: a lift from before them is not put back over them
+            if request.label == .setLimit { CardLifts.drop(card: request.key) }
+            print("[foxy] card: \(request.label.rawValue) signed against the keeper's yes before the tap")
+        } else if request.label == .setCard, CardMoves.matches(request, seen: cardSeen) {
+            // kept until the card takes it (SET_CARD answered 9000, cardSaw): a record that never reached the card is signed again
+            cardSeen.moveSigned = request.key
             print("[foxy] card: a move the keeper said yes to earlier is written now")
         } else {
             print("[foxy] card: \(request.label.rawValue) not signed: the keeper said yes to nothing like it")
-            return resolve(id: id, text: nil, error: CardOwner.declined)
+            return false
         }
-        onSeedQueue(id: id) { SeedActions.cardOwnerSign(request, env: $0) }
+        // what the card holds once it takes this, for what is asked after it in the tap
+        cardSeen = CardOwner.seen(after: request, cardSeen)
+        return true
     }
 
     /// {label, …} → {"approved": true}, or CardOwner.declined: the keeper's yes to
@@ -572,8 +606,9 @@ extension FoxyBridge {
     /// the seconds after an unlock stand in for the keeper. set-limit asks the
     /// alert alone. One question at a time, and no answer in 50 seconds is a no.
     /// A yes lasts for the next card session or 90 seconds, whichever ends first;
-    /// a move (`keep`) is kept in the Keychain for its card until the write that
-    /// uses it.
+    /// a move (`keep`) is kept in the Keychain for its card until the card takes
+    /// the record it signs. A yes that names a lift is asked in the same alert and kept as two
+    /// (CardOwner.split): the command's own, and the lift's for its whole session.
     func handleCardOwnerApprove(id: String, body: [String: Any]) {
         guard let approval = CardOwner.approval(body, at: Date().timeIntervalSince1970),
               let question = CardOwner.question(for: approval) else {
@@ -589,12 +624,15 @@ extension FoxyBridge {
             DispatchQueue.main.async {
                 self.cardOwnerAsking = false
                 guard yes else { return self.resolve(id: id, text: nil, error: CardOwner.declined) }
-                if approval.keep {
-                    CardMoves.keep(approval)
-                } else {
-                    // for the next card session: one already open is not it
-                    self.cardApprovals.append((approval, nil))
-                    if self.cardApprovals.count > 4 { self.cardApprovals.removeFirst(self.cardApprovals.count - 4) }
+                // the command's own yes, and its lift's where it named one (CardOwner.split)
+                for one in CardOwner.split(approval) {
+                    if one.keep {
+                        CardMoves.keep(one)
+                    } else {
+                        // for the next card session: one already open is not it
+                        self.cardApprovals.append((one, nil))
+                        if self.cardApprovals.count > 4 { self.cardApprovals.removeFirst(self.cardApprovals.count - 4) }
+                    }
                 }
                 self.resolve(id: id, text: Self.json(["approved": true]), error: nil)
             }
@@ -617,9 +655,11 @@ extension FoxyBridge {
         }
     }
 
-    /// Yeses past their 90 seconds, or bound to a session that has ended.
+    /// Yeses past their 90 seconds, or bound to a session that has ended. A lift's
+    /// yes, once its session has begun, lasts that session: the money can take
+    /// longer than that to come off, and the card may come back to the sheet.
     func dropSpentCardApprovals(now: TimeInterval) {
-        cardApprovals.removeAll { now - $0.approval.at > CardOwner.approvalLife
+        cardApprovals.removeAll { (now - $0.approval.at > CardOwner.approvalLife && !($0.approval.lift == true && $0.session != nil))
             || ($0.session != nil && ($0.session != cardSession || !cardSessionOpen)) }
     }
 
@@ -649,9 +689,23 @@ extension FoxyBridge {
         let body = Array(a.dropLast(2))
         switch c[1] {
         case 0x01:
-            if let limits = CardOwner.limitsSeen(body) { cardSeen.limits = limits }
+            if let limits = CardOwner.limitsSeen(body, granted: cardSeen.granted) {
+                cardSeen.limits = limits
+                /* a lift kept for this card that this answer shows it holding again is done with: from this answer's own figures
+                 * alone, never from what was signed since (`seen(after:)`), nor on any other answer */
+                if let key = cardSeen.key { CardLifts.settle(card: key, limits: limits) }
+            }
             if CardOwner.unownedSeen(body) { cardSeen.unowned = true }
+        case 0x10: if body.count == 33 { cardSeen.key = body }
         case 0x16: if let record = CardOwner.recordSeen(body) { cardSeen.unit = record.unit; cardSeen.mint = record.mint }
+        // the owner's grant: from here the card says its limit on one payment
+        case 0x45: cardSeen.granted = true
+        // a record the card took: a move kept for it is done with
+        case 0x32:
+            if let key = cardSeen.moveSigned {
+                CardMoves.done(card: key)
+                cardSeen.moveSigned = nil
+            }
         default: break
         }
     }
@@ -856,8 +910,9 @@ extension FoxyBridge {
 }
 
 /// The moves to another mint the keeper said yes to, kept for the card each is
-/// for until the write that uses it, which can be a later tap than the one that
-/// moved the money (CardOwner.useMove). In the Keychain, this device only, as a
+/// for until the card takes the record it signs (SET_CARD answered 9000), which can
+/// be a later tap than the one that moved the money (CardOwner.useMove): a record
+/// signed but never taken is signed again at the next tap. In the Keychain, this device only, as a
 /// list; a reinstall removes it with everything else a previous installation
 /// approved.
 enum CardMoves {
@@ -877,10 +932,52 @@ enum CardMoves {
 
     static func keep(_ move: CardOwner.Approval) { save(CardOwner.keepMove(kept(), move)) }
 
-    /// Whether a move kept for this card is what `request` writes; if so it is used up.
-    static func use(for request: CardOwner.SignRequest, seen: CardOwner.Seen) -> Bool {
-        guard let left = CardOwner.useMove(kept(), for: request, seen: seen) else { return false }
-        save(left)
-        return true
+    /// Whether a move kept for this card is what `request` writes. It is not used up by the signature: only by the card taking
+    /// the record (`done`), so that a tap that left before SET_CARD reached the card is signed again at the next one.
+    static func matches(_ request: CardOwner.SignRequest, seen: CardOwner.Seen) -> Bool {
+        CardOwner.useMove(kept(), for: request, seen: seen) != nil
+    }
+
+    /// The card took the record its kept move wrote: the move is done with.
+    static func done(card: [UInt8]) {
+        let list = kept()
+        guard list.contains(where: { $0.card == card }) else { return }
+        save(list.filter { $0.card != card })
+        print("[foxy] card: the move kept for it is written")
+    }
+}
+
+/// A card's limits as they were before a lift the keeper said yes to, kept in the
+/// Keychain beside nothing else until the card is seen holding them again, or the
+/// keeper sets a limit: the put-back signs, to a card seen lifted, in the same tap
+/// or a later one (CardOwner.Lift, putsBack). Only those figures, for that card.
+enum CardLifts {
+    static let key = "foxy.card.lifts"
+
+    static func kept() -> [CardOwner.Lift] {
+        guard let text = SeedStore.load(key: key),
+              let list = try? JSONDecoder().decode([CardOwner.Lift].self, from: Data(text.utf8)) else { return [] }
+        return list
+    }
+
+    private static func save(_ list: [CardOwner.Lift]) {
+        guard !list.isEmpty else { SeedStore.deleteIfPresent(key: key); return }
+        guard let data = try? JSONEncoder().encode(list), let text = String(data: data, encoding: .utf8) else { return }
+        if !SeedStore.save(text, key: key) { print("[foxy] card: what its limit was could not be kept on the phone") }
+    }
+
+    static func keep(_ lift: CardOwner.Lift) { save(CardOwner.keepLift(kept(), lift)) }
+
+    static func drop(card: [UInt8]) {
+        let list = kept()
+        if list.contains(where: { $0.card == card }) { save(list.filter { $0.card != card }) }
+    }
+
+    /// The card is seen holding these limits: a lift kept for it whose figures they are is done with.
+    static func settle(card: [UInt8], limits: [CardOwner.Figure: UInt32]) {
+        let list = kept()
+        guard list.contains(where: { $0.card == card && CardOwner.holds($0, limits) }) else { return }
+        save(list.filter { !($0.card == card && CardOwner.holds($0, limits)) })
+        print("[foxy] card: its limit is seen put back")
     }
 }

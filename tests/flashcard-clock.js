@@ -535,6 +535,28 @@ const withBits = (hex, bits) => { const b = Buffer.from(hex, 'hex'); b.writeUInt
       const [x, y] = await Promise.all([one, two]);
       ok(x.fetched && y.fetched && F.explored.length - before === 6, 'asked twice while a fetch is in flight, it is made once: six requests, not twelve', String(F.explored.length - before));
     }
+    /* Two rounds to each source, not three: the header and the height are asked together once the tip is known (each round to an
+     * onion is seconds; a phone's log had three in series take 10.3 s). Every request held until the test lets the round go. */
+    reset();
+    {
+      const answer = (tipIs(F, mineHeader(now() - 4, CHEAP)), F.explorer);
+      const waiting = [];
+      F.explorer = (host, path) => new Promise((go) => waiting.push(() => go(answer(host, path))));
+      const before = F.explored.length;
+      const run = FW.headerRefresh({ force: true });
+      const rounds = [];
+      for (let i = 0; i < 6 && F.explored.length - before < 6; i++) {
+        await new Promise((go) => setTimeout(go, 20));
+        rounds.push(waiting.length);
+        waiting.splice(0).forEach((go) => go());
+      }
+      await new Promise((go) => setTimeout(go, 20));
+      waiting.splice(0).forEach((go) => go());
+      r = await run;
+      F.explorer = answer;
+      ok(r.fetched && rounds.length === 2 && rounds[0] === 2 && rounds[1] === 4 && FW.headerKept().height > 0,
+         'two rounds: both tips at once, then both headers and both heights at once', JSON.stringify(rounds));
+    }
     // a source that quotes its answer, or ends it with a line break, is read all the same
     reset();
     {

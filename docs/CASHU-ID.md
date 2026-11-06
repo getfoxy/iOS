@@ -3,8 +3,8 @@
 A name another wallet keeps in its contacts and pays, with no server in the
 middle: something like a Lightning address, with more privacy. MENU › MY
 CASHU ID shows it as a QR code with SHARE. Another Foxy scans it, or pastes it
-on the home screen, names the contact, and from then on pays it from SEND ›
-CONTACTS. The ID itself is never what the money is locked to: every payment
+on the home screen, names the contact, and from then on pays it from
+CONTACTS (SEND › CONTACTS, or CONTACTS in the menu). The ID itself is never what the money is locked to: every payment
 is locked, by NUT-28 (pay-to-blinded-key, P2BK), to keys nobody has seen
 before, which only the ID's seed can open.
 
@@ -406,272 +406,31 @@ anything at most five times an hour), and the relays can count them. A delivery 
 the amount, note and E of every payment to the ID, but not spend them: that
 needs `d`. The ID key leaking is the words leaking.
 
-## Messages
+## The screens
 
-Two Foxys that hold each other's ID can write to each other, over the same
-relays and through Tor, without the relays seeing that the two are talking.
-Only once this phone's ID is in use (MY CASHU ID shown, or its words
-restored): with no ID in use there are no messages, none are listened for and
-none can be written, and a contact's screen says so.
+MY CASHU ID is the round button at the top left of home (the menu button's
+twin, with a head-and-shoulders drawing) and a row in the menu's WALLET; both
+open the same screen: the ID as a QR code with SHARE and DONE. Opened from home,
+DONE goes back to home; opened from the menu, back to the menu. With no ID read
+yet, both say NO CASHU ID and why.
 
-The code: `Foxy/Keychain/CashuMsg.swift` (the keys, native),
-`Foxy/Bridge/FoxyBridge+CashuID.swift` (`cashuIdMsgSend`, `cashuIdMsgOpen`),
-`Foxy/Nostr/NostrInbox.swift` (one inbox on many keys),
-`build/wallet/08f-cashu-msg.js` and `21d-cashu-msg.js` (the counters, the
-messages, the outbox), `build/app/26p-cashu-msg.js` (the screens). Tests:
-`tests/cashu-msg.js`, `tests/cashu-msg-ui.js`, `FoxyTests/CashuMsgTests.swift`,
-held to `tests/fixtures/cashu-msg-vectors.json`.
-
-### The keys
-
-Each phone works out one secret with each contact, from its own ID key `d` and
-the contact's ID:
-
-    secret = SHA-256("foxy-msg-pair-v1" ‖ x(d_mine · ID_peer))     32 bytes; x(d_A·ID_B) = x(d_B·ID_A)
-
-and from it two chains, one for each direction. `dir` is 0 for messages from the
-lower ID key to the higher (the two 33-byte compressed keys compared byte by
-byte) and 1 the other way. Message `i` (0, 1, 2 … below 2^32) of a direction goes
-to the x-only public half of
-
-    k_i = SHA-256("foxy-msg-recv-v1" ‖ secret ‖ dir ‖ i as 4 bytes, big-endian)
-
-and its seal (NIP-59's middle layer) is signed by
-
-    s_i = SHA-256("foxy-msg-seal-v1" ‖ secret ‖ dir ‖ i as 4 bytes, big-endian)
-
-each once more with `0xFF` appended if it is 0 or not below n. The receiver
-believes a message only when its seal is by s_i·G: anyone who saw k_i·G on a
-relay can send a wrap to it, but not one sealed by s_i, and the seal's key is
-inside the encryption, so no relay sees it.
-
-None of this reaches the page. The phone works the secret out on the seed queue,
-keeps it in memory for the session (wiped when Foxy leaves the foreground), and
-uses it for two things only: wrapping a body the page hands it to message `i`
-(`cashuIdMsgSend {peer, i, body}`, answering how many relays took it) and
-listening (`cashuIdMsgOpen`, below). The page gets plaintexts.
-
-For example, with the words `abandon … about` (A, the ID above) and `legal winner
-thank year wave sausage worth useful legal winner thank yellow` (B, ID
-`023b2460793848e414cf2b22a46c09860c42bc58cf3a03ad21d41ba2d0f22d131b`):
-
-    secret         6a5f0fdb73c034c9014e7ae34678ece1e5e66cfc9fcb9d9d973180738941ce26
-    dir A→B        1 (A's key is the higher), B→A 0
-    k_0, A→B       5009135d83cc679b9701373dfd2dc331681e1a9c6918fd4f68731172594168a1
-                   x-only 517bd5e82ebae70d66bd4ece190c2423358c242c980cc1310ae818f8e114d2f4
-    k_1, A→B       e17f2c2e8df1352627a14a074c362764d913f8438bd643d1ec2b2680617e24cd
-                   x-only bfefbb046170058ae87ffcdb2117842de0b62f458be953f5383ac7c0c87b095a
-    k_0, B→A       cd24c5ec166d3cb0ce152705498e0b2281d7c26f1119c74e31a59c774c1eafe6
-                   x-only 2841c1cf8f4825f7e6c7c1640faece14abe16e6e1d17920a778307757f357d81
-    s_0, A→B       30f5c8eaaa429f44840d4726101c701241ada1d85e535bc96df2edde77335a74
-                   x-only ee765f83b793fd5b9060932dd3a5c236931c8b323d326e9a22196f5f20e8faed
-
-Three implementations agree on these and the rest of the fixture: libsecp256k1
-in Swift (`CashuMsgTests`), `tests/harness.js`'s BigInt arithmetic, which wrote
-the file, and the noble curve the page bundles (`tests/cashu-msg.js`).
-
-### The message
-
-A NIP-17 gift wrap (kind 1059, `NostrEvent.giftWrapped`), its rumor (kind 14)
-holding:
-
-    { "v": 1, "type": "foxy-msg", "id": "<32 hex, random>", "text": "<at most 1,000 characters>",
-      "at": <ms>, "i": <its index>, "next": <the lowest index of theirs this phone has not had>,
-      "pad": "<random characters>" }
-
-padded with `pad` so the whole is exactly 512, 1,024 or 2,048 bytes, the
-smallest that holds it; a text that does not fit 2,048 is refused ("That message
-is too long."). A body of any other size, or any other shape, is dropped, and so
-is one whose `i` is above 2^32 − 9 (the window of eight past it must fit below
-2^32, so a contact's window is never empty). The text keeps line breaks; other
-control characters (C0, DEL and C1, U+0080 to U+009F) become spaces, and so do
-the marks that turn a line's direction (U+061C, U+200E, U+200F, U+202A to
-U+202E, U+2066 to U+2069); the invisible spaces U+200B, U+2060 and U+FEFF are
-dropped. The joiners U+200C and U+200D stay: emoji and some scripts need them.
-A message's `at` is kept no later than its arrival and no earlier than 32 days
-before it.
-
-**The first message to a contact** whose place this phone does not know goes
-once to the contact's public delivery key instead, as a payment goes, carrying
-"ratchet from now": the index it stands for, and this phone's ID proved as a
-payer is (`from`, a fresh `E`, `tag` = SHA-256("foxy-cashu-id-from-v1" ‖ x(d·ID) ‖ E)
-from `cashuIdTag`) with its ID string (`card`), so a receiver who has not added
-it can. The receiver believes it only with that tag, and from someone who is a
-contact or whose `card` is the ID in `from`; its window for this phone starts at
-`i + 1`. After a relay took it, every message goes by the chain. It goes by the
-delivery key again after a restore (below); when the other side's `next` says it
-is a window or more behind this phone's chain (`out − next ≥ 8`); and, with no
-answer, each time this phone's chain is eight, sixteen … past the most the other
-side said it had read (`out − ack` a multiple of 8, `ack` the highest `next`
-heard): a side whose window stopped on messages the relays lost hears the next
-one all the same.
-
-A first message is known again by its id, kept with its sender's conversation
-(the last 64, which nobody else's messages can push out), so one read again from
-the relays is "seen". It never moves the window back: below the window, only a
-first message newer than every message of theirs this phone holds moves it (a
-phone of theirs restored past what the relays hold, its chain started again);
-an older one never had (it came late) is kept as a line, and the window stays.
-
-**Where I stand.** A phone restored from the words (below) sends each contact
-it adds back one more message by the delivery key, proved as a first message
-is:
-
-    { "v": 1, "type": "foxy-msg-stand", "id": "<32 hex>", "text": "", "at": <ms>,
-      "i": <its next index to them>, "next": <the lowest index of theirs it has not had>,
-      "from", "E", "tag", "card", "pad" }
-
-It is silent: no line on either phone and nothing unread. The receiver takes
-its `next` as how far the restored phone has read (not the most it ever said),
-so when that is a window or more behind, its own next message goes by the
-delivery key and is heard. It takes no index and moves no window. It is believed
-only by the delivery key, from a contact or someone with a conversation already,
-and with no text: one by the chain, or with text, is refused.
-
-### Listening, and the window
-
-For each contact the phone listens on the next eight indices of theirs it has
-not had, starting at the lowest (`base`); a message that arrives moves the
-window on, one out of order is kept and its gap waits, and with eight had above
-a gap the gap is given up (a message the relays lost). All contacts' keys go to
-the phone in one request (`cashuIdMsgOpen {since, peers: [{peer, in: [i…], out:
-[i…]}]}`, at most sixty contacts and eight a direction each), and the phone asks
-the relays for each contact's on their own (`CashuMsgListen`): a REQ of their
-own, in an inbox of their own, on a Tor circuit of their own, at ONE of the three
-relays (every message goes to all three, so one hears it). Which one is the next
-in that contact's own random order of the three, kept in memory for the session
-and moved on each time the contact is reopened, so every relay is asked within
-three reopenings; never a counter shared by contacts, which would show each relay
-the same group of contacts every third opening. A relay that fails, answers
-CLOSED or goes is left, and the contact tried once more at another; one that
-found no relay is tried again after two minutes, then every ten, while Foxy is
-open:
-
-    ["REQ", "<sub>", {"kinds":[1059],"#p":["<k_i·G x-only>", … that contact's eight or sixteen],"since":<the start of the day before, 32 days back>,"limit":500}]
-
-The `since` is rounded down to a day and a day more, the same for every phone all
-day: the page's, to the second, was the same in every contact's REQ and named the
-moment the listen began. Each contact's open, and each retry, waits a random time
-inside a window of 3 seconds and 0.4 a contact (at most 20), at most six open at
-once, each given 20 seconds, so the relays and Tor's exits do not see forty
-circuits arrive together. The phone answers "1" once one
-is listening, within a minute. A contact asked for again with the same keys keeps
-its inbox, so a message moving one contact's window reopens that contact alone.
-
-A wrap opens only by the key its `p` tag names, and reaches the page
-(`_cashuMsgArrived(peer, way, i, body)`) only when its seal is by that key's
-s_i. The page asks again (a second and a half after the last arrival) with the
-windows moved on.
-
-### Sending
-
-A message is kept in its conversation, marked **sending…**, and in the outbox
-(`foxy.msg.outbox`) at once. It goes after a random wait of 0 to 20 seconds, so
-a relay cannot pair it with a tap on SEND, to Foxy's three relays over Tor, and
-is marked **sent** once a relay said OK. Until then it is tried again once a
-minute (every quarter of an hour after thirty tries), and at once when the
-route comes back: the outbox rules a payment to a contact keeps. Its outbox row
-goes only once the mark is written: when a relay took it while the store was
-full, the row stays, is not sent again, and the mark is tried again a minute
-later until there is room. A row whose message is already marked sent is
-dropped when the outbox is next sent.
-
-### Restoring
-
-The words do not bring storage back. Once a contact is added again (scanned or
-pasted), a phone restored in the last week listens on both chains with that
-contact from 0, its own messages too (both phones can open both chains), walks
-forward as they arrive and so reads back what the relays still hold (32 days),
-and resumes its own chain after the last of its own it found. It tells the contact
-where it stands at once ("Where I stand", above), so the contact's next message
-comes by the delivery key when the relays no longer hold enough to walk to it.
-Its first message to that contact goes by the delivery key, saying where it
-stands, and the contact, with its stored state, goes on from it. Messages older than the relays
-keep are gone, and an index this phone used before that the relays no longer
-hold may be used again: the relays then see one key twice.
-
-### The screens
-
-CONTACTS: a contact that is a Cashu ID opens its own screen; its row carries how
-many of its messages are unread. People who are not contacts and wrote are under
-NEW MESSAGES as "A Cashu ID", "Not in your contacts". A contact's screen: its
-name, PAY (the payment above), the messages oldest at the top and newest at the
-bottom with their time, this phone's own marked `sending…` or `sent`,
-and a field ("Message <name>") with SEND. Someone who is not a contact has ADD
-CONTACT in place of PAY, which asks NAME THIS CONTACT? with the ID string they
-sent, and "Not in your contacts." under the name. With no ID in use the screen
-has PAY and "NO MESSAGES YET: Messages go from your own Cashu ID. Open MY CASHU
-ID in the menu to start, then write to <name> here."
-
-CHAT, the round button at the top left of home (where CARD was: the card is
-home's CARD button now, beside SCAN and PASTE), carries the number of unread messages across every
-conversation on its corner, a filled circle in the accent colour ("1", "2" …
-"9+"), drawn again as a message arrives or is read. It opens INBOX, and so does
-CHAT in the menu's WALLET: everyone this phone has written to, heard from, paid
-or been paid by, newest first by the latest of a message or a payment either
-way. Each row has the name ("A Cashu ID" for someone who is not a contact), the
-last message's first line or the payment ("Paid $1.25", "Received 500 sats"),
-its time, and its unread count; a row opens that contact's screen. A payment is
-listed under a contact when this phone paid their ID (its outbox row, kept a
-week after it is collected or comes back) or when the payer proved who they are
-(`cidPeer` on the history row); a payer who did not is no one's. With nothing
-yet: "No conversations yet. Share MY CASHU ID to be paid or messaged." With no
-ID in use, the line the contact's screen has. CONTACTS stays the full list.
+CONTACTS, from the menu or from SEND, lists the contacts; a Cashu ID reads
+CASHU ID, and tapping it goes to SET AMOUNT for that contact (the payment
+above), from either. An empty CONTACTS says "Ask another Foxy user to share
+their Cashu ID with you to add them as a contact." with ADD A CASHU ID, a card
+with a field to paste the ID into (PASTE A CASHU ID, NEXT reads it as a pasted
+one is), and SCAN A CASHU ID under it (the camera, then the same). Neither is
+offered where the wallet cannot read an ID, and SCAN is not where it cannot
+scan.
 
 The menu, in this order, every section open until it is tapped shut:
 
     BACKUP ACCOUNT    only while the wallet holds a balance and the words are not verified
-    WALLET            FOXY CARD · MY CASHU ID · HISTORY · CHAT · CONTACTS · HIDE BALANCE · YOUR CHANGE
+    WALLET            MY CASHU ID · HISTORY · CONTACTS · HIDE BALANCE
     MINTS             SWITCH/ADD MINTS · TRANSFER MONEY (money at two mints or more) · SWAP and WHAT YOU HOLD
                       (a mint with two balances) · OTHER MINTS (an answer remembered)
     TOOLS             POINT OF SALE · SPLIT A BILL
     SETTINGS          BLUETOOTH TAP · SET PIN · FACE ID LOCK · BACKUP · RESTORE · RESTORE LOST CARD · TEST LOGS
-
-### Kept
-
-The last 200 messages with each contact, a megabyte in all, at most ten people
-who are not contacts (the eleventh's first message is dropped), whose messages
-between them keep to 128 KB of the megabyte, their oldest going first; past the
-megabyte, the oldest message of someone who is not a contact goes first and then
-the oldest of any, so people nobody added cannot push a contact's messages out.
-At most 100 messages waiting to go
-(`foxy.msg.threads`, `foxy.msg.outbox`, `foxy.msg.seen`, `STORAGE.md`).
-
-### What the relays see
-
-- gift wraps to keys that never repeat, each signed by a key made for it, so
-  nothing ties two messages to each other, to the ID, to the delivery key or to
-  the two people;
-- the one first message to a contact, which goes to its public delivery key, as
-  a payment does (and again after a restore, or when the other side fell a
-  window behind);
-- the time a wrap was published, blurred by the 0 to 20 seconds' wait and
-  NIP-59's backdating of `created_at`;
-- its size, one of three;
-- when one conversation is listened for (over Tor), and its keys: eight for a
-  contact this phone has heard from, sixteen for one it has not (its own next
-  eight too). Each contact's keys are in a REQ of their own, on a circuit of
-  their own, at one relay of the contact's own order, with a `since` every phone
-  shares all day, so no REQ shows which conversations are one phone's or how
-  many it has (two contacts' circuits can leave Tor by the same exit by chance). A window moving on keeps
-  seven of its eight keys from one listen to the next, so while a conversation
-  is quiet its keys are a pseudonym a relay can follow from listen to listen
-  (not to the phone's other conversations, nor to its ID). What could still tie
-  conversations together is timing: one phone's REQs reach the relays within
-  twenty seconds of each other each time Foxy is opened, and relays comparing
-  notes over many openings could guess which go together. A relay that serves a
-  REQ can link the wraps that match it to that listener.
-
-A message only one relay kept (the others refused it or dropped it, or took it
-and do not serve it) is heard when that contact is next asked for at that relay:
-the rotation reaches it within three reopenings of the contact (a message that
-moves the window, Foxy opened again, or a revival). If, before that, eight later
-messages from that contact arrive, its gap is given up (above) and the message is
-lost. The payments to an ID are another inbox, on the delivery
-key, and stay as they were: every payment to one ID goes to one key (THREAT-MODEL.md).
-
-A message carries no amount, no mint and nothing of a payment; a payment's
-note still goes in its own envelope (above), not as a message.
 
 ## Not built
 
@@ -687,6 +446,8 @@ note still goes in its own envelope (above), not as a message.
   one-time request (no screen shows it) was the stand-in.
 - The one-time request with an amount, or across mints this phone does not use; and a
   payment to the ID key itself at a mint this phone does not use (refused).
-- Messages: a payment's note sent as a message; read receipts; messages to more
-  than one person at once; anything but text; notification of a message while
-  Foxy is not in front (the phone listens only while it is).
+- Messages between two Cashu IDs. A contact is paid and nothing else; a
+  payment's note goes in its own envelope (above). An earlier build had them;
+  this build drops their stores at its first boot (`foxy.msg.threads`,
+  `foxy.msg.outbox`, `foxy.msg.seen`, STORAGE.md), and a first message an older
+  Foxy sends to the delivery key is refused as no payment.

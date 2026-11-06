@@ -98,7 +98,7 @@
      * quote's to say, so the room for it is checked there. */
     this.setState(p => ({
       screen: 'trConfirm', stack: p.stack.concat([p.screen]),
-      trSats: sats, trPlan: null, trFee: null, trErr: '', trFits: 0,
+      trSats: sats, trPlan: null, trFee: null, trErr: '', trFits: 0, cfMore: '',
     }));
     this.quoteTransfer();
   }
@@ -155,13 +155,15 @@
     if (this.refuseSwitchWhileBusy()) return;
     const to = this.mintNameOf(this.state.trTo);
     this.setState({ trBusy: true });
-    this.showMelt((plan.unit === 'usd' ? 'Moving your dollars to ' : 'Moving your sats to ') + to + '…', 0, { sats: this.state.trSats, mint: to });
+    // the fox, the figure following the move's own stages (26r-fox-wait.js); the melt loader where it cannot be drawn
+    const fox = !!(this.foxUp && this.foxUp('trMove', 'move', { forMs: this.MELT_PATIENCE_MS }));
+    if (!fox) this.showMelt((plan.unit === 'usd' ? 'Moving your dollars to ' : 'Moving your sats to ') + to + '…', 0, { sats: this.state.trSats, mint: to });
     /* Back on the mint the money leaves: the quote was made while connected to
      * the destination, and moveRun pays from whichever wallet is connected —
      * run from the destination it found nothing to spend (seen in the
      * simulator). */
-    W.connect(this.state.trFrom).then(() => W.moveRun(plan, () => {})).then(done => {
-      this.hideMelt();
+    W.connect(this.state.trFrom).then(() => W.moveRun(plan, fox ? this.foxHears('trMove') : () => {})).then(done => {
+      if (fox) this.foxEnd('trMove', true); else this.hideMelt();
       this.setState({ trBusy: false, trPlan: null, trStep: '', trErr: '' });
       this.refreshBalance();
       this.loadHistory();
@@ -171,7 +173,7 @@
         to: to, force: true,
       });
     }).catch(e => {
-      this.hideMelt();
+      if (fox) this.foxEnd('trMove', false); else this.hideMelt();
       this.setState({ trBusy: false, trErr: W.reason(e) });
       this.toast(W.reason(e), true);
     });
@@ -185,12 +187,56 @@
     if (W && back && W.mintUrl !== back) W.connect(back).then(() => this.refreshBalance(), () => {});
   }
 
+  /* The keeper's 1k (2026-11-06): MOVING, FEE and RECEIVING stacked, RECEIVING in the accent, and MORE DETAILS, which opens
+   * FROM and TO and the three fees the quote is made of: the source's for spending its pieces, the route's reserve (UP TO:
+   * what it does not use comes back), and the far mint's for the pieces it issues (`transferQuote`'s padding). `fig` says a
+   * figure in the unit that leaves. A dollar transfer says what it becomes, in the words the card's move uses. */
+  trLook(spec, o) {
+    const s = this.state;
+    const plan = s.trPlan;
+    const W = window.FoxyWallet;
+    const from = (this.mintNameOf(s.trFrom) || 'the other mint').toUpperCase();
+    const to = (this.mintNameOf(s.trTo) || 'this mint').toUpperCase();
+    const red = spec.amountInk === '#FF5C5C';
+    const waiting = s.trErr ? 'UNKNOWN' : 'CHECKING\u2026';
+    const reserve = plan ? Math.max(0, Math.round(Number(plan.reserve) || 0)) : 0;
+    const pad = plan ? Math.max(0, Math.round(Number(plan.padSats) || 0)) : 0;
+    const own = plan && o.fee != null ? Math.max(0, o.fee - reserve - (o.usd ? 0 : pad)) : null;
+    let note = '';
+    if (o.usd) {
+      let issued = [];
+      try { issued = (W && typeof W.mintUnits === 'function') ? (W.mintUnits(s.trTo) || []) : []; } catch (e) { issued = []; }
+      note = (issued.length && issued.indexOf('usd') < 0)
+        ? (this.mintNameOf(s.trTo) || 'That mint') + ' has no dollars, so the money becomes bitcoin.'
+        : 'The dollars leave ' + (this.mintNameOf(s.trFrom) || 'the other mint') + '; bitcoin lands at ' + (this.mintNameOf(s.trTo) || 'this mint') + '.';
+    }
+    return Object.assign({}, spec, {
+      stack: [
+        { label: 'MOVING', value: o.moving != null ? o.fig(o.moving) : waiting },
+        { label: 'FEE', value: o.fee != null ? o.fig(o.fee) : waiting },
+        { label: 'RECEIVING', value: o.receiving, big: true, ink: red ? '#FF5C5C' : 'var(--acc)', sub: o.receivingSub || '' },
+      ],
+      details: [
+        { label: 'FROM', value: from },
+        { label: 'TO', value: to },
+        { label: from + ' FEE', value: own != null ? o.fig(own) : waiting },
+        { label: 'LIGHTNING FEE', value: plan ? 'UP TO ' + o.fig(reserve) : waiting },
+        // (the far mint's fee is in what it issues: sats)
+        { label: to + ' FEE', value: plan ? this.money(pad).main : waiting, wide: true },
+      ],
+      detailNote: note,
+    });
+  }
+
   /* The confirmation screen's contents (confirmSpec). */
   transferSpec() {
     const s = this.state;
     if (s.trUnit === 'usd') return this.transferSpecUsd();
     const sats = s.trSats || 0;
     const fee = s.trFee;
+    // (what leaves is what lands and the fee, the most it can be)
+    const look = (sp) => (!this.trLook ? sp : this.trLook(sp, { fig: (n) => this.money(n).main, moving: fee != null && !s.trErr ? sats + fee : null,
+      fee: fee != null && !s.trErr ? fee : null, receiving: this.money(sats).main }));
     const rows = [
       this.cfRow('LANDING AT', (this.mintNameOf(s.trTo) || '').toUpperCase()),
       this.cfRow('PAYING FROM', (this.mintNameOf(s.trFrom) || '').toUpperCase(), { half: true }),
@@ -205,7 +251,7 @@
        * Asking again for the same amount would only be refused again, so that
        * is the button this replaces; CANCEL is still there. */
       const fits = s.trFits || 0;
-      return {
+      return look({
         title: 'CONFIRMATION', amountLabel: 'MOVING',
         amount: this.money(sats).main, amountSub: this.money(sats).sub, amountInk: '#FF5C5C', rows: rows,
         warn: s.trErr,
@@ -213,9 +259,9 @@
         ctaTone: fits > 0 ? 'go' : 'warn',
         go: () => { if (fits > 0) this.trMoveLess(fits); else this.quoteTransfer(); },
         secondary: { label: 'CANCEL', go: () => this.trCancel() },
-      };
+      });
     }
-    return {
+    return look({
       title: 'CONFIRMATION',
       amountLabel: 'MOVING',
       amount: this.money(sats).main,
@@ -224,11 +270,12 @@
       amountSub: this.money(sats).sub,
       rows: rows,
       secondary: { label: 'CANCEL', go: () => this.trCancel() },
-      cta: s.trBusy ? 'MOVING…' : fee == null ? 'CHECKING THE FEE…' : 'MOVE ' + this.money(sats).main,
+      // TRANSFER and what leaves (the keeper's 1k)
+      cta: s.trBusy ? 'MOVING…' : fee == null ? 'CHECKING THE FEE…' : 'TRANSFER ' + this.money(sats + fee).main,
       ctaTone: 'go',
       ctaBusy: !!s.trBusy || fee == null,
       go: () => { if (fee != null && !s.trBusy) this.runTransfer(); },
-    };
+    });
   }
 
   /* A transfer from dollars: the sats that land, and the dollars that leave at the source's quote, both on the one
@@ -240,6 +287,13 @@
     const out = plan && plan.unit === 'usd' ? Math.round(Number(plan.gross) || 0) : null;
     const fee = plan && plan.unit === 'usd' ? Math.max(0, Math.round(Number(plan.feeUnit) || 0)) : null;
     const from = (this.mintNameOf(s.trFrom) || '').toUpperCase();
+    /* Dollars leave and sats land: RECEIVING in dollars as drawn, at the source's own rate from its quote (`plan.rate`), so
+     * MOVING less FEE comes to it bar the far mint's fee; the market's price before there is a quote; the sats under it. */
+    const rate = (plan && plan.rate) ? Number(plan.rate.usdPerBtc) || 0 : 0;
+    const lands = rate > 0 ? this.unitFigure(Math.round(sats / 1e8 * rate * 100), 'usd') : this.money(sats).main;
+    const look = (sp) => (!this.trLook ? sp : this.trLook(sp, { usd: true, fig: (n) => this.unitFigure(n, 'usd'),
+      moving: out != null && !s.trErr ? out : null, fee: fee != null && !s.trErr ? fee : null,
+      receiving: lands, receivingSub: this.unitFigure(sats, 'sat') }));
     const rows = [
       this.cfRow('LANDING AT', (this.mintNameOf(s.trTo) || '').toUpperCase()),
       this.cfRow('LANDING', this.unitFigure(sats, 'sat'), { half: true }),
@@ -249,15 +303,15 @@
                  { half: true, sub2: 'You pay the mint\u2019s fees' }),
     ];
     if (s.trErr) {
-      return {
+      return look({
         title: 'CONFIRMATION', amountLabel: 'MOVING',
         amount: this.unitFigure(sats, 'sat'), amountSub: '', amountInk: '#FF5C5C', rows: rows,
         warn: s.trErr, cta: 'TRY AGAIN', ctaTone: 'warn',
         go: () => this.quoteTransfer(),
         secondary: { label: 'CANCEL', go: () => this.trCancel() },
-      };
+      });
     }
-    return {
+    return look({
       title: 'CONFIRMATION',
       amountLabel: 'MOVING',
       amount: this.unitFigure(sats, 'sat'),
@@ -265,9 +319,9 @@
       amountSub: out == null ? '' : this.unitFigure(out, 'usd'),
       rows: rows,
       secondary: { label: 'CANCEL', go: () => this.trCancel() },
-      cta: s.trBusy ? 'MOVING\u2026' : out == null ? 'CHECKING THE FEE\u2026' : 'MOVE ' + this.unitFigure(sats, 'sat'),
+      cta: s.trBusy ? 'MOVING\u2026' : out == null ? 'CHECKING THE FEE\u2026' : 'TRANSFER ' + this.unitFigure(out, 'usd'),
       ctaTone: 'go',
       ctaBusy: !!s.trBusy || out == null,
       go: () => { if (out != null && !s.trBusy) this.runTransfer(); },
-    };
+    });
   }

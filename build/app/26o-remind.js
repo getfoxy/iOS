@@ -68,7 +68,7 @@
     const W = window.FoxyWallet;
     this.blockedCard('remindAsk', {
       tone: 'ask', title: 'REMIND YOU?',
-      reason: 'Foxy can remind you after 15 days away, so a payment or message waiting for you is not missed.',
+      reason: 'Foxy can remind you after 15 days away, so a payment waiting for you is not missed.',
       retry: 'TURN ON', go: () => this.remindOn(),
       shut: { label: 'NOT NOW', tap: () => { if (W && W.remindNotNow) W.remindNotNow(); } },
     });

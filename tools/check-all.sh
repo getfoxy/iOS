@@ -67,6 +67,7 @@ check "two doors"      1 node tests/two-doors.js
 check "scan twice"     1 node tests/scan-twice.js
 check "scan cross mint" 1 node tests/scan-cross-mint.js
 check "pay from"       1 node tests/pay-from.js
+check "confirmations and pay from, as drawn" 1 node tests/confirm-screens.js
 check "attack 11-01"    1 node tests/attack-2026-11-01.js
 check "attack 11-01 r2" 1 node tests/attack-2026-11-01-round2.js
 check "attack 11-01 r3" 1 node tests/attack-2026-11-01-round3.js
@@ -75,7 +76,6 @@ check "attack 11-01 r5" 1 node tests/attack-2026-11-01-round5.js
 check "attack 11-01 r6" 1 node tests/attack-2026-11-01-round6.js
 check "attack 11-01 r7" 1 node tests/attack-2026-11-01-round7.js
 check "attack 11-01 r8" 1 node tests/attack-2026-11-01-round8.js
-check "attack 11-05"    1 node tests/attack-2026-11-05.js
 check "change twin"    1 node tests/change-twin.js
 check "address kept"   1 node tests/onchain-address-kept.js
 check "lock key kept"  1 node tests/lock-key-kept.js
@@ -96,6 +96,7 @@ check "change recovery" 1 node tests/change-recovery.js
 check "audit"          1 node tests/audit.js
 check "audit in flight" 1 node tests/audit-in-flight.js
 check "waiting screens" 1 node tests/waiting-screens.js
+check "fox wait"     1 node tests/fox-wait.js
 check "ask-again pace" 1 node tests/ask-again-pace.js
 check "send fee check" 1 node tests/send-fee-check.js
 check "long exact set" 1 node tests/long-exact-set.js
@@ -146,6 +147,7 @@ check "flashcard owner key" 1 node tests/flashcard-owner-vectors.js
 check "flashcard money" 1 node tests/flashcard-money.js
 check "flashcard one signature" 1 node tests/flashcard-sigall.js
 check "flashcard stale lift" 1 node tests/flashcard-stale-lift.js
+check "flashcard under the keeper's yes" 1 node tests/flashcard-gate.js
 check "flashcard take back" 1 node tests/flashcard-takeback.js
 check "flashcard screens" 1 node tests/flashcard-screens.js
 check "card headers"    1 node tests/card-headers.js
@@ -166,6 +168,7 @@ check "flashcard offline, screens" 1 node tests/flashcard-offline-ui.js
 check "flashcard in dollars" 1 node tests/flashcard-usd.js
 check "flashcard in dollars, screens" 1 node tests/flashcard-usd-ui.js
 check "flashcard of two units (1.23)" 1 node tests/flashcard-units.js
+check "flashcard five seconds a tap" 1 node tests/flashcard-tap-time.js
 check "switch guard"   1 node tests/switch-guard.js
 check "transfer quote"  1 node tests/transfer-quote.js
 check "transfer dollars" 1 node tests/transfer-dollars.js
@@ -204,6 +207,7 @@ check "tap nearby"     1 node tests/tap-nearby.js
 check "tap held"       1 node tests/tap-held.js
 check "tap settle"     1 node tests/tap-settle.js
 check "tap paid"       1 node tests/tap-paid.js
+check "received, at rest" 1 node tests/paid-rest.js
 check "history notes"  1 node tests/history-notes.js
 check "cross online"   1 node tests/cross-mint-online-only.js
 check "settle quiet"   1 node tests/settle-quiet.js
@@ -215,13 +219,12 @@ check "cashu id, other mints" 1 node tests/cashu-id-choice.js
 check "cashu id, screens" 1 node tests/cashu-id-ui.js
 check "cashu id, any wallet" 1 node tests/cashu-id-any.js
 check "reminder"       1 node tests/remind.js
-check "cashu id, messages" 1 node tests/cashu-msg.js
-check "cashu id, message screens" 1 node tests/cashu-msg-ui.js
 check "every field above the keyboard" 1 node tests/keyboard-lift.js
 check "amountless"     1 node tests/amountless-invoice.js
 check "render parity"  1 node tests/render-parity.js
 check "render snapshots" 1 node tests/render-snapshots.js
 check "two balances, screens" 1 node tests/two-balances-screens.js
+check "mint tiles"     1 node tests/mint-tiles.js
 check "two balances, send quote" 1 node tests/send-quote-first.js
 check "two balances, swap" 1 node tests/two-balances-swap.js
 check "swap, its requests" 1 node tests/swap-run.js

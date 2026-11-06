@@ -346,26 +346,6 @@ or the seed.
   (made by a second implementation, `tests/harness.js`, and held to cashu-ts by
   `tests/cashu-id.js`), and checks no reply holds d, q, the paying key, the
   recovery key, r₀ or a one-time key.
-
-  **Messages between Cashu IDs** (`cashuIdMsgSend`, `cashuIdMsgOpen`,
-  `Foxy/Keychain/CashuMsg.swift`; the design is `CASHU-ID.md`, Messages) use d
-  once more, for a secret shared with one contact:
-
-      secret = SHA-256("foxy-msg-pair-v1" ‖ x(d·ID_peer))                  the same on both phones
-      k_i    = SHA-256("foxy-msg-recv-v1" ‖ secret ‖ dir ‖ i, 4 bytes)     message i's key (0xFF retry)
-      s_i    = SHA-256("foxy-msg-seal-v1" ‖ secret ‖ dir ‖ i, 4 bytes)     its seal's key
-
-  `dir` is 0 for messages from the lower ID key (its 33 bytes) to the higher.
-  None of them reaches the page: the secret is worked out on the seed queue,
-  kept in memory for the session (`CashuMsg.cache`, at most 64, wiped when Foxy
-  leaves the foreground), and used only to wrap a message to k_i·G sealed by s_i
-  and to listen on and open the keys a contact may send to. The secret gives
-  every key of both chains, so it is held as d is. What the page can do: have the
-  phone send any body as message i to any contact, and listen on any index; it
-  learns only plaintexts sealed by the chain. `FoxyTests/CashuMsgTests.swift`
-  holds the derivation to `tests/fixtures/cashu-msg-vectors.json`, which
-  `tests/harness.js` wrote and `tests/cashu-msg.js` holds the page bundle's noble
-  curve to.
 - **A card's owner key** (`cardOwnerKey`, `cardOwnerSign`, `CardOwner` in
   `Foxy/Keychain/NUT13.swift`). A card that holds ecash is shown its owner as a
   P-256 public key at set-up, and its owner later signs, with the private half, to
@@ -385,7 +365,7 @@ or the seed.
   been got at can ask for a signature for any card whose key it knows, but a
   nonce comes only from a card held to the phone, and a signature is good for that
   nonce, in that tap, and no other, so it needs that card held to the phone.
-  Every label but `load` signs only against the keeper's yes, given before the card session (`cardOwnerApprove`, below), and uses it up: the same bytes for `change-pin`, `reset` and `set-owner`; the mint, and the unit where it was named, for `set-card`; the figures chosen for `set-limit`, every other figure in the value the card's own as its GET_INFO answer in this tap said it. Three things sign with no yes because they change nothing the keeper chose: a 16-byte limit whose day's, one payment's and no-PIN figures are the card's own (the rate written before a top-up in sats); a limit in the tap whose GET_INFO said the card had no owner (its set-up); and a record at the mint and unit the card's own record, read in this tap, names. A move to another mint the keeper said yes to (`keep`) is kept in the Keychain (`foxy.card.moves`) for its card until the write that uses it, which may be a later tap. A record (`set-card`) is signed only when the key its money goes back to is this phone's own: the request names the lock-key index (`refundIndex`) and native derives the key again from the seed; any other key, none, or no index is "Nothing was changed on the card.", whatever the mint and unit. Nothing is asked during a tap: the phone's alert would sit under the card sheet. A new owner key for `set-owner` must be a point on P-256, not only 65 bytes beginning 04, or it is "bad request" before anything else.
+  Every label but `load` signs only against the keeper's yes, given before the card session (`cardOwnerApprove`, below), and uses it up: the same bytes for `change-pin`, `reset` and `set-owner`; the mint, and the unit where it was named, for `set-card`; the figures chosen for `set-limit`, every other figure in the value the card's own as its GET_INFO answer in this tap said it. Three things sign with no yes because they change nothing the keeper chose: a 16-byte limit whose day's, one payment's and no-PIN figures are the card's own (the rate written before a top-up in sats); a limit in the tap whose GET_INFO said the card had no owner (its set-up); and a record at the mint and unit the card's own record, read in this tap, names. A move to another mint the keeper said yes to (`keep`) is kept in the Keychain (`foxy.card.moves`) for its card until the card takes the record it signs (SET_CARD answered 9000), which may be a later tap. A record (`set-card`) is signed only when the key its money goes back to is this phone's own: the request names the lock-key index (`refundIndex`) and native derives the key again from the seed; any other key, none, or no index is "Nothing was changed on the card.", whatever the mint and unit. Nothing is asked during a tap: the phone's alert would sit under the card sheet. A new owner key for `set-owner` must be a point on P-256, not only 65 bytes beginning 04, or it is "bad request" before anything else.
 - **The words are shown and typed on native screens**
   (`Foxy/Bridge/SeedScreens.swift`), in the page's wording. `seedShow` reads the
   words under the usual unlock and shows them behind TAP TO REVEAL, with VERIFY

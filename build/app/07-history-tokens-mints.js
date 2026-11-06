@@ -519,7 +519,8 @@
       /* Nor while change is on its way back to this phone: the top-up would
        * hold the proof lock, the change would wait behind it, and the
        * receiver would not be told in time that it was kept. */
-      if (this.moneyBusy() || this.movingMints() || this._changeDueAt) { this.tidyChangeLater(more); return; }
+      // (and while a card's sheet is up: every command to the card rides the thread this would)
+      if (this.moneyBusy() || this.movingMints() || this._changeDueAt || (W.cardSheetUp && W.cardSheetUp())) { this.tidyChangeLater(more); return; }
       // brought back meanwhile: the rest waits for the next put-away
       if (!this._putAway || this._tapTalking || this.state.tapArmed) {
         this.tidyChangeLater(more);
@@ -2345,7 +2346,9 @@
      * The same picture carries on under MOVING ECASH TO YOUR MINT when they
      * say to go ahead. The melt loader is what a page
      * without that file falls back to. */
-    if (!this.movingUp('VERIFYING ECASH', info.mint)) {
+    // the fox while the fee is asked (26r-fox-wait.js); the two banks, or the melt loader, where it cannot be drawn
+    const fox = !!(this.foxUp && this.foxUp('nmMove', 'fee', { forMs: this.MELT_PATIENCE_MS }));
+    if (!fox && !this.movingUp('VERIFYING ECASH', info.mint)) {
       if (!document.getElementById('foxy-melt')) this.showMelt('');
       this.meltHeading(this.mintNameOf(info.mint).toUpperCase(),
         'This token is from a mint you don\u2019t use. Foxy is checking the fee to move it.');
@@ -2364,10 +2367,10 @@
 
     ask(2).then(plan => {
       // the figures are on screen and REDEEM is live: nothing left to wait for
-      this.movingDown();
+      if (fox) this.foxEnd('nmMove', true); else this.movingDown();
       this.setState({ nmPlan: plan, nmStage: '' });
     }).catch(e => {
-      this.movingDown();
+      if (fox) this.foxEnd('nmMove', false); else this.movingDown();
       // too small to move: keeping it at its mint, or leaving it, is what is left
       const tooSmall = /more than the token is worth/i.test(String((e && e.message) || e));
       this.setState({ nmPlan: null, nmStage: '', nmErr: W.reason(e), nmTooSmall: tooSmall });
@@ -2389,9 +2392,12 @@
     // one line for the whole move, claim and payment alike
     this.setState({ nmBusy: true, nmErr: '', nmStage: 'Moving to your mint\u2026' });
     // the same two banks again, now with the sats actually crossing between them
-    if (!this.movingUp('MOVING ECASH TO YOUR MINT', this.state.nmInfo && this.state.nmInfo.mint)) {
+    // the fox, the claim and then the move's own stages (26r-fox-wait.js); the two banks, or the melt loader, where it cannot be drawn
+    const fox = !!(this.foxUp && this.foxUp('nmMove', 'move', { forMs: 120000 }));
+    if (!fox && !this.movingUp('MOVING ECASH TO YOUR MINT', this.state.nmInfo && this.state.nmInfo.mint)) {
       this.showMelt('Moving to your mint\u2026');
     }
+    const down = (landed) => { if (fox) this.foxEnd('nmMove', landed); else this.movingDown(); };
     this._quiet = true;
     this._hushUntil = Date.now() + 120000;
     this.expectOwnSpend();
@@ -2402,12 +2408,15 @@
     }).catch(() => { this._sweepBefore = null; });
 
     W.receiveToken(this.state.nmToken).then(r => {
-      return W.moveRun(plan, () => {}).then(done => this.hushSweepEntries().then(() => done)).then(done => {
+      // claimed at their mint: the first mint has answered
+      if (fox) this.foxStep('nmMove', 'answered');
+      return W.moveRun(plan, fox ? this.foxHears('nmMove') : () => {}).then(done => this.hushSweepEntries().then(() => done)).then(done => {
         /* The move's own history entries are marked seen, and taken out of the
          * confirmation queue, before anything reloads history. walletReady ran
          * first, queued the claim at this mint as a payment received, and it
          * showed as a second confirmation when the move's own was dismissed. */
-        this.movingDown();
+        // change left at the source: the fox stays up, near the end, for that second pass (`sweepChange`)
+        if (!(fox && (done.leftBehind || 0) > 0)) down(true);
         this._quiet = false;
         // what landed, not what the token said before fees
         this._netLanded = done.sats;
@@ -2439,7 +2448,7 @@
           hash: 'sweep-' + Date.now(), to: 'ecash',
         });
       }).catch(e => {
-        this.movingDown();
+        down(false);
         this._quiet = false;
         this.setState({
           nmBusy: false, nmStage: '',
@@ -2448,7 +2457,7 @@
         this.walletReady({ name: r.host });
       });
     }).catch(e => {
-      this.movingDown();
+      down(false);
       this._quiet = false;
       this.setState({ nmBusy: false, nmStage: '', nmErr: W.reason(e) });
     });
@@ -2517,13 +2526,16 @@
     this.expectOwnSpend();
     // one extra pass only: the second move leaves its own change, and chasing
     // that forever would spend more on quotes than it recovers
-    if (this._chasingChange) { return; }
+    // the fox the move left up for this pass ends where this pass does not run (26r-fox-wait.js)
+    const foxLeft = !!(this.foxOn && this.foxOn('nmMove'));
+    if (this._chasingChange) { if (foxLeft) this.foxEnd('nmMove', true); return; }
     /* Collecting the change connects to the source mint. If a payment started
      * while the first move ran, that switch would pull it onto the wrong mint,
      * so the change stays where it is — still spendable there — and the
      * confirmation reports what landed. Checked before this pass marks itself
      * busy, or it would always refuse. */
     if (this.moneyBusy()) {
+      if (foxLeft) this.foxEnd('nmMove', true);
       console.log('[foxy] change of', left, 'sats left at the source: a payment is in progress');
       this._quiet = false;
       this._hushUntil = Date.now() + 30000;
@@ -2535,11 +2547,14 @@
     }
     this._chasingChange = true;
     this._sweepBefore = null;
-    this.showMelt('Moving to your mint\u2026');
+    // the same fox carrying on, or one of its own; the melt loader where it cannot be drawn
+    const fox = foxLeft || !!(this.foxUp && this.foxUp('nmMove', 'move', { forMs: this.MELT_PATIENCE_MS }));
+    if (!fox) this.showMelt('Moving to your mint\u2026');
     this._quiet = true;
 
     const done = (extra, note) => {
-      this.hideMelt();
+      // the money that came landed whether or not the change did: ALL SET
+      if (fox) this.foxEnd('nmMove', true); else this.hideMelt();
       this._quiet = false;
       this._chasingChange = false;
       this.refreshBalance();
@@ -2557,7 +2572,7 @@
     // as both ends and refuse with "already from this mint" — and left the app
     // sitting on the source mint's balance afterwards.
     W.sweepQuote(from, left)
-      .then(plan => W.connect(from).then(() => W.moveRun(plan, () => {})))
+      .then(plan => W.connect(from).then(() => W.moveRun(plan, fox ? this.foxHears('nmMove') : () => {})))
       .then(r => this.hushSweepEntries()
         .then(() => done(r.sats, 'moved ' + r.sats + ', ' + (r.leftBehind || 0) + ' still left')))
       .catch(e => {

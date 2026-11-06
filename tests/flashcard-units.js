@@ -55,6 +55,9 @@
 const fs = require('fs');
 const path = require('path');
 const { funded, page, newCard, settle, why, OTHER_WORDS, MINT, MINT2 } = require('./flashcard-kit');
+// (a first load cut eight deep and written in one tap, as before 2026-11-06: this suite's drawers are such a load's; flashcard-tap-time.js holds the defaults)
+require('./flashcard-kit').deepFirstLoads(8);
+require('./flashcard-kit').uncappedTaps();
 const { booksWrong } = require('./harness');
 const { makeCard } = require('./flashcard-card');
 const { appOn, until, pad, card: cardUp, vals, settle: uiSettle, speed } = require('./flashcard-ui-kit');
@@ -995,11 +998,11 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
          'a card of 1.23: "What will this card hold?" with DOLLARS, BITCOIN and BOTH', v.curCards.map((x) => x.name).join());
       const b = v.curCards[2];
       ok(b.balance === '' && b.labelShown === false && v.curCards.every((x) => x.labelShown === false && x.balance === '')
-         && v.curCards.every((x) => x.badgePx === '60px' && x.nameSize === '28px' && x.radius === '30px' && !x.markShown && !x.balShown && typeof x.tap === 'function'),
-         'BOTH is a tile of the same shape; the set-up tiles are the owner’s: a 60px badge, the word, no balances', JSON.stringify([b.balance, b.labelShown]));
-      ok(b.symTwo && !b.symOne && /^linear-gradient\(115deg,#D6EEF7 0%,#B9DCEA 49\.8%,transparent 50\.2%\),/.test(b.bg) && /foxy-fur\.webp/.test(b.bg)
-         && v.curCards[0].symOne && !v.curCards[0].symTwo && v.curFootShown === false,
-         'BOTH split between dollars’ frost and bitcoin’s fur, its badge $ and ₿; nothing under the tiles', b.bg);
+         && v.curCards.every((x) => x.labelPx === '40px' && x.radius === '30px' && (x.signOne ? !!x.sign : x.signTwo) && !x.balShown && typeof x.tap === 'function'),
+         'BOTH is a tile of the same shape; the set-up tiles are the keeper’s: the sign faint, the word 40px, no balances', JSON.stringify([b.balance, b.labelShown]));
+      ok(b.signTwo && !b.signOne && /^linear-gradient\(105deg,#CDEAF1 0%,#BFE3EC 49\.8%,#EB6A2E 50\.2%,#D9561C 100%\)$/.test(b.bg)
+         && v.curCards[0].signOne && !v.curCards[0].signTwo && v.curFootShown === false,
+         'BOTH split between dollars’ blue and bitcoin’s orange, with the $ and the ₿; nothing under the tiles', b.bg);
       b.tap();
       a.fcSuSkip();
       a.fcSuSkip();

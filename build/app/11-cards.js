@@ -773,19 +773,24 @@
        * long enough to see. */
       return new Promise((resolve, reject) => {
         let over = false, shown = false;
-        const down = () => { if (shown && this.hideStage) this.hideStage('calcFee'); };
+        // the fox's ALL SET where the fee came, down at once where it did not (26r-fox-wait.js)
+        const down = (landed) => {
+          if (!shown) return;
+          if (this.foxEnd) this.foxEnd('calcFee', landed);
+          else if (this.hideStage) this.hideStage('calcFee');
+        };
         const up = setTimeout(() => {
           if (over || !this.stageScreen) return;
           shown = true;
           this.stageScreen('calcFee', {
-            art: 'mints', title: 'Calculating<br>fee', dots: true, forMs: 45000,
+            fox: 'fee', art: 'mints', title: 'Calculating<br>fee', dots: true, forMs: 45000,
             body: 'The receiver uses another mint, wait while I calculate the fee to pay them.',
             button: 'CANCEL',
             go: () => { if (over) return; over = true; console.log('[foxy] crossing: cancelled while the fee was being worked out'); resolve(false); },
           });
         }, 120);
         plan.then((p) => {
-          clearTimeout(up); down();
+          clearTimeout(up); down(!over);
           if (over) return;
           over = true;
           this.crossMintCard(p, theirMint, myMint).then(resolve, reject);

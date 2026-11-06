@@ -138,6 +138,7 @@ only:
 | `-FoxySeedScreenTest show` / `verify` / `enter` / `counters` / `wipe` | Three seconds after the page loads, asks the bridge from the page for the seed actions (§14) and logs one `[seedscreentest]` line with each answer, secrets as counts only. Makes a seed if there is none. `wipe` asks to delete the seed |
 | `-FoxyTorStall auth` | Every reply to Tor's control authentication is dropped until RESTART TOR or RETRY is tapped: a hang a phone once showed, on demand (§5h) |
 | `-FoxyTorStall listener` | The TCP control port is treated as refused once, as iOS leaves it after reclaiming a suspended app's sockets, so the recovery runs on demand (§5i) |
+| `-FoxyFirstDepth N` | A card's first load is cut N deep (1 to 8; 1, one binary set, is the default) for this run, for §23g |
 | `-FoxyReminderMinutes N` | The reminder after 15 days away (REMIND ME AFTER 15 DAYS) is set for N minutes (at least 1) instead of 15 days, so it can be seen to fire: allow it, leave Foxy, wait N minutes |
 | `-FoxyKeychainTest YES` | At launch, checks the keychain rules on scratch entries — a different seed refused without replace, the Orbot key stored — and logs `[keychaintest]` lines. It only reads the wallet's own seed |
 
@@ -222,13 +223,12 @@ you added for testing. Debugger detached and Console.app streaming, as in the
 setup above, unless a step says otherwise.
 
 **Menu paths.** The menu has four sections, each open until tapped shut:
-WALLET (FOXY CARD, MY CASHU ID, HISTORY, CHAT, CONTACTS, HIDE BALANCE, YOUR
-CHANGE), MINTS (SWITCH/ADD MINTS, TRANSFER MONEY), TOOLS (POINT OF SALE, SPLIT A
+WALLET (MY CASHU ID, HISTORY, CONTACTS, HIDE BALANCE), MINTS (SWITCH/ADD MINTS, TRANSFER MONEY), TOOLS (POINT OF SALE, SPLIT A
 BILL) and SETTINGS (BLUETOOTH TAP, SET PIN, FACE ID LOCK, BACKUP,
 RESTORE, RESTORE LOST CARD, TEST LOGS). BACKUP ACCOUNT is at the very top while
 the wallet holds money and the words are not verified; BACKUP is always under
 SETTINGS. LOGS is TEST LOGS; SPLIT is SPLIT A BILL; the card is MENU → FOXY CARD
-(home's top-left button is CHAT, which opens INBOX).
+(home's top-left button is MY CASHU ID, with a head-and-shoulders drawing).
 
 ### A. Tor, the network, and what leaves the phone
 
@@ -699,7 +699,7 @@ one phone and a second wallet on that mint. **Test money only.** Debug build.
 3. Phone A scans B's QR. **Pass:** the usual send confirmation opens at once,
    with no card in between (the mint settles its own invoice inside itself; the
    PAYING ANOTHER … USER card with USE CASHU was removed on 2026-11-01).
-4. Tap SEND. **Pass:** B's invoice is paid within seconds and A's confirmation
+4. Tap PAY. **Pass:** B's invoice is paid within seconds and A's confirmation
    shows no Lightning fee.
 5. (No token screen is involved any more.)
 6. Phone B taps SCAN on its invoice screen (the fourth round button) and scans
@@ -812,10 +812,11 @@ landed on a control that no longer existed.
 
 #### 21g. Ecash in and out
 
-1. Receive a token from **another mint**. **Pass:** VERIFYING ECASH, then
-   MOVING ECASH TO YOUR MINT, the top bank 60px lower, looping for as long as
-   it takes; and the whole thing finishes well inside the 30 seconds that was
-   complained about.
+1. Receive a token from **another mint**. **Pass:** the fox on black with
+   CHECKING THE FEE and a rising percentage, ALL SET, then after REDEEM the fox
+   again with MOVING YOUR MONEY; the fox moves only while the percentage does
+   and never starts over; and the whole thing finishes well inside the 30
+   seconds that was complained about.
 2. Split a bill and have the payers pay. **Pass:** they are marked complete on
    COLLECTING **while it is open** — not only in history afterwards.
    *(Known: a payer's own QR screen does not react — sitting on Payer 2 while
@@ -838,8 +839,8 @@ swaps. The first step also needs a mint that pays out on chain.*
    its fee: this needs N sats and you hold M." under the rows (N is the
    amount, the fee shown, and what the mint charges to swap what you hold);
    back is the way out; where the mint offers a slower speed, CHANGE THE SPEED
-   is there and a speed that costs less turns the button to SEND. An amount
-   that fits with all of it reads SEND, and pays.
+   is there and a speed that costs less turns the button to PAY. An amount
+   that fits with all of it reads PAY and what leaves, and pays.
 2. **A payment request.** Scan a request for the most the balance holds less
    the mint's fee, plus one sat. **Pass:** the offer's button reads NOT ENOUGH
    with the same sentence, and pressing it makes nothing. One sat less is not
@@ -1250,17 +1251,31 @@ what it did.
 Needs a phone with a Cashu ID in use (MENU → MY CASHU ID has been opened, or the words were restored) and a Debug build run
 with `-FoxyReminderMinutes 2`.
 
-1. Open MENU → MY CASHU ID, close it, put Foxy away and bring it back. **Pass:** no card over the code; at the return a card says "Foxy can remind you after 15 days away, so a payment or
-   message waiting for you is not missed." with TURN ON and NOT NOW. (If notifications were already allowed for payments, no
+1. Open MENU → MY CASHU ID, close it, put Foxy away and bring it back. **Pass:** no card over the code; at the return a card says "Foxy can remind you after 15 days away, so a payment
+   waiting for you is not missed." with TURN ON and NOT NOW. (If notifications were already allowed for payments, no
    card: the switch is simply on.)
 2. TURN ON. **Pass:** iOS asks its own notification question once; MENU → SETTINGS shows REMIND ME AFTER 15 DAYS, the first
    row of SETTINGS, on.
-3. Put Foxy away and wait 2 minutes. **Pass:** a notification "You have not opened Foxy in 15 days. A payment or message may
-   be waiting for you." Tapping it opens Foxy.
+3. Put Foxy away and wait 2 minutes. **Pass:** a notification "You have not opened Foxy in 15 days. A payment may be waiting
+   for you." Tapping it opens Foxy.
 4. Open Foxy, leave it again after one minute, and wait 90 seconds. **Pass:** nothing yet (each coming and going starts the
    wait again); it comes 2 minutes after the last.
 5. Turn REMIND ME AFTER 15 DAYS off and put Foxy away. **Pass:** nothing arrives. Turn it on again: iOS is not asked twice.
 6. A phone with no Cashu ID in use. **Pass:** no REMIND ME AFTER 15 DAYS row and no card.
+
+#### 13s. Home's MY CASHU ID button, and a contact from the menu
+
+Needs a phone with a Cashu ID contact saved, and a phone that has never opened MY CASHU ID (a fresh install will do).
+
+1. On home, look at the top left. **Pass:** a round button the size and look of the menu button at the top right, with a
+   head-and-shoulders drawing, and no number on its corner. No chat button anywhere, and no CHAT in the menu.
+2. Tap it. **Pass:** MY CASHU ID, the code with SHARE and DONE, the same screen as MENU → MY CASHU ID. DONE goes back to
+   home with the menu shut. On the fresh install the first tap reads the ID from the words first (Face ID if it is on),
+   as the menu row does.
+3. MENU → CONTACTS, tap the Cashu ID contact. **Pass:** SET AMOUNT, "How much to send to <name>?", with no messages
+   screen in between; back returns to CONTACTS. No unread counts and no NEW MESSAGES on CONTACTS.
+4. On a phone that had the earlier build with messages, open Foxy once. **Pass:** nothing of the old conversations
+   anywhere, and paying a contact still works.
 
 #### 13f. Typing a mint address
 
@@ -1462,7 +1477,7 @@ build first, then one of them on an older build.
    This is the check that the version byte and the bound message kind broke
    nothing.
 2. **Change, and a payer put away.** An offline payer pays over, so change
-   comes back; and a payer put in the background straight after SEND, then
+   comes back; and a payer put in the background straight after PAY, then
    brought back. **Pass:** the change is kept, and the payer hears the result
    again. Both use messages that are now bound to their kind.
 3. **An older payer.** The receiver on this build, the payer on a build from
@@ -1503,8 +1518,8 @@ Two phones each showing an invoice, a hand's width apart, and a third to pay.
 4. **Backing out early.** RECEIVE, an amount, NEXT, and BACK within a second.
    Then MENU, the mint list, pick another mint. **Pass:** it switches; it
    does not say to wait for a payment to finish.
-5. **The mint list.** With more mints than fit, the list scrolls to ADD MINT
-   BY URL and ADD MINT BY QR.
+5. **The mint list.** With more mints than fit, the list scrolls to the last
+   tile, ADD A MINT, and its scan button.
 6. **A receipt.** Pay another Foxy by tap at the same mint (a locked
    payment). Open the payment in history a few seconds later. **Pass:**
    RECEIPT says it was taken by the key it was locked to; COPY RECEIPT copies
@@ -1612,19 +1627,16 @@ and load it), a phone whose build carries the NFC entitlement
    the PIN is typed only if the card wants it: 23c-10. The card tested so far is
    an earlier one, which ends that first tap asking for the PIN, and is tapped
    again once it has been typed.)
-   **Pass:** behind the sheet the screen is TAP BEHIND PHONE (light blue, a card
-   coming down behind a phone with three waves rising, looping) over the amount;
-   the moment the card connects it turns orange with the fur and the card
-   settles, saying KEEP HOLDING · 0 s and counting up a second at a time; the
+   **Pass:** behind the sheet the screen is TAP TO PAY (1a: light blue, the arrow
+   bobbing over the top with TAP CARD BEHIND THE TOP) over the amount; the moment
+   the card connects it turns orange and says PAYING (1c), the dots going; the
    sheet reads the card and counts the pieces it signs ("Signing piece 2 of 4"),
    and the moment the last is signed says "Hold for change." while the screen
-   says VERIFYING CARD; then, where there is change, the sheet asks for the card
-   again and the screen is TAP FOR CHANGE (light blue, looping) until the card
-   is found, VERIFYING CARD while the change goes on; and after that the
-   ordinary paid screen. Where nothing is owed back, the screen says REMOVE once
-   the card has signed. Check that each title is on one line, the card is the
-   right design (the picture for a Foxy card, the drawn face otherwise) and the
-   count matches your own count of the seconds. Time two
+   still says PAYING; then, where there is change, the sheet asks for the card
+   again and the screen is TAP FOR CHANGE (1a) until the card is found, RECEIVING
+   (1c) while the change goes on; and after that RECEIVED (1h). Where nothing is
+   owed back, the screen turns teal and says CHECKING (1d) once the card has
+   signed. Check that each title is on one line and the amount is whole. Time two
    things apart: from the sheet opening to "Verifying" (how long the card is
    held; the model says about 1.2 seconds for one piece, with the phone finding
    the card on top), and from there to the second tap being asked for (the
@@ -1646,30 +1658,26 @@ and load it), a phone whose build carries the NFC entitlement
    away. **Pass:** its PAYMENT RECEIVED is its own amount, and the first's does
    not come up again.
 2c. Lift the card away part way through the first tap, and again part way
-   through the change. **Pass:** each time the screen turns to PLEASE TAP AGAIN
-   (light blue, the card looping) the moment the card is lost (or TAP FOR CHANGE,
-   if none of the change had gone on yet), the same sheet asks for the card, the
-   count begins again from the new contact, and the
+   through the change. **Pass:** each time the screen turns red, CARD LOST (1g),
+   the moment the card is lost, the same sheet asks for the card, it is orange
+   again (1c) from the new contact, and the
    next tap finishes: the payment is made, the change is all back, and no PIN
    pad comes up for the rest of the change.
 2d. The screen behind the sheet, on its own. On a card with a PIN and no no PIN limit, pay at the till: **Pass:** the sheet ends
-   with `Enter the card's PIN`, the pad comes up (ENTER PIN is under it), and after the PIN the sheet comes up with PLEASE TAP
-   AGAIN behind it, the card looping. Back from the pad leaves the invoice with nothing behind it. Turn on Reduce Motion
-   (Settings, Accessibility, Motion): **Pass:** the card is drawn settled behind the phone and does not move, in every state.
-   On the smallest phone you have, KEEP HOLDING · 12 s is still on one line. Open FLASHCARD, tap a card of this phone's own,
-   and one of a Flash card: **Pass:** the card in the picture is the card's own design once it is read. Look at how much of the
-   amount the sheet covers on each phone.
+   with `Enter the card's PIN`, the pad comes up (ENTER PIN is under it), and after the PIN the sheet comes up with TAP TO PAY
+   behind it, the arrow bobbing. Back from the pad leaves the invoice with nothing behind it. Turn on Reduce Motion
+   (Settings, Accessibility, Motion): **Pass:** the dots and the arrow stand still in every state, and RECEIVED's flash still
+   plays. On the smallest phone you have, STILL CHECKING and TAP TO WITHDRAW are each on one line. Look at how much of the
+   amount the sheet covers on each phone, and whether TAP CARD BEHIND THE TOP sits clear of the Dynamic Island.
 2e. The screen behind the sheet when the mint is slow. A swap that hangs cannot be made on demand; the nearest is a request that
    goes nowhere: 100% Loss from the Network Link Conditioner (Settings, Developer, on a phone set up for development), switched
    on as the sheet ends, on a price an exact set of the card's pieces makes (so there is no change, and the sheet ends at once
    with only its tick). If Foxy answers that at once with NO CONNECTION the request did not hang, and the CHECKING card is what
-   is shown, as in step 4. **Pass:** where it hangs, behind the sheet the screen says REMOVE, and by a second and a half after
-   the card signed, or as the sheet is seen to go, whichever is first, it says CHECKING in its place and not REMOVE: on the same
-   orange ground, the card settled, no CANCEL. About a minute after CHECKING came up it says STILL CHECKING (the wait the CHECKING
-   card makes: a first asking at 3 seconds and a dozen at 5). Turn the condition off: the payment is made once the mint has
-   answered, and PAYMENT RECEIVED goes up after the screen has come down. A payment that makes change is different: **Pass:**
-   the sheet stays up saying `Hold for change.` and the screen behind it says VERIFYING CARD, as it always did, and TAP FOR
-   CHANGE if the card must be tapped again.
+   is shown, as in step 4. **Pass:** where it hangs, behind the sheet the screen is teal and says CHECKING (1d), the dots going,
+   CLOSE and no CANCEL. About a minute after the card signed it says STILL CHECKING (the wait the CHECKING screen makes: a first
+   asking at 3 seconds and a dozen at 5). Turn the condition off: the payment is made once the mint has answered, and RECEIVED
+   goes up after the screen has come down. A payment that makes change is different: **Pass:** the sheet stays up saying
+   `Hold for change.` and the screen behind it says PAYING (1c), and TAP FOR CHANGE if the card must be tapped again.
 2f. A confirmation does not come up over a card being tapped. With two phones on one mint, the first holding a card to ADD FUNDS
    (or WITHDRAW), and sheet up, have the second phone pay the first (a request, or a tap), and a third payment too if you
    can. **Pass:** nothing comes up on the first phone while its sheet is up, or the screen behind it, or the PIN pad that
@@ -2046,7 +2054,7 @@ on a real card. The sheet's lines are short from this release: `Tap behind the p
    PIN leaves the money owed to the card; TRY AGAIN asks again.
 10. **HOW TAP LIMIT WORKS.** LIMITS, PER TAP LIMIT. **Pass:** for a card of 1.18 the rows say `~1–4 SEC TAP`, `~9 SEC TAP`,
     `~11 SEC TAP`, `~13 SEC TAP` (a card of 1.17: 9, 10 and 12). Charge over the limit and watch the screen behind the sheet:
-    KEEP HOLDING counts to about the row's figure for that tier (two more seconds for each further limit's worth), and the till's
+    PAYING (1c) stays up for about the row's figure for that tier (two more seconds for each further limit's worth), and the till's
     sheet reads `Over per tap limit`, `x2`, `x3` as it goes on.
 
 #### 23d. What a card cannot be made to do
@@ -2073,7 +2081,7 @@ entitlements, never committed) makes iOS ask the site directly, for a test build
 1. **The lock screen.** Lock the phone, wake it so the screen is on and still locked, and hold the card to the top of it. **Pass:**
    iOS raises a banner that offers Foxy, not Safari. Tap it: the phone asks to be unlocked, Foxy opens, and with Foxy's own PIN or
    Face ID on it asks for that first, with nothing of the card's screen showing behind the lock. Once you are in, within a minute,
-   the Flashcard screen's tap begins by itself (TAP BEHIND PHONE and the phone's sheet) and reads the card, which is still held.
+   the Flashcard screen's tap begins by itself (TAP TO READ and the phone's sheet) and reads the card, which is still held.
    The log has `kept until Foxy is open, it is locked` and then `opening the card screen from home, after N s kept`.
 2. **Foxy's home screen.** With Foxy open at home and unlocked, hold the card to the phone. **Pass:** the banner comes up over Foxy;
    a tap on it goes to the Flashcard screen's tap at once, and the card is read; back is home. Note whether iOS raises the banner
@@ -2121,7 +2129,83 @@ lines are `card: wrote …` (each write) and `card: its proofs: …` (each check
 6. **Cut short.** Lift the card in the middle of a load. **Pass:** the sheet comes up again for the rest; what went on stays on and nothing is on the card twice;
    `Verified At` after. With no connection, a card read just now: **Pass:** the time of the mint's last word is said only if this phone found every piece real.
 
+#### 23g. Five seconds a tap: how deep a card's first load is
+
+The keeper decides the first load's depth from this test: one binary set (the default) against four of each size, each held to
+five seconds of card contact. Needs a Debug build, an empty card of 128 places (software 1.20 or later) set up on this phone, and
+$50.00 of test money at the card's mint. Each run's log line is `card: wrote N piece(s) in M ms, contact T ms from read to done`:
+N the pieces, M the milliseconds from the first load command to the last answer, T the card in the field, from its first answer
+in the sheet to its last. Open Foxy fresh and let Tor settle before each tap (the slow taps of 2026-11-06 came right after a return).
+
+1. **Depth 1, the default.** Launch with no argument (or `-FoxyFirstDepth 1`). On the empty card, DEPOSIT $25.00 and tap. **Pass:**
+   the log has `card: wrote 16 piece(s) …`, the sheet's "Writing" line changes about twice, and `contact T ms` is under 5,000. Write
+   down N, M and T.
+2. **Empty the card.** WITHDRAW, ALL OF IT, back to this phone, so the next load is a first load again.
+3. **Depth 4.** Launch with `-FoxyFirstDepth 4`; the log says `card: a first load is cut 4 deep for this run`. DEPOSIT $25.00 and
+   tap. **Pass:** the log has `card: wrote 23 piece(s) …` (four of each size as far as the money and the tap's thirty pieces go) and
+   `contact T ms`. Write down N, M and T.
+4. **Compare.** M divided by N is the card's time a piece on this phone (89 ms on a settled phone, 220 ms on the slow tap). Both T
+   under 5,000: depth 4 fits five seconds on this phone, and pays more prices exactly offline (count the whole sets on the card's
+   screen). Depth 4 over 5,000 and depth 1 under: keep depth 1. Either over: say which commands were slow (the read's own line
+   gives each part of the read; AUTH is `proof`).
+5. **Release.** A Release build ignores `-FoxyFirstDepth`: no "cut 4 deep" line, sixteen pieces.
+
+#### 23g. Taking money off under the keeper's yes
+
+Needs the holder's own card with a per tap limit (and, for step 3, a card of 1.23 holding both currencies), and test money only.
+The phone signs the card's limit lifted, and put back, only against the keeper's yes, asked before the card is held up. The log
+lines are `card: its limit lifted against the keeper's yes before the tap …` and `card: its limit put back as it was before it
+was lifted` (`sh tools/pull-device-log.sh`); `not signed: the keeper said yes to nothing like it` is a failure in every step here.
+
+1. **WITHDRAW.** WITHDRAW, ALL OF IT, the PIN. **Pass:** the phone's own alert, LIFT THIS CARD'S LIMIT?, before the sheet; LIFT,
+   then the tap. The money is in the phone, LIMITS shows the same per tap limit as before, and the log has the two lines above.
+   CANCEL at the alert instead: **Pass:** no sheet, `Nothing was changed on the card.`, the card as it was.
+2. **WITHDRAW, cut short.** Take the card away straight after the PIN tap starts signing. **Pass:** TAP THE CARD AGAIN (or the sheet
+   asks for the rest); the next tap of that card puts the limit back first (`put back as it was`), with no question, then takes the rest.
+3. **Both currencies.** On a card of 1.23 holding dollars and sats, WITHDRAW with no amount. **Pass:** one alert; both come off in the
+   one tap; two `lifted` and two `put back` lines.
+4. **TRANSFER.** TRANSFER to another mint. **Pass:** the MOVE THIS CARD alert says its limit is lifted for the money that comes off,
+   then put back; one alert and Face ID, one tap, and the card's limits as before at the new mint.
+5. **RESET with money, RENEW, SWAP.** Each once. **Pass:** one alert each, naming the lift (RESET's in its own words), and no
+   `not signed` line.
+6. **A card with no limit.** Read it on its own screen first (so the phone knows it has none), then WITHDRAW. **Pass:** no alert at
+   all, and the money comes off. (A card the screen has not read is asked about, as one that may have a limit.)
+7. **A put-back that did not land.** As step 2, but take the card away between the money coming off and the sheet ending. **Pass:**
+   the next tap of that card puts its limit back (`put back as it was`), and LIMITS then shows it; `its limit is seen put back` follows.
+8. **TRANSFER, finished at the next tap.** TRANSFER, and take the card away as the money comes off. **Pass:** TAP THE CARD AGAIN;
+   TAP CARD writes the record and the money with no question (`a move the keeper said yes to earlier is written now`, then
+   `the move kept for it is written`), and the card is at the new mint.
+9. **SWITCH TO.** An empty card set up at another mint than the phone's: ADD FUNDS, SWITCH TO, an amount. **Pass:** MOVE THIS CARD
+   TO ANOTHER MINT? with Face ID before the sheet, naming this phone's mint; then one tap writes the record and the funds.
+
 ---
+
+#### 23g. The card tap screens (1a to 1h), from the 2026-11-06 design
+
+Needs a card with money on it (test money), the phone whose card it is, and a second phone at the same mint to be paid. What a
+simulator shows of these is checked by `tests/flashcard-screens.js`; what only a phone shows is iOS's sheet over them, where the
+arrow sits beside the Dynamic Island, and how a real card leaving is reported.
+
+1. **A real tap, start to finish.** On the second phone: RECEIVE, an amount, CARD. Hold the card behind the top of the phone and
+   keep it there. **Pass:** 1a (light blue, TAP TO PAY, the amount at full size, the arrow bobbing and TAP CARD BEHIND THE TOP
+   above the sheet), then 1c the moment the card connects (orange, PAYING, the dots going), then, once it has signed, 1d (teal,
+   CHECKING, or RECEIVING then CHARGING for change) once the sheet has gone, then RECEIVED (1h): the flash plays as before and
+   then rests on green, RECEIVED, the amount, the black circle with the green tick, ADDED TO (or NOW AT a mint) under the
+   amount, and DONE. DONE goes home as DISMISS did.
+2. **The card pulled away.** The same, and take the card away the instant the sheet says it is reading. **Pass:** the screen
+   turns red at once, CARD LOST (1g), with "Your money is still on your card."; the sheet asks for the card again. Cancel the
+   sheet. **Pass:** the screen settles on TAP AGAIN (1f, yellow): the amount, "The card wasn't read. Nothing has been paid yet.",
+   TAP CARD and CANCEL. TAP CARD asks for the card again and pays; the card's balance and the receiving phone's balance agree
+   with what was paid, once.
+3. **A load the card missed.** On the card's own phone, ADD FUNDS: GETTING READY (1b, the slower dots, CLOSE), then TAP TO LOAD
+   (1a). Take the card away before it is written to and cancel the sheet. **Pass:** TAP AGAIN (1e): the amount, "This money is
+   still waiting to go onto it.", the lock, TAP CARD and LATER. LATER leaves it owed (the card's screen says so); TAP CARD puts it
+   on.
+4. **Every flow's words.** READ (TAP TO READ, READING), WITHDRAW, RESET, SET UP, CHANGE PIN, LIMITS: **Pass:** each tap's 1a says
+   TAP TO ... for what it is, and 1c the matching word (CARD.md, *What the person sees*). Nothing on any screen is cut off on
+   the smallest phone.
+5. **Less motion.** Settings, Accessibility, Motion, Reduce Motion on, and repeat step 1. **Pass:** the dots and the arrow stand
+   still; RECEIVED's flash still plays.
 
 #### 22l. What two diaries of offline taps showed besides the money
 
@@ -2219,8 +2303,8 @@ dark circle with the turning ring), and tap the shield where it says to tap the 
     amount; another time, a Lightning address, and type an amount.
     **Pass:** no card for no connection. The confirmation is there, its button
     reads CHECKING with a spinner and so does its FEE row, and pressing the
-    button does nothing. When the banner turns to Tor the button turns to SEND
-    by itself, with the fee in the FEE row (NOT ENOUGH, with the sentence under
+    button does nothing. When the banner turns to Tor the button turns to PAY
+    and what leaves by itself, with the fee under FEE (NOT ENOUGH, with the sentence under
     the rows, when the balance would not cover the payment and its fee). In
     airplane mode the same invoice gets YOU'RE OFFLINE at once, as before; and
     with the radios turned off while CHECKING shows, the card comes up over
@@ -2308,3 +2392,24 @@ been used on a phone. Update the table when a section is run.
 | Run on a device, in part | §4 (each transport connects; a payment through each is not run), §5b (long returns reconnect, including the recovery from a reclaimed control listener; the 30 minute return on cellular with the phone locked is not recorded), §14c (a pasted phrase stayed on the clipboard; fixed in code, not re-run), §17 (the card and the token work and three faults it found are fixed; run it again) |
 | Simulator only | §8, §10, §11, §12 (the keychain test, not 12b to 12d), §16, §19 (steps 1, 3 and 4), §20 (steps 1 and 4), §21b (the mechanism; the 4-to-5-second claim is not tested), §21c, §21e (steps 1 and 2), §21f (step 1), §21g (steps 1 and 2) |
 | Not run | §2, §3, §5d, §5e, §6, §7, §9, §12b, §12c, §12d, §13a to §13j, §14d, §14e, §15, §18, §21d, §21h, §22a, §22c, §22d, §22e, §22f, §22g, §22h, §22i, §22j, §22k, §23e |
+
+## The confirmations and PAY FROM as drawn (2026-11-06)
+
+1. **A transfer (1k).** TRANSFER between two mints. **Pass:** MOVING, FEE and
+   RECEIVING stacked, RECEIVING large in the accent; MORE DETAILS closed until
+   tapped, then FROM, TO and the three fees (LIGHTNING FEE says UP TO); CANCEL,
+   then TRANSFER and what leaves. From dollars to a mint with none, the note
+   says the money becomes bitcoin.
+2. **A Lightning invoice (1l).** **Pass:** RECEIVER GETS, FEE, PAYING, RECEIVER
+   (the invoice shortened); at a mint that charges for its pieces, PAYING and
+   PAY are what leaves, never less. PAYING FROM's pill at the foot: no chevron
+   with one balance; at a mint with two it opens DOLLARS/BITCOIN; with money at
+   two mints it opens PAY FROM, and NEXT comes back with the pill naming it.
+3. **A request (1m).** A Foxy over Tor, a tap, a website, a Cashu ID. **Pass:**
+   the button reads PAY and what leaves on every one; a website's host is
+   under RECEIVER; a Cashu ID's name is; the ✕ on a tap's screen leaves the
+   other phone saying the payer cancelled.
+4. **PAY FROM (1p).** **Pass:** a tile per balance with its name, its balance
+   line, a tick on the one chosen, its fee line with the ₿ or $ badge,
+   CALCULATING… while asked; NOT ENOUGH on one that cannot pay; dark and light
+   mode both read.

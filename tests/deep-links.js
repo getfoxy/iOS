@@ -402,10 +402,11 @@ function screensInTheSource() {
       if (list) (list[1].match(/'([A-Za-z0-9_-]+)'/g) || []).forEach((q) => names.add(q.slice(1, -1)));
     });
   }
-  return Array.from(names).sort();
+  // (the card tap family's screens, 1a to 1g, are the stage's schemes, `fcFamilyScreen`'s `screen`, not screens of the app)
+  return Array.from(names).filter((n) => !/^1[a-z]$/.test(n)).sort();
 }
 // where nothing is in progress, and where a payment, an amount being typed, a confirmation or anything else is
-const FREE_SCREENS = ['change', 'contacts', 'fcRestore', 'fieldLog', 'flashcard', 'history', 'home', 'inbox', 'switchMint', 'txDetail'];
+const FREE_SCREENS = ['change', 'contacts', 'fcRestore', 'fieldLog', 'flashcard', 'history', 'home', 'switchMint', 'txDetail'];
 const BUSY_SCREENS = ['amount', 'bkStart', 'confirm', 'crossConfirm', 'depConfirm', 'fcLimitConfirm', 'fcLimits', 'fcMoveConfirm', 'fcName', 'fcSpeed', 'fcWelcome', 'fcXmConfirm', 'fcXlConfirm', 'fcOuConfirm', 'feeTooLow',
   'importSeed', 'newMint', 'ocConfirm', 'paid', 'priceConfirm', 'reqOffer', 'rsConfirm', 'sendConfirm', 'sendDone', 'sendFail',
   'sendHow', 'sendScan', 'sendType', 'spAllPaid', 'spAmount', 'spAssign', 'spPayer', 'spShares', 'spWaiting', 'spWays', 'tokenOut',
@@ -418,8 +419,6 @@ const BUSY_SCREENS = ['amount', 'bkStart', 'confirm', 'crossConfirm', 'depConfir
   'swapConfirm', 'swapDone',
   // a Cashu ID payment being decided (26o-cashu-id.js)
   'cidConfirm',
-  // a contact's messages, where one may be half written (26p-cashu-msg.js)
-  'cidChat',
   // SEND > BANK ACCOUNT's username or River's invoice being given (26q-bank.js)
   'bankAsk'];
 

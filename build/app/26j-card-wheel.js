@@ -312,7 +312,7 @@
     if (c.unit) how.unit = c.unit === 'both' ? 'usd' : c.unit;
     const fc = this.state.fc;
     if (fc && fc.v123 && c.unit) how.hold = c.unit;
-    this.fcTap({}, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
+    this.fcTap({ flow: 'setup' }, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
       .then((card) => {
         this.fcNameSettle(card && card.key);
         this.fcNoPinTxKeep(card && card.key, c);

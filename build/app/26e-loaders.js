@@ -74,6 +74,8 @@
    * button, go, and `keep` to leave the screen up after the button. */
   stageScreen(kind, o) {
     this.hideStage();
+    // the fox, for a fee being checked or money moving (26r-fox-wait.js)
+    if (o && o.fox && this.foxStage) { this.foxStage(kind, o); return; }
     const W = window.FoxyWallet;
     const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g,
       (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -223,15 +225,16 @@
     if (kind && old.getAttribute('data-stage') !== kind) return false;
     clearTimeout(this._stageT);
     clearInterval(this._stageQrT);
-    // the card screen's count of seconds, and its look that comes of time (26h-tap-screen.js)
-    clearInterval(this._fcCountT);
+    // the card screen's look that comes of time (26h-tap-screen.js)
     clearTimeout(this._fcLookT);
-    this._stageT = null; this._stageQrT = null; this._fcCountT = null; this._fcLookT = null;
+    this._stageT = null; this._stageQrT = null; this._fcLookT = null;
     const was = old.getAttribute('data-stage');
+    // the fox's video let go of with its screen (26r-fox-wait.js)
+    if (this.foxRelease) this.foxRelease(old);
     if (old.parentNode) old.parentNode.removeChild(old);
     if (this.syncPreview) this.syncPreview();
     // a card screen coming down may be the end of a card flow, and what waited for it is raised (26f-flashcard.js)
-    if (was === 'card' || was === 'cardReady' || was === 'cardBack') this.cardFlowMayHaveEnded();
+    if (was === 'card' || was === 'cardReady' || was === 'cardBack' || was === 'cardAgain') this.cardFlowMayHaveEnded();
     // a stage a menu row opened (MY CASHU ID): the menu again, unless another stage takes its place (01-ui-basics.js)
     if (this.menuReturnSoon) this.menuReturnSoon();
     return true;

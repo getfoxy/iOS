@@ -43,6 +43,9 @@
  * (tests/flashcard-card.js); the mint is the test mint with a sat and a usd keyset, which holds SIG_ALL as CDK and
  * Nutshell do and refuses a swap of two units. */
 const { page, funded, newCard, binaryLoad, settle, history, why, MINT, MINT2, OTHER_WORDS } = require('./flashcard-kit');
+// (a first load cut eight deep and written in one tap, as before 2026-11-06: this suite's drawers are such a load's; flashcard-tap-time.js holds the defaults)
+require('./flashcard-kit').deepFirstLoads(8);
+require('./flashcard-kit').uncappedTaps();
 const { books, booksWrong } = require('./harness');
 
 let failed = 0, passed = 0;

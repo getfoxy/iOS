@@ -261,7 +261,7 @@
           out.paidHeadlineSub = 'Paid in dollars: ' + this.unitFigure(cents, 'usd') + ' for ' + this.unitFigure(askedSats, 'sat');
         }
       }
-      return out;
+      return this.renderPaidRest(c, out);
     }
     const base = this.renderPaidBase(c);
     // bitcoin at a mint with two balances is named as the balance it went into
@@ -279,7 +279,37 @@
       base.paidHeadlineSub = '\u20bf ' + this.group(sats) + (words ? ' \u00b7 ' + (s.paidAskOwn ? 'THIS PHONE\u2019S PRICE ' : 'THEIR PRICE ') + words : '');
       base.paidAddedTo = 'BITCOIN, THEN DOLLARS';
     }
-    return base;
+    return this.renderPaidRest(c, base);
+  }
+
+  /* RECEIVED (the keeper's 2026-11-06 design, 1h): where every receive comes to rest once its flash has played, on green, with the
+   * amount at 76px, the black circle with the green tick, and DONE. A payment out keeps the screen it had (`isPaidOut`). What the
+   * screen said beside the headline is kept, in lines under the amount: the line under the headline (`paidHeadlineSub`: the other
+   * currency, the price it was worked out at) and where the money went (`paidAddedLabel` and `paidAddedTo`: ADDED TO a balance,
+   * NOW AT a mint, SENT TO THE KEEPER). */
+  /**
+   * @param {RenderContext} c
+   * @param {any} v
+   */
+  renderPaidRest(c, v) {
+    // (nothing for any other screen: its values are as they were)
+    if (!v.isPaid) return v;
+    const s = c.s;
+    const lines = [];
+    if (v.paidHeadlineSub) lines.push({ text: String(v.paidHeadlineSub) });
+    if (v.paidAddedTo) lines.push({ text: (v.paidAddedLabel ? v.paidAddedLabel + ' ' : '') + v.paidAddedTo });
+    const fig = String(v.paidHeadline || '');
+    return Object.assign(v, {
+      isPaidIn: !!v.isPaid && !s.payOut,
+      isPaidOut: !!v.isPaid && !!s.payOut,
+      paidRestTitle: s.paidSays || 'RECEIVED',
+      paidRestLines: lines,
+      // 76px for a figure of seven characters and fewer, as the design's; a longer one is made smaller to stay on one line
+      paidRestSize: fig.length <= 7 ? '76px' : Math.max(36, Math.floor(76 * 7 / fig.length)) + 'px',
+      // (dark as it goes, as the screen it replaced did)
+      paidRestBg: (s.recv && s.recv.live) === 'out' ? '#050505' : 'linear-gradient(180deg,#5FD58C 0%,#1FAF5A 55%,#138A44 100%)',
+      paidRestDone: (s.paidPlace && s.paidPlace.dismiss) || 'DONE',
+    });
   }
 
   /** @param {RenderContext} c */
@@ -1032,6 +1062,59 @@
         { half: true, sub2: held ? '' : 'You pay the mint\u2019s fees' }),
     ] : []).concat(swapSrc ? [this.cfRow('SWAP', this.pfSwapText(swapSrc.e, swapSrc.q), { sub2: 'Swapped at the mint, then paid' })] : [])
       .concat(usdReq ? (swapSrc ? [] : [this.cfRow('FROM', 'DOLLARS')]) : agreed ? agreedRows() : this.peerRateRow());
+    /* The keeper's 1m (2026-11-06): RECEIVER GETS, FEE and PAYING stacked, with no RECEIVER (the four digits of a tap are
+     * above them, DELIVERED TO), and PAYING FROM's pill at the foot, which opens PAY FROM again where it offered a choice
+     * (`pfReopen`). Paid from the other balance, swapped first: what the swap takes, in what leaves. */
+    const swapFrom = swapSrc ? (swapSrc.e.unit === 'usd' ? 'usd' : 'sat') : '';
+    const feeAmt = crossFee > 0 ? crossFee : (lack && lack.fee > 0 ? lack.fee : 0);
+    const payFig = (n) => (agreed ? '\u20bf ' + this.group(n) : fig(n).main);
+    const swapQ = swapSrc && swapSrc.q ? swapSrc.q : null;
+    /* Paid on a visit to a mint this phone holds money at: what that mint charges for the pieces is known only there
+     * (`lack.there`), so the fee is not said to be nothing. */
+    const feeThere = !!(lack && lack.there && !(src && (src.plan || src.swap)));
+    // what leaves, as PAYING says it and PAY's figure: the amount and the fee, or the swap's whole, in the unit that leaves
+    const payingText = !sats ? 'ANY AMOUNT' : held ? 'CHECKING…'
+      /* the swap covers what is missing (`pfSwapSource`): what leaves is the other balance's whole for the swap, and the
+       * rest of the request from the balance in its own unit */
+      : swapSrc ? (swapQ ? this.unitFigure(Math.round(Number(swapQ.total) || 0), swapFrom)
+          + (Math.max(0, sats - Math.round(Number(swapQ.get) || 0)) > 0
+            ? ' + ' + this.unitFigure(Math.max(0, sats - Math.round(Number(swapQ.get) || 0)), usdReq ? 'usd' : 'sat') : '')
+        : 'CHECKING…')
+      : feeThere ? payFig(sats) + ' + FEE'
+      : payFig(sats + feeAmt);
+    const payWords = /^(CHECKING|ANY)/.test(payingText) ? head(sats).main : payingText;
+    // the way out, the same from every one of these screens: a phone over a tap is told the payer gave up
+    const leave = () => {
+      if (req && req.viaTap && W && W.tapQuote) {
+        W.tapQuote(JSON.stringify({ gaveUp: 'The payer cancelled.' })).catch(() => {});
+      }
+      this.setState({ screen: 'home', stack: [], req: null, note: '', noteDraft: '', tapQuoteFor: '' });
+    };
+    const look = (sp) => {
+      if (!this.cfPayLook) return sp;
+      const many = !!(this.pfMany && this.pfMany('req'));
+      const unitNow = src ? (src.unit || 'sat') : (usdReq ? 'usd' : 'sat');
+      // the mint the money leaves: the source chosen, the mint visited to pay it there, or this phone's own (it crosses from here)
+      const leaves = src ? src.mint : (lack && lack.there) ? judgeAt : this.pfHere ? this.pfHere() : '';
+      // sats for dollars agreed over a tap: the dollars they asked, at this phone's price and how old it is
+      const ageWords = agreed && this.priceAgeWords ? this.priceAgeWords(Number(s.tapQuoteAgeMs) || 0) : '';
+      return this.cfPayLook(sp, {
+        gets: sats ? head(sats).main : 'ANY AMOUNT',
+        getsSub: agreed ? 'For ' + this.unitFigure(Math.round(Number(s.tapQuoteUsd) || 0), 'usd') + ' at $ '
+          + this.group(Math.round(Number(s.tapQuoteRate) || 0)) + ', this phone\u2019s price' + (ageWords ? ', seen ' + ageWords.toLowerCase() : '') : '',
+        fee: held ? 'CHECKING…'
+          : swapSrc ? (swapQ && this.pfSwapFee ? this.unitFigure(this.pfSwapFee(swapQ, swapFrom), swapFrom) : 'CHECKING…')
+          : feeThere ? 'NOT KNOWN YET'
+          : payFig(feeAmt),
+        paying: payingText,
+        // paid from the other balance, swapped first: from what
+        payingSub: (swapSrc && this.pfSwapText) ? this.pfSwapText(swapSrc.e, swapQ) : '',
+        // a website is named, as the money goes to it
+        receiver: (d && d.kind === 'https' && siteHost) ? siteHost : '',
+        word: (this.pfLabel && leaves) ? this.pfLabel(leaves, unitNow) : (this.mintName() || 'THIS MINT').toUpperCase(),
+        go: many && this.pfReopen ? () => this.pfReopen() : null,
+      });
+    };
     /* Short with the fee counted, as the send itself counts it. The balance
      * alone let a 980-sat request through on a phone holding 979, to be
      * refused after SEND.
@@ -1046,29 +1129,31 @@
      * what it charges, are known only then, so the figures below stay as they
      * were. */
     if (lack && lack.short && (this.requestHere(req) || lack.there)) {
-      return {
+      return look({
         title: 'CONFIRMATION', amountLabel: 'SENDING', code: byTap ? s.tapCode : '',
         amount: head(sats).main, amountSub: head(sats).sub, amountInk: '#FF5C5C', rows: rows,
         // (what is held back with this mint says nothing of a pile at another)
         warn: (lack.there ? '' : this.heldBlocks(usdReq ? 0 : lack.need - lack.have)) || lack.why,
         cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
-      };
+        close: leave,
+      });
     }
     // (not this mint's balance where the payment is made from another, or crosses from one: judged above)
     const shortBy = (src && src.plan) || swapSrc || (lack && lack.there) ? 0 : lack && lack.short ? lack.need - lack.have
       : Math.max(0, sats - (usdReq ? this.unitBalance('usd') : (s.balSats || 0)));
     const short = shortBy > 0;
     if (short) {
-      return {
+      return look({
         title: 'CONFIRMATION', amountLabel: 'SENDING', code: byTap ? s.tapCode : '',
         amount: head(sats).main, amountSub: head(sats).sub, amountInk: '#FF5C5C', rows: rows,
         warn: this.heldBlocks(usdReq ? 0 : shortBy)
           || 'More than your balance \u2014 short by ' + fig(shortBy).main
              + (lack && lack.fee > 0 ? ' with the mint\u2019s fees' : ''),
         cta: 'CLOSE', ctaTone: 'warn', go: () => this.setState({ screen: 'home', stack: [], req: null, tapQuoteFor: '' }),
-      };
+        close: leave,
+      });
     }
-    return {
+    return look({
       title: 'CONFIRMATION',
       code: byTap ? s.tapCode : '',
       amountLabel: 'SENDING',
@@ -1079,30 +1164,24 @@
        * second button goes, and the X at the top to back out. */
       secondary: { label: (s.note || '').trim() ? 'EDIT NOTE' : 'ADD A NOTE',
         go: () => this.editSendNote(), filled: !!(s.note || '').trim() },
-      close: () => {
-        /* Backing out of a request that came over a tap: the other phone is
-         * told, so its screen does not offer to scan a payment that is not
-         * coming. */
-        const W = window.FoxyWallet;
-        if (req && req.viaTap && W && W.tapQuote) {
-          W.tapQuote(JSON.stringify({ gaveUp: 'The payer cancelled.' })).catch(() => {});
-        }
-        this.setState({ screen: 'home', stack: [], req: null, note: '', noteDraft: '', tapQuoteFor: '' });
-      },
-      /* SEND over the link in your hand, PAY over Tor. Not one word for both:
-       * over Tor it really is a payment going somewhere, and on a tap the two
-       * phones are touching and the thing being done is handing it over. What
-       * it must never say is GENERATE ECASH TOKEN, which is what it said while
-       * showing the code of the phone it was about to send to. */
+      /* Backing out of a request that came over a tap: the other phone is
+       * told, so its screen does not offer to scan a payment that is not
+       * coming (`leave`, every one of these screens' way out). */
+      close: leave,
+      /* PAY over the link in your hand and over Tor alike (it was SEND on a
+       * tap until the keeper's 2026-11-06 confirmations). What it must never
+       * say is GENERATE ECASH TOKEN, which is what it said while showing the
+       * code of the phone it was about to send to. */
       /* COLLECTING… while a move to that mint, paid and not yet collected, is
        * collected first (`makeTokenForRequest`): PAY stayed live under it for
        * up to 45 seconds, with nothing on screen to say anything was running. */
       cta: held ? 'CHECKING…' : s.reqCollecting ? 'COLLECTING\u2026' : s.reqSwapping ? 'SWAPPING\u2026'
         : s.reqBusy ? (d ? (d.kind === 'tap' ? 'SENDING\u2026' : 'PAYING\u2026') : 'MAKING\u2026')
-        : d ? (d.kind === 'tap' ? 'SEND ' : 'PAY ') + head(sats).main
+        // PAY on every one, a tap's too (the keeper, 2026-11-06)
+        : d ? 'PAY ' + payWords
         : 'GENERATE ECASH TOKEN',
       ctaTone: 'go',
       ctaBusy: held || !!s.reqBusy || !!s.reqCollecting || !!s.reqSwapping,
       go: (held || s.reqCollecting || s.reqSwapping) ? () => {} : () => this.makeTokenForRequest(),
-    };
+    });
   }

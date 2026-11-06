@@ -2,7 +2,7 @@
 /* flashcard-kit.js — what the flashcard suites share: a page with a phone and
  * a mint behind it, and a card to tap on it. */
 const crypto = require('crypto');
-const { loadReal, fakeMint, nativePhone, PHONE_WORDS } = require('./harness');
+const { loadReal, fakeMint, nativePhone, PHONE_WORDS, cardGate } = require('./harness');
 const { makeCard } = require('./flashcard-card');
 
 /* The two block explorers a card's clock is fetched from, by their onion addresses (build/wallet/08b-block-headers.js). A page made
@@ -26,6 +26,9 @@ function page(o) {
   const opts = o || {};
   // `phone`: another page's phone, for a page that is that page launched again (its counters and lock keys)
   const phone = opts.phone || nativePhone({ words: opts.words || PHONE_WORDS });
+  /* Every tap the phone's own sheet carries is held to the keeper's yes as the phone holds it (harness.js `cardGate`, the model of
+   * NativeSeedBridge.swift `cardOwnerAllows`), in every suite: tools/smoke.py refuses a suite that turns it off. */
+  if (!phone.gate) phone.gate = cardGate();
   let mint = null;
   let mint2 = null;
   let ctx = null;
@@ -79,6 +82,8 @@ function page(o) {
         ctx.ended = false;
         if (ctx.nfc === 'off') return reply(w, m.id, null, 'NFC is not available on this phone');
         if (!ctx.nfc) return reply(w, m.id, null, ctx.beginWhy || 'the session was cancelled');
+        // the keeper's yeses given since the last session are for this one (`phone.gate`, harness.js `cardGate`)
+        if (phone.gate) phone.gate.begin();
         ctx.nfc.tap();
         report(w, 'connected', 'Reading the card');
         return reply(w, m.id, 'ok');
@@ -87,14 +92,40 @@ function page(o) {
         // the sheet has ended: the phone has no session to carry a command (Foxy/Bridge/FoxyBridge+Flashcard.swift)
         if (ctx.ended) { ctx.refusedAfterEnd += 1; return reply(w, m.id, null, 'the tag was lost'); }
         if (!ctx.nfc || ctx.nfc === 'off') return reply(w, m.id, null, 'no card');
-        return ctx.nfc.send(m.apdu).then((r) => reply(w, m.id, r), () => { report(w, 'lost', 'The card was lost.'); reply(w, m.id, null, 'the tag was lost'); });
+        return ctx.nfc.send(m.apdu).then((r) => { if (phone.gate) phone.gate.saw(m.apdu, r); reply(w, m.id, r); }, () => { report(w, 'lost', 'The card was lost.'); reply(w, m.id, null, 'the tag was lost'); });
+      }
+      /* Several commands sent back to back (FoxyBridge+Flashcard.swift, handleCardSendMany): the answers joined by commas, stopping
+       * after the first that is not 9000, and `lost` last where the card left part way. `ctx.noMany`: a phone with no such step.
+       * `ctx.batches`: the size of every list sent. */
+      if (m.action === 'cardSendMany') {
+        if (ctx.noMany) return reply(w, m.id, null, 'Unknown action: cardSendMany');
+        if (ctx.ended) { ctx.refusedAfterEnd += 1; return reply(w, m.id, null, 'the tag was lost'); }
+        if (!ctx.nfc || ctx.nfc === 'off') return reply(w, m.id, null, 'no card');
+        const list = Array.isArray(m.apdus) ? m.apdus : [];
+        if (!list.length || list.length > 16 || list.some((a) => /^00a4/i.test(a))) return reply(w, m.id, null, 'That is not a command Foxy sends to a card.');
+        ctx.batches.push(list.length);
+        const out = [];
+        const step = (i) => {
+          if (i >= list.length) return reply(w, m.id, out.join(','));
+          return ctx.nfc.send(list[i]).then((r) => {
+            out.push(r);
+            if (!/9000$/i.test(r)) return reply(w, m.id, out.join(','));
+            return step(i + 1);
+          }, () => {
+            report(w, 'lost', 'The card was lost.');
+            if (!out.length) return reply(w, m.id, null, 'the tag was lost');
+            return reply(w, m.id, out.concat(['lost']).join(','));
+          });
+        };
+        return step(0);
       }
       if (m.action === 'cardSay') { ctx.sheet.push('say: ' + m.text); report(w, 'say', m.text); return reply(w, m.id, 'ok'); }
       // the same sheet looks for the card again (FoxyBridge+Flashcard.swift, handleCardAgain): the card is tapped anew, or none is
       if (m.action === 'cardAgain') {
         ctx.sheet.push('again: ' + m.text);
         if (ctx.ended) return reply(w, m.id, null, 'the session was cancelled');
-        if (!ctx.nfc || ctx.nfc === 'off') { ctx.ended = true; return reply(w, m.id, null, 'the session was cancelled'); }
+        if (!ctx.nfc || ctx.nfc === 'off') { ctx.ended = true; if (phone.gate) phone.gate.end(); return reply(w, m.id, null, 'the session was cancelled'); }
+        if (phone.gate) phone.gate.again();
         ctx.nfc.tap();
         report(w, 'connected', 'Reading the card');
         return reply(w, m.id, 'ok');
@@ -103,6 +134,7 @@ function page(o) {
         ctx.sheet.push(m.error ? 'error: ' + m.error : 'end: ' + m.text);
         ctx.trace.push(m.error ? 'error' : 'end');
         ctx.ended = true;
+        if (phone.gate) phone.gate.end();
         report(w, 'end', m.error || m.text);
         return reply(w, m.id, 'ok');
       }
@@ -122,9 +154,13 @@ function page(o) {
     },
   });
   ctx.deaf = !!opts.deaf;
+  // a first load cut as before 2026-11-06 (eight deep), for a suite whose subject is such a drawer (`deepFirstLoads`)
+  if (firstDepth) ctx.W._cardFirstDepth = firstDepth;
+  if (tapUncapped) ctx.W._cardTapUncapped = true;
   ctx.hang = null;
   ctx.nfc = null;
   ctx.sheet = [];
+  ctx.batches = [];
   ctx.events = [];
   ctx.trace = [];
   ctx.circuits = [];
@@ -140,6 +176,17 @@ function page(o) {
 }
 
 /* Connected at MINT, with `sats` claimed from an invoice (0 for none). */
+/* Two switches, each for the suites whose subject needs it, the defaults being one binary set for a first load and five seconds of
+ * pieces a tap (08a-flashcard.js, "five seconds a tap"); flashcard-tap-time.js and flashcard-screens.js hold the defaults:
+ *   `deepFirstLoads(depth)`  every page made from here on cuts a card's first load `depth` deep, as before 2026-11-06 (a cent of
+ *                            change, the second unit cut four deep);
+ *   `uncappedTaps()`         and writes a drawer of any size in one tap, as before 2026-11-06 (sixty-six pieces in one load, the
+ *                            waits of a deep drawer). */
+let firstDepth = 0;
+let tapUncapped = false;
+const deepFirstLoads = (depth) => { firstDepth = depth === undefined ? 8 : depth; };
+const uncappedTaps = () => { tapUncapped = true; };
+
 async function funded(o, sats) {
   const c = page(o);
   await c.W.connect((o && o.mint) || MINT, null, null, { remember: true });
@@ -227,5 +274,5 @@ const history = (c) => JSON.parse(c.storage.getItem('foxy.cashu.log') || '[]');
 /* What a call rejected with: its `card` kind, or its message. */
 const why = (p) => p.then(() => 'went through', (e) => (e && e.card) || (e && e.message) || String(e));
 
-module.exports = { heightOf, page, funded, newCard, binaryLoad, settle, history, why, MINT, MINT2, OTHER_WORDS, PHONE_WORDS,
+module.exports = { deepFirstLoads, uncappedTaps, heightOf, page, funded, newCard, binaryLoad, settle, history, why, MINT, MINT2, OTHER_WORDS, PHONE_WORDS,
                     EXPLORERS, CHEAP, mineHeader, hashOfHeader, tipIs, sha256d, targetOfBits };

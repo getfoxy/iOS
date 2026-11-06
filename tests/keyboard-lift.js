@@ -12,11 +12,10 @@
  *
  * and on each of these, with a field focused, the field and its button must end above the keyboard's top edge:
  *
- *   1  a contact's conversation: the message field and SEND (the list above it shortened, drawn bottom up)
- *   2  NAME THIS CONTACT?: the name field and SAVE
- *   3  ADD A NOTE on an invoice: the note field and DONE
- *   4  a note on a payment in history (the memo sheet): the field and SAVE
- *   5  NAME CARD: the name field and NEXT
+ *   1  NAME THIS CONTACT?: the name field and SAVE
+ *   2  ADD A NOTE on an invoice: the note field and DONE
+ *   3  a note on a payment in history (the memo sheet): the field and SAVE
+ *   4  NAME CARD: the name field and NEXT
  *
  * and when the keyboard goes, everything is back at the foot. A keyboard raised while no field of the page has the
  * focus (one of the phone's own prompts over the page) moves nothing.
@@ -162,34 +161,6 @@ function stubWallet() {
   return W;
 }
 
-/* The messages' contract (build/wallet/21d-cashu-msg.js), kept in memory. */
-function withMessages(W, on, threads) {
-  const sent = [];
-  const seen = [];
-  let refuse = '';
-  Object.assign(W, {
-    cashuMsgOn: () => on,
-    cashuMsgThreads: () => (on ? threads.map((t) => ({ peer: t.peer, name: t.name, contact: t.contact, unread: t.unread,
-      lastAt: t.msgs.length ? t.msgs[t.msgs.length - 1].at : 0, lastText: '' })) : []),
-    cashuMsgThread: (peer) => {
-      if (!on) return null;
-      const t = threads.find((x) => x.peer === peer);
-      return t ? JSON.parse(JSON.stringify(t)) : { peer, name: 'Alice', contact: true, card: '', unread: 0, msgs: [] };
-    },
-    cashuMsgSeen: (peer) => { seen.push(peer); const t = threads.find((x) => x.peer === peer); if (t) t.unread = 0; },
-    cashuMsgSend: (peer, text) => {
-      if (refuse) return Promise.reject(new Error(refuse));
-      sent.push({ peer, text });
-      const t = threads.find((x) => x.peer === peer);
-      if (t) t.msgs.push({ id: 'n' + sent.length, dir: 'out', text, at: Date.now(), mark: 'sent' });
-      return Promise.resolve({ id: 'n' + sent.length, i: 1, first: false });
-    },
-  });
-  W.msg = { sent, seen, threads, refuse: (why) => { refuse = why; } };
-  return W;
-}
-
-
 async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
 
 // ---- where a box's foot can be, from inline styles ------------------------------------------------
@@ -284,35 +255,16 @@ function layout(w, H) {
   const drop = async () => { phone.told(0); phone.viewport(0, false); await settle(); };
   const line = H - KB;
 
-  const ALICE = REAL.cashuIdDecode(ID_ALICE).id;
-  const T0 = Date.UTC(2026, 10, 4, 9, 0, 0);
-  const chatWallet = async () => {
+  const contactWallet = async () => {
     const W = stubWallet();
-    const threads = [{ peer: ALICE, name: 'Alice', contact: true, card: '', unread: 0, msgs: [
-      { id: 'a', dir: 'in', text: 'Lunch at noon?', at: T0, mark: '' },
-      { id: 'b', dir: 'out', text: 'Yes', at: T0 + 60000, mark: 'sent' }] }];
-    Object.assign(W, {
-      cashuMsgOn: () => true,
-      cashuMsgThreads: () => threads.map((t) => ({ peer: t.peer, name: t.name, contact: true, unread: 0, lastAt: T0, lastText: '' })),
-      cashuMsgThread: () => JSON.parse(JSON.stringify(threads[0])),
-      cashuMsgSeen() {}, cashuMsgSend: () => Promise.resolve({ id: 'n', i: 1, first: false }),
-    });
     await W.cashuIdAdd(ID_ALICE, 'Alice');
     return W;
   };
 
   /* Each screen: open it, focus its field, and give back [field's box, its button]. */
   const SCREENS = {
-    'the conversation': async () => {
-      const W = await chatWallet();
-      await fresh(W, { screen: 'cidChat', stack: ['contacts'], cmPeer: ALICE, cmDraft: 'On my way' });
-      const input = w.document.querySelector('input[aria-label="Message"]');
-      if (!input) return null;
-      input.focus();
-      return { field: input.parentElement, button: w.document.querySelector('[aria-label="Send"]'), extra: input.parentElement.parentElement };
-    },
     'NAME THIS CONTACT?': async () => {
-      const W = await chatWallet();
+      const W = await contactWallet();
       await fresh(W, { screen: 'contacts', stack: ['home'] });
       A.cidNameAsk(ID_ALICE, '');
       await wait(80);
@@ -365,20 +317,10 @@ function layout(w, H) {
     }
   }
 
-  // the conversation: the list is drawn bottom up, so a shorter list keeps its last message in view
-  {
-    await SCREENS['the conversation']();
-    const list = Array.prototype.slice.call(w.document.querySelectorAll('[data-template="list"] div')).find((d) => /column-reverse/.test(d.style.flexDirection));
-    ok(!!list && /auto|scroll/.test(list.style.overflow + list.style.overflowY) && list.style.minHeight === '0px' && /1/.test(list.style.flex),
-      'the conversation: the list above the field shrinks and scrolls from its newest message', list && list.getAttribute('style'));
-    await drop();
-  }
-
   // a keyboard of the phone's own, over the page, with no field of the page focused: nothing moves
   {
-    const W = await chatWallet();
-    await fresh(W, { screen: 'cidChat', stack: ['contacts'], cmPeer: ALICE });
-    const send = w.document.querySelector('[aria-label="Send"]');
+    await fresh(stubWallet(), { screen: 'fcName', stack: ['home'], fcNaming: { mode: 'rename', key: 'k' }, fcNameDraft: 'Groceries' });
+    const send = byText(w.document.querySelector('[data-template="list"]'), 'NEXT');
     const at = foot(send);
     phone.told(KB);
     await settle();

@@ -97,6 +97,52 @@ extension FoxyBridge {
         }
     }
 
+    /// {apdus}: several commands for the card, sent back to back with no trip to the page between them, as hex. Answers
+    /// each reply as hex, in order, joined by commas; it stops after the first reply that is not 9000 (that reply is the
+    /// last), and ends with `lost` where the card left part way. Refused, with nothing sent, where any one is not a
+    /// command this app sends to its own applet once chosen (`CardGate.batch`). A card's load is many commands of one
+    /// size: one trip each way for all of them, not two for every one.
+    func handleCardSendMany(id: String, body: [String: Any]) {
+        let raw = (body["apdus"] as? [Any]) ?? []
+        // every entry a string, or none is sent: a list with something else in it is not counted short and sent in part
+        let hexes = raw.compactMap { $0 as? String }
+        DispatchQueue.main.async {
+            guard let link = self.cardLink else {
+                self.resolve(id: id, text: nil, error: CardLinkError.lost.words)
+                return
+            }
+            // each one what `cardSend` would carry (CardGate.allows), and a load (CardGate.batch)
+            guard hexes.count == raw.count, let apdus = CardGate.batch(hexes, selected: self.cardSelected), apdus.count == raw.count,
+                  apdus.allSatisfy({ CardGate.allows($0, selected: self.cardSelected) }) else {
+                self.resolve(id: id, text: nil, error: "That is not a command Foxy sends to a card.")
+                return
+            }
+            var answers = [Data]()
+            func next(_ i: Int) {
+                guard i < apdus.count else {
+                    self.resolve(id: id, text: CardGate.batchAnswer(answers, lost: false), error: nil)
+                    return
+                }
+                link.send(apdus[i]) { [weak self, weak link] answer, why in
+                    guard let self else { return }
+                    guard let answer else {
+                        if answers.isEmpty { self.resolve(id: id, text: nil, error: (why ?? .lost).words); return }
+                        self.resolve(id: id, text: CardGate.batchAnswer(answers, lost: true), error: nil)
+                        return
+                    }
+                    if let link, self.cardLink === link { self.cardSaw(apdus[i], answer) }
+                    answers.append(answer)
+                    if !CardGate.succeeded(answer) {
+                        self.resolve(id: id, text: CardGate.batchAnswer(answers, lost: false), error: nil)
+                        return
+                    }
+                    next(i + 1)
+                }
+            }
+            next(0)
+        }
+    }
+
     /// {text}: the card left part way through, and the sheet stays up and looks
     /// for it again, with this line on it. Answers "ok" when a card is there to
     /// talk to (chosen afresh: the applet is chosen again before anything else),

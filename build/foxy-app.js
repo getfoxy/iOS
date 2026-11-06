@@ -183,6 +183,8 @@ class Component extends DCLogic {
       wdPick: false, tillList: false, tillListBackTo: false,
       // nor SEND's BANK ACCOUNT (26q-bank.js)
       bankPick: false,
+      // nor a mint picked on an earlier card's WITHDRAW TO or TRANSFER TO (26n-card-withdraw-to.js, `fcListNext`)
+      mintSel: '',
     }, extra || {}));
   }
   back() {
@@ -365,6 +367,9 @@ class Component extends DCLogic {
    *    cta?: string, ctaTone?: string, ctaBusy?: boolean,
    *    titleUp?: boolean, wallet?: { word: string, go: () => void, label?: string },
    *    diffLine?: ?{ text: string, amber: boolean, pct: number },
+   *    stack?: Array<{ label: string, value: string, big?: boolean, small?: boolean, ink?: string, sub?: string }>,
+   *    details?: Array<{ label: string, value: string, wide?: boolean }>, detailNote?: string,
+   *    from?: ?{ word: string, go: ?(() => void) },
    *    go?: () => void }} ConfirmSpec */
   /* What the confirmation shell shows (renderConfirmShell). */
   /** @returns {ConfirmSpec} */
@@ -467,6 +472,34 @@ class Component extends DCLogic {
     const atPrice = out ? (cardUsd ? cardRate : Math.round((this.px && this.px()) || 0)) : 0;
     const atLine = atPrice > 0 ? 'at $ ' + this.group(atPrice) + ' per bitcoin' : '';
     if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
+    /* The keeper's 1l (2026-11-06): a Lightning payment from this phone's balance, its figures stacked, RECEIVER GETS, FEE,
+     * PAYING and RECEIVER, and PAYING FROM at the foot, which opens PAY FROM where there is a choice (`cfPayLook`). Not from
+     * a card: its confirmation is its own. */
+    const payBase = s.quotedAmt != null ? s.quotedAmt : this.sendSatsNow();
+    /* What leaves is the sum `pay` refuses on (`payNeed`: the amount, the reserve and the mint's fee on the pieces it
+     * spends), never less: at a mint that charges for its pieces the quote's fee alone said less than went. FEE is that
+     * less the amount. */
+    let payNeedSats = null;
+    if (asks && !out && s.quotedFee != null) {
+      payNeedSats = payBase + s.quotedFee;
+      try {
+        const pn = (W && W.payNeed) ? W.payNeed(payBase, s.quotedFee) : null;
+        if (pn && pn.need != null && Number(pn.need) > payNeedSats) payNeedSats = Math.round(Number(pn.need));
+      } catch (e) { /* the quote's own sum, then */ }
+    }
+    const payTotal = payNeedSats != null ? this.money(payNeedSats).main : '';
+    const look = (sp) => {
+      if (!asks || out || !this.cfPayLook) return sp;
+      const many = !!(this.pfMany && this.pfMany('send'));
+      return this.cfPayLook(sp, {
+        gets: this.sendAmountText(),
+        fee: payNeedSats != null ? this.money(payNeedSats - payBase).main : held ? 'CHECKING…' : 'UNKNOWN',
+        paying: payTotal || (held ? 'CHECKING…' : sp.amount),
+        receiver: this.sendToText(),
+        word: this.pfLabel ? this.pfLabel(this.pfHome(), 'sat') : String(s.payFrom || 'BITCOIN'),
+        go: many ? () => this.openWalletPick() : null,
+      });
+    };
     /* The code is not a row any more: it is above the amount, the same size,
      * in the accent — the same place and shape as on the receiver's screen, so
      * the two can be held side by side and compared at a glance rather than
@@ -483,7 +516,7 @@ class Component extends DCLogic {
       return (need && need > have) ? need - have : 0;
     })();
     if (shortOf) {
-      return {
+      return look({
         title: 'CONFIRMATION', amountLabel: 'SENDING',
         amount: this.sendAmountText(),
         amountInk: '#FF5C5C',
@@ -491,13 +524,13 @@ class Component extends DCLogic {
         // (what this phone holds with the mint is no part of what a card holds: nothing is held back from a card)
         warn: this.heldBlocks(out ? 0 : shortOf) || (out ? 'More than the card holds \u2014 short by ' : 'More than your balance \u2014 short by ') + this.money(shortOf).main,
         cta: 'CLOSE', ctaTone: 'warn', go: () => this.back(),
-      };
+      });
     }
     /* Typed in dollars: nothing can be sent until two price sources agree on
      * how many sats that is (checkSendPrice). */
     if (s.recipientKind !== 'invoice' && s.unit !== 'SATS' && s.sendPriceCheck !== 'agreed') {
       const failed = s.sendPriceCheck === 'failed';
-      return {
+      return look({
         title: 'CONFIRMATION', amountLabel: 'SENDING',
         amount: '$ ' + this.usd(val),
         amountSub: failed ? '' : 'Checking the price with two sources\u2026',
@@ -505,7 +538,7 @@ class Component extends DCLogic {
         warn: failed ? 'Two price sources did not agree on the price of bitcoin, so Foxy cannot work out the sats. Nothing was sent.' : '',
         cta: failed ? 'TRY AGAIN' : 'CHECKING THE PRICE\u2026', ctaTone: failed ? 'warn' : 'go',
         go: failed ? () => this.checkSendPrice() : () => {},
-      };
+      });
     }
     /* Once the fee is quoted: can the balance cover the payment and its fee?
      *
@@ -536,14 +569,14 @@ class Component extends DCLogic {
     // a dollar card's headline is what the invoice costs in dollars, at the mint's quote, once it has one
     const cardHead = (cardUsd && s.quotedAmt != null) ? cfig(s.quotedAmt).main : null;
     if (covers && !covers.ok) {
-      return {
+      return look({
         title: 'CONFIRMATION', amountLabel: 'SENDING',
         amount: cardHead || this.sendAmountText(),
         amountInk: '#FF5C5C',
         rows: rows,
         warn: this.heldBlocks(out ? 0 : covers.need - covers.have) || covers.why,
         cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
-      };
+      });
     }
     const spec = {
       title: 'CONFIRMATION', amountLabel: 'SENDING',
@@ -571,7 +604,8 @@ class Component extends DCLogic {
        * the sending screen that the payment did not fit. While that is being
        * asked, or the connection it is asked over is on its way, the button
        * says CHECKING and does nothing, and the FEE row says the same. */
-      cta: held ? 'CHECKING…' : 'SEND ' + this.sendAmountText(),
+      // (PAY and what leaves, on the new confirmation: the keeper's 1l)
+      cta: held ? 'CHECKING…' : (asks && !out) ? 'PAY ' + (payTotal || this.sendAmountText()) : 'SEND ' + this.sendAmountText(),
       ctaBusy: held,
       ctaTone: 'go',
       go: held ? () => {} : () => this.startSend(),
@@ -587,7 +621,7 @@ class Component extends DCLogic {
     }
     // from a card: the price under the amount, where there is one
     if (out && atLine) spec.amountSub = atLine;
-    return spec;
+    return look(spec);
   }
 
   /* Which of your mints issued this invoice, if any, and what you hold there.
@@ -863,12 +897,8 @@ class Component extends DCLogic {
    * cover this payment greyed (renderCurrency). With a choice of mints on PAY
    * FROM, its list again, the one paying ringed (26l-pay-from.js). */
   openWalletPick() {
-    const s = this.state;
-    if (this.pfMany && this.pfMany('send')) {
-      this.setState({ payFromReopen: true, payFromTapped: true, payFromPick: s.payMint ? this.pfKey(s.payMint, s.payUnit) : (s.payFromPick || '') });
-      this.go('payFrom');
-      return;
-    }
+    // a choice of mints: PAY FROM again, the source it is paid from ticked (26l-pay-from.js `pfReopen`)
+    if (this.pfMany && this.pfMany('send') && this.pfReopen) { this.pfReopen(); return; }
     this.go('walletPick');
   }
 
@@ -929,7 +959,14 @@ class Component extends DCLogic {
       ? (W.amountOf(String(s.recipient)) || 0) : this.typedSats();
     const bracket = (t) => (t ? '(' + t + ')' : '');
     const fig = (n) => (wallet === 'usd' ? { main: this.unitFigure(n, 'usd'), sub: '' } : this.money(n));
-    const total = q ? Math.round(Number(q.amount) || 0) + Math.round(Number(q.feeReserve) || 0) : null;
+    let total = q ? Math.round(Number(q.amount) || 0) + Math.round(Number(q.feeReserve) || 0) : null;
+    // what leaves is the sum `pay` refuses on (`payNeed`), never less: the reserve and the mint's fee on the pieces it spends
+    if (q && total != null && W && W.payNeed) {
+      try {
+        const pn = W.payNeed(q.amount, q.feeReserve, { unit: wallet });
+        if (pn && pn.need != null && Number(pn.need) > total) total = Math.round(Number(pn.need));
+      } catch (e) { /* the quote's own sum, then */ }
+    }
     const rows = [
       this.cfRow('TO', this.sendToText()),
       this.cfRow('AMOUNT', q ? fig(q.amount).main : this.sendAmountText(), {
@@ -961,25 +998,38 @@ class Component extends DCLogic {
                              ownWord: 'the mint\u2019s', slackCents: 1 })
       : null;
     const base = {
-      title: 'CONFIRM PAYMENT', titleUp: true, amountLabel: 'TOTAL', rows: rows, diffLine: diffLine,
+      // (CONFIRMATION, as the keeper drew 1l on 2026-11-06)
+      title: 'CONFIRMATION', titleUp: true, amountLabel: 'TOTAL', rows: rows, diffLine: diffLine,
       wallet: Object.assign({ word: this.walletLabel(wallet), go: () => this.openWalletPick() }, many ? { label: 'PAY FROM' } : {}),
       close: () => this.setState({ screen: 'home', stack: [] }),
       // the figure in ink, as drawn; red only when it cannot be paid
       amountInk: 'var(--ink)',
     };
+    /* The keeper's 1l (2026-11-06): the same figures stacked, in the balance that pays (the sats the payee is paid under
+     * RECEIVER GETS where dollars pay), and PAYING FROM's pill naming the mint and the balance, which opens the choice
+     * between them, or PAY FROM where other mints could pay too (`openWalletPick`). */
+    const look = (sp) => (!this.cfPayLook ? sp : this.cfPayLook(sp, {
+      gets: q ? fig(q.amount).main : this.sendAmountText(),
+      getsSub: (wallet === 'usd' && asked) ? '₿ ' + this.group(asked) : '',
+      fee: (q && total != null) ? fig(total - Math.round(Number(q.amount) || 0)).main : held ? 'CHECKING…' : 'UNKNOWN',
+      paying: total != null ? fig(total).main : held ? 'CHECKING…' : sp.amount,
+      receiver: this.sendToText(),
+      word: this.pfLabel ? this.pfLabel(this.pfHome ? this.pfHome() : '', wallet) : this.walletLabel(wallet),
+      go: () => this.openWalletPick(),
+    }));
     /* Typed in dollars to an address: the address is asked in sats, so two
      * price sources agree on them first (checkSendPrice), whichever balance
      * then pays. */
     if (s.recipientKind !== 'invoice' && s.unit !== 'SATS' && s.sendPriceCheck !== 'agreed') {
       const failed = s.sendPriceCheck === 'failed';
       const val = parseFloat(s.amount) || 0;
-      return Object.assign(base, {
+      return look(Object.assign(base, {
         amount: '$ ' + this.usd(val),
         amountSub: failed ? '' : 'Checking the price with two sources…',
         warn: failed ? 'Two price sources did not agree on the price of bitcoin, so Foxy cannot work out the sats. Nothing was sent.' : '',
         cta: failed ? 'TRY AGAIN' : 'CHECKING THE PRICE…', ctaTone: failed ? 'warn' : 'go',
         go: failed ? () => this.checkSendPrice() : () => {},
-      });
+      }));
     }
     const fits = this.quoteFits(wallet);
     // short, with the other balance's quote still to come: CHECKING, since that one may pay it (`autoWallet`)
@@ -988,7 +1038,7 @@ class Component extends DCLogic {
       const W2 = window.FoxyWallet;
       let why = '';
       try { why = (W2 && W2.payNeed && q) ? String((W2.payNeed(q.amount, q.feeReserve, { unit: wallet }) || {}).why || '') : ''; } catch (e) { why = ''; }
-      return Object.assign(base, {
+      return look(Object.assign(base, {
         amount: total != null ? fig(total).main : this.sendAmountText(),
         amountSub: (total != null && wallet === 'sat') ? fig(total).sub : '',
         amountInk: '#FF5C5C',
@@ -998,16 +1048,17 @@ class Component extends DCLogic {
           : (wallet === 'sat' && this.heldBlocks && q ? this.heldBlocks(total - this.unitBalance('sat')) : '') || why
             || 'More than your ' + this.unitWord(wallet).toLowerCase() + '.',
         cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
-      });
+      }));
     }
-    return Object.assign(base, {
+    return look(Object.assign(base, {
       amount: total != null ? fig(total).main : this.sendAmountText(),
       amountSub: (total != null && wallet === 'sat') ? fig(total).sub : '',
-      cta: held ? 'CHECKING…' : 'PAY',
+      // PAY and what leaves (the keeper's 1l)
+      cta: held ? 'CHECKING…' : 'PAY' + (total != null ? ' ' + fig(total).main : ''),
       ctaBusy: held,
       ctaTone: 'go',
       go: held ? () => {} : () => this.startSend(),
-    });
+    }));
   }
 
   // ---- account levels ----
@@ -3643,7 +3694,8 @@ class Component extends DCLogic {
       /* Nor while change is on its way back to this phone: the top-up would
        * hold the proof lock, the change would wait behind it, and the
        * receiver would not be told in time that it was kept. */
-      if (this.moneyBusy() || this.movingMints() || this._changeDueAt) { this.tidyChangeLater(more); return; }
+      // (and while a card's sheet is up: every command to the card rides the thread this would)
+      if (this.moneyBusy() || this.movingMints() || this._changeDueAt || (W.cardSheetUp && W.cardSheetUp())) { this.tidyChangeLater(more); return; }
       // brought back meanwhile: the rest waits for the next put-away
       if (!this._putAway || this._tapTalking || this.state.tapArmed) {
         this.tidyChangeLater(more);
@@ -5469,7 +5521,9 @@ class Component extends DCLogic {
      * The same picture carries on under MOVING ECASH TO YOUR MINT when they
      * say to go ahead. The melt loader is what a page
      * without that file falls back to. */
-    if (!this.movingUp('VERIFYING ECASH', info.mint)) {
+    // the fox while the fee is asked (26r-fox-wait.js); the two banks, or the melt loader, where it cannot be drawn
+    const fox = !!(this.foxUp && this.foxUp('nmMove', 'fee', { forMs: this.MELT_PATIENCE_MS }));
+    if (!fox && !this.movingUp('VERIFYING ECASH', info.mint)) {
       if (!document.getElementById('foxy-melt')) this.showMelt('');
       this.meltHeading(this.mintNameOf(info.mint).toUpperCase(),
         'This token is from a mint you don\u2019t use. Foxy is checking the fee to move it.');
@@ -5488,10 +5542,10 @@ class Component extends DCLogic {
 
     ask(2).then(plan => {
       // the figures are on screen and REDEEM is live: nothing left to wait for
-      this.movingDown();
+      if (fox) this.foxEnd('nmMove', true); else this.movingDown();
       this.setState({ nmPlan: plan, nmStage: '' });
     }).catch(e => {
-      this.movingDown();
+      if (fox) this.foxEnd('nmMove', false); else this.movingDown();
       // too small to move: keeping it at its mint, or leaving it, is what is left
       const tooSmall = /more than the token is worth/i.test(String((e && e.message) || e));
       this.setState({ nmPlan: null, nmStage: '', nmErr: W.reason(e), nmTooSmall: tooSmall });
@@ -5513,9 +5567,12 @@ class Component extends DCLogic {
     // one line for the whole move, claim and payment alike
     this.setState({ nmBusy: true, nmErr: '', nmStage: 'Moving to your mint\u2026' });
     // the same two banks again, now with the sats actually crossing between them
-    if (!this.movingUp('MOVING ECASH TO YOUR MINT', this.state.nmInfo && this.state.nmInfo.mint)) {
+    // the fox, the claim and then the move's own stages (26r-fox-wait.js); the two banks, or the melt loader, where it cannot be drawn
+    const fox = !!(this.foxUp && this.foxUp('nmMove', 'move', { forMs: 120000 }));
+    if (!fox && !this.movingUp('MOVING ECASH TO YOUR MINT', this.state.nmInfo && this.state.nmInfo.mint)) {
       this.showMelt('Moving to your mint\u2026');
     }
+    const down = (landed) => { if (fox) this.foxEnd('nmMove', landed); else this.movingDown(); };
     this._quiet = true;
     this._hushUntil = Date.now() + 120000;
     this.expectOwnSpend();
@@ -5526,12 +5583,15 @@ class Component extends DCLogic {
     }).catch(() => { this._sweepBefore = null; });
 
     W.receiveToken(this.state.nmToken).then(r => {
-      return W.moveRun(plan, () => {}).then(done => this.hushSweepEntries().then(() => done)).then(done => {
+      // claimed at their mint: the first mint has answered
+      if (fox) this.foxStep('nmMove', 'answered');
+      return W.moveRun(plan, fox ? this.foxHears('nmMove') : () => {}).then(done => this.hushSweepEntries().then(() => done)).then(done => {
         /* The move's own history entries are marked seen, and taken out of the
          * confirmation queue, before anything reloads history. walletReady ran
          * first, queued the claim at this mint as a payment received, and it
          * showed as a second confirmation when the move's own was dismissed. */
-        this.movingDown();
+        // change left at the source: the fox stays up, near the end, for that second pass (`sweepChange`)
+        if (!(fox && (done.leftBehind || 0) > 0)) down(true);
         this._quiet = false;
         // what landed, not what the token said before fees
         this._netLanded = done.sats;
@@ -5563,7 +5623,7 @@ class Component extends DCLogic {
           hash: 'sweep-' + Date.now(), to: 'ecash',
         });
       }).catch(e => {
-        this.movingDown();
+        down(false);
         this._quiet = false;
         this.setState({
           nmBusy: false, nmStage: '',
@@ -5572,7 +5632,7 @@ class Component extends DCLogic {
         this.walletReady({ name: r.host });
       });
     }).catch(e => {
-      this.movingDown();
+      down(false);
       this._quiet = false;
       this.setState({ nmBusy: false, nmStage: '', nmErr: W.reason(e) });
     });
@@ -5641,13 +5701,16 @@ class Component extends DCLogic {
     this.expectOwnSpend();
     // one extra pass only: the second move leaves its own change, and chasing
     // that forever would spend more on quotes than it recovers
-    if (this._chasingChange) { return; }
+    // the fox the move left up for this pass ends where this pass does not run (26r-fox-wait.js)
+    const foxLeft = !!(this.foxOn && this.foxOn('nmMove'));
+    if (this._chasingChange) { if (foxLeft) this.foxEnd('nmMove', true); return; }
     /* Collecting the change connects to the source mint. If a payment started
      * while the first move ran, that switch would pull it onto the wrong mint,
      * so the change stays where it is — still spendable there — and the
      * confirmation reports what landed. Checked before this pass marks itself
      * busy, or it would always refuse. */
     if (this.moneyBusy()) {
+      if (foxLeft) this.foxEnd('nmMove', true);
       console.log('[foxy] change of', left, 'sats left at the source: a payment is in progress');
       this._quiet = false;
       this._hushUntil = Date.now() + 30000;
@@ -5659,11 +5722,14 @@ class Component extends DCLogic {
     }
     this._chasingChange = true;
     this._sweepBefore = null;
-    this.showMelt('Moving to your mint\u2026');
+    // the same fox carrying on, or one of its own; the melt loader where it cannot be drawn
+    const fox = foxLeft || !!(this.foxUp && this.foxUp('nmMove', 'move', { forMs: this.MELT_PATIENCE_MS }));
+    if (!fox) this.showMelt('Moving to your mint\u2026');
     this._quiet = true;
 
     const done = (extra, note) => {
-      this.hideMelt();
+      // the money that came landed whether or not the change did: ALL SET
+      if (fox) this.foxEnd('nmMove', true); else this.hideMelt();
       this._quiet = false;
       this._chasingChange = false;
       this.refreshBalance();
@@ -5681,7 +5747,7 @@ class Component extends DCLogic {
     // as both ends and refuse with "already from this mint" — and left the app
     // sitting on the source mint's balance afterwards.
     W.sweepQuote(from, left)
-      .then(plan => W.connect(from).then(() => W.moveRun(plan, () => {})))
+      .then(plan => W.connect(from).then(() => W.moveRun(plan, fox ? this.foxHears('nmMove') : () => {})))
       .then(r => this.hushSweepEntries()
         .then(() => done(r.sats, 'moved ' + r.sats + ', ' + (r.leftBehind || 0) + ' still left')))
       .catch(e => {
@@ -8025,6 +8091,9 @@ class Component extends DCLogic {
     if (this._pinLocked) return;
     this._pinLocked = true;
     this._lockedOnce = true;
+    /* A card's PIN pad the lock comes over (26f-flashcard.js `fcAskPin`) is asked again once the app is unlocked: its flow has its
+     * pieces made and waiting, and without it would be left with no pad and no word. */
+    const cardAsk = (this._pinEl && this._pinEl.parentNode && /** @type {any} */ (this._pinEl).__fcAsk) || null;
     // said, so a diary shows the lock: it drew and asked in silence, and a report about it had nothing to go on
     console.log('[foxy] lock: up, ' + (byFaceAlone ? 'a face is the way in' : 'the PIN pad') + (W.faceLock && W.faceLock() ? ', a face is asked' : ''));
     this._unlockWait = new Promise(resolve => { this._unlockDone = resolve; });
@@ -8032,6 +8101,7 @@ class Component extends DCLogic {
       this._pinLocked = false;
       this.pinDismiss();
       if (this._unlockDone) { this._unlockDone(); this._unlockDone = null; }
+      if (cardAsk && this.fcAskPin) this.fcAskPin(cardAsk.o, cardAsk.then);
     };
 
     /* Face ID first, when it is there and wanted.
@@ -8871,19 +8941,24 @@ class Component extends DCLogic {
        * long enough to see. */
       return new Promise((resolve, reject) => {
         let over = false, shown = false;
-        const down = () => { if (shown && this.hideStage) this.hideStage('calcFee'); };
+        // the fox's ALL SET where the fee came, down at once where it did not (26r-fox-wait.js)
+        const down = (landed) => {
+          if (!shown) return;
+          if (this.foxEnd) this.foxEnd('calcFee', landed);
+          else if (this.hideStage) this.hideStage('calcFee');
+        };
         const up = setTimeout(() => {
           if (over || !this.stageScreen) return;
           shown = true;
           this.stageScreen('calcFee', {
-            art: 'mints', title: 'Calculating<br>fee', dots: true, forMs: 45000,
+            fox: 'fee', art: 'mints', title: 'Calculating<br>fee', dots: true, forMs: 45000,
             body: 'The receiver uses another mint, wait while I calculate the fee to pay them.',
             button: 'CANCEL',
             go: () => { if (over) return; over = true; console.log('[foxy] crossing: cancelled while the fee was being worked out'); resolve(false); },
           });
         }, 120);
         plan.then((p) => {
-          clearTimeout(up); down();
+          clearTimeout(up); down(!over);
           if (over) return;
           over = true;
           this.crossMintCard(p, theirMint, myMint).then(resolve, reject);
@@ -12336,12 +12411,8 @@ class Component extends DCLogic {
       handle: c.cid ? 'CASHU ID' : c.handle,
       ini: String(c.name || c.handle).charAt(0).toUpperCase(),
       tint: c.tint || 'var(--acc)',
-      // a Cashu ID's messages not read yet (26p-cashu-msg.js): '' with none, or with no ID in use
-      unread: c.cid ? this.cmUnreadOf(String(c.cid.id || '')) : '',
-      unreadSay: 'unread messages',
-      // a Cashu ID opens its own screen, its messages and PAY, from the menu's CONTACTS; from SEND it goes straight to
-      // the amount (`cidPayStart`), as an address does: the sender came to pay, not to read
-      tap: c.cid ? () => ((s.stack || []).slice(-1)[0] === 'sendHow' ? this.cidPayStart(c) : this.cidOpen(c)) : () => this.setState(p => ({
+      // a Cashu ID goes to the amount (`cidPayStart`), from the menu's CONTACTS and from SEND's alike, as an address does
+      tap: c.cid ? () => this.cidPayStart(c) : () => this.setState(p => ({
         screen: 'amount',
         stack: p.stack.concat([p.screen]),
         flow: 'send',
@@ -15746,7 +15817,7 @@ class Component extends DCLogic {
   renderVals() {
     const v = /** @type {ReturnType<Component["renderValsBase"]> & {
       clearHistory: () => void, clearContacts: () => void, open0: boolean, rot0: string,
-      toggleMenu: () => void, homeButtons: object[], menuItems: object[], menuAlert: string,
+      toggleMenu: () => void, cidHomeGo: () => void, homeButtons: object[], menuItems: object[], menuAlert: string,
       mintHostLabel: string, qrSrc: string, pageHash: string, homeButtonsTwo: object[],
       menuRingInk: string, menuRingInk2: string, menuRing: string,
       histRingInk: string, histRingInk2: string, histRing: string,
@@ -15802,9 +15873,7 @@ class Component extends DCLogic {
       mint: 'M3.5 9 12 4l8.5 5M5.5 9.5v7.5M9.8 9.5v7.5M14.2 9.5v7.5M18.5 9.5v7.5M3.5 20h17',
       // a wrench (the menu's TOOLS)
       tools: 'M14.6 3.8a4.6 4.6 0 0 0-4.3 6.2l-6.1 6.1a2 2 0 0 0 2.8 2.8l6.1-6.1a4.6 4.6 0 0 0 6.2-4.3l-2.6 2.6-2.6-.6-.6-2.6Z',
-      // a speech bubble with two lines in it, its tail at the lower left: home's CHAT, and the menu's
-      chat: 'M5.1 4.5h13.8a2.1 2.1 0 0 1 2.1 2.1v8.6a2.1 2.1 0 0 1-2.1 2.1H10.2l-4.7 3.7v-3.7h-.4A2.1 2.1 0 0 1 3 15.2V6.6a2.1 2.1 0 0 1 2.1-2.1ZM7.5 9.4h9M7.5 12.9h5.6',
-      // a head over a pair of shoulders: a person's own profile (MY CASHU ID)
+      // a head over a pair of shoulders: a person's own profile (MY CASHU ID, and home's round button at the top left)
       profile: 'M12 12.2a4.1 4.1 0 1 0 0-8.2 4.1 4.1 0 0 0 0 8.2ZM4.5 20.5c0-3.9 3.4-6.4 7.5-6.4s7.5 2.5 7.5 6.4',
     };
     /* A row that opens something: the drawer shuts, and the screen it opens goes back to the menu when it is left
@@ -15829,6 +15898,9 @@ class Component extends DCLogic {
     v.rot0 = this.state.open0 ? 'rotate(90deg)' : 'rotate(0deg)';
     // opened or shut by hand: nothing is waiting to open it again
     v.toggleMenu = () => this.setState(p => ({ open0: !p.open0, menuReturn: null }));
+    /* Home's round button at the top left, the menu button's twin: MY CASHU ID (26o-cashu-id.js, `cidShow`), the same
+     * screen as the menu's row. Opened from home, not the menu, so nothing is armed: DONE goes back to home. */
+    v.cidHomeGo = () => this.cidShow();
     /* SCAN and PASTE are the two ways money arrives at a phone, so they are on
      * home rather than a screen in. PASTE carries the marker
      * Apple's paste control is laid over (15-paid-wake-keyboard.js).
@@ -15856,7 +15928,7 @@ class Component extends DCLogic {
     const twoHere = this.twoUnitsOn();
     v.homeButtonsTwo = !twoHere ? [] : v.homeButtons.map(b => Object.assign({ dim: '1' }, b));
     /* The menu drawer, from the right: everything that is not RECEIVE, SEND,
-     * SCAN, PASTE or CHAT, in its sections (below). */
+     * SCAN, PASTE or MY CASHU ID's round button, in its sections (below). */
     /* A balance with no verified backup: the menu button and BACKUP glow red,
      * so the way to fix it is visible from home. */
     // a balance in either unit: dollars are lost with the words as surely as sats
@@ -15923,7 +15995,11 @@ class Component extends DCLogic {
     /* And for the audit: red while the balance and the payments disagree,
      * and red too while change is waiting to be scanned or shown. The card is on
      * the history screen; this is what says to go and look. */
-    const AU = this.histAudit ? this.histAudit() : { whole: false, off: 0, dueChange: 0, toShowCount: 0 };
+    /* (while a card's sheet is up, the books as they were last added up: the walk through every entry waits for the sheet to go,
+     * every command to the card riding the thread it runs on) */
+    const W0 = window.FoxyWallet;
+    const sheet = !!(W0 && W0.cardSheetUp && W0.cardSheetUp()) && !!this._auditKept;
+    const AU = sheet ? this._auditKept : (this.histAudit ? (this._auditKept = this.histAudit()) : { whole: false, off: 0, dueChange: 0, toShowCount: 0 });
     // and the dollars' own books, at a mint with two balances: each adds up in its own unit
     const AUusd = (twoHere && this.histAuditUsd) ? this.histAuditUsd() : { whole: false, off: 0 };
     /* Not at the first sign of it. The balance is read a moment before the
@@ -15961,7 +16037,7 @@ class Component extends DCLogic {
      *
      *   BACKUP ACCOUNT, at the very top and only while the wallet holds a balance and its words have not been checked
      *     (`unbacked`), with the backup's red ring
-     *   WALLET:   MY CASHU ID · HISTORY · CHAT · CONTACTS · HIDE BALANCE
+     *   WALLET:   MY CASHU ID · HISTORY · CONTACTS · HIDE BALANCE
      *   MINTS:    SWITCH/ADD MINTS · TRANSFER MONEY (money at two mints or more) · and, at a mint with two balances, SWAP
      *             and CURRENCIES · OTHER MINTS (only while an answer is remembered)
      *   TOOLS:    POINT OF SALE · SPLIT A BILL   (WITHDRAW TO BANK left the menu 2026-11-05; the send screen's BANK ACCOUNT stays)
@@ -15970,8 +16046,8 @@ class Component extends DCLogic {
      *
      * Every section is open until it is tapped shut (`menuShut`, which remembers the shut ones while Foxy is open). Each
      * heading after the first has the gap over it that the eye sees between MENU and WALLET (`headTop`). The card is home's CARD button
-     * (`homeButtons`), not a row here; SWAP is a row here, not home's. CHAT opens INBOX, as home's round button at the top
-     * left does (26p-cashu-msg.js, `renderInbox`), and CONTACTS stays the full list. YOUR CHANGE is not a row any
+     * (`homeButtons`), not a row here; SWAP is a row here, not home's. MY CASHU ID is also home's round button at the top
+     * left (`cidHomeGo`), and CONTACTS is the full list, a contact opening its payment. YOUR CHANGE is not a row any
      * more: the change screen (`goChange`) stays. BLUETOOTH TAP is a switch in SETTINGS (26d-tap.js, `tapAutoArms`).
      * A screen opened from a row goes back to the menu when it is left (01-ui-basics.js, `menuReturnArm`).
      * Rows inside a section are indented; a switch shows its state, so its label never has to. No balance is kept for a
@@ -16007,7 +16083,6 @@ class Component extends DCLogic {
       { label: 'MY CASHU ID', path: MENU_ICON.profile, tap: shut(() => this.cidShow()) },
       { label: 'HISTORY', path: MENU_ICON.history, tap: shut(() => this.go('history')),
         ringInk: v.histRingInk, ringInk2: v.histRingInk2, ring: v.histRing },
-      { label: 'CHAT', path: MENU_ICON.chat, tap: shut(() => this.goInbox()) },
       { label: 'CONTACTS', path: MENU_ICON.contacts, tap: shut(v.goContacts) },
       /* The label says what the tap will do, so it reads the same whichever way round it is. */
       { label: this.state.hidden ? 'SHOW BALANCE' : 'HIDE BALANCE', path: MENU_ICON.hide, tap: shutOnly(v.toggleHide) },
@@ -16199,8 +16274,6 @@ class Component extends DCLogic {
       ...this.renderHistory(c),
       ...this.renderTxDetail(c),
       ...this.renderContacts(c),
-      ...this.renderCidChat(c),
-      ...this.renderInbox(c),
       ...this.renderMints(c),
       ...this.renderFlashcard(c),
       ...this.renderCardScreens(c),
@@ -17554,7 +17627,7 @@ class Component extends DCLogic {
           out.paidHeadlineSub = 'Paid in dollars: ' + this.unitFigure(cents, 'usd') + ' for ' + this.unitFigure(askedSats, 'sat');
         }
       }
-      return out;
+      return this.renderPaidRest(c, out);
     }
     const base = this.renderPaidBase(c);
     // bitcoin at a mint with two balances is named as the balance it went into
@@ -17572,7 +17645,37 @@ class Component extends DCLogic {
       base.paidHeadlineSub = '\u20bf ' + this.group(sats) + (words ? ' \u00b7 ' + (s.paidAskOwn ? 'THIS PHONE\u2019S PRICE ' : 'THEIR PRICE ') + words : '');
       base.paidAddedTo = 'BITCOIN, THEN DOLLARS';
     }
-    return base;
+    return this.renderPaidRest(c, base);
+  }
+
+  /* RECEIVED (the keeper's 2026-11-06 design, 1h): where every receive comes to rest once its flash has played, on green, with the
+   * amount at 76px, the black circle with the green tick, and DONE. A payment out keeps the screen it had (`isPaidOut`). What the
+   * screen said beside the headline is kept, in lines under the amount: the line under the headline (`paidHeadlineSub`: the other
+   * currency, the price it was worked out at) and where the money went (`paidAddedLabel` and `paidAddedTo`: ADDED TO a balance,
+   * NOW AT a mint, SENT TO THE KEEPER). */
+  /**
+   * @param {RenderContext} c
+   * @param {any} v
+   */
+  renderPaidRest(c, v) {
+    // (nothing for any other screen: its values are as they were)
+    if (!v.isPaid) return v;
+    const s = c.s;
+    const lines = [];
+    if (v.paidHeadlineSub) lines.push({ text: String(v.paidHeadlineSub) });
+    if (v.paidAddedTo) lines.push({ text: (v.paidAddedLabel ? v.paidAddedLabel + ' ' : '') + v.paidAddedTo });
+    const fig = String(v.paidHeadline || '');
+    return Object.assign(v, {
+      isPaidIn: !!v.isPaid && !s.payOut,
+      isPaidOut: !!v.isPaid && !!s.payOut,
+      paidRestTitle: s.paidSays || 'RECEIVED',
+      paidRestLines: lines,
+      // 76px for a figure of seven characters and fewer, as the design's; a longer one is made smaller to stay on one line
+      paidRestSize: fig.length <= 7 ? '76px' : Math.max(36, Math.floor(76 * 7 / fig.length)) + 'px',
+      // (dark as it goes, as the screen it replaced did)
+      paidRestBg: (s.recv && s.recv.live) === 'out' ? '#050505' : 'linear-gradient(180deg,#5FD58C 0%,#1FAF5A 55%,#138A44 100%)',
+      paidRestDone: (s.paidPlace && s.paidPlace.dismiss) || 'DONE',
+    });
   }
 
   /** @param {RenderContext} c */
@@ -18325,6 +18428,59 @@ class Component extends DCLogic {
         { half: true, sub2: held ? '' : 'You pay the mint\u2019s fees' }),
     ] : []).concat(swapSrc ? [this.cfRow('SWAP', this.pfSwapText(swapSrc.e, swapSrc.q), { sub2: 'Swapped at the mint, then paid' })] : [])
       .concat(usdReq ? (swapSrc ? [] : [this.cfRow('FROM', 'DOLLARS')]) : agreed ? agreedRows() : this.peerRateRow());
+    /* The keeper's 1m (2026-11-06): RECEIVER GETS, FEE and PAYING stacked, with no RECEIVER (the four digits of a tap are
+     * above them, DELIVERED TO), and PAYING FROM's pill at the foot, which opens PAY FROM again where it offered a choice
+     * (`pfReopen`). Paid from the other balance, swapped first: what the swap takes, in what leaves. */
+    const swapFrom = swapSrc ? (swapSrc.e.unit === 'usd' ? 'usd' : 'sat') : '';
+    const feeAmt = crossFee > 0 ? crossFee : (lack && lack.fee > 0 ? lack.fee : 0);
+    const payFig = (n) => (agreed ? '\u20bf ' + this.group(n) : fig(n).main);
+    const swapQ = swapSrc && swapSrc.q ? swapSrc.q : null;
+    /* Paid on a visit to a mint this phone holds money at: what that mint charges for the pieces is known only there
+     * (`lack.there`), so the fee is not said to be nothing. */
+    const feeThere = !!(lack && lack.there && !(src && (src.plan || src.swap)));
+    // what leaves, as PAYING says it and PAY's figure: the amount and the fee, or the swap's whole, in the unit that leaves
+    const payingText = !sats ? 'ANY AMOUNT' : held ? 'CHECKING…'
+      /* the swap covers what is missing (`pfSwapSource`): what leaves is the other balance's whole for the swap, and the
+       * rest of the request from the balance in its own unit */
+      : swapSrc ? (swapQ ? this.unitFigure(Math.round(Number(swapQ.total) || 0), swapFrom)
+          + (Math.max(0, sats - Math.round(Number(swapQ.get) || 0)) > 0
+            ? ' + ' + this.unitFigure(Math.max(0, sats - Math.round(Number(swapQ.get) || 0)), usdReq ? 'usd' : 'sat') : '')
+        : 'CHECKING…')
+      : feeThere ? payFig(sats) + ' + FEE'
+      : payFig(sats + feeAmt);
+    const payWords = /^(CHECKING|ANY)/.test(payingText) ? head(sats).main : payingText;
+    // the way out, the same from every one of these screens: a phone over a tap is told the payer gave up
+    const leave = () => {
+      if (req && req.viaTap && W && W.tapQuote) {
+        W.tapQuote(JSON.stringify({ gaveUp: 'The payer cancelled.' })).catch(() => {});
+      }
+      this.setState({ screen: 'home', stack: [], req: null, note: '', noteDraft: '', tapQuoteFor: '' });
+    };
+    const look = (sp) => {
+      if (!this.cfPayLook) return sp;
+      const many = !!(this.pfMany && this.pfMany('req'));
+      const unitNow = src ? (src.unit || 'sat') : (usdReq ? 'usd' : 'sat');
+      // the mint the money leaves: the source chosen, the mint visited to pay it there, or this phone's own (it crosses from here)
+      const leaves = src ? src.mint : (lack && lack.there) ? judgeAt : this.pfHere ? this.pfHere() : '';
+      // sats for dollars agreed over a tap: the dollars they asked, at this phone's price and how old it is
+      const ageWords = agreed && this.priceAgeWords ? this.priceAgeWords(Number(s.tapQuoteAgeMs) || 0) : '';
+      return this.cfPayLook(sp, {
+        gets: sats ? head(sats).main : 'ANY AMOUNT',
+        getsSub: agreed ? 'For ' + this.unitFigure(Math.round(Number(s.tapQuoteUsd) || 0), 'usd') + ' at $ '
+          + this.group(Math.round(Number(s.tapQuoteRate) || 0)) + ', this phone\u2019s price' + (ageWords ? ', seen ' + ageWords.toLowerCase() : '') : '',
+        fee: held ? 'CHECKING…'
+          : swapSrc ? (swapQ && this.pfSwapFee ? this.unitFigure(this.pfSwapFee(swapQ, swapFrom), swapFrom) : 'CHECKING…')
+          : feeThere ? 'NOT KNOWN YET'
+          : payFig(feeAmt),
+        paying: payingText,
+        // paid from the other balance, swapped first: from what
+        payingSub: (swapSrc && this.pfSwapText) ? this.pfSwapText(swapSrc.e, swapQ) : '',
+        // a website is named, as the money goes to it
+        receiver: (d && d.kind === 'https' && siteHost) ? siteHost : '',
+        word: (this.pfLabel && leaves) ? this.pfLabel(leaves, unitNow) : (this.mintName() || 'THIS MINT').toUpperCase(),
+        go: many && this.pfReopen ? () => this.pfReopen() : null,
+      });
+    };
     /* Short with the fee counted, as the send itself counts it. The balance
      * alone let a 980-sat request through on a phone holding 979, to be
      * refused after SEND.
@@ -18339,29 +18495,31 @@ class Component extends DCLogic {
      * what it charges, are known only then, so the figures below stay as they
      * were. */
     if (lack && lack.short && (this.requestHere(req) || lack.there)) {
-      return {
+      return look({
         title: 'CONFIRMATION', amountLabel: 'SENDING', code: byTap ? s.tapCode : '',
         amount: head(sats).main, amountSub: head(sats).sub, amountInk: '#FF5C5C', rows: rows,
         // (what is held back with this mint says nothing of a pile at another)
         warn: (lack.there ? '' : this.heldBlocks(usdReq ? 0 : lack.need - lack.have)) || lack.why,
         cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
-      };
+        close: leave,
+      });
     }
     // (not this mint's balance where the payment is made from another, or crosses from one: judged above)
     const shortBy = (src && src.plan) || swapSrc || (lack && lack.there) ? 0 : lack && lack.short ? lack.need - lack.have
       : Math.max(0, sats - (usdReq ? this.unitBalance('usd') : (s.balSats || 0)));
     const short = shortBy > 0;
     if (short) {
-      return {
+      return look({
         title: 'CONFIRMATION', amountLabel: 'SENDING', code: byTap ? s.tapCode : '',
         amount: head(sats).main, amountSub: head(sats).sub, amountInk: '#FF5C5C', rows: rows,
         warn: this.heldBlocks(usdReq ? 0 : shortBy)
           || 'More than your balance \u2014 short by ' + fig(shortBy).main
              + (lack && lack.fee > 0 ? ' with the mint\u2019s fees' : ''),
         cta: 'CLOSE', ctaTone: 'warn', go: () => this.setState({ screen: 'home', stack: [], req: null, tapQuoteFor: '' }),
-      };
+        close: leave,
+      });
     }
-    return {
+    return look({
       title: 'CONFIRMATION',
       code: byTap ? s.tapCode : '',
       amountLabel: 'SENDING',
@@ -18372,32 +18530,26 @@ class Component extends DCLogic {
        * second button goes, and the X at the top to back out. */
       secondary: { label: (s.note || '').trim() ? 'EDIT NOTE' : 'ADD A NOTE',
         go: () => this.editSendNote(), filled: !!(s.note || '').trim() },
-      close: () => {
-        /* Backing out of a request that came over a tap: the other phone is
-         * told, so its screen does not offer to scan a payment that is not
-         * coming. */
-        const W = window.FoxyWallet;
-        if (req && req.viaTap && W && W.tapQuote) {
-          W.tapQuote(JSON.stringify({ gaveUp: 'The payer cancelled.' })).catch(() => {});
-        }
-        this.setState({ screen: 'home', stack: [], req: null, note: '', noteDraft: '', tapQuoteFor: '' });
-      },
-      /* SEND over the link in your hand, PAY over Tor. Not one word for both:
-       * over Tor it really is a payment going somewhere, and on a tap the two
-       * phones are touching and the thing being done is handing it over. What
-       * it must never say is GENERATE ECASH TOKEN, which is what it said while
-       * showing the code of the phone it was about to send to. */
+      /* Backing out of a request that came over a tap: the other phone is
+       * told, so its screen does not offer to scan a payment that is not
+       * coming (`leave`, every one of these screens' way out). */
+      close: leave,
+      /* PAY over the link in your hand and over Tor alike (it was SEND on a
+       * tap until the keeper's 2026-11-06 confirmations). What it must never
+       * say is GENERATE ECASH TOKEN, which is what it said while showing the
+       * code of the phone it was about to send to. */
       /* COLLECTING… while a move to that mint, paid and not yet collected, is
        * collected first (`makeTokenForRequest`): PAY stayed live under it for
        * up to 45 seconds, with nothing on screen to say anything was running. */
       cta: held ? 'CHECKING…' : s.reqCollecting ? 'COLLECTING\u2026' : s.reqSwapping ? 'SWAPPING\u2026'
         : s.reqBusy ? (d ? (d.kind === 'tap' ? 'SENDING\u2026' : 'PAYING\u2026') : 'MAKING\u2026')
-        : d ? (d.kind === 'tap' ? 'SEND ' : 'PAY ') + head(sats).main
+        // PAY on every one, a tap's too (the keeper, 2026-11-06)
+        : d ? 'PAY ' + payWords
         : 'GENERATE ECASH TOKEN',
       ctaTone: 'go',
       ctaBusy: held || !!s.reqBusy || !!s.reqCollecting || !!s.reqSwapping,
       go: (held || s.reqCollecting || s.reqSwapping) ? () => {} : () => this.makeTokenForRequest(),
-    };
+    });
   }
 
   /* depConfirm, sendConfirm: one shell, filled in by confirmSpec(). */
@@ -18405,6 +18557,13 @@ class Component extends DCLogic {
   renderConfirmShell(c) {
     const { s, sc } = c;
     const cf = CONFIRM_SCREENS.indexOf(sc) >= 0 ? this.confirmSpec() : {};
+    /* The confirmations of the keeper's 2026-11-06 design (1k, 1l, 1m): the figures stacked down the middle, the last of
+     * them in the accent, MORE DETAILS where the spec has details (a transfer's, for now), and PAYING FROM as a pill at the
+     * foot. A spec with no `stack` is drawn as it always was. */
+    const stack = (Array.isArray(cf.stack) && cf.stack.length) ? cf.stack : null;
+    const details = (stack && Array.isArray(cf.details) && cf.details.length) ? cf.details : null;
+    const moreOpen = !!details && s.cfMore === sc;
+    const from = stack ? (cf.from || null) : null;
     return {
       // ---- CONFIRM shell: title, amount, rows, cta. One block renders them all ----
       isConfirmShell: CONFIRM_SCREENS.indexOf(sc) >= 0,
@@ -18412,10 +18571,38 @@ class Component extends DCLogic {
       cfTitleInk: cf.titleInk || 'var(--ink)',
       /* The title between the round buttons, level with them (CONFIRM PAYMENT
        * at a mint with two balances), or under them as everywhere else. */
-      cfTitleUp: !!cf.titleUp,
-      cfTitleDown: !cf.titleUp,
+      // (level with them on the new confirmations, as drawn)
+      cfTitleUp: !!cf.titleUp || !!stack,
+      cfTitleDown: !cf.titleUp && !stack,
+      // the new confirmations' stack: each label over its figure, 48px, the last 68px in the accent, a name 24px
+      cfStackShown: !!stack,
+      cfOldShown: !stack,
+      cfStack: (stack || []).map((x) => ({
+        label: String(x.label || ''), value: String(x.value == null ? '' : x.value),
+        // (a long figure a size down, so it stays on one line in the phone's width)
+        size: x.small ? '24px' : x.big ? (String(x.value).length <= 8 ? '68px' : String(x.value).length <= 10 ? '56px' : '44px')
+          : (String(x.value).length <= 10 ? '48px' : String(x.value).length <= 13 ? '38px' : '30px'),
+        ink: x.ink || (x.big ? 'var(--acc)' : 'var(--ink)'),
+        sub: String(x.sub || ''), subShown: !!x.sub,
+      })),
+      // MORE DETAILS, closed until tapped, and the grid it opens: two to a row, a wide one across both
+      cfMoreShown: !!details,
+      cfMoreOpen: moreOpen,
+      cfMoreRot: moreOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+      cfMoreTap: () => this.cfMoreToggle(),
+      cfDetails: (details || []).map((d) => ({ label: String(d.label || ''), value: String(d.value == null ? '' : d.value),
+        span: d.wide ? '1 / -1' : 'auto' })),
+      cfDetailNote: details ? String(cf.detailNote || '') : '',
+      cfDetailNoteShown: !!details && !!cf.detailNote,
+      // PAYING FROM at the foot: the pill names the balance that pays, and opens the choice where there is one
+      cfFromShown: !!from,
+      cfFromWord: from ? String(from.word || '') : '',
+      cfFromMany: !!(from && from.go),
+      cfFromGo: (from && from.go) || (() => {}),
+      cfFromCursor: (from && from.go) ? 'pointer' : 'default',
       // the WALLET button, last under the rows: which balance pays, and the way to change it
-      cfWalletShown: !!cf.wallet,
+      // (not on the new confirmations: PAYING FROM's pill is their way to change it)
+      cfWalletShown: !!cf.wallet && !stack,
       cfWalletWord: (cf.wallet || {}).word || '',
       // WALLET between a mint's two balances; PAY FROM where there is a choice of mints (26l-pay-from.js)
       cfWalletLabel: (cf.wallet || {}).label || 'WALLET',
@@ -18474,6 +18661,37 @@ class Component extends DCLogic {
       cfCtaGlow: cf.ctaTone === 'warn' ? 'rgba(247,147,26,.3)' : cf.ctaTone === 'money' ? 'rgba(58,181,74,.32)' : 'rgba(var(--acc-rgb),.32)',
       cfGo: cf.go || (() => {}),
     };
+  }
+
+  /* MORE DETAILS, tapped: open on this screen, or closed again. */
+  cfMoreToggle() {
+    const sc = this.state.screen;
+    this.setState({ cfMore: this.state.cfMore === sc ? '' : sc });
+  }
+
+  /* 1l and 1m, from a payment's own figures: RECEIVER GETS, FEE, PAYING in the accent (red where the spec's amount is), and
+   * RECEIVER where there is one to name; PAYING FROM as the pill at the foot, which opens PAY FROM, or the WALLET choice at a
+   * mint with two balances, where there is a choice (`o.go`) and opens nothing where there is not. No note button: the
+   * design has none (a confirmation at a mint with two balances had none already); a note already written is drawn. */
+  cfPayLook(spec, o) {
+    const red = spec.amountInk === '#FF5C5C';
+    /* Each { label, value }: `big` the last, 68px in the accent (red where it cannot be paid), `small` a name or an invoice at
+     * 24px, `sub` a line under it. */
+    /** @type {Array<{ label: string, value: string, big?: boolean, small?: boolean, ink?: string, sub?: string }>} */
+    const stack = [
+      { label: 'RECEIVER GETS', value: String(o.gets || ''), sub: o.getsSub || '' },
+      { label: 'FEE', value: String(o.fee || '') },
+      { label: 'PAYING', value: String(o.paying || spec.amount || ''), big: true, ink: red ? '#FF5C5C' : 'var(--acc)', sub: o.payingSub || '' },
+    ];
+    if (o.receiver) stack.push({ label: 'RECEIVER', value: String(o.receiver), small: true });
+    // a note already written travels with the payment, so it is drawn; there is no button to add one (as drawn)
+    const note = String((this.state && this.state.note) || '').trim();
+    if (note) stack.push({ label: 'NOTE', value: note, small: true });
+    // back and the X, as drawn: the X home where the spec has no way out of its own
+    const look = Object.assign({}, spec, { stack: stack, from: { word: o.word || '', go: o.go || null },
+      close: spec.close || (() => this.setState({ screen: 'home', stack: [] })) });
+    delete look.secondary;
+    return look;
   }
 
   /* The BLOCKED screens: an action that did not happen, and why. */
@@ -18577,11 +18795,25 @@ class Component extends DCLogic {
       LOOK.both = { bg: 'linear-gradient(115deg,#D6EEF7 0%,#B9DCEA 49.8%,transparent 50.2%),' + LOOK.sat.bg, ink: '#FFFFFF', inkRgb: '255,255,255',
         blend: 'normal,' + LOOK.sat.blend, edge: 'rgba(255,255,255,.22)', badgeBg: '#FFFFFF', badgeInk: '#10161B', sym: '$\u20bf' };
     }
+    /* The tiles' look (the keeper's design of 2026-11-06, "Currency"): dollars in frost, bitcoin in orange, BOTH split between the
+     * two, each with its sign large and faint at the right and its word at the bottom left. Their own colours, not LOOK's, which PAY
+     * FROM's rows still wear; the question of what to hold wears these too (`holdRows`). */
+    const TILE = {
+      usd: { bg: 'linear-gradient(160deg,#D6EEF4 0%,#BFE3EC 100%)', ink: '#0F2A33', inkRgb: '15,42,51', blend: 'normal', edge: 'rgba(255,255,255,.22)',
+        sign: '$', signInk: 'rgba(15,42,51,.14)' },
+      sat: { bg: 'linear-gradient(160deg,#F78A4A 0%,#EB6A2E 55%,#D9561C 100%)', ink: '#1A0A02', inkRgb: '26,10,2', blend: 'normal', edge: 'rgba(255,255,255,.22)',
+        sign: '\u20bf', signInk: 'rgba(26,10,2,.16)' },
+      both: { bg: 'linear-gradient(105deg,#CDEAF1 0%,#BFE3EC 49.8%,#EB6A2E 50.2%,#D9561C 100%)', ink: '#0A0A0A', inkRgb: '10,10,10', blend: 'normal',
+        edge: 'rgba(255,255,255,.22)', sign: '', signInk: 'rgba(15,42,51,.16)' },
+      grey: { sign: '', signInk: 'rgba(255,255,255,.08)' },
+    };
+    // (and the question of what to hold, below: its three choices by the tile each wears)
+    const HOLD_TILE = { dollars: 'usd', bitcoin: 'sat', both: 'both' };
     const cards = (sc === 'currency' || pick) ? units.map(u => {
       const tag = u === 'both' ? '' : whyNot(u);
       // (a card's question may mark a currency it still offers, `curCard.mark`: said where a greyed one says why, and not greyed)
       const mark = (!tag && cc && cc.mark && cc.mark[u]) || '';
-      const look = Object.assign({}, LOOK[u], tag ? LOOK.grey : {});
+      const look = Object.assign({}, LOOK[u], TILE[u] || {}, tag ? LOOK.grey : {}, tag ? { signInk: TILE.grey.signInk } : {});
       const chosen = pick && u === current && !tag;
       return Object.assign(look, {
         sym: LOOK[u].sym,
@@ -18590,16 +18822,22 @@ class Component extends DCLogic {
         balance: (setUp || receiving) ? '' : u === 'both' ? balanceText('usd') + ' \u00b7 ' + balanceText('sat') : balanceText(u),
         labelShown: u !== 'both' && !setUp && !receiving,
         badgePx: setUp ? '60px' : three ? '52px' : '92px', badgeFont: setUp ? (u === 'both' ? '20px' : '30px') : three ? '28px' : '50px',
-        nameSize: setUp ? '28px' : three ? '26px' : '34px',
+        nameSize: '40px',
         balSize: three ? '20px' : '24px', gap: setUp ? '8px' : three ? '4px' : '10px', pad: three ? '12px 22px' : '22px',
-        radius: setUp ? '30px' : '34px',
-        // (the big faint sign behind each card, and a balance line, are not on the set-up's tiles nor a receive's; BOTH's badge has the two signs, the ₿ in fur)
-        markShown: !setUp, balShown: !setUp && !receiving,
+        radius: '30px',
+        /* The tile: its sign large and faint at the right (BOTH has the two, side by side at the top), its word 40px at the bottom
+         * left, and under the word, where one is shown, the balance and why it cannot pay. The badge's keys are kept for the
+         * questions that still read them; the tiles draw no badge. */
+        sign: u === 'both' ? '' : (TILE[u] ? TILE[u].sign : LOOK[u].sym), signOne: u !== 'both', signTwo: u === 'both',
+        signA: '$', signB: '\u20bf', signInkA: 'rgba(15,42,51,.16)', signInkB: 'rgba(26,10,2,.18)',
+        labelPx: '40px',
+        balShown: !setUp && !receiving,
         symOne: !(setUp && u === 'both'), symTwo: setUp && u === 'both',
-        nameShadow: (setUp && u === 'both') ? '0 2px 8px rgba(0,0,0,.45),0 0 2px rgba(0,0,0,.5)' : 'none',
+        // (BOTH's word is in dark ink on its split, as the others', and needs no shadow)
+        nameShadow: 'none',
         tag: tag || mark, tagShown: !!(tag || mark),
-        shadow: tag ? 'none' : SHADOW,
-        outline: chosen ? '3px solid rgba(255,255,255,.9)' : 'none',
+        shadow: tag ? 'none' : 'inset 0 1px 0 rgba(255,255,255,.35)',
+        outline: chosen ? '3px solid var(--ink)' : 'none',
         cursor: tag ? 'default' : 'pointer',
         tap: () => ((cc && tag) ? this.toast(String(cc.why || 'That one cannot do this.'), true) : pick ? this.walletPickChoose(u, tag ? (tag === 'NEEDS A CONNECTION'
           ? 'Your ' + this.unitWord(u).toLowerCase() + ' need a connection to pay this.'
@@ -18641,7 +18879,10 @@ class Component extends DCLogic {
       curNextFur: pfOn ? FUR_CTA : 'none,none,none',
       curNextInk: pfOn ? '#fff' : 'rgba(var(--ink-rgb),.4)',
       curNextSh: pfOn ? 'inset 0 2px 0 rgba(255,255,255,.4),inset 0 -4px 0 rgba(0,0,0,.16),0 12px 24px rgba(var(--acc-rgb),.34)' : 'none',
-      curGap: setUp ? '14px' : three ? '12px' : '16px',
+      // (the tiles 12px apart, as designed; PAY FROM's empty column as it was)
+      curGap: pf ? '16px' : '12px',
+      // the question: in grey under the rule on the tiles' screens (as designed); PAY FROM has its title alone (1p)
+      curAskAbove: false, curAskBelow: !pf,
       // (the set-up's tiles stand alone, with nothing under them)
       // (PAY FROM has no line under its tiles either: the keeper, 2026-11-06)
       curFootShown: !setUp && !pf,
@@ -18670,9 +18911,14 @@ class Component extends DCLogic {
       holdDoneLabel: holdFrom ? 'NEXT' : 'DONE',
       holdNote: holdFrom ? 'Your ' + this.unitFigure(this.unitBalance(holdFrom), holdFrom) + ' in ' + this.unitWord(holdFrom).toLowerCase()
         + ' is swapped into ' + this.unitWord(holdFrom === 'usd' ? 'sat' : 'usd').toLowerCase() + ' first. You see the fee before anything moves.' : '',
-      holdRows: HOLD.map(h => Object.assign({}, h.look, {
+      /* In the currency tiles' look (`TILE`, the keeper's design of 2026-11-06): each choice a tile with its sign faint at the
+       * right and its word 40px at the bottom left, the line under it smaller. */
+      holdRows: HOLD.map(h => Object.assign({}, h.look, TILE[HOLD_TILE[h.key]], {
         name: h.name, sub: h.sub,
-        outline: holding === h.key ? '3px solid rgba(255,255,255,.9)' : 'none',
+        sign: TILE[HOLD_TILE[h.key]].sign, signOne: h.key !== 'both', signTwo: h.key === 'both',
+        signA: '$', signB: '\u20bf', signInkA: 'rgba(15,42,51,.16)', signInkB: 'rgba(26,10,2,.18)',
+        labelPx: '40px', radius: '30px', shadow: 'inset 0 1px 0 rgba(255,255,255,.35)',
+        outline: holding === h.key ? '3px solid var(--ink)' : 'none',
         tap: () => this.setState({ holdPick: h.key }),
       })),
       holdBack: () => this.holdLater(),
@@ -19391,9 +19637,12 @@ class Component extends DCLogic {
       contactAll: this.contactRows(),
       contactLetter: (this.contactRows()[0] || {}).ini || '',
       contactRecents: this.contactRows().slice(0, 3),
-      // people who are not contacts and wrote by Cashu ID (26p-cashu-msg.js)
-      contactNew: sc === 'contacts' ? this.cmNewRows() : [],
-      contactNewShown: sc === 'contacts' && this.cmNewRows().length > 0,
+      // ADD A CASHU ID and SCAN A CASHU ID, on the empty CONTACTS (26o-cashu-id.js); not offered where the wallet cannot
+      // read an ID, nor SCAN where it cannot scan
+      ctAddShown: !!(window.FoxyWallet && window.FoxyWallet.cashuIdCheck),
+      ctAddGo: () => this.cidPasteAsk(),
+      ctScanShown: !!(window.FoxyWallet && window.FoxyWallet.cashuIdCheck && window.FoxyWallet.scan),
+      ctScanGo: () => this.cidScanAsk(),
       /* A contact is paid at a Lightning address, which offline can be neither
        * resolved nor paid. The list itself is local and could be shown, but a
        * screen of people none of whom can be paid is a worse answer than saying
@@ -19563,7 +19812,7 @@ class Component extends DCLogic {
      * quote's to say, so the room for it is checked there. */
     this.setState(p => ({
       screen: 'trConfirm', stack: p.stack.concat([p.screen]),
-      trSats: sats, trPlan: null, trFee: null, trErr: '', trFits: 0,
+      trSats: sats, trPlan: null, trFee: null, trErr: '', trFits: 0, cfMore: '',
     }));
     this.quoteTransfer();
   }
@@ -19620,13 +19869,15 @@ class Component extends DCLogic {
     if (this.refuseSwitchWhileBusy()) return;
     const to = this.mintNameOf(this.state.trTo);
     this.setState({ trBusy: true });
-    this.showMelt((plan.unit === 'usd' ? 'Moving your dollars to ' : 'Moving your sats to ') + to + '…', 0, { sats: this.state.trSats, mint: to });
+    // the fox, the figure following the move's own stages (26r-fox-wait.js); the melt loader where it cannot be drawn
+    const fox = !!(this.foxUp && this.foxUp('trMove', 'move', { forMs: this.MELT_PATIENCE_MS }));
+    if (!fox) this.showMelt((plan.unit === 'usd' ? 'Moving your dollars to ' : 'Moving your sats to ') + to + '…', 0, { sats: this.state.trSats, mint: to });
     /* Back on the mint the money leaves: the quote was made while connected to
      * the destination, and moveRun pays from whichever wallet is connected —
      * run from the destination it found nothing to spend (seen in the
      * simulator). */
-    W.connect(this.state.trFrom).then(() => W.moveRun(plan, () => {})).then(done => {
-      this.hideMelt();
+    W.connect(this.state.trFrom).then(() => W.moveRun(plan, fox ? this.foxHears('trMove') : () => {})).then(done => {
+      if (fox) this.foxEnd('trMove', true); else this.hideMelt();
       this.setState({ trBusy: false, trPlan: null, trStep: '', trErr: '' });
       this.refreshBalance();
       this.loadHistory();
@@ -19636,7 +19887,7 @@ class Component extends DCLogic {
         to: to, force: true,
       });
     }).catch(e => {
-      this.hideMelt();
+      if (fox) this.foxEnd('trMove', false); else this.hideMelt();
       this.setState({ trBusy: false, trErr: W.reason(e) });
       this.toast(W.reason(e), true);
     });
@@ -19650,12 +19901,56 @@ class Component extends DCLogic {
     if (W && back && W.mintUrl !== back) W.connect(back).then(() => this.refreshBalance(), () => {});
   }
 
+  /* The keeper's 1k (2026-11-06): MOVING, FEE and RECEIVING stacked, RECEIVING in the accent, and MORE DETAILS, which opens
+   * FROM and TO and the three fees the quote is made of: the source's for spending its pieces, the route's reserve (UP TO:
+   * what it does not use comes back), and the far mint's for the pieces it issues (`transferQuote`'s padding). `fig` says a
+   * figure in the unit that leaves. A dollar transfer says what it becomes, in the words the card's move uses. */
+  trLook(spec, o) {
+    const s = this.state;
+    const plan = s.trPlan;
+    const W = window.FoxyWallet;
+    const from = (this.mintNameOf(s.trFrom) || 'the other mint').toUpperCase();
+    const to = (this.mintNameOf(s.trTo) || 'this mint').toUpperCase();
+    const red = spec.amountInk === '#FF5C5C';
+    const waiting = s.trErr ? 'UNKNOWN' : 'CHECKING\u2026';
+    const reserve = plan ? Math.max(0, Math.round(Number(plan.reserve) || 0)) : 0;
+    const pad = plan ? Math.max(0, Math.round(Number(plan.padSats) || 0)) : 0;
+    const own = plan && o.fee != null ? Math.max(0, o.fee - reserve - (o.usd ? 0 : pad)) : null;
+    let note = '';
+    if (o.usd) {
+      let issued = [];
+      try { issued = (W && typeof W.mintUnits === 'function') ? (W.mintUnits(s.trTo) || []) : []; } catch (e) { issued = []; }
+      note = (issued.length && issued.indexOf('usd') < 0)
+        ? (this.mintNameOf(s.trTo) || 'That mint') + ' has no dollars, so the money becomes bitcoin.'
+        : 'The dollars leave ' + (this.mintNameOf(s.trFrom) || 'the other mint') + '; bitcoin lands at ' + (this.mintNameOf(s.trTo) || 'this mint') + '.';
+    }
+    return Object.assign({}, spec, {
+      stack: [
+        { label: 'MOVING', value: o.moving != null ? o.fig(o.moving) : waiting },
+        { label: 'FEE', value: o.fee != null ? o.fig(o.fee) : waiting },
+        { label: 'RECEIVING', value: o.receiving, big: true, ink: red ? '#FF5C5C' : 'var(--acc)', sub: o.receivingSub || '' },
+      ],
+      details: [
+        { label: 'FROM', value: from },
+        { label: 'TO', value: to },
+        { label: from + ' FEE', value: own != null ? o.fig(own) : waiting },
+        { label: 'LIGHTNING FEE', value: plan ? 'UP TO ' + o.fig(reserve) : waiting },
+        // (the far mint's fee is in what it issues: sats)
+        { label: to + ' FEE', value: plan ? this.money(pad).main : waiting, wide: true },
+      ],
+      detailNote: note,
+    });
+  }
+
   /* The confirmation screen's contents (confirmSpec). */
   transferSpec() {
     const s = this.state;
     if (s.trUnit === 'usd') return this.transferSpecUsd();
     const sats = s.trSats || 0;
     const fee = s.trFee;
+    // (what leaves is what lands and the fee, the most it can be)
+    const look = (sp) => (!this.trLook ? sp : this.trLook(sp, { fig: (n) => this.money(n).main, moving: fee != null && !s.trErr ? sats + fee : null,
+      fee: fee != null && !s.trErr ? fee : null, receiving: this.money(sats).main }));
     const rows = [
       this.cfRow('LANDING AT', (this.mintNameOf(s.trTo) || '').toUpperCase()),
       this.cfRow('PAYING FROM', (this.mintNameOf(s.trFrom) || '').toUpperCase(), { half: true }),
@@ -19670,7 +19965,7 @@ class Component extends DCLogic {
        * Asking again for the same amount would only be refused again, so that
        * is the button this replaces; CANCEL is still there. */
       const fits = s.trFits || 0;
-      return {
+      return look({
         title: 'CONFIRMATION', amountLabel: 'MOVING',
         amount: this.money(sats).main, amountSub: this.money(sats).sub, amountInk: '#FF5C5C', rows: rows,
         warn: s.trErr,
@@ -19678,9 +19973,9 @@ class Component extends DCLogic {
         ctaTone: fits > 0 ? 'go' : 'warn',
         go: () => { if (fits > 0) this.trMoveLess(fits); else this.quoteTransfer(); },
         secondary: { label: 'CANCEL', go: () => this.trCancel() },
-      };
+      });
     }
-    return {
+    return look({
       title: 'CONFIRMATION',
       amountLabel: 'MOVING',
       amount: this.money(sats).main,
@@ -19689,11 +19984,12 @@ class Component extends DCLogic {
       amountSub: this.money(sats).sub,
       rows: rows,
       secondary: { label: 'CANCEL', go: () => this.trCancel() },
-      cta: s.trBusy ? 'MOVING…' : fee == null ? 'CHECKING THE FEE…' : 'MOVE ' + this.money(sats).main,
+      // TRANSFER and what leaves (the keeper's 1k)
+      cta: s.trBusy ? 'MOVING…' : fee == null ? 'CHECKING THE FEE…' : 'TRANSFER ' + this.money(sats + fee).main,
       ctaTone: 'go',
       ctaBusy: !!s.trBusy || fee == null,
       go: () => { if (fee != null && !s.trBusy) this.runTransfer(); },
-    };
+    });
   }
 
   /* A transfer from dollars: the sats that land, and the dollars that leave at the source's quote, both on the one
@@ -19705,6 +20001,13 @@ class Component extends DCLogic {
     const out = plan && plan.unit === 'usd' ? Math.round(Number(plan.gross) || 0) : null;
     const fee = plan && plan.unit === 'usd' ? Math.max(0, Math.round(Number(plan.feeUnit) || 0)) : null;
     const from = (this.mintNameOf(s.trFrom) || '').toUpperCase();
+    /* Dollars leave and sats land: RECEIVING in dollars as drawn, at the source's own rate from its quote (`plan.rate`), so
+     * MOVING less FEE comes to it bar the far mint's fee; the market's price before there is a quote; the sats under it. */
+    const rate = (plan && plan.rate) ? Number(plan.rate.usdPerBtc) || 0 : 0;
+    const lands = rate > 0 ? this.unitFigure(Math.round(sats / 1e8 * rate * 100), 'usd') : this.money(sats).main;
+    const look = (sp) => (!this.trLook ? sp : this.trLook(sp, { usd: true, fig: (n) => this.unitFigure(n, 'usd'),
+      moving: out != null && !s.trErr ? out : null, fee: fee != null && !s.trErr ? fee : null,
+      receiving: lands, receivingSub: this.unitFigure(sats, 'sat') }));
     const rows = [
       this.cfRow('LANDING AT', (this.mintNameOf(s.trTo) || '').toUpperCase()),
       this.cfRow('LANDING', this.unitFigure(sats, 'sat'), { half: true }),
@@ -19714,15 +20017,15 @@ class Component extends DCLogic {
                  { half: true, sub2: 'You pay the mint\u2019s fees' }),
     ];
     if (s.trErr) {
-      return {
+      return look({
         title: 'CONFIRMATION', amountLabel: 'MOVING',
         amount: this.unitFigure(sats, 'sat'), amountSub: '', amountInk: '#FF5C5C', rows: rows,
         warn: s.trErr, cta: 'TRY AGAIN', ctaTone: 'warn',
         go: () => this.quoteTransfer(),
         secondary: { label: 'CANCEL', go: () => this.trCancel() },
-      };
+      });
     }
-    return {
+    return look({
       title: 'CONFIRMATION',
       amountLabel: 'MOVING',
       amount: this.unitFigure(sats, 'sat'),
@@ -19730,11 +20033,11 @@ class Component extends DCLogic {
       amountSub: out == null ? '' : this.unitFigure(out, 'usd'),
       rows: rows,
       secondary: { label: 'CANCEL', go: () => this.trCancel() },
-      cta: s.trBusy ? 'MOVING\u2026' : out == null ? 'CHECKING THE FEE\u2026' : 'MOVE ' + this.unitFigure(sats, 'sat'),
+      cta: s.trBusy ? 'MOVING\u2026' : out == null ? 'CHECKING THE FEE\u2026' : 'TRANSFER ' + this.unitFigure(out, 'usd'),
       ctaTone: 'go',
       ctaBusy: !!s.trBusy || out == null,
       go: () => { if (out != null && !s.trBusy) this.runTransfer(); },
-    };
+    });
   }
   /* ---- on chain (NUT-30) ---------------------------------------------------
    *
@@ -22703,15 +23006,17 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     let done = false;
     let t = null;
-    const close = () => {
+    // the fox's ALL SET where the invoice came (26r-fox-wait.js), down at once where it did not
+    const close = (landed) => {
       clearTimeout(t);
       if (W.onTapTerms) W.onTapTerms(null);
-      if (this.hideStage) this.hideStage('invWait');
+      if (this.foxEnd) this.foxEnd('invWait', landed);
+      else if (this.hideStage) this.hideStage('invWait');
     };
     const finish = (inv) => {
       if (done) return;
       done = true;
-      close();
+      close(!!inv);
       if (inv) { this.tapConvertPay(inv, from, offer); return; }
       console.log('[foxy] tap: no invoice came in five seconds; nothing was sent');
       this.tapRefuseUnit('They have no invoice for this yet. Nothing was sent.', 'The payer could not pay without an invoice.');
@@ -22725,7 +23030,7 @@ class Component extends DCLogic {
     }
     t = setTimeout(() => finish(''), 5000);
     this.waitingScreen('invWait', {
-      art: 'mints', title: 'Getting<br>their invoice', dots: true, forMs: 6000,
+      fox: 'fee', art: 'mints', title: 'Getting<br>their invoice', dots: true, forMs: 6000,
       body: 'Waiting a moment for their Lightning invoice.',
       button: 'CANCEL',
       go: () => { if (done) return; done = true; close(); this.tapGaveNothing('cancelled'); this.back(); },
@@ -22805,16 +23110,18 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     let done = false;
     let t = null;
-    const close = () => {
+    // the fox's ALL SET where the invoice came (26r-fox-wait.js), down at once where it did not
+    const close = (landed) => {
       clearTimeout(t);
       if (W.onTapTerms) W.onTapTerms(null);
       this.dismissCard('invWait');
-      if (this.hideStage) this.hideStage('invWait');
+      if (this.foxEnd) this.foxEnd('invWait', landed);
+      else if (this.hideStage) this.hideStage('invWait');
     };
     const finish = (inv) => {
       if (done) return;
       done = true;
-      close();
+      close(!!inv);
       console.log(inv ? '[foxy] tap: their invoice came after the offer; paying it over Lightning'
         : '[foxy] tap: no invoice in five seconds; moving the sats to their mint instead');
       this.tapPayOffer(Object.assign({}, offer, { invWaited: true }, inv ? { inv: inv } : {}), sats);
@@ -22829,7 +23136,7 @@ class Component extends DCLogic {
     console.log('[foxy] tap: they are online at another mint and their invoice is not in yet; waiting up to 5s for it');
     t = setTimeout(() => finish(''), 5000);
     this.waitingScreen('invWait', {
-      art: 'mints', title: 'Getting<br>their invoice', dots: true, forMs: 6000,
+      fox: 'fee', art: 'mints', title: 'Getting<br>their invoice', dots: true, forMs: 6000,
       body: 'The receiver uses another mint. Waiting a moment for their Lightning invoice.',
       button: 'CANCEL',
       go: () => { if (done) return; done = true; close(); this.tapGaveNothing('cancelled'); this.back(); },
@@ -23163,7 +23470,9 @@ class Component extends DCLogic {
     this._crossRun = run;
     const free = () => { if (this._crossRun === run) this._crossRun = null; };
     this.hushMove(plan);
-    this.showMelt('Moving your sats to ' + (this.mintNameOf(theirs) || 'their mint') + '\u2026',
+    // the fox, the figure following the move's own stages (26r-fox-wait.js); the melt loader where it cannot be drawn
+    const fox = !!(this.foxUp && this.foxUp('crossMove', 'move', { forMs: this.MELT_PATIENCE_MS }));
+    if (!fox) this.showMelt('Moving your sats to ' + (this.mintNameOf(theirs) || 'their mint') + '\u2026',
                   0, { sats: plan.net, mint: this.mintNameOf(theirs) });
     /* On the mint the money leaves, which is where the melt has to run from —
      * the same step the transfer screen takes for the same reason. `moveRun`
@@ -23189,12 +23498,12 @@ class Component extends DCLogic {
     return start
       /* The plan's own melt quote paid with, not asked for again (`quoted`), and the far mint made ready while the melt
        * runs (`warm`): the plan was quoted moments ago, on PAY FROM or the crossing card, and the person agreed to its fee. */
-      .then(() => W.moveRun(plan, () => {}, { visit: true, quoted: true, warm: true })).then((done) => {
+      .then(() => W.moveRun(plan, fox ? this.foxHears('crossMove') : () => {}, { visit: true, quoted: true, warm: true })).then((done) => {
       const quiet = this.hushSweepEntries ? this.hushSweepEntries() : Promise.resolve();
       return quiet.then(() => done, () => done);
     }).then(() => {
       loud();
-      this.hideMelt();
+      if (fox) this.foxEnd('crossMove', true); else this.hideMelt();
       this.refreshBalance();
       /* From here the money is at their mint whatever happens next, and that is
        * worth knowing about: a failure now leaves the balance at a mint the
@@ -23206,7 +23515,7 @@ class Component extends DCLogic {
        * request payment's visit) wrote the mint being visited as home, and
        * that trip's ending took the phone there and not home. */
       if (!this._crossCameFrom) this._crossCameFrom = visit ? home : mine;
-    }).then(() => { free(); }, (e) => { free(); throw e; });
+    }).then(() => { free(); }, (e) => { free(); if (fox) this.foxEnd('crossMove', false); throw e; });
   }
 
   /* Whatever went wrong, the wallet goes back to the mint it was on: a failed
@@ -23215,6 +23524,7 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     this._quiet = false;
     this.hideMelt();
+    if (this.hideStage) this.hideStage('crossMove');
     if (W.mintUrl !== mine) W.connect(mine).then(() => this.refreshBalance(), () => {});
     const why = W.reason ? W.reason(e) : String((e && e.message) || e);
     console.warn('[foxy] tap: could not pay across mints:', why);
@@ -23548,11 +23858,14 @@ class Component extends DCLogic {
     this._hushUntil = Date.now() + 120000;
     W.transactions(50).then(list => { this._sweepBefore = new Set(list.map(x => x.hash)); })
       .catch(() => { this._sweepBefore = null; });
-    this.showMelt('Bringing the payment to your mint\u2026', 0,
+    // the fox, the figure following the walk's own stages (26r-fox-wait.js); the melt loader where it cannot be drawn
+    const fox = !!(this.foxUp && this.foxUp('carryMove', 'move', { forMs: this.MELT_PATIENCE_MS }));
+    if (!fox) this.showMelt('Bringing the payment to your mint\u2026', 0,
                   { sats: Math.round(Number(job.terms.net) || 0), mint: this.mintNameOf(home) });
     this.hushMove(job.terms.plan);
-    const settle = () => {
-      this.hideMelt();
+    // ALL SET only where it landed at home
+    const settle = (landed) => {
+      if (fox) this.foxEnd('carryMove', landed); else this.hideMelt();
       this._quiet = false;
       this._carryingHome = false;
       this._hushUntil = Date.now() + 20000;
@@ -23562,18 +23875,19 @@ class Component extends DCLogic {
      * landed, it is on its way, it has to wait, it would cost more than was
      * paid for, or it went back to the payer. The phone is at its own mint
      * when the answer comes, whichever it is. */
+    const heard = fox ? this.foxHears('carryMove') : () => {};
     const walk = (W.carryHome && job.id)
-      ? W.carryHome(job.id, job.terms.plan, () => {})
-      : W.moveRun(job.terms.plan, () => {}).then(done => ({ state: 'home', sats: done && done.sats, done: done }),
+      ? W.carryHome(job.id, job.terms.plan, heard)
+      : W.moveRun(job.terms.plan, heard).then(done => ({ state: 'home', sats: done && done.sats, done: done }),
           e => ({ state: 'stuck', why: W.reason ? W.reason(e) : String((e && e.message) || e) }));
     return walk.then((r) => {
       const quiet = (r && r.state === 'home' && this.hushSweepEntries) ? this.hushSweepEntries() : Promise.resolve();
       return quiet.then(() => r, () => r);
     }).then((r) => {
-      settle();
+      settle(!!(r && r.state === 'home'));
       this.carryOutcome(r, { home: home, heldThere: heldThere, paid: paid, net: job.terms.net });
     }).catch(e => {
-      settle();
+      settle(false);
       console.warn('[foxy] tap: bringing the payment home:', (e && e.message) || e);
       this.loadHistory();
     });
@@ -23586,6 +23900,20 @@ class Component extends DCLogic {
    * received when it is at this phone's own mint and at no moment before:
    * until then it is money at a mint this person did not choose, and every
    * card here says which of those it is. */
+  /* A payment's walk home, or back to the payer, started from one of the cards below: the fox (26r-fox-wait.js), or the
+   * melt loader with `label` where it cannot be drawn. True for the fox. */
+  carryFoxUp(label, o) {
+    const fox = !!(this.foxUp && this.foxUp('carryMove', 'move', { forMs: this.MELT_PATIENCE_MS }));
+    if (!fox) this.showMelt(label, 0, o);
+    return fox;
+  }
+
+  /* Its end: ALL SET where it `landed` at home; down at once otherwise, a payment sent back included, since the card
+   * that follows says what became of it. */
+  carryFoxDown(fox, landed) {
+    if (fox) this.foxEnd('carryMove', landed); else this.hideMelt();
+  }
+
   carryOutcome(r, ctx) {
     const W = window.FoxyWallet;
     const c = ctx || {};
@@ -23647,12 +23975,13 @@ class Component extends DCLogic {
         chip: 'It is not received until it is at ' + homeName + '.',
         retry: 'BRING ' + this.group(lands) + ' HOME',
         go: () => {
-          this.showMelt('Bringing the payment to your mint\u2026', 0, { sats: lands, mint: homeName });
-          W.carryHome(job.id, null, () => {}, { less: true }).then(x => { this.hideMelt(); this.carryOutcome(x, { home: home }); });
+          const fox = this.carryFoxUp('Bringing the payment to your mint\u2026', { sats: lands, mint: homeName });
+          W.carryHome(job.id, null, fox ? this.foxHears('carryMove') : () => {}, { less: true })
+            .then(x => { this.carryFoxDown(fox, x && x.state === 'home'); this.carryOutcome(x, { home: home }); });
         },
         shut: { label: 'SEND IT BACK', tap: () => {
-          this.showMelt('Sending the payment back\u2026');
-          W.carryRefund(job.id).then(x => { this.hideMelt(); this.carryOutcome(x, { home: home }); });
+          const fox = this.carryFoxUp('Sending the payment back\u2026');
+          W.carryRefund(job.id).then(x => { this.carryFoxDown(fox, false); this.carryOutcome(x, { home: home }); });
         } },
       });
       return;
@@ -23681,12 +24010,13 @@ class Component extends DCLogic {
         chip: 'It is not received until it is at ' + homeName + '.',
         retry: 'TRY AGAIN',
         go: () => {
-          this.showMelt('Bringing the payment to your mint\u2026', 0, { sats: Math.round(Number(job.net) || 0), mint: homeName });
-          W.carryHome(job.id, null, () => {}).then(x => { this.hideMelt(); this.carryOutcome(x, { home: home }); });
+          const fox = this.carryFoxUp('Bringing the payment to your mint\u2026', { sats: Math.round(Number(job.net) || 0), mint: homeName });
+          W.carryHome(job.id, null, fox ? this.foxHears('carryMove') : () => {})
+            .then(x => { this.carryFoxDown(fox, x && x.state === 'home'); this.carryOutcome(x, { home: home }); });
         },
         shut: job.payerKey ? { label: 'SEND IT BACK', tap: () => {
-          this.showMelt('Sending the payment back\u2026');
-          W.carryRefund(job.id).then(x => { this.hideMelt(); this.carryOutcome(x, { home: home }); });
+          const fox = this.carryFoxUp('Sending the payment back\u2026');
+          W.carryRefund(job.id).then(x => { this.carryFoxDown(fox, false); this.carryOutcome(x, { home: home }); });
         } } : { label: 'CLOSE' },
       });
       return;
@@ -23755,7 +24085,9 @@ class Component extends DCLogic {
       clearTimeout(this._tapQuoteT);
       if (W.onTapTerms) W.onTapTerms(null);
       this.dismissCard('priceSent');
-      if (this.hideStage) this.hideStage('priceSent');
+      /* An answer is the fox's real end, ALL SET over the fee screen it opens (26r-fox-wait.js); an answer that is
+       * refused below takes the fox down at once. */
+      if (over || !this.foxDone || !this.foxDone('priceSent')) { if (this.hideStage) this.hideStage('priceSent'); }
       // a talk that ended with no payment leaves nothing to protect
       if (over) { this._crossReady = null; this.tapGaveNothing(over); }
       return true;
@@ -23773,6 +24105,7 @@ class Component extends DCLogic {
         }
         if (!done()) return;
         if (!terms || !terms.req || !(Number(terms.sats) > 0)) {
+          if (this.hideStage) this.hideStage('priceSent');
           this.toast(terms && terms.why ? String(terms.why)
             : 'They could not take a payment from your mint. Nothing was sent.', true);
           this.back();
@@ -23797,6 +24130,7 @@ class Component extends DCLogic {
           console.warn('[foxy] tap: their terms and their request do not agree ('
             + (read ? 'the request is for ' + reqSats + ' sats' + (reqMint && reqMint !== myMint ? ' at ' + reqMint : '') : 'the request could not be read')
             + ', the terms say ' + shownSats + '); nothing was sent');
+          if (this.hideStage) this.hideStage('priceSent');
           this.toast(!read ? 'Their request could not be read. Nothing was sent.'
             : 'Their request does not match the amount they quoted. Nothing was sent.', true);
           this.back();
@@ -23829,7 +24163,7 @@ class Component extends DCLogic {
      * the arithmetic is not something the person paying needs to hold in
      * their head. */
     this.waitingScreen('priceSent', {
-      art: 'mints', title: 'Calculating<br>fee', dots: true,
+      fox: 'fee', art: 'mints', title: 'Calculating<br>fee', dots: true,
       body: 'The receiver uses another mint, wait while I calculate the fee to pay them.',
       button: 'CANCEL', go: () => { if (done('cancelled')) this.back(); },
     });
@@ -24176,6 +24510,8 @@ class Component extends DCLogic {
    * button, go, and `keep` to leave the screen up after the button. */
   stageScreen(kind, o) {
     this.hideStage();
+    // the fox, for a fee being checked or money moving (26r-fox-wait.js)
+    if (o && o.fox && this.foxStage) { this.foxStage(kind, o); return; }
     const W = window.FoxyWallet;
     const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g,
       (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -24325,15 +24661,16 @@ class Component extends DCLogic {
     if (kind && old.getAttribute('data-stage') !== kind) return false;
     clearTimeout(this._stageT);
     clearInterval(this._stageQrT);
-    // the card screen's count of seconds, and its look that comes of time (26h-tap-screen.js)
-    clearInterval(this._fcCountT);
+    // the card screen's look that comes of time (26h-tap-screen.js)
     clearTimeout(this._fcLookT);
-    this._stageT = null; this._stageQrT = null; this._fcCountT = null; this._fcLookT = null;
+    this._stageT = null; this._stageQrT = null; this._fcLookT = null;
     const was = old.getAttribute('data-stage');
+    // the fox's video let go of with its screen (26r-fox-wait.js)
+    if (this.foxRelease) this.foxRelease(old);
     if (old.parentNode) old.parentNode.removeChild(old);
     if (this.syncPreview) this.syncPreview();
     // a card screen coming down may be the end of a card flow, and what waited for it is raised (26f-flashcard.js)
-    if (was === 'card' || was === 'cardReady' || was === 'cardBack') this.cardFlowMayHaveEnded();
+    if (was === 'card' || was === 'cardReady' || was === 'cardBack' || was === 'cardAgain') this.cardFlowMayHaveEnded();
     // a stage a menu row opened (MY CASHU ID): the menu again, unless another stage takes its place (01-ui-basics.js)
     if (this.menuReturnSoon) this.menuReturnSoon();
     return true;
@@ -24667,7 +25004,7 @@ class Component extends DCLogic {
 
   /* A tap, step by step: the line on the phone's sheet. The wallet names the steps as it reaches them; the screen behind
    * the sheet is drawn from where the tap has got to (26h-tap-screen.js), not from these. */
-  // the screen's lead over the sheet, in ms: TAP BEHIND PHONE is seen before iOS's sheet comes up
+  // the screen's lead over the sheet, in ms: the screen asking for the card (1a) is seen before iOS's sheet comes up
   /* No head start for the screen before the sheet. A phone with its screen on reads a card's tag by itself and offers
    * its banner whenever no card sheet is up, so a card already at the phone in that half second was taken by the
    * system and not by the payment. The sheet is asked for at once; the screen behind it comes up with it. */
@@ -24984,9 +25321,8 @@ class Component extends DCLogic {
    * none of them says anything of the address. */
 
   // the screens on which nothing is in progress: a card's address may take the person away from any of them
-  // (RESTORE CARD, 'fcRestore', is a list: a take-back under way is its stage, drawn over it; so is INBOX, 'inbox', with nothing
-  // written there: a message is written on the contact's own screen)
-  CARD_TAP_FREE = ['home', 'history', 'contacts', 'txDetail', 'flashcard', 'change', 'fieldLog', 'switchMint', 'fcRestore', 'inbox'];
+  // (RESTORE CARD, 'fcRestore', is a list: a take-back under way is its stage, drawn over it)
+  CARD_TAP_FREE = ['home', 'history', 'contacts', 'txDetail', 'flashcard', 'change', 'fieldLog', 'switchMint', 'fcRestore'];
   // how long a request waits for Foxy to be open before it lapses, and how often it looks again meanwhile
   CARD_TAP_KEEP_MS = 60000;
   CARD_TAP_POLL_MS = 250;
@@ -25194,13 +25530,15 @@ class Component extends DCLogic {
     // a tap is in progress from here until it settles, whatever is on the screen meanwhile (`cardFlowBusy`)
     this._fcTaps = (this._fcTaps || 0) + 1;
     const free = () => { this._fcTaps = Math.max(0, (this._fcTaps || 1) - 1); };
-    /* The tap that follows the PIN pad (the last sheet ended asking for it) starts as PLEASE TAP AGAIN, on the screen
+    /* The tap that follows the PIN pad (the last sheet ended asking for it) asks for the card again (1a), on the screen
      * the last tap left up (26h-tap-screen.js). */
     const was = document.getElementById('foxy-stage');
     const afterPin = !!(was && was.getAttribute('data-stage') === 'card' && was.getAttribute('data-look') === 'pin');
     this._fcTapO = Object.assign({}, o || {});
     delete this._fcTapO.t;
     if (afterPin) this._fcTapO.pinAgain = true;
+    // this tap's own options, for what its screen saw (a later tap, or a pause that stands in for one, puts others in their place)
+    const tapO = this._fcTapO;
     this.fcStage('hold');
     /* What the phone's own link says is happening, as it says it: the card found, the card lost. The sheet's lines are
      * ours already, and the screen behind it does not repeat them. */
@@ -25210,9 +25548,11 @@ class Component extends DCLogic {
     const over = (pinNeeded) => {
       if (W.onCard) W.onCard(null);
       if (pinNeeded) this.fcTapPin(); else this.hideStage('card');
+      // a screen CLOSE took down: nothing of this tap's is left to time out (`fcTapClose`)
+      if (tapO.t && tapO.t.closed && !this.stageUp()) { clearTimeout(this._stageT); this._stageT = null; }
     };
     /* The screen and the sheet together. The sheet could follow the screen by FC_TAP_LEAD, and did by half a second
-     * so that TAP BEHIND PHONE was seen first; with a tag on the card, that half second was one in which the system
+     * so that the screen asking for the card was seen first; with a tag on the card, that half second was one in which the system
      * read the card and raised its banner. The lead is nothing now, and a lead that is set is still honoured. */
     const lead = Math.max(0, Number(this.FC_TAP_LEAD) || 0);
     // with no lead the sheet is asked for in this very turn
@@ -25243,8 +25583,11 @@ class Component extends DCLogic {
          * app asks for three. */
         if ((step === 'checking' || step === 'mint') && info && info.change) this.fcChangeBuzz();
         if (step === 'checking') {
-          clearTimeout(this._stageT);
-          this._stageT = setTimeout(() => this.hideStage('card'), 180000);
+          // (only for a screen that is up: one CLOSE took down leaves no timer behind to take down a later tap's)
+          if (this.stageUp('card')) {
+            clearTimeout(this._stageT);
+            this._stageT = setTimeout(() => this.hideStage('card'), 180000);
+          }
           /* The card has signed for a payment: its PAYMENT RECEIVED waits from
            * here, before the mint has said paid, until its change is back on
            * the card or is left for later. Held as this payment's and no
@@ -25255,12 +25598,21 @@ class Component extends DCLogic {
       };
       /* Which piece, of how many: said on the sheet before the card is asked, so the line is up for as long as it works
        * on that piece and a person keeps holding. A card that has said its design (`design`) is drawn as it. */
+      /* "Writing i of n" is said at most every FC_SAY_EVERY_MS (its first and its last always): each line is a trip to the phone
+       * and a change to its sheet, and a card's load is many pieces in a few seconds. */
+      let saidAt = 0;
       const progress = (p) => {
         if (p && Object.prototype.hasOwnProperty.call(p, 'design')) this.fcTapSeen(p.design);
         // a piece being written: some of the change is going on, and contact breaking now breaks it part way
         if (p && p.step === 'writing' && Math.round(Number(p.i)) > 0) this.fcTapState().wrote = true;
         const text = this.fcProgressText(p);
         if (!text) return;
+        if (p && p.step === 'writing') {
+          const i = Math.round(Number(p.i)), n = Math.round(Number(p.n));
+          const now = Date.now();
+          if (i > 1 && i < n && now - saidAt < this.FC_SAY_EVERY_MS) return;
+          saidAt = now;
+        }
         link.say(text);
       };
       on('reading');
@@ -25273,8 +25625,19 @@ class Component extends DCLogic {
       if (line) this.fcTapLost();
       return line;
     } : null }).then((r) => { free(); over(false); return r; },
-            (e) => { free(); over(!!(e && e.card === 'pin-needed')); throw e; }));
+            (e) => {
+              /* What the screen behind the sheet had seen, for the flow to settle on (`fcFailed`): the card lost mid-tap (CARD LOST,
+               * 1g) and whether it had signed by then, and the amount the tap was for. */
+              const seen = tapO.t || {};
+              if (e && typeof e === 'object') {
+                try { e.tapLost = !!seen.lost; e.tapSigned = !!seen.signed; e.tapAmount = String(tapO.amount || ''); } catch (x) { /* a frozen error says nothing more */ }
+              }
+              free(); over(!!(e && e.card === 'pin-needed')); throw e;
+            }));
   }
+
+  // the least time between two "Writing i of n" lines on the sheet
+  FC_SAY_EVERY_MS = 500;
 
   /* "Signing piece 3 of 9", "Writing 2 of 4": the words for one step of a
    * card's work, or '' for a step with none. */
@@ -25362,6 +25725,9 @@ class Component extends DCLogic {
    * for an instant between the two. */
   fcAskPin(o, then) {
     const opt = o || {};
+    /* Never over the app's lock, and never in its place: the lock's pad is the one pad that is up while it is locked. A card's PIN
+     * asked then is asked once the app is unlocked (`pinUnlocked`); one the lock came over is asked again then (10-pin.js, `pinLock`). */
+    if (this._pinLocked) { this.pinUnlocked().then(() => this.fcAskPin(o, then)); return; }
     // the pad is remembered, so that a card flow waiting on a PIN can be told from a pad that is gone (`cardFlowBusy`)
     this._fcPadEl = this.pinOverlay({
       title: opt.title || 'CARD PIN',
@@ -25378,6 +25744,8 @@ class Component extends DCLogic {
         try { then(pin); } finally { this._fcPadSwap = false; }
       },
     });
+    // what it asks, so that the lock coming over it can ask it again once the app is unlocked
+    if (this._fcPadEl) /** @type {any} */ (this._fcPadEl).__fcAsk = { o, then };
   }
 
   /* Whether the card on screen has no PIN (software 1.16 and on can be set up without one). */
@@ -25569,9 +25937,17 @@ class Component extends DCLogic {
     const retry = (kind === 'wrong-pin' && typeof opt.pinAgain === 'function') ? opt.pinAgain : opt.again;
     const again = retry ? { retry: 'TRY AGAIN', go: retry, shut: { label: 'CANCEL' } } : {};
     console.log('[foxy] card: ' + (kind || 'failed') + ' — ' + said);
+    /* A payment whose card was not read and signed nothing: taken away before it signed (`gone`, the sheet closed on it), or lost
+     * mid-tap (CARD LOST, 1g) and the sheet then dismissed. TAP AGAIN (1f) settles it: nothing has been paid. */
+    if (opt.paying && !(e && e.tapSigned) && (kind === 'gone' || (kind === 'cancelled' && e && e.tapLost))) { this.fcMissedPay(e, opt); return; }
     // their own cancel, or no card held up: the screen they were on is the answer
     if (kind === 'cancelled') { if (typeof opt.cancelled === 'function') opt.cancelled(e); return; }
-    if (kind === 'waiting') { this.fcChecking(e && e.id, (e && e.after) ? Object.assign({}, opt, { after: e.after }) : opt); return; }
+    if (kind === 'waiting') {
+      // (the amount the tap was for, for the CHECKING screen to say)
+      const o2 = Object.assign({}, opt, (e && e.tapAmount) ? { tapAmount: e.tapAmount } : {});
+      this.fcChecking(e && e.id, (e && e.after) ? Object.assign(o2, { after: e.after }) : o2);
+      return;
+    }
     // the unit of the card that refused, which every figure below is in: a dollar card's are its cents (08a-flashcard.js puts it on each)
     const u = this.fcUnitOf(e);
     /* A bitcoin card at a dollar receive, which asked it for dollars alone: why it could not be asked for its sats instead. With
@@ -25831,13 +26207,14 @@ class Component extends DCLogic {
     const opt = o || {};
     let tries = 0;
     clearTimeout(this._fcCheckT);
-    this.stageScreen('cardChecking', {
-      art: 'card', title: 'CHECKING',
-      body: 'The card has signed and the mint has not answered yet.',
-      dots: true, forMs: 70000, button: 'CLOSE',
+    /* The card has signed and the mint has not answered yet: CHECKING (1d), CHARGING for a load, VERIFYING for a read, over the
+     * amount the tap was for. */
+    const flow = opt.paying ? this.FC_TAP_FLOWS.pay : this.fcTapFlow();
+    this.fcFamilyScreen('cardChecking', {
+      screen: '1d', title: flow.check, amount: String(opt.tapAmount || ''), dots: 'fast',
       // (a card at another mint: the asking is over, and this phone goes home, `fcXmHome`)
-      go: () => { clearTimeout(this._fcCheckT); if (opt.xm || opt.away) this.fcXmHome(); },
-    });
+      plain: { label: 'CLOSE', go: () => { clearTimeout(this._fcCheckT); if (opt.xm || opt.away) this.fcXmHome(); } },
+    }, 70000);
     const settled = (how, row) => {
       clearTimeout(this._fcCheckT);
       this.hideStage('cardChecking');
@@ -26260,7 +26637,8 @@ class Component extends DCLogic {
     const waiting = () => {
       usd.melting = false;
       usd.pending = true;
-      this.fcUsdVerifying(usd, 'The card paid ' + this.fcPaidWords(usd.sats, 'sat') + '. The mint has not answered yet; the dollars land when it does.', 120000);
+      this.fcUsdVerifying(usd, 'The card paid ' + this.fcPaidWords(usd.sats, 'sat') + '. The mint has not answered yet; the dollars land when it does.', 120000,
+        'The mint has not answered yet. The dollars land when it does.');
       this.refreshBalance();
       this.loadHistory();
       this.fcUsdWaiting();
@@ -26291,9 +26669,9 @@ class Component extends DCLogic {
   /* The VERIFYING screen over the dollar code a card has paid (the receive's `paidCheck` stage, as a tap payment's
    * "Confirming payment"): what the card paid and what Foxy is waiting on. CLOSE shows the code again, where CARD says the code
    * is paid already (`fcUsdLanding`). Not drawn where the code is no longer the one on screen. */
-  fcUsdVerifying(usd, body, forMs) {
+  fcUsdVerifying(usd, body, forMs, words) {
     if (!usd || this.state.invoiceHash !== usd.hash || this.state.screen !== 'confirm') return;
-    this.fcCardVerifying(body, forMs);
+    this.fcCardVerifying(body, forMs, this.stageMoney(usd.sats, 'sat'), words);
   }
 
   /* An amount a card paid, said dollars first with the sats in brackets ("$5.00 (₿6,182)"), as the owner reads figures; sats alone
@@ -26304,11 +26682,20 @@ class Component extends DCLogic {
     return (m && m.main && /\$/.test(m.main)) ? m.main + ' (' + this.fcSats(amount) + ')' : this.fcSats(amount);
   }
 
-  fcCardVerifying(body, forMs) {
+  /* The card has paid, and Foxy is confirming the payment with the mint: CHECKING (1d) over what it paid, `amount`. `body` is the
+   * diary's line; `words`, said under the dots, only where there is something more to know than that it is being checked. */
+  fcCardVerifying(body, forMs, amount, words) {
+    if (this.hideConnecting) this.hideConnecting();
+    console.log('[foxy] blocked: paidCheck \u2014 ' + body);
+    if (this.fcFamilyScreen) {
+      this.fcFamilyScreen('paidCheck', { screen: '1d', title: this.FC_TAP_FLOWS.pay.check, amount: String(amount || ''), dots: 'fast',
+        words: String(words || ''), plain: { label: 'CLOSE', go: () => {} } }, forMs || 60000);
+      return;
+    }
     const o = { art: 'phone', title: 'Verifying', dots: true, forMs: forMs || 60000, body, button: 'CLOSE', go: () => {} };
     // (the tap screens' `waitingScreen` where the app has it; the stage itself where a page has only the card's methods)
     if (this.waitingScreen) this.waitingScreen('paidCheck', o);
-    else if (this.stageScreen) { console.log('[foxy] blocked: paidCheck \u2014 ' + body); this.stageScreen('paidCheck', o); }
+    else if (this.stageScreen) this.stageScreen('paidCheck', o);
   }
 
   // whether the wallet still holds a melt of this dollar invoice whose outcome the mint has not given
@@ -26524,7 +26911,7 @@ class Component extends DCLogic {
      * is not raised over it. It is in HISTORY. */
     if (!resuming) this.fcDropConfirm();
     // (paying out of this phone, nobody here is being paid: no PAYMENT RECEIVED is held for it)
-    const tapO = { amount: look.amount, lost: !!resuming,
+    const tapO = { flow: 'pay', amount: look.amount, lost: !!resuming,
                    sheet: resuming ? 'Hold to finish paying' : (look.sheet || ''), warm: !offline, paying: !send,
                    /* the card left part way through: the same sheet asks for it again, and the payment is taken up in it */
                    again: (e) => (e && e.card === 'interrupted' && e.resumable) ? 'Hold to finish paying'
@@ -26587,7 +26974,8 @@ class Component extends DCLogic {
          * card's own mint PAYMENT RECEIVED follows in the next moment and takes it down; a melt (another mint, a dollar card paying
          * sats, sats paying a dollar code) keeps it up until the mint answers. */
         if (!share && !owesChange && this.state.screen === 'confirm') {
-          this.fcCardVerifying('The card paid ' + this.fcPaidWords(this.fcAmt(r), unit) + '. Foxy is confirming the payment with your mint.', 60000);
+          this.fcCardVerifying('The card paid ' + this.fcPaidWords(this.fcAmt(r), unit) + '. Foxy is confirming the payment with your mint.', 60000,
+            this.stageMoney(this.fcAmt(r), unit));
           /* A payment settled within the tap (the card's own mint, sats) reaches PAYMENT RECEIVED in the next moment, which takes this
            * down; one still with a mint (a melt, at the card's mint or for a dollar code) keeps it. Nothing of either a moment on, with
            * no melt out: down, and the code stands as it was. */
@@ -27637,7 +28025,8 @@ class Component extends DCLogic {
     const opt = o || {};
     const how = opt.owner ? { owner: true } : opt.change ? { change: true } : { pin };
     const looks = opt.receive ? this.fcReceiveLook(Math.round(Number(opt.paid) || 0), Math.round(Number(opt.sats) || 0), opt.unit) : {};
-    this.fcTap({ amount: looks.amount || (opt.sats ? this.stageMoney(opt.sats, opt.unit) : ''), look: looks.look || '', lost: !!opt.lost, wrote: !!opt.lost,
+    this.fcTap({ flow: opt.receive ? 'change' : 'load',
+                 amount: looks.amount || (opt.sats ? this.stageMoney(opt.sats, opt.unit) : ''), look: looks.look || '', lost: !!opt.lost, wrote: !!opt.lost,
                  sheet: opt.sheet || (opt.receive ? 'Hold for change.' : ''),
                  // what went on stays on: the same sheet asks for the card again for the rest
                  again: (e) => (e && e.card === 'gone') ? 'Hold for the rest.' : '' },
@@ -27660,7 +28049,10 @@ class Component extends DCLogic {
                   ? this.fcStillWaiting(opt)
                 : (e && e.card === 'gone' && e.wrote > 0)
                   ? this.fcWriteAgain(opt)
-                  : (this.fcReleaseConfirm('the change tap failed'), this.fcFailed(e, { again: () => this.fcWriteAsk(opt) })));
+                  /* (and with none of it on: the money still waits for the card, TAP AGAIN, 1e) */
+                  : (e && e.card === 'gone')
+                    ? this.fcStillWaiting(opt)
+                    : (this.fcReleaseConfirm('the change tap failed'), this.fcFailed(e, { again: () => this.fcWriteAsk(opt) })));
   }
 
   /* RECEIVE in the same sheet as SEND.
@@ -27815,6 +28207,13 @@ class Component extends DCLogic {
 
   // a card of the card screens is up, and its button is the card to be tapped again
   fcAskingForCard() {
+    /* (TAP AGAIN for money waiting to go onto a card, 1e, is a screen of the family, `fcStillWaiting`, and asks for the card as the
+     * card it replaced did. TAP AGAIN for a payment, 1f, rests: nothing is held for it, and other payments' confirmations are not
+     * kept behind it.) */
+    if (this.stageUp && this.stageUp('cardAgain')) {
+      const up = document.getElementById('foxy-stage');
+      return !!(up && up.getAttribute('data-scheme') === '1e');
+    }
     const up = this._blockedEl;
     return !!(up && up.parentNode && /^fc-/.test(String(this._blockedKind || '')) && /TAP CARD/.test(up.textContent || ''));
   }
@@ -27872,12 +28271,28 @@ class Component extends DCLogic {
     // it all went on after all, in a tap that ended as if it had not: the payment is whole
     if (!(owed > 0)) { this.fcReleaseConfirm('nothing is waiting for the card'); return; }
     const after = this.fcOwedAfterPaying();
-    this.blockedCard('fc-change', {
-      tone: 'warn', title: after ? 'TAP TO RECEIVE' : 'TAP THE CARD AGAIN',
-      reason: 'The card was not read. ' + this.fcSats(owed, sum.unit) + ' is still waiting to go ' + (after ? 'back on it.' : 'onto it.') + (after ? ' ' + this.fcNoPinWords() : ''),
-      chip: 'It is kept for that card and no other.',
-      retry: 'TAP CARD', go: () => this.fcWriteAsk(opt),
-      shut: { label: 'LATER', tap: () => this.fcReleaseConfirm('the change is left for later') },
+    /* TAP AGAIN (1e): what waits, and that it is the card's alone. LATER leaves it owed, as it is until a tap puts it on. */
+    this.haptic && this.haptic('warning');
+    console.log('[foxy] card: not read; ' + this.fcSats(owed, sum.unit) + ' still waits for it');
+    this.fcFamilyScreen('cardAgain', {
+      screen: '1e', title: 'TAP AGAIN', amount: this.fcPrice(owed, sum.unit),
+      words: after ? this.FC_TAP_WORDS.back + ' ' + this.fcNoPinWords() : this.FC_TAP_WORDS.load,
+      chip: { icon: 'lock', text: this.FC_TAP_CHIPS.lock },
+      solid: { label: 'TAP CARD', go: () => this.fcWriteAsk(opt) },
+      plain: { label: 'LATER', go: () => this.fcReleaseConfirm('the change is left for later') },
+    });
+  }
+
+  /* TAP AGAIN (1f): a payment whose card was not read, and nothing signed. TAP CARD asks for it again as the flow's own TRY AGAIN
+   * did; CANCEL leaves the payment unpaid. */
+  fcMissedPay(e, opt) {
+    console.log('[foxy] card: not read; nothing was paid');
+    this.haptic && this.haptic('error');
+    this.fcFamilyScreen('cardAgain', {
+      screen: '1f', title: 'TAP AGAIN', amount: String((e && e.tapAmount) || ''), words: this.FC_TAP_WORDS.pay,
+      chip: { icon: 'shield', text: this.FC_TAP_CHIPS.shield },
+      solid: typeof opt.again === 'function' ? { label: 'TAP CARD', go: () => opt.again() } : null,
+      plain: { label: 'CANCEL', go: () => {} },
     });
   }
 
@@ -28096,7 +28511,7 @@ class Component extends DCLogic {
     // (software 1.23: every card's rate follows the price, a dollar card's too, so the price is sent for a card of it)
     // (and never another phone's price, or one too old to trust, for a card's rate: `fcRatePrice`)
     const price = (this.state.fc && this.state.fc.unit === 'usd' && !this.state.fc.v123) ? 0 : (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0);
-    this.fcTap({}, (link, on, progress) => W.cardLook(link, { mine: true, price, change: true, real: true, on, progress })
+    this.fcTap({ flow: 'read' }, (link, on, progress) => W.cardLook(link, { mine: true, price, change: true, real: true, on, progress })
       .then((card) => {
         if (card && card.owes && card.owes.wrote > 0) link.doneText = 'Done.';
         return card;
@@ -28274,7 +28689,7 @@ class Component extends DCLogic {
   fcMendRun(pin) {
     const W = this.fcW();
     if (!W) return;
-    this.fcTap({}, (link, on, progress) => { on('writing'); return W.cardMend(link, { pin, onHold: () => on('writing'), on, progress }); })
+    this.fcTap({ flow: 'change' }, (link, on, progress) => { on('writing'); return W.cardMend(link, { pin, onHold: () => on('writing'), on, progress }); })
       .then((r) => {
         this.fcShow(r.card);
         if (r.amount > 0) {
@@ -28312,7 +28727,7 @@ class Component extends DCLogic {
     const W = this.fcW();
     if (!W) return;
     this.fcApprove({ label: 'reset', number: x.number })
-      .then(() => this.fcTap({}, (link, on) => { on('writing'); return W.cardGiveUp(link, { number: x.number, B_: x.B_, amount: x.amount, pin, onHold: () => on('writing') }); }))
+      .then(() => this.fcTap({ flow: 'write' }, (link, on) => { on('writing'); return W.cardGiveUp(link, { number: x.number, B_: x.B_, amount: x.amount, pin, onHold: () => on('writing') }); }))
       .then((r) => {
         // what the screen said of the card's change, without the one given up
         const card = Object.assign({}, r.card, { owes: this.fcOwesWithout(this.state.fc && this.state.fc.owes, x.number) });
@@ -28513,7 +28928,7 @@ class Component extends DCLogic {
     // (the unit only where one was chosen: a card set up at a mint with one balance is set up as every card was)
     const how = /** @type {any} */ (Object.assign({ pin, recoverable, design: this.FC_SETUP_DESIGN }, unit ? { unit } : {}));
     /* A card of 1.21 takes this phone as its owner only after about ten seconds of asking: each asking says Keep holding again. */
-    this.fcTap({}, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
+    this.fcTap({ flow: 'setup' }, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
       .then((card) => {
         this.fcNameSettle(card && card.key);
         this.fcShow(card);
@@ -28613,12 +29028,14 @@ class Component extends DCLogic {
   /* The owner's phone adds funds with its own proof and no PIN: the PIN was
    * typed once, at set-up. Any other phone, with the card's PIN, adds them as a
    * till writes change. The daily limit is not touched by putting money on. */
-  fcAddPin(sats) {
+  /* `prep`: the pieces already being made for this load (`fcAddPrep`, a DEPOSIT whose money came in), and `onBack` what backing
+   * out of the PIN does then. */
+  fcAddPin(sats, prep, onBack) {
     const fc = this.state.fc;
     /* (from 1.21 every load wants the PIN, the owner's own included: decided from the card just read, `fcCardPinFirst`, and never from a
      * figure of the screen's that may not be there) */
-    if (fc && fc.ownedHere && !this.fcCardPinFirst()) { this.fcLeaveAmount(); this.fcAddRun(sats, '', true); return; }
-    this.fcAddAskPin(sats);
+    if (fc && fc.ownedHere && !this.fcCardPinFirst()) { this.fcLeaveAmount(); this.fcAddRun(sats, '', true, prep); return; }
+    this.fcAddAskPin(sats, prep, onBack);
   }
 
   /* Whether the card in hand is of software 1.21 or later, whose every load wants its PIN: from the card as it was read (its version,
@@ -28658,45 +29075,85 @@ class Component extends DCLogic {
     return this.fcKnownPinFirst() ? 'Its PIN is asked first.' : 'No PIN is needed.';
   }
 
-  fcAddAskPin(sats) {
+  fcAddAskPin(sats, prep, onBack) {
     // (a card with no PIN is loaded by whoever holds it: nothing to ask)
     const u = this.fcUnit();
-    this.fcPinOr({
+    this.fcPinOr(Object.assign({
       title: 'CARD PIN',
       subtitle: 'To add ' + this.fcBoth(sats, u) + ' to the card.',
       cta: 'ADD ' + this.fcPrice(sats, u) + ' TO CARD',
-    }, (pin) => { this.fcLeaveAmount(); this.fcAddRun(sats, pin, false); });
+    }, onBack ? { onBack } : {}), (pin) => { this.fcLeaveAmount(); this.fcAddRun(sats, pin, false, prep); });
   }
 
-  fcAddRun(sats, pin, owner) {
+  /* The pieces for `sats` onto the card on show, begun now (`cardPrepare`): { run, u, v123, p, done, made, err }. `p` settles as they
+   * are made or refused; `done` says it has. Nothing is shown. ADD FUNDS begins them as its PIN goes in (`fcAddRun`); a DEPOSIT whose
+   * money has come in begins them at once, while its PIN is being typed (`fcDepLoad`). */
+  fcAddPrep(sats) {
     const W = this.fcW();
     const card = this._fcCard;
-    if (this._fcAdding) { this.toast('Still getting the last amount ready for the card.', true); return; }
-    /* The run in hand. CLOSE on the screen while the pieces are being made lets the person go, and the pieces,
-     * once made, wait for the next tap as anything made for a card does (`cardOwed`): no sheet comes up by itself
-     * later, over whatever they are doing then. Two runs at once once put two sheets on one reader, and neither
-     * wrote. */
-    const run = { closed: false };
-    this._fcAdding = run;
     // in the card's own unit: a dollar card is loaded from this phone's dollars, in cents (a card of 1.23: the currency chosen, `fcUnit`)
     const u = (this.state.fc && this.state.fc.v123) ? this.fcUnit() : (card && card.record && card.record.unit === 'usd') ? 'usd' : 'sat';
     const v123 = !!(this.state.fc && this.state.fc.v123);
-    this.stageScreen('cardReady', {
-      art: 'card', title: 'GETTING<br>IT READY', amount: this.stageMoney(sats, u),
-      body: 'Keep the card nearby. You will be asked to tap it in a moment.',
-      dots: true, forMs: 90000, button: 'CLOSE', go: () => { run.closed = true; },
-    });
     /* A card that holds nothing and is at another mint than this phone's is told
      * its new mint in the tap that writes the funds (the owner's proof; `fcOtherMint`
      * only offers this to its owner): the money is made for the mint this phone is at. */
     const there = String((card && card.record && card.record.mint) || '').replace(/\/+$/, '');
     const here = String(W.mintUrl || '').replace(/\/+$/, '');
     const moving = !!(there && here && there !== here && !((card.pieces || []).length));
-    W.cardPrepare(card, sats, Object.assign({ moving }, (u === 'usd' || v123) ? { unit: u } : {})).then((made) => {
-      if (this._fcAdding === run) this._fcAdding = null;
+    /* `run`: CLOSE on GETTING READY, or the PIN backed out of, while the pieces are being made lets the person go, and the pieces,
+     * once made, wait for the next tap as anything made for a card does (`cardOwed`): no sheet comes up by itself later, over whatever
+     * they are doing then. */
+    const prep = { run: { closed: false }, u, v123, p: null, done: false, made: null, err: null };
+    /* That record is the owner's command: the keeper's set-card yes is asked first, in the phone's own alert, for this card, at this
+     * phone's mint, in the unit the card holds (a card of 1.23 in either), and kept for it until the card takes the record (`fcApprove`,
+     * `keep`): the pieces may take longer to make than a yes lasts. A no ends here, with nothing made. */
+    const unitHeld = (card && card.record && card.record.unit === 'usd') ? 'usd' : 'sat';
+    const prepare = () => W.cardPrepare(card, sats, Object.assign({ moving }, (u === 'usd' || v123) ? { unit: u } : {}));
+    // (not moving: asked in this very turn, as ADD FUNDS always has; a throw is a refusal like any other)
+    let asked;
+    try {
+      asked = moving
+        ? this.fcApprove(Object.assign({ label: 'set-card', mint: here, keep: true, card: card.key }, v123 ? {} : { units: [unitHeld] })).then(prepare)
+        : Promise.resolve(prepare());
+    } catch (e) { asked = Promise.reject(e); }
+    prep.p = asked.then((made) => {
+      prep.done = true;
+      prep.made = made;
       // said by this flow, so not announced as a payment sent (16-history-lists.js)
       if (made && made.hash) this.txIsNew(made.hash);
-      this.hideStage('cardReady');
+      return made;
+    }, (e) => {
+      prep.done = true;
+      prep.err = e || new Error('The pieces for the card could not be made.');
+      throw prep.err;
+    });
+    prep.p.then(null, () => {});
+    return prep;
+  }
+
+  /* `prep`: pieces already begun for this load (`fcAddPrep`); with them made, the sheet comes up at once, and GETTING READY is
+   * shown only while they are still being made. */
+  fcAddRun(sats, pin, owner, prep) {
+    /* The run in hand. Two runs at once once put two sheets on one reader, and neither wrote: one already running is refused, unless
+     * it is the very one whose pieces were begun for this load. */
+    if (this._fcAdding && !(prep && this._fcAdding === prep.run)) { this.toast('Still getting the last amount ready for the card.', true); return; }
+    const pr = prep || this.fcAddPrep(sats);
+    // (taken on by this run: the deposit's pieces no longer let go of it by themselves, `fcDepLoad`)
+    pr.taken = true;
+    const run = pr.run;
+    const u = pr.u, v123 = pr.v123;
+    this._fcAdding = run;
+    const staged = !pr.done;
+    // GETTING READY (1b), while the pieces are made: the tap's own screens follow it
+    if (staged) {
+      this.fcFamilyScreen('cardReady', {
+        screen: '1b', title: 'GETTING READY', amount: this.stageMoney(sats, u), dots: 'slow',
+        plain: { label: 'CLOSE', go: () => { run.closed = true; } },
+      }, 90000);
+    }
+    pr.p.then((made) => {
+      if (this._fcAdding === run) this._fcAdding = null;
+      if (staged) this.hideStage('cardReady');
       if (run.closed) {
         this.toast(this.fcPrice(this.fcAmt(made), u) + ' is ready for the card. It goes on at the next tap.');
         return;
@@ -28704,7 +29161,9 @@ class Component extends DCLogic {
       this.fcWriteRun(pin, Object.assign({ sats: this.fcAmt(made), owner: !!owner, asked: sats, rounded: Number(made.rounded) || 0 }, (u === 'usd' || v123) ? { unit: u } : {}));
     }, (e) => {
       if (this._fcAdding === run) this._fcAdding = null;
-      this.hideStage('cardReady');
+      if (staged) this.hideStage('cardReady');
+      // a deposit's money that no pieces could be made of stays on this phone, and its history row says so (`fcDepKept`)
+      if (pr.dep && !this.fcPrepOwed(e)) this.fcDepKept(pr.dep, true);
       if (run.closed) return;
       this.fcFailed(e, {});
     });
@@ -28713,11 +29172,13 @@ class Component extends DCLogic {
   /* ---- DEPOSIT above what this phone holds ---------------------------------
    * Decided 2026-11-04: DEPOSIT, an amount more than this phone holds in the card's currency at its mint, opens the app's
    * own receive invoice for the WHOLE amount (RECEIVE's screen, its tap to pay and its card with it); when the money has
-   * come in, TAP THE CARD AGAIN puts that amount on the card, by ADD FUNDS' own steps (`fcAddPin`). What the phone held
-   * before is not touched: the load is the amount that came in. The ask is held as a TRANSFER's second tap is
-   * (`fcMoveHold`): LATER, the card closed any other way, or two minutes with no tap end it, and the money stays on this
-   * phone with its history row saying so. */
-  FC_DEP_HOLD_MS = 120000;
+   * come in, that amount goes on the card by ADD FUNDS' own steps (`fcAddPin`). What the phone held before is not touched:
+   * the load is the amount that came in.
+   * Decided 2026-11-06: nothing is asked in between. The money in, the card's PIN pad comes up at once (a card with no PIN:
+   * the sheet), and the pieces for the card are made while the PIN is typed, so the sheet opens as the PIN goes in
+   * (`fcDepLoad`). The card clock is asked for as the invoice goes up, the wait for the payer being idle time (`fcDepOpen`).
+   * Backed out of the PIN: pieces made are owed to the card and go on at its next tap, as anything made for a card does;
+   * where none could be made the money stays on this phone, its history row saying so (`fcDepKept`). */
 
   // the history row's words for money that came in for the card and stayed on this phone
   FC_DEP_KEPT = 'For the card · kept on this phone';
@@ -28743,6 +29204,10 @@ class Component extends DCLogic {
       flow: 'receive', wallet: u, walletAuto: false, asset: 'BITCOIN', network: 'LIGHTNING', depositVia: '',
     }));
     this.openReceive();
+    /* The newest block header for the card's clock, asked for as the invoice goes up and kept (two minutes, 08b-block-headers.js): the tap uses what is
+     * kept and never waits for a fetch, and a fetch begun at the tap is for the tap after. Nothing waits on it here either. */
+    const W = this.fcW();
+    if (W && W.headerWarm) { try { W.headerWarm().then(null, () => {}); } catch (e) { /* the clock is the next tap's then */ } }
   }
 
   /* Called on every update: the deposit's money come in (PAID, money in, in the card's currency, at least the amount),
@@ -28768,13 +29233,12 @@ class Component extends DCLogic {
     }
   }
 
-  /* The deposit's money is in: the card's screen, and TAP THE CARD AGAIN over it. TAP CARD loads the amount typed;
-   * LATER keeps it on this phone (`fcDepHold`). */
+  /* The deposit's money is in: the card's screen, and at once its PIN pad (`fcDepLoad`). PAID is up for the moment it takes to
+   * get here (this runs a turn after it rose), as before. */
   fcDepArrived(d) {
     if (this._fcDep !== d) return;
     this._fcDep = null;
-    const fig = this.fcBoth(d.amount, d.unit);
-    console.log('[foxy] card: the deposit came in; asking for the card again');
+    console.log('[foxy] card: the deposit came in; on to the card');
     this.setState(p => {
       const at = (p.stack || []).lastIndexOf('flashcard');
       return { screen: 'flashcard', stack: at >= 0 ? p.stack.slice(0, at) : [], amount: '', network: '', unit: 'USD', payOut: false,
@@ -28782,52 +29246,65 @@ class Component extends DCLogic {
     });
     // (the balance was read again as the money landed: RECEIVE's watch)
     if (this.paidDismissed) this.paidDismissed();
-    const held = this.fcDepHold(d);
-    this.blockedCard('fc-dep-tap', {
-      tone: 'warn', title: 'TAP THE CARD AGAIN',
-      reason: fig + ' came in on this phone. Tap the card to put it on.',
-      retry: 'TAP CARD', go: () => { held.take(); this.fcDepLoad(d); },
-      shut: { label: 'LATER', tap: () => held.end() },
-      // closed without TAP CARD (outside the card, say): kept on this phone; TAP CARD has taken it by then
-      onClose: () => setTimeout(() => { if (this._fcDepHeld === held) held.end(); }, 0),
-    });
+    this.fcDepLoad(d);
   }
 
-  /* The ask held for its tap, as a TRANSFER's is (`fcMoveHold`): { take(), end(), ended }. `take()` is TAP CARD's; `end()`
-   * keeps the money on this phone, said in the history and once on screen. Ended by itself after FC_DEP_HOLD_MS. */
-  fcDepHold(d) {
-    clearTimeout(this._fcDepHoldT);
-    const held = { ended: false, take: null, end: null };
-    held.take = () => {
-      held.ended = true;
-      clearTimeout(this._fcDepHoldT);
-      if (this._fcDepHeld === held) this._fcDepHeld = null;
-    };
-    held.end = () => {
-      if (held.ended) return;
-      held.take();
-      const W = this.fcW();
-      if (d.hash && W && W.tag) { try { W.tag(d.hash, { note: this.FC_DEP_KEPT }); } catch (x) { /* the toast still says it */ } }
-      console.log('[foxy] card: the deposit stays on this phone');
-      this.toast(this.fcBoth(d.amount, d.unit) + ' stays on this phone. DEPOSIT puts it on the card.');
-      if (this.loadHistory) this.loadHistory();
-      if (this.dismissCard) this.dismissCard('fc-dep-tap');
-    };
-    this._fcDepHeld = held;
-    this._fcDepHoldT = setTimeout(() => held.end(), this.FC_DEP_HOLD_MS);
-    return held;
+  /* The money that came in for the card stays on this phone, spendable: said in its history row and once on screen (`quiet`: the
+   * row only, where the screen says something else already: a failure's card). */
+  fcDepKept(d, quiet) {
+    const W = this.fcW();
+    if (d.hash && W && W.tag) { try { W.tag(d.hash, { note: this.FC_DEP_KEPT }); } catch (x) { /* the toast still says it */ } }
+    console.log('[foxy] card: the deposit stays on this phone');
+    if (!quiet) this.toast(this.fcBoth(d.amount, d.unit) + ' stays on this phone. DEPOSIT puts it on the card.');
+    if (this.loadHistory) this.loadHistory();
   }
 
-  /* TAP CARD: the amount that came in, onto the card it was asked for, by ADD FUNDS' own steps: its PIN where the card
-   * wants one, then the tap. Not onto another card. */
+  /* Whether pieces were made for the card though the making failed after (`misfit-kept`: filed as owed to it, `cardPrepare`): the
+   * money is the card's then, not this phone's. */
+  fcPrepOwed(e) {
+    return !!(e && (e.card === 'misfit-kept' || e.hash));
+  }
+
+  /* The amount that came in, onto the card it was asked for, by ADD FUNDS' own steps: its PIN where the card wants one, then the
+   * tap. Not onto another card. The pieces are begun first (`fcAddPrep`), so that they are made while the PIN is typed and the
+   * sheet opens as it goes in; the card clock is asked for again (kept from the invoice's, where that is fresh). */
   fcDepLoad(d) {
     const fc = this.state.fc;
-    if (!fc || String(fc.key || '') !== d.key) {
+    if (!fc || String(fc.key || '') !== d.key || !this._fcCard || this._fcCard.key !== fc.key) {
       this.toast(this.fcBoth(d.amount, d.unit) + ' stays on this phone. Open the card it was for to put it on.', true);
       return;
     }
+    const W = this.fcW();
+    if (W && W.headerWarm) { try { W.headerWarm().then(null, () => {}); } catch (e) { /* the clock is the next tap's then */ } }
     this._fcFlowUnit = d.flowUnit;
-    this.fcAddPin(d.amount);
+    // another load still being made for a card: this one waits on the phone, as before (ADD FUNDS says the same)
+    if (this._fcAdding) { this.fcDepKept(d); return; }
+    const prep = this.fcAddPrep(d.amount);
+    prep.dep = d;
+    this._fcAdding = prep.run;
+    /* The run lets go of itself once its pieces are made or refused, unless the PIN has taken it on (`fcAddRun`, `taken`): a pad that
+     * goes some way other than its back button or its PIN (the lock coming over it) must not hold ADD FUNDS shut until a relaunch. */
+    prep.p.then(() => {}, () => {}).then(() => { if (!prep.taken && this._fcAdding === prep.run) this._fcAdding = null; });
+    // backed out of the PIN: pieces made are owed to the card and said so; none made, the money stays on this phone
+    const back = () => {
+      prep.run.closed = true;
+      prep.p.then((made) => {
+        if (this._fcAdding === prep.run) this._fcAdding = null;
+        console.log('[foxy] card: the deposit\u2019s PIN was backed out of; its pieces wait for the card');
+        this.toast(this.fcPrice(this.fcAmt(made), prep.u) + ' is ready for the card. It goes on at the next tap.');
+      }, (e) => {
+        if (this._fcAdding === prep.run) this._fcAdding = null;
+        // made and filed as owed, and then found not to fit: the card's, said in the wallet's own words
+        if (this.fcPrepOwed(e)) { this.toast(String((e && e.message) || 'It is kept for the card.'), true); return; }
+        this.fcDepKept(d);
+      });
+    };
+    /* The PIN (or, for a card with none, the sheet) once the app is unlocked: a deposit that lands under the app's lock (a return
+     * from paying it in another wallet) never puts a card's pad in the lock's place. The pieces are being made meanwhile. */
+    this.pinUnlocked().then(() => {
+      if (prep.run.closed) return;
+      this.fcAddPin(d.amount, prep, back);
+    });
   }
 
   /* ---- withdraw --------------------------------------------------------------
@@ -28929,7 +29406,8 @@ class Component extends DCLogic {
       });
     };
     const opt = { taken: true, again: () => this.fcWithdraw(), done: (after) => said(after ? { card: after } : null) };
-    this.fcTap({ amount: sats ? this.stageMoney(sats, u) : '', warm: true, sheet: again ? 'Hold for the rest.' : '',
+    // the keeper's yes to the card's limit lifted for this and put back, before the card is held up (`fcApprove`)
+    this.fcApprove({ label: 'set-limit', lift: true }).then(() => this.fcTap({ flow: 'withdraw', amount: sats ? this.stageMoney(sats, u) : '', warm: true, sheet: again ? 'Hold for the rest.' : '',
                  again: (e) => {
                    if (e && e.card === 'partial' && Number(e.left) > 0) { absorb(e); return 'Hold for the rest.'; }
                    return (e && e.card === 'gone') ? 'Tap behind the phone.' : '';
@@ -28937,7 +29415,7 @@ class Component extends DCLogic {
                // (a card of 1.23: in the currency chosen, `unit`; all of it in that one)
                (link, on, progress) => W.cardWithdraw(link, Object.assign(ask ? { pin, sats: ask, on, progress, keepSheet: true } : { pin, on, progress, keepSheet: true },
                                                                           named ? { unit: u } : {}))
-                 .then((r) => this.fcChangeInSheet(link, on, progress, r, pin)))
+                 .then((r) => this.fcChangeInSheet(link, on, progress, r, pin))))
       .then((r) => {
         if (r && r.hash) this.txIsNew(r.hash);
         this.fcMoved({});
@@ -29016,12 +29494,34 @@ class Component extends DCLogic {
    * key signs that command in the next tap and nothing like it that was not said yes to, so this is asked before the tap and
    * never during it, where the phone's alert would sit under the card sheet. Named for the card on screen. A no rejects
    * `declined`, said as any refusal is. */
+  /* `op.lift`: the tap takes money off the card, and this phone lifts the card's limits for it and puts them back (the wallet's
+   * `cardUnderPin`); the one yes names that too (`fcMayLift` says where there is nothing to lift, and then it is not named, and a
+   * yes to the lift alone is not asked at all). Every flow that takes money off the keeper's own card asks it: WITHDRAW, the SWAP's
+   * first tap, RENEW, RESET of a card with money on it, TRANSFER, the backup's move to this phone, and a per tap limit that
+   * recuts the money under it. */
   fcApprove(op) {
     const W = this.fcW();
     const fc = this.state.fc;
     const card = fc && /^0[23][0-9a-f]{64}$/.test(String(fc.key || '')) ? fc.key : undefined;
     if (!W || !W.cardApprove) return Promise.resolve(true);
-    return W.cardApprove(Object.assign(card ? { card } : {}, op));
+    let o = op || {};
+    if (o.lift && !this.fcMayLift(o.card || card)) {
+      o = Object.assign({}, o);
+      delete o.lift;
+      if (o.label === 'set-limit' && !(o.figures || []).length) return Promise.resolve(true);
+    }
+    return W.cardApprove(Object.assign(card ? { card } : {}, o));
+  }
+
+  /* Whether this phone may lift the card's limits for money it takes off (the wallet lifts them where the card is this phone's
+   * and has a limit). Where the screen does not know that card, yes: the keeper is asked rather than the tap refused. */
+  fcMayLift(key) {
+    const fc = this.state.fc;
+    if (!fc || (key && fc.key !== key)) return true;
+    if (fc.ownedHere === false) return false;
+    const tap = fc.tap;
+    if (!tap) return true;
+    return Number(fc.limit) > 0 || !!(fc.day && fc.day.limited) || !!tap.limited || !!tap.hidden;
   }
 
   fcChangePin() {
@@ -29037,7 +29537,7 @@ class Component extends DCLogic {
     }, (a) => this.fcAskPin({ title: 'NEW PIN AGAIN', subtitle: 'So a mistyped digit does not become the card’s PIN.' }, (b) => {
       if (a !== b) { fresh('Those did not match. Start again.'); return; }
       this.fcApprove({ label: 'change-pin', pin: a })
-        .then(() => this.fcTap({}, (link, on) => { on('writing'); return W.cardChangePin(link, { newPin: a }); }))
+        .then(() => this.fcTap({ flow: 'pin' }, (link, on) => { on('writing'); return W.cardChangePin(link, { newPin: a }); }))
         .then(() => {
           this.haptic && this.haptic('success');
           this.blockedCard('fc-pin', { tone: 'ask', title: was ? 'CARD UNBLOCKED' : 'PIN CHANGED', reason: 'The card asks for the new one from now on.', shut: { label: 'DONE' } });
@@ -29060,7 +29560,7 @@ class Component extends DCLogic {
       title: 'CHOOSE A PIN', subtitle: 'A card with no PIN is cash to whoever holds it. Four to eight digits.', warn: warn || '',
     }, (a) => this.fcAskPin({ title: 'TYPE IT AGAIN', subtitle: 'So a mistyped digit does not become the card’s PIN.' }, (b) => {
       if (a !== b) { fresh('Those did not match. Start again.'); return; }
-      this.fcTap({}, (link, on) => { on('writing'); return W.cardAddPin(link, { pin: a }); })
+      this.fcTap({ flow: 'pin' }, (link, on) => { on('writing'); return W.cardAddPin(link, { pin: a }); })
         .then((card) => {
           this.fcShow(card);
           this.haptic && this.haptic('success');
@@ -29491,7 +29991,12 @@ class Component extends DCLogic {
     // a dollar card's limit is its cents, and is kept at nothing: no dollars are sent for it (the wallet writes no pace note for one)
     const keep = v123 ? (lu === 'sat' ? usd : 0) : this.fcUnit() === 'usd' ? 0 : usd;
     const more = v123 ? Object.assign({ unit: lu, price: (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0) }, answer || {}) : {};
-    this.fcApprove({ label: 'set-limit', figures: [np ? 'noPin' : tap ? 'tap' : 'day'] }).then(() => this.fcTap({}, (link, on, progress) => {
+    /* (a per tap limit on a card with pieces larger than it: its money is recut under it in the same tap, under its limits lifted, as the
+     * wallet's `cardSetLimit` does it: with the PIN or on a card that has none, a card of the deep drawer, not one that holds both currencies) */
+    const fcL = this.state.fc;
+    const recut = !np && !!tap && sats > 0 && !!fcL && (!!pin || fcL.pin === 'none') && !fcL.both
+      && this.fcAbove(this._fcCard, sats, this.fcLimitUnit(), true) > 0;
+    this.fcApprove(Object.assign({ label: 'set-limit', figures: [np ? 'noPin' : tap ? 'tap' : 'day'] }, recut ? { lift: true } : {})).then(() => this.fcTap({ flow: 'limit' }, (link, on, progress) => {
       on('writing');
       return W.cardSetLimit(link, Object.assign(np ? { sats, noPin: true, usd: keep, on, progress } : { sats, tap: !!tap, usd: (tap || v123) ? keep : 0, pin, on, progress }, more));
     }))
@@ -29562,8 +30067,8 @@ class Component extends DCLogic {
     }, (pin) => {
       this.setState({ swapBusy: true, swapErr: '', swapErrAmount: false });
       let took = 0;
-      this.fcTap({ amount: this.stageMoney(total, from), warm: true },
-                 (link, on, progress) => W.cardWithdraw(link, { pin, sats: total, unit: from, on, progress, only: sc.key }))
+      this.fcApprove({ label: 'set-limit', lift: true, card: sc.key }).then(() => this.fcTap({ flow: 'swap', amount: this.stageMoney(total, from), warm: true },
+                 (link, on, progress) => W.cardWithdraw(link, { pin, sats: total, unit: from, on, progress, only: sc.key })))
         .then((r) => {
           took = this.fcAmt(r);
           if (r && r.hash) this.txIsNew(r.hash);
@@ -29644,7 +30149,7 @@ class Component extends DCLogic {
     const only = key || undefined;
     // (nothing of an earlier swap's card is kept for this one's SWAPPED, 26i-swap.js `swapDoneClose`)
     this._fcSwapWrote = null;
-    this.fcTap({ amount: this.stageMoney(amount, unit), warm: true }, (link, on) => {
+    this.fcTap({ flow: 'swap', amount: this.stageMoney(amount, unit), warm: true }, (link, on) => {
       on('mint');
       return W.cardLook(link, { short: true }).then((card) => W.cardPrepare(card, amount, { unit, only }).then((m) => {
         if (!(back && back.amount > 0)) return m;
@@ -29731,7 +30236,7 @@ class Component extends DCLogic {
     this.blockedCard('fc-rate-ask', {
       tone: 'ask', title: 'BITCOIN PRICE',
       reason: this.fcRateWords(a.now, a.was),
-      retry: 'YES', go: () => this.fcTap({}, (link, on) => { on('writing'); return W.cardSetRate(link, { price: a.now }); })
+      retry: 'YES', go: () => this.fcTap({ flow: 'rate' }, (link, on) => { on('writing'); return W.cardSetRate(link, { price: a.now }); })
         .then((c) => { this.fcShow(c); this.haptic && this.haptic('success'); this.toast('The card has the new price.'); },
               (e) => this.fcFailed(e, { again: () => this.fcRateAsk(card) })),
       shut: { label: 'NO', pill: true, tap: () => { if (W.cardRateNo) W.cardRateNo(card.key, a.rate); } },
@@ -29791,8 +30296,9 @@ class Component extends DCLogic {
     /* Whichever mint this phone is at. The money comes off the card at the
      * card's own mint, and this phone is taken there for as long as the move
      * lasts (`fcMoveQuote`) and put back after (`fcMoveEnd`). */
-    // through the one way into that list, which clears every other question it can be asking
-    this.goSwitchMint({ fcPick: true });
+    // the list of mints, TRANSFER TO, each asked what the move there costs (26n-card-withdraw-to.js, `fcMoveAsk`)
+    if (this.fcMoveAsk) this.fcMoveAsk();
+    else this.goSwitchMint({ fcPick: true });
   }
 
   /* A mint tapped on that list. */
@@ -29826,7 +30332,7 @@ class Component extends DCLogic {
       .then(() => (String(W.mintUrl || '').replace(/\/+$/, '') === to ? null : W.connect(to, null, null, { remember: false })))
       // the keeper's yes to the mint it goes to, before the card is held up (`fcApprove`)
       .then(() => this.fcApprove({ label: 'set-card' }))
-      .then(() => this.fcTap({}, (link, on) => { on('writing'); return W.cardRepoint(link); }))
+      .then(() => this.fcTap({ flow: 'move' }, (link, on) => { on('writing'); return W.cardRepoint(link); }))
       .then((card) => {
         this.fcShow(card);
         end();
@@ -29959,10 +30465,11 @@ class Component extends DCLogic {
     this._fcQuiet = true;
     W.transactions(50).then((list) => { this._sweepBefore = new Set(list.map(x => x.hash)); },
                             () => { this._sweepBefore = null; });
-    // the keeper's yes to the mint and currency it goes to, kept for this card until its record is written (`fcApprove`)
+    // the keeper's yes to the mint and currency it goes to, kept for this card until the card takes its record (`fcApprove`)
     // (in the currency it is turned into, where the quote says it changes; otherwise the one its record holds)
-    this.fcApprove(Object.assign({ label: 'set-card', mint: m.to, keep: true }, m.quote && m.quote.toUnit ? { units: [m.quote.toUnit] } : {}))
-      .then(() => this.fcTap({ amount: this.stageMoney(m.have, m.unit), warm: true },
+    // (and, where the money is still on the card, its limits lifted for it to come off and put back: not on a TRANSFER taken up again)
+    this.fcApprove(Object.assign({ label: 'set-card', mint: m.to, keep: true }, m.quote && m.quote.toUnit ? { units: [m.quote.toUnit] } : {}, m.resume ? {} : { lift: true }))
+      .then(() => this.fcTap({ flow: 'move', amount: this.stageMoney(m.have, m.unit), warm: true },
         (link, on, progress) => W.cardTransfer(link, { pin, on, progress, to: m.to, most: m.quote.fee, toUnit: m.quote.toUnit, unit: m.unit,
                                                        only: fc && fc.key, resume: !!m.resume })))
       .then((r) => {
@@ -30055,7 +30562,7 @@ class Component extends DCLogic {
       }
       return W.cardVisit(to);
     };
-    const go = (pin) => visitFor().then((v) => this.fcTap({},
+    const go = (pin) => visitFor().then((v) => this.fcTap({ flow: 'move' },
       (link, on, progress) => { on('writing'); return W.cardWrite(link, pin ? { pin, progress } : { owner: true, progress }); })
       .then((r) => {
         v.end();
@@ -30156,8 +30663,8 @@ class Component extends DCLogic {
       title: 'CARD PIN',
       subtitle: 'Its money is good until ' + this.fcDay(fc.first) + '. Renew it for ' + this.fcHoldDays() + ' days: ' + this.fcWholeWords(fc) + '.',
       cta: 'RENEW',
-    }, (pin) => this.fcTap({ amount: this.fcWholeStage(fc), warm: true },
-      (link, on, progress) => W.cardRenew(link, { pin, on, progress }))
+    }, (pin) => this.fcApprove({ label: 'set-limit', lift: true }).then(() => this.fcTap({ flow: 'renew', amount: this.fcWholeStage(fc), warm: true },
+      (link, on, progress) => W.cardRenew(link, { pin, on, progress })))
       .then((r) => {
         (r.hashes || []).forEach(h => this.txIsNew(h));
         this.fcWrote(r, { renewed: true });
@@ -30342,7 +30849,8 @@ class Component extends DCLogic {
     const fc = this.state.fc;
     if (!W || !fc) return;
     const money = this.fcAnyMoney(fc);
-    this.fcApprove({ label: 'reset' }).then(() => this.fcTap({ amount: (money && fc.check !== 'asking') ? this.fcWholeStage(fc) : '', warm: money || !!fc.spentOn },
+    // (the money, or the spent pieces, come off under its limits lifted and put back: the one yes says so)
+    this.fcApprove(Object.assign({ label: 'reset' }, (money || fc.spentOn) ? { lift: true } : {})).then(() => this.fcTap({ flow: 'reset', amount: (money && fc.check !== 'asking') ? this.fcWholeStage(fc) : '', warm: money || !!fc.spentOn },
       (link, on, progress) => {
         // the card is held through the money coming off and the reset: the steps that say it may go are not said
         const held = (step, info) => { if (step !== 'done' && step !== 'checking') on(step, info); };
@@ -30436,7 +30944,7 @@ class Component extends DCLogic {
     // the dollars typed, exactly, for a dollar card at another mint (`fcXlSend`), whatever balance the figure was sent in
     const cents = (typedUsd && this.state.screen === 'amount' && this.centsTyped) ? this.centsTyped() : 0;
     let away = null;
-    this.fcTap({ amount: unit ? this.stageMoney(sats, unit) : typedUsd ? this.stageMoney(fig.usd, 'usd') : this.stageMoney(fig.sat, 'sat'), warm: true },
+    this.fcTap({ flow: 'load', amount: unit ? this.stageMoney(sats, unit) : typedUsd ? this.stageMoney(fig.usd, 'usd') : this.stageMoney(fig.sat, 'sat'), warm: true },
       (link, on) => {
         on('mint');
         return W.cardLook(link, { short: true }).then((card) => {
@@ -30893,7 +31401,7 @@ class Component extends DCLogic {
     const W = this.fcW();
     const cu = x.cardUnit;
     const how = owner ? { owner: true } : { pin: pin || undefined };
-    this.fcTap({ amount: this.stageMoney(this.fcAmt(made), cu) }, (link, on, progress) => { on('writing'); return W.cardWrite(link, Object.assign({ progress }, how)); })
+    this.fcTap({ flow: 'load', amount: this.stageMoney(this.fcAmt(made), cu) }, (link, on, progress) => { on('writing'); return W.cardWrite(link, Object.assign({ progress }, how)); })
       .then((r) => {
         this.fcXmHome();
         this.fcWrote(r, { rounded: Number(made && made.rounded) || 0, unit: cu });
@@ -30959,7 +31467,7 @@ class Component extends DCLogic {
     let made = null;
     // whether the set-up itself was finished in this tap: a tap cut after it is a send with the holder's PIN, one cut before it the set-up again
     let setUp = false;
-    this.fcTap({ amount: this.stageMoney(sats, unit), warm: true }, (link, on) => {
+    this.fcTap({ flow: 'load', amount: this.stageMoney(sats, unit), warm: true }, (link, on) => {
       on('writing');
       // (the dollars each number was chosen in, and the price: a card of software 1.23 keeps them in cents with its rate)
       return W.cardSetUpFor(link, { pin: c.pin, unit: c.unit, design: this.FC_SETUP_DESIGN, tapLimit: c.tapLimit, noPin: c.noPin,
@@ -31021,7 +31529,7 @@ class Component extends DCLogic {
     const W = this.fcW();
     if (!W) return;
     // (`on`: the sheet says what the card is held for when its change is looked into in the same tap)
-    this.fcTap({}, (link, on) => W.cardGuestLook(link, { pin, onHold: () => on('writing'), on }))
+    this.fcTap({ flow: 'read' }, (link, on) => W.cardGuestLook(link, { pin, onHold: () => on('writing'), on }))
       .then((card) => {
         this.fcShow(card);
         this.haptic && this.haptic('success');
@@ -31058,7 +31566,7 @@ class Component extends DCLogic {
     const here = String((W.mintHost && W.mintHost()) || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
     const there = String((fc && fc.mint) || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
     const refresh = full && !this.offlineNow() && !!(W.cardOnline && W.cardOnline()) && !!here && (!there || there === here);
-    this.fcTap({ warm: refresh }, (link, on, progress) => {
+    this.fcTap({ flow: 'card', warm: refresh }, (link, on, progress) => {
       on('writing');
       return W.cardClaim(link, { pin, onHold: () => on('writing'), refresh, on, progress });
     }).then((card) => {
@@ -31099,8 +31607,8 @@ class Component extends DCLogic {
       title: 'CARD PIN',
       subtitle: 'To move this card’s backup to this phone: ' + this.fcWholeWords(fc) + '.',
       cta: 'MOVE BACKUP',
-    }, (pin) => W.cardVisit(fc.mint || W.mintUrl).then((v) => this.fcTap({ amount: this.fcWholeStage(fc), warm: true },
-      (link, on, progress) => W.cardRekeyRun(link, { pin, on, progress }))
+    }, (pin) => W.cardVisit(fc.mint || W.mintUrl).then((v) => this.fcApprove({ label: 'set-limit', lift: true }).then(() => this.fcTap({ flow: 'renew', amount: this.fcWholeStage(fc), warm: true },
+      (link, on, progress) => W.cardRekeyRun(link, { pin, on, progress })))
       .then((r) => {
         v.end();
         (r.hashes || []).forEach((h) => this.txIsNew(h));
@@ -31209,7 +31717,7 @@ class Component extends DCLogic {
 
   /* ---- home and the card --------------------------------------------------------------------------------------------
    *
-   * CARD, the third of home's buttons under the balance (home's round button at the top left was CARD, and is CHAT now), opens the
+   * CARD, the third of home's buttons under the balance (home's round button at the top left was CARD, and is MY CASHU ID now), opens the
    * card's screen as a card's address does (`goFlashcard`), which asks for the card to be tapped; nothing of a card is shown before it has been read. The card's screen has the HOME
    * button in the same place, which comes back home (`fcGoHome`). A swipe does the same (`fcSwipe`): to the left on home is CARD,
    * to the right on the card's screen is HOME; nothing is drawn for it and nothing of a card is kept for it. */
@@ -32335,61 +32843,90 @@ class Component extends DCLogic {
   fcExplainerClose() {
     if (this._fcExplainer) this._fcExplainer.close();
   }
-  /* ---- the screen behind the card sheet --------------------------------------
+  /* ---- the card tap screens ----------------------------------------------------
    *
-   * Foxy's own screen while the phone's NFC sheet is up, from the design: a card
-   * comes down behind a phone with three waves rising, the title says what to do,
-   * and the amount is under it. Everything is in the top half, where the sheet
-   * (the phone's own, drawn nowhere here) leaves room; the bottom holds only
-   * CANCEL, which is under the sheet's own on a phone.
+   * One family of full screens for every card tap, from the keeper's 2026-11-06 design (screens 1a to 1g), and
+   * only the words change from one flow to the next. Each is a ground, a title of 34px spaced out, the amount at
+   * 76px under it, then three dots, a paragraph or a chip where the screen has one, and its pills at the foot.
+   * The status bar is the phone's own, and the NFC sheet is iOS's: neither is drawn here.
    *
-   * Two grounds. Light blue while no card is connected (TAP BEHIND PHONE, and the
-   * asking again: TAP FOR CHANGE, PLEASE TAP AGAIN, ENTER PIN); orange, with the
-   * fur over it, from the moment the sheet reports a card connected (KEEP
-   * HOLDING, VERIFYING CARD, REMOVE) until it is lost or the sheet ends. The card
-   * and the waves loop while a card is wanted and settle behind the phone once it
-   * is there; the page's stylesheet stops the loop for a person who asks for
-   * less motion (build/markup.html, `[data-look]`), and the card is then just
-   * drawn settled.
+   *   1a  WAITING        light blue   the sheet is up and no card is in contact: TAP TO PAY, TAP TO LOAD, and so
+   *                                   on by flow (FC_TAP_FLOWS), with the arrow over the top of the screen and
+   *                                   TAP CARD BEHIND THE TOP; ENTER PIN while the pad is up over it
+   *   1b  GETTING READY  light blue   the phone is making what it will write, before any sheet (`fcAddRun`)
+   *   1c  IN CONTACT     orange       the card is being read or is signing: PAYING, RECEIVING, READING, ...
+   *   1d  CHECKING       teal         the card has signed and been let go, and the mint is asked: CHECKING for a
+   *                                   payment, CHARGING for a load, VERIFYING for a read; STILL ... once the wait
+   *                                   the CHECKING screen makes has run out (`fcChecking`, which is drawn so too)
+   *   1e  TAP AGAIN      yellow       a load whose card was not read: the money still waits to go onto it
+   *                                   (26f-flashcard.js, `fcStillWaiting`); TAP CARD and LATER
+   *   1f  TAP AGAIN      yellow       a payment whose card was not read: nothing has been paid (`fcFailed`'s
+   *                                   `gone`); TAP CARD and CANCEL
+   *   1g  CARD LOST      red          the instant the phone's link says the card has gone mid-tap; it stays until
+   *                                   the card is found again (1c), the card turns out to have signed and the mint
+   *                                   is asked (1d), or the tap ends, when the flow says what happened (1e, 1f)
    *
-   * What it says, by where the tap has got to (`fcTapLook`):
+   * What the screen behind the sheet says, by where the tap has got to (`fcTapLook`, the key kept on `data-look`):
    *
-   *   TAP BEHIND PHONE         waiting for the first contact
-   *   KEEP HOLDING · N s       in contact, the card being asked; N counts up from
-   *                            the contact, a whole second at a time
-   *   VERIFYING CARD           the card has signed and is still there: the mint is
-   *                            asked, and change is fetched or written
-   *   REMOVE                   the card has signed and nothing more is wanted of it:
-   *                            for as long as the phone's sheet may still be showing, which
-   *                            is until it has gone or a second and a half after the card
-   *                            signed, whichever is first
-   *   CHECKING                 and then, while the mint has not answered the swap of what the
-   *                            card signed: there is nothing to remove, and the mint is asked
-   *   STILL CHECKING           the wait the CHECKING card makes (`fcChecking`) has run out, and
-   *                            the phone goes on asking
-   *   TAP FOR CHANGE           the card has signed and contact broke before the
-   *                            change went on (or the second tap is waiting for it)
-   *   PLEASE TAP AGAIN         contact broke part way, and the same sheet asks again
-   *   ENTER PIN                the sheet ended asking for the PIN; the pad is up
+   *   hold      1a  the flow's TAP TO ...      waiting for the first contact
+   *   keep      1c  the flow's contact word    in contact, the card being asked
+   *   verify    1c  the same                   the card has signed and is still there: the mint is asked, and
+   *                                            change is fetched or written
+   *   remove    1d  the flow's checking word   the card has signed and nothing more is wanted of it, while the
+   *                                            phone's sheet may still be showing (until it has gone or a second
+   *                                            and a half after the card signed, whichever is first)
+   *   checking  1d  the same                   and then, while the mint has not answered
+   *   still     1d  STILL and the same         the wait the CHECKING screen makes (`fcChecking`) has run out
+   *   change    1a  TAP FOR CHANGE             the card has signed and its change waits for the next tap;
+   *             1g  CARD LOST                  or contact broke before the change went on
+   *   again     1g  CARD LOST                  contact broke part way, and the same sheet asks again;
+   *             1a  the flow's TAP TO ...      or a tap that begins again with nothing asked of the card yet
+   *   pin       1a  ENTER PIN                  the sheet ended asking for the PIN; the pad is up
    *
-   * The sheet's own line is the wallet's and 26f's (FC_STEPS, fcProgressText);
-   * nothing of it is repeated here, and no estimate of how long a tap will take:
-   * the till cannot know the count, and the card does not say it.
-   *
-   * The card in the animation is the card screen's own card (build/markup.html,
-   * `[data-card-portrait]`), standing up, 150px wide: its design is the card's (FX1 is
-   * the upright picture, img/card-fx1-portrait.jpg; FL1 the drawn face and EL1 the
-   * animated beaker, each turned a quarter to stand), FX1 until a card has been read at a till.
+   * The sheet's own line is the wallet's and 26f's (FC_STEPS, fcProgressText); nothing of it is repeated here.
+   * A person who asks for less motion has the dots and the arrow still (build/markup.html, `[data-look]` and
+   * `[data-tp-move]`).
    */
-  FC_TAP_FACE = '<div data-card-face style="width:100cqw;height:63.02cqw;border-radius:4.17cqw;box-sizing:border-box;position:relative;overflow:hidden;background:repeating-linear-gradient(92deg,rgba(255,255,255,.05) 0 1px,rgba(255,255,255,0) 1px 3px),repeating-linear-gradient(0deg,rgba(0,0,0,.16) 0 1px,rgba(0,0,0,0) 1px 4px),radial-gradient(circle at 22% 8%,rgba(255,255,255,.14),rgba(255,255,255,0) 46%),linear-gradient(146deg,#3A3B3D 0%,#1B1C1E 38%,#101113 72%,#26272A 100%);box-shadow:inset 0 1.5px 0 rgba(255,255,255,.34),inset 0 -2px 0 rgba(0,0,0,.7),inset 1.5px 0 0 rgba(255,255,255,.14),inset -1.5px 0 0 rgba(0,0,0,.6),0 2px 0 rgba(0,0,0,.7),0 14px 28px rgba(0,0,0,.6)"><div style="position:absolute;inset:3.52cqw;border-radius:2.34cqw;border:1px solid rgba(255,255,255,.16);box-shadow:inset 0 0 0 1px rgba(0,0,0,.5);pointer-events:none"></div><div style="position:absolute;inset:4.56cqw;border-radius:1.82cqw;background:repeating-linear-gradient(45deg,rgba(255,255,255,.045) 0 1px,rgba(255,255,255,0) 1px 5px),repeating-linear-gradient(-45deg,rgba(255,255,255,.045) 0 1px,rgba(255,255,255,0) 1px 5px);pointer-events:none"></div><div style="position:absolute;inset:6.25cqw;border-radius:1.04cqw;background:radial-gradient(circle at 50% 46%,rgba(0,0,0,.5),rgba(0,0,0,0) 72%);pointer-events:none"></div><div style="position:absolute;left:50%;top:50%;width:31.25cqw;height:31.25cqw;transform:translate(-50%,-50%);border-radius:50%;background:linear-gradient(150deg,#2E2F32,#121315);box-shadow:inset 0 2px 3px rgba(0,0,0,.8),inset 0 -1.5px 0 rgba(255,255,255,.16),0 1px 0 rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;pointer-events:none"><svg viewBox="0 0 236.5 366" style="height:16.15cqw;width:10.43cqw;display:block;opacity:.5"><path d="M81.1,364.6c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8L37.9,56.1c4.3-20.8,21.7-34.8,42.9-34.2,14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#050505"></path><path d="M103,355c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8L59.7,46.4c4.3-20.8,21.7-34.8,42.9-34.2,14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#5C5C5C"></path><path d="M124.1,342.8c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8,32.1-112C85.2,13.5,102.6-.5,123.8,0c14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#C9C9C9"></path></svg></div><div style="position:absolute;left:9.92cqw;top:8.75cqw;width:15.18cqw;height:13.78cqw;border-radius:1.56cqw;background:linear-gradient(150deg,#E8E4D8,#A9A392);box-shadow:inset 0 1px 0 rgba(255,255,255,.7),inset 0 -1px 0 rgba(60,58,50,.4),0 2px 4px rgba(0,0,0,.5);overflow:hidden"><div style="position:absolute;left:0;right:0;top:33%;height:1px;background:rgba(70,68,60,.4)"></div><div style="position:absolute;left:0;right:0;top:66%;height:1px;background:rgba(70,68,60,.4)"></div><div style="position:absolute;top:0;bottom:0;left:33%;width:1px;background:rgba(70,68,60,.4)"></div><div style="position:absolute;top:0;bottom:0;left:66%;width:1px;background:rgba(70,68,60,.4)"></div></div><div style="position:absolute;right:7.81cqw;bottom:6.25cqw;display:flex;flex-direction:column;align-items:center;gap:2px"><div style="font-size:5.99cqw;font-weight:800;line-height:1;color:rgba(255,255,255,.5)">₿</div><div style="font-family:Sora,sans-serif;font-size:2.86cqw;font-weight:600;letter-spacing:0.24em;color:rgba(255,255,255,.42)">BEARER</div></div>' + this.FC_EL1_FACE + '</div>';
-  FC_TAP_GROUNDS = {
-    '01': { ground: '#BFE3EC', ink: '#0F2A33', shadow: '0 14px 30px rgba(15,42,51,.28)' },
-    '03': { ground: '#EB6A2E', ink: '#1A0A04', shadow: '0 14px 30px rgba(26,10,4,.32)' },
+  // each screen's ground, ink, and the colours of its paragraph, its chip and its filled pill
+  FC_TAP_SCREENS = {
+    '1a': { bg: 'linear-gradient(180deg,#D6EEF4 0%,#BFE3EC 60%,#A9D6E2 100%)', ink: '#0F2A33' },
+    '1b': { bg: 'linear-gradient(180deg,#D6EEF4 0%,#BFE3EC 60%,#A9D6E2 100%)', ink: '#0F2A33' },
+    '1c': { bg: 'linear-gradient(180deg,#FF9A5C 0%,#EB6A2E 60%,#D9561C 100%)', ink: '#1A0A02' },
+    '1d': { bg: 'linear-gradient(180deg,#1A3C47 0%,#0F2A33 60%,#081C22 100%)', ink: '#F2FAFC' },
+    '1e': { bg: 'linear-gradient(180deg,#FFE7A8 0%,#F6C453 60%,#EDB236 100%)', ink: '#2A1A00', words: '#3D2A05', chip: 'rgba(42,26,0,.1)', solid: '#2A1A00', solidInk: '#FFE7A8' },
+    '1f': { bg: 'linear-gradient(180deg,#FFE7A8 0%,#F6C453 60%,#EDB236 100%)', ink: '#2A1A00', words: '#3D2A05', chip: 'rgba(42,26,0,.1)', solid: '#2A1A00', solidInk: '#FFE7A8' },
+    '1g': { bg: 'linear-gradient(180deg,#E8503F 0%,#D93A2B 60%,#B82A1E 100%)', ink: '#FFFFFF', words: '#FFE9E5', chip: 'rgba(255,255,255,.16)', solid: '#FFFFFF', solidInk: '#B82A1E' },
   };
-  FC_TAP_TITLES = {
-    hold: 'TAP BEHIND PHONE', keep: 'KEEP HOLDING · ', verify: 'VERIFYING CARD', remove: 'REMOVE',
-    checking: 'CHECKING', still: 'STILL CHECKING',
-    change: 'TAP FOR CHANGE', again: 'PLEASE TAP AGAIN', pin: 'ENTER PIN',
+  /* The words of each flow: what 1a asks for, what 1c says while the card is in contact, and what 1d says while the mint is
+   * asked. A tap names its flow (`fcTap`'s `o.flow`); one that names none is a payment's where it is paying (`o.paying`),
+   * the change's where it is a payment's second tap (`o.look`), and plain TAP CARD otherwise. */
+  FC_TAP_FLOWS = {
+    pay: { tap: 'TAP TO PAY', contact: 'PAYING', check: 'CHECKING' },
+    load: { tap: 'TAP TO LOAD', contact: 'RECEIVING', check: 'CHARGING' },
+    change: { tap: 'TAP FOR CHANGE', contact: 'RECEIVING', check: 'CHARGING' },
+    read: { tap: 'TAP TO READ', contact: 'READING', check: 'VERIFYING' },
+    withdraw: { tap: 'TAP TO WITHDRAW', contact: 'WITHDRAWING', check: 'CHECKING' },
+    swap: { tap: 'TAP TO SWAP', contact: 'SWAPPING', check: 'CHECKING' },
+    move: { tap: 'TAP TO MOVE', contact: 'MOVING', check: 'CHECKING' },
+    renew: { tap: 'TAP TO RENEW', contact: 'RENEWING', check: 'CHECKING' },
+    reset: { tap: 'TAP TO RESET', contact: 'RESETTING', check: 'CHECKING' },
+    setup: { tap: 'TAP TO SET UP', contact: 'SETTING UP', check: 'CHECKING' },
+    pin: { tap: 'TAP TO SET PIN', contact: 'WRITING', check: 'CHECKING' },
+    limit: { tap: 'TAP TO SET LIMIT', contact: 'WRITING', check: 'CHECKING' },
+    rate: { tap: 'TAP TO SET RATE', contact: 'WRITING', check: 'CHECKING' },
+    write: { tap: 'TAP CARD', contact: 'WRITING', check: 'CHECKING' },
+    card: { tap: 'TAP CARD', contact: 'READING', check: 'CHECKING' },
+  };
+  FC_TAP_WORDS = {
+    lost: 'The card moved away too soon. Hold it still behind the top of the phone.',
+    load: 'The card wasn’t read. This money is still waiting to go onto it.',
+    back: 'The card wasn’t read. This money is still waiting to go back onto it.',
+    pay: 'The card wasn’t read. Nothing has been paid yet.',
+  };
+  FC_TAP_CHIPS = { shield: 'Your money is still on your card.', lock: 'Only this card can receive it.' };
+  FC_TAP_ICONS = {
+    shield: '<path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"></path><path d="M9 12l2 2 4-4"></path>',
+    lock: '<rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path>',
   };
   // how long REMOVE is said after the card has signed, if the sheet has not been seen to go before then
   FC_TAP_REMOVE_MS = 1500;
@@ -32414,6 +32951,10 @@ class Component extends DCLogic {
         // the sheet ended asking for the PIN; and the tap that follows the pad
         pin: false, pinAgain: !!o.pinAgain,
         design: '',
+        // CLOSE took the screen down (`fcTapClose`); and a tap that takes up one the card left part way, some of it signed already
+        closed: false, resumed: !!o.lost && !!o.paying,
+        // the change has been asked for in this tap (TAP FOR CHANGE): the card in contact after it is receiving
+        forChange: false,
       };
     }
     const t = o.t;
@@ -32435,12 +32976,15 @@ class Component extends DCLogic {
   fcTapLost() {
     const t = this.fcTapState();
     if (t.gone || t.pin) return;
+    /* Only a card that was in the field can be lost. The phone's link says `lost` too when iOS ends a sheet no card came near
+     * (its own Cancel, its minute run out), and that is no card lost: the screen stays as it was, and the tap ends silent. */
+    if (!t.connected && !t.touched) return;
     t.lost = true;
     t.connected = false;
     if (this.stageUp('card')) this.fcTapDraw();
   }
 
-  /* The sheet ended asking for the PIN: the pad comes up over this, and the tap that follows it starts as PLEASE TAP AGAIN. */
+  /* The sheet ended asking for the PIN: the pad comes up over this, and the tap that follows it asks for the card again (1a). */
   fcTapPin() {
     const t = this.fcTapState();
     t.pin = true;
@@ -32511,13 +33055,8 @@ class Component extends DCLogic {
     }
   }
 
-  /* The seconds since the card connected. */
-  fcHeldSeconds() {
-    const t = this.fcTapState();
-    return t.connected ? Math.max(0, Math.floor((Date.now() - t.since) / 1000)) : 0;
-  }
-
-  /* Which screen this is, from where the tap has got to. */
+  /* Which screen this is, from where the tap has got to: the key (`data-look`), the screen of the family it is drawn as
+   * (`data-scheme`), whether the arrow and TAP CARD BEHIND THE TOP are up (`data-loop`), and whether CANCEL is. */
   fcTapLook() {
     const o = this._fcTapO || {};
     const t = this.fcTapState();
@@ -32532,132 +33071,227 @@ class Component extends DCLogic {
     // the tap that follows the PIN pad: nothing has been asked of the card yet, and it was asked before
     else if (t.pinAgain) key = 'again';
     else key = 'hold';
-    const warm = key === 'keep' || key === 'verify' || key === 'remove' || key === 'checking' || key === 'still';
+    // (the change asked for: from then on the card in contact is receiving it)
+    if (key === 'change') t.forChange = true;
+    const screen = (key === 'keep' || key === 'verify') ? '1c'
+      : (key === 'remove' || key === 'checking' || key === 'still') ? '1d'
+      : ((key === 'again' || key === 'change') && t.lost) ? '1g' : '1a';
     return {
-      key, scheme: warm ? '03' : '01',
-      // the card is wanted, and the loop says so; once it is there it stays settled
-      loop: key === 'hold' || key === 'again' || key === 'change',
+      key, scheme: screen,
+      // the card is wanted, and the arrow over the top says where
+      loop: screen === '1a' && key !== 'pin',
       // nothing has been asked of the card: the one way out is here (after that, finishing is)
       cancel: !t.touched && !t.connected && (key === 'hold' || key === 'again' || key === 'change'),
     };
   }
 
-  /* The screen, made once for a tap and kept: what changes is its ground, its title, and whether the card moves. */
-  fcTapBuild() {
+  // the words of the flow this tap is (FC_TAP_FLOWS)
+  fcTapFlow() {
+    const o = this._fcTapO || {};
+    const F = this.FC_TAP_FLOWS;
+    return F[String(o.flow || '')] || (o.look === 'receive' ? F.change : o.paying ? F.pay : F.card);
+  }
+
+  /* What the screen shows for a look: its screen, title, amount, the dots, the paragraph and chip of a card lost, and its pills. */
+  fcTapSpec(k) {
+    const o = this._fcTapO || {};
+    const t = this.fcTapState();
+    const f = this.fcTapFlow();
+    const spec = { screen: k.scheme, amount: o.amount || '', amountSub: o.amountSub || '', hint: k.loop, dots: '', words: '', chip: null, solid: null, plain: null };
+    const close = { label: 'CLOSE', go: () => this.fcTapClose() };
+    if (k.scheme === '1g') {
+      spec.title = 'CARD LOST';
+      spec.words = this.FC_TAP_WORDS.lost;
+      /* Money the card was to receive waits for it alone; a card that has not signed still holds its own. A payment taken up
+       * again after the card left part way (`o.lost` as it began) has some of it signed already: neither is said then. */
+      const receiving = f === this.FC_TAP_FLOWS.load || f === this.FC_TAP_FLOWS.change || t.signed;
+      spec.chip = receiving ? { icon: 'lock', text: this.FC_TAP_CHIPS.lock } : t.resumed ? null : { icon: 'shield', text: this.FC_TAP_CHIPS.shield };
+      spec.solid = { label: 'TRY AGAIN', go: () => this.fcTapRetry() };
+      spec.plain = { label: 'CANCEL', go: () => { const W = this.fcW(); if (W) W.cardStop(); } };
+      return spec;
+    }
+    if (k.key === 'pin') { spec.title = 'ENTER PIN'; return spec; }
+    if (k.scheme === '1a') {
+      spec.title = k.key === 'change' ? this.FC_TAP_FLOWS.change.tap : f.tap;
+      // the session ends as cancelled, and that is what takes this screen down
+      if (k.cancel) spec.plain = { label: 'CANCEL', go: () => { const W = this.fcW(); if (W) W.cardStop(); } };
+      return spec;
+    }
+    spec.dots = 'fast';
+    spec.plain = close;
+    spec.title = k.scheme === '1c' ? (t.forChange ? this.FC_TAP_FLOWS.change.contact : f.contact) : (k.key === 'still' ? 'STILL ' : '') + f.check;
+    return spec;
+  }
+
+  /* CLOSE on 1c and 1d: this screen goes, and the tap goes on under the phone's sheet (or, the card let go, at the mint) to its
+   * end, which is said as it always is; nothing of it draws this screen again. */
+  fcTapClose() {
+    this.fcTapState().closed = true;
+    this.hideStage('card');
+  }
+
+  /* TRY AGAIN on CARD LOST: the same sheet is asking for the card already, and the screen says so again (1a). */
+  fcTapRetry() {
+    const t = this.fcTapState();
+    t.lost = false;
+    if (this.stageUp('card')) this.fcTapDraw();
+  }
+
+  /* ---- one screen of the family, made and filled ------------------------------------------------------------------- */
+
+  /* The screen's parts, made once: the arrow and its words at the top, the title, the amount and what goes under it, and
+   * two pills at the foot (the filled one over the outlined one). `fcFamilyFill` changes them in place. */
+  fcFamilyBuild(kind) {
     this.hideStage();
     const root = document.createElement('div');
     root.id = 'foxy-stage';
-    root.setAttribute('data-stage', 'card');
-    root.setAttribute('data-look', 'hold');
-    root.style.cssText = 'position:fixed;inset:0;z-index:2147483300;display:flex;flex-direction:column;overflow:hidden;'
-      + 'box-sizing:border-box;padding-top:env(safe-area-inset-top);font-family:Sora,system-ui,sans-serif;'
-      + '-webkit-font-smoothing:antialiased;transition:background-color .35s ease,color .35s ease;animation:foxyIn .18s ease';
-    const BLUE = '#0A84FF';
-    const wave = (d, delay) => '<path data-tap-wave d="' + d + '" style="opacity:0;animation:cvWave 4.2s ease-out ' + delay + 's infinite"></path>';
+    root.setAttribute('data-stage', kind);
+    root.setAttribute('data-tp', '1');
+    root.style.cssText = 'position:fixed;inset:0;z-index:2147483300;overflow:hidden;box-sizing:border-box;'
+      + "font-family:Sora,system-ui,sans-serif;-webkit-font-smoothing:antialiased;animation:foxyIn .18s ease";
+    const fig = "font-family:Figtree,Sora,system-ui,sans-serif";
     root.innerHTML =
-      '<div data-tap-fur style="position:absolute;inset:0;background-image:url(snow-fur.jpg);background-size:cover;'
-      + 'mix-blend-mode:soft-light;opacity:0;pointer-events:none;transition:opacity .35s ease"></div>'
-      + '<div style="position:relative;width:100%;max-width:430px;margin:0 auto;flex:1 1 auto;min-height:0;display:flex;flex-direction:column">'
-      + '<div style="position:relative;flex:0 0 auto;height:269px;overflow:hidden">'
-      // 150px wide and 54 by 85.6 (237.8px tall), the corners its 3.18mm to scale
-      + '<div data-tap-card style="position:absolute;left:50%;top:30px;width:150px;margin-left:-75px;aspect-ratio:54 / 85.6;'
-      + 'border-radius:8.83px;overflow:hidden;animation:cvBehind 4.2s cubic-bezier(.5,0,.3,1) infinite">'
-      + '<div data-card-portrait data-card-design="FX1" style="position:relative;width:100%;height:100%">'
-      + '<div data-card-picture style="position:absolute;inset:0;background:url(img/card-fx1-portrait.jpg) center/cover no-repeat"></div>'
-      + '<div data-card-turn style="position:absolute;left:50%;top:50%;width:237.8px;transform:translate(-50%,-50%) rotate(90deg);container-type:inline-size">'
-      + this.FC_TAP_FACE + '</div></div></div>'
-      + '<svg viewBox="0 0 220 60" width="220" height="60" fill="none" style="position:absolute;left:50%;top:83px;margin-left:-110px;z-index:2;overflow:visible">'
-      + '<g stroke="' + BLUE + '" stroke-width="4" stroke-linecap="round">'
-      + wave('M70 40 Q110 14 150 40', 0) + wave('M52 34 Q110 -4 168 34', .25) + wave('M34 28 Q110 -22 186 28', .5)
-      + '</g></svg>'
-      + '<div style="position:absolute;left:50%;top:119px;width:300px;height:150px;margin-left:-150px;z-index:3;'
-      + 'border-radius:46px 46px 0 0;background:#0F2A33;box-shadow:0 -8px 24px rgba(15,42,51,.25);padding:8px 8px 0;box-sizing:border-box">'
-      + '<div style="width:100%;height:100%;border-radius:38px 38px 0 0;background:linear-gradient(180deg,#1E4450,#163842);position:relative">'
-      + '<div style="position:absolute;left:50%;top:12px;width:70px;height:20px;margin-left:-35px;border-radius:999px;background:#0A1B21"></div>'
-      + '</div></div></div>'
-      + '<div style="position:relative;padding:22px 32px 0;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center">'
-      + '<h1 style="margin:0;font-weight:800;font-size:31px;line-height:1.05;white-space:nowrap;letter-spacing:-.01em;'
-      + 'text-transform:uppercase"></h1>'
-      + '<div data-tap-amount style="margin-top:6px;font-weight:800;font-size:42px;letter-spacing:-.02em"></div>'
-      + '</div></div>';
-    /* CANCEL, where the phone's sheet would be: under it on a phone, whose sheet has its own, and the way out wherever
-     * there is no sheet. */
-    const wrap = document.createElement('div');
-    wrap.style.cssText = 'position:relative;z-index:1;margin-top:auto;padding:20px 24px calc(44px + env(safe-area-inset-bottom))';
-    const b = document.createElement('div');
-    b.style.cssText = 'width:100%;height:60px;border-radius:18px;box-sizing:border-box;border:2px solid;'
-      + 'background:rgba(255,255,255,.35);font-family:Sora,system-ui,sans-serif;font-weight:800;font-size:17px;'
-      + 'letter-spacing:.04em;text-transform:uppercase;display:flex;align-items:center;justify-content:center;cursor:pointer';
-    b.textContent = 'CANCEL';
-    b.setAttribute('data-stage-button', '1');
-    // the session ends as cancelled, and that is what takes this screen down
-    b.addEventListener('click', () => { const W = this.fcW(); if (W) W.cardStop(); });
-    wrap.appendChild(b);
-    root.firstElementChild.nextElementSibling.appendChild(wrap);
+      // the arrow bobbing up to the top of the phone, where the card goes
+      '<div data-tp-hint style="position:absolute;left:0;right:0;top:0;height:110px;overflow:hidden;pointer-events:none">'
+      + '<div style="position:absolute;left:0;right:0;top:max(28px, env(safe-area-inset-top));display:flex;flex-direction:column;align-items:center;gap:2px">'
+      + '<svg data-tp-move viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="animation:tpArrow 1.2s ease-in-out infinite"><path d="M6 14l6-6 6 6"></path></svg>'
+      + '<span style="' + fig + ';font-weight:700;font-size:15px;letter-spacing:.08em">TAP CARD BEHIND THE TOP</span></div></div>'
+      + '<div data-tp-body style="position:absolute;left:0;right:0;top:0;display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;'
+      + 'box-sizing:border-box;padding:calc(max(54px, env(safe-area-inset-top)) + min(130px, 15vh)) 36px 0">'
+      + '<h1 style="margin:0;font-weight:800;font-size:34px;line-height:1.05;letter-spacing:.1em;white-space:nowrap"></h1>'
+      + '<div data-tap-amount style="font-weight:800;font-size:76px;line-height:1;letter-spacing:-.04em;white-space:nowrap"></div>'
+      + '<div data-tap-amount-sub style="margin-top:-4px;' + fig + ';font-weight:600;font-size:19px;opacity:.6"></div>'
+      + '<p data-tp-words style="margin:22px 0 0;' + fig + ';font-weight:500;font-size:19px;line-height:1.45;text-wrap:balance"></p>'
+      + '<div data-tp-chip style="margin-top:6px;display:flex;align-items:center;gap:10px;padding:12px 18px;border-radius:999px;' + fig + ';font-weight:700;font-size:15px">'
+      + '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex:none"></svg><span></span></div>'
+      + '<div data-tp-dots style="margin-top:22px;display:flex;gap:10px">'
+      + '<span data-tp-move></span><span data-tp-move></span><span data-tp-move></span></div>'
+      + '</div>';
+    const foot = document.createElement('div');
+    foot.setAttribute('data-tp-foot', '1');
+    foot.style.cssText = 'position:absolute;left:0;right:0;bottom:0;padding:0 24px max(40px, calc(env(safe-area-inset-bottom) + 16px));display:flex;flex-direction:column;gap:12px';
+    const pill = (solid) => {
+      const b = document.createElement('div');
+      b.style.cssText = 'height:58px;border-radius:999px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;'
+        + 'font-family:Sora,system-ui,sans-serif;font-weight:800;font-size:17px;letter-spacing:.08em;cursor:pointer;'
+        + (solid ? '' : 'border:2px solid currentColor');
+      b.setAttribute(solid ? 'data-tp-solid' : 'data-stage-button', '1');
+      b.addEventListener('click', () => { const go = /** @type {any} */ (b)._go; if (typeof go === 'function') go(); });
+      foot.appendChild(b);
+      return b;
+    };
+    pill(true);
+    pill(false);
+    root.appendChild(foot);
     document.body.appendChild(root);
+    return root;
+  }
+
+  /* Fill the screen for `spec` (`fcTapSpec`'s shape): its ground and ink, the words, the dots' pace, and the pills. */
+  fcFamilyFill(root, spec) {
+    const S = this.FC_TAP_SCREENS[spec.screen] || this.FC_TAP_SCREENS['1a'];
+    const q = (sel) => /** @type {HTMLElement | null} */ (root.querySelector(sel));
+    root.setAttribute('data-scheme', spec.screen);
+    root.style.background = S.bg;
+    root.style.color = S.ink;
+    const shown = (el, on) => { if (el) el.style.display = on ? '' : 'none'; };
+    const hint = q('[data-tp-hint]');
+    shown(hint, !!spec.hint);
+    this.fcFamilyTitle(root, String(spec.title || ''));
+    const amount = q('[data-tap-amount]');
+    if (amount) { amount.textContent = spec.amount || ''; shown(amount, !!spec.amount); }
+    const sub = q('[data-tap-amount-sub]');
+    if (sub) { sub.textContent = spec.amountSub || ''; shown(sub, !!spec.amountSub); }
+    const words = q('[data-tp-words]');
+    if (words) { words.textContent = spec.words || ''; words.style.color = S.words || S.ink; shown(words, !!spec.words); }
+    const chip = q('[data-tp-chip]');
+    if (chip) {
+      const c = spec.chip;
+      shown(chip, !!c);
+      chip.style.background = S.chip || 'transparent';
+      if (c) {
+        const svg = chip.querySelector('svg');
+        const icon = this.FC_TAP_ICONS[c.icon] || '';
+        if (svg && svg.getAttribute('data-icon') !== c.icon) { svg.innerHTML = icon; svg.setAttribute('data-icon', c.icon); }
+        const span = chip.querySelector('span');
+        if (span) span.textContent = c.text;
+      }
+    }
+    const dots = q('[data-tp-dots]');
+    if (dots) {
+      shown(dots, !!spec.dots);
+      const pace = spec.dots === 'fast' ? [0.8, 0.12] : [1.2, 0.18];
+      Array.from(dots.children).forEach((d, i) => {
+        const el = /** @type {HTMLElement} */ (d);
+        el.style.cssText = 'width:12px;height:12px;border-radius:50%;background:currentColor;'
+          + (spec.dots ? 'animation:tpDot ' + pace[0] + 's ease-in-out ' + (i * pace[1]).toFixed(2) + 's infinite' : '');
+      });
+    }
+    const pill = (el, b, solid) => {
+      if (!el) return;
+      /** @type {any} */ (el)._go = b ? b.go : null;
+      el.textContent = b ? b.label : '';
+      el.style.display = b ? 'flex' : 'none';
+      el.style.visibility = b ? 'visible' : 'hidden';
+      if (solid) { el.style.background = S.solid || '#0A0A0A'; el.style.color = S.solidInk || '#FFFFFF'; }
+    };
+    pill(q('[data-tp-solid]'), spec.solid, true);
+    pill(q('[data-stage-button]'), spec.plain, false);
+  }
+
+  /* The title on one line: 34px, smaller only where a phone is too narrow for it. */
+  fcFamilyTitle(root, text) {
+    const h = /** @type {HTMLElement | null} */ (root.querySelector('h1'));
+    if (!h) return;
+    if (h.textContent !== text) h.textContent = text;
+    try {
+      h.style.fontSize = '34px';
+      const col = h.parentElement;
+      const room = col ? col.clientWidth - 48 : 0;
+      const need = h.scrollWidth;
+      if (room > 0 && need > room) h.style.fontSize = Math.max(18, Math.floor(340 * room / need) / 10) + 'px';
+    } catch (e) { /* no layout to measure */ }
+  }
+
+  /* A screen of the family that is not the one behind the sheet: GETTING READY (1b), CHECKING (1d), TAP AGAIN (1e, 1f). `kind`
+   * names it, so whatever put it up can take down its own and nothing else's; a pill pressed takes it down first, and a wait
+   * (`forMs`) takes it down by itself when it outlives what it waited for, as every stage does. */
+  fcFamilyScreen(kind, spec, forMs) {
+    const root = this.fcFamilyBuild(kind);
+    const wrap = (b) => (b ? { label: b.label, go: () => { this.hideStage(kind); if (typeof b.go === 'function') b.go(); } } : null);
+    this.fcFamilyFill(root, Object.assign({}, spec, { solid: wrap(spec.solid), plain: wrap(spec.plain) }));
+    if (forMs > 0) this._stageT = setTimeout(() => this.hideStage(kind), forMs);
+    if (this.syncPreview) this.syncPreview();
+    console.log('[foxy] screen: ' + kind + ', ' + String(spec.title || '').toLowerCase());
+    return root;
+  }
+
+  /* ---- the screen behind the sheet ---------------------------------------------------------------------------------- */
+
+  /* Made once for a tap and kept: what changes is filled in place, so the dots do not start again when only the title moves. */
+  fcTapBuild() {
+    const root = this.fcFamilyBuild('card');
+    root.setAttribute('data-look', 'hold');
     // the rule every stage keeps: one that outlives what it waited for hides a working app
     this._stageT = setTimeout(() => this.hideStage('card'), 120000);
     return root;
   }
 
-  /* Draw the screen for where the tap has got to: made if it is not up, and otherwise changed in place, so that the
-   * card does not start again when only the title has moved. */
+  /* Draw the screen for where the tap has got to: made if it is not up, and otherwise changed in place. A screen CLOSE took
+   * down is not drawn again for the same tap. */
   fcTapDraw() {
-    const o = this._fcTapO || {};
+    const t = this.fcTapState();
+    if (t.closed) return;
     const k = this.fcTapLook();
     let root = document.getElementById('foxy-stage');
     const fresh = !(root && root.getAttribute('data-stage') === 'card' && root.getAttribute('data-look'));
     if (fresh) root = this.fcTapBuild();
     if (!root) return;
-    const g = this.FC_TAP_GROUNDS[k.scheme];
     const was = root.getAttribute('data-look');
     root.setAttribute('data-look', k.key);
-    root.setAttribute('data-scheme', k.scheme);
-    root.style.backgroundColor = g.ground;
-    root.style.color = g.ink;
-    const fur = /** @type {HTMLElement | null} */ (root.querySelector('[data-tap-fur]'));
-    if (fur) fur.style.opacity = k.scheme === '03' ? '.5' : '0';
-    // the card's design: FX1 is its picture and FL1 the face drawn in CSS (build/markup.html)
-    const t = this.fcTapState();
-    const design = t.design || (this.state && this.state.fc ? this.fcDesignOf(this.state.fc) : 'FX1');
-    const face = root.querySelector('[data-card-design]');
-    if (face && face.getAttribute('data-card-design') !== design) face.setAttribute('data-card-design', design);
-    const card = /** @type {HTMLElement | null} */ (root.querySelector('[data-tap-card]'));
-    if (card) card.style.boxShadow = g.shadow;
-    // the loop starts when a card is wanted and stops where it is when it is there
-    const looping = root.getAttribute('data-loop') === '1';
-    if (k.loop !== looping || fresh) {
-      root.setAttribute('data-loop', k.loop ? '1' : '0');
-      if (card) card.style.animation = k.loop ? 'cvBehind 4.2s cubic-bezier(.5,0,.3,1) infinite' : 'none';
-      Array.from(root.querySelectorAll('[data-tap-wave]')).forEach((w, i) => {
-        /** @type {HTMLElement} */ (w).style.animation = k.loop ? 'cvWave 4.2s ease-out ' + (i * 0.25) + 's infinite' : 'none';
-      });
-    }
-    const amount = /** @type {HTMLElement | null} */ (root.querySelector('[data-tap-amount]'));
-    if (amount) {
-      amount.textContent = o.amount || '';
-      amount.style.display = o.amount ? '' : 'none';
-    }
-    /* A dollar receive paid by a card: the sats the card pays, under the dollars asked, as every bitcoin figure is shown
-     * beside its dollars. Made only when there is such a line, so every other tap's screen is as it always was. */
-    let sub = /** @type {HTMLElement | null} */ (root.querySelector('[data-tap-amount-sub]'));
-    if (o.amountSub && !sub && amount && amount.parentNode) {
-      sub = document.createElement('div');
-      sub.setAttribute('data-tap-amount-sub', '1');
-      sub.style.cssText = 'margin-top:-8px;font-weight:600;font-size:19px;letter-spacing:-.01em;opacity:.6';
-      amount.parentNode.insertBefore(sub, amount.nextSibling);
-    }
-    if (sub) {
-      sub.textContent = o.amountSub || '';
-      sub.style.display = o.amountSub ? '' : 'none';
-    }
-    this.fcTapTitle(root, k);
-    const btn = /** @type {HTMLElement | null} */ (root.querySelector('[data-stage-button]'));
-    if (btn) { btn.style.visibility = k.cancel ? 'visible' : 'hidden'; btn.style.color = g.ink; btn.style.borderColor = g.ink; }
-    // the count runs only while it is on the screen
-    if (k.key === 'keep' && !this._fcCountT) this._fcCountT = setInterval(() => this.fcTapTick(), 500);
-    else if (k.key !== 'keep') { clearInterval(this._fcCountT); this._fcCountT = null; }
-    if (fresh || was !== k.key) console.log('[foxy] screen: card, ' + k.key);
+    root.setAttribute('data-loop', k.loop ? '1' : '0');
+    this.fcFamilyFill(root, this.fcTapSpec(k));
+    if (fresh || was !== k.key) console.log('[foxy] screen: card, ' + k.key + ' (' + k.scheme + ')');
     if (fresh && this.syncPreview) this.syncPreview();
     /* A look that comes of time alone is drawn when it is due, and the timer goes with the screen (`hideStage`). */
     clearTimeout(this._fcLookT);
@@ -32670,44 +33304,6 @@ class Component extends DCLogic {
       }, due);
     }
   }
-
-  /* The title, one line: KEEP HOLDING carries the seconds, whose unit stays lowercase. */
-  fcTapTitle(root, k) {
-    const h = /** @type {HTMLElement | null} */ (root.querySelector('h1'));
-    if (!h) return;
-    const secs = k.key === 'keep' ? this.fcHeldSeconds() : -1;
-    const sig = k.key + ':' + secs;
-    if (h.getAttribute('data-sig') !== sig) {
-      h.setAttribute('data-sig', sig);
-      h.textContent = this.FC_TAP_TITLES[k.key];
-      if (secs >= 0) {
-        const u = document.createElement('span');
-        u.style.textTransform = 'none';
-        u.textContent = secs + ' s';
-        h.appendChild(u);
-      }
-    }
-    // one line, whatever the phone's width: smaller when it would not fit (the design is 31px on 430)
-    try {
-      h.style.fontSize = '31px';
-      const col = h.parentElement;
-      const room = col ? col.clientWidth - 64 : 0;
-      const need = h.scrollWidth;
-      if (room > 0 && need > room) h.style.fontSize = Math.max(18, Math.floor(310 * room / need) / 10) + 'px';
-    } catch (e) { /* no layout to measure */ }
-  }
-
-  /* One turn of the count: it stops by itself when the screen it was counting for is gone. */
-  fcTapTick() {
-    const root = document.getElementById('foxy-stage');
-    if (!root || root.getAttribute('data-stage') !== 'card' || root.getAttribute('data-look') !== 'keep') {
-      clearInterval(this._fcCountT);
-      this._fcCountT = null;
-      return;
-    }
-    this.fcTapTitle(root, { key: 'keep' });
-  }
-
   /* ---- SWAP: dollars into bitcoin, or bitcoin into dollars, at this mint ----
    *
    * Four screens, the way a payment goes:
@@ -33204,9 +33800,12 @@ class Component extends DCLogic {
     // the balances before, for the count-up on home once the screen is dismissed
     this._preSettle = this.balNow();
     this.setState({ swapBusy: true, swapNewRate: false, swapErr: '', swapErrAmount: false });
-    this.showMelt('Swapping ' + this.unitWord(from).toLowerCase() + ' into ' + this.unitWord(to).toLowerCase() + '…', 120000);
+    // the fox, the figure following the swap's own stages (26r-fox-wait.js); the melt loader where it cannot be drawn
+    const fox = !!(this.foxUp && this.foxUp('swapMove', 'swap', { forMs: 120000 }));
+    if (!fox) this.showMelt('Swapping ' + this.unitWord(from).toLowerCase() + ' into ' + this.unitWord(to).toLowerCase() + '…', 120000);
     console.log('[foxy] swap: running ' + this.unitFigure(q.total, from) + ' into ' + this.unitFigure(q.get, to));
-    this._swapRun = W.swapRun(q, (stage) => console.log('[foxy] swap: ' + stage)).then(r => {
+    const heard = (stage) => console.log('[foxy] swap: ' + stage);
+    this._swapRun = W.swapRun(q, fox ? this.foxHears('swapMove', heard) : heard).then(r => {
       /* One leg unanswered is, most of the time, a mint a few seconds slow rather than a mint stuck, and the card for
        * "still going through" read as a verdict one round trip after SWAP. The swapping screen stays up for a short while,
        * asking the mint again every few seconds, and the card comes only if it is still not settled (`swapAwait`). */
@@ -33216,7 +33815,9 @@ class Component extends DCLogic {
       return r;
     }).then(r => {
       this._swapRun = null;
-      this.hideMelt();
+      // ALL SET where it landed, or settled while the screen waited; down at once where it did not
+      if (fox) this.foxEnd('swapMove', !!(r && (r.state === 'done' || (r.state === 'pending' && r.held === false))));
+      else this.hideMelt();
       this.refreshBalance();
       this.loadHistory();
       // the next probe from this balance asks at this size, the likeliest next figure
@@ -33262,7 +33863,7 @@ class Component extends DCLogic {
           + ' are where they were.' });
     }).catch(e => {
       this._swapRun = null;
-      this.hideMelt();
+      if (fox) this.foxEnd('swapMove', false); else this.hideMelt();
       this._preSettle = null;
       const why = W.reason ? W.reason(e) : String((e && e.message) || e);
       console.warn('[foxy] swap: did not run:', why);
@@ -34014,7 +34615,7 @@ class Component extends DCLogic {
     if (c.unit) how.unit = c.unit === 'both' ? 'usd' : c.unit;
     const fc = this.state.fc;
     if (fc && fc.v123 && c.unit) how.hold = c.unit;
-    this.fcTap({}, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
+    this.fcTap({ flow: 'setup' }, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
       .then((card) => {
         this.fcNameSettle(card && card.key);
         this.fcNoPinTxKeep(card && card.key, c);
@@ -34867,6 +35468,11 @@ class Component extends DCLogic {
       + list.map((e) => this.pfName(e.mint).toLowerCase() + ' ' + e.unit).join(', ') + ')' + (o.show ? '; asking which' : ''));
     if (o.show) this.setState((p) => Object.assign(patch, { screen: 'payFrom', stack: p.stack.concat([p.screen]) }));
     else this.setState(patch);
+    /* While every tile is still asking there is nothing on them to choose between: the fox says the fee is being
+     * checked over the screen, CANCEL being the screen's own way out, and the first answer is its end (`pfIn`). */
+    if (o.show && list.length && list.every((e) => e.ok === null) && this.foxUp) {
+      this.foxUp('pfAsk', 'fee', { forMs: 45000, go: () => { if (this._pf && this._pf.run === run) this._pf.cancel(); } });
+    }
     list.forEach((e) => { if (e.ok === null) this.pfAsk(e, run); });
     this.pfSettled(run);
   }
@@ -34898,6 +35504,10 @@ class Component extends DCLogic {
       tag: r.ok === true ? '' : String(r.tag || 'NOT ENOUGH'), rank: r.rank != null ? r.rank : e.rank,
     })));
     const ranked = this.pfRanked(list);
+    /* The fox's wait (`pfOpen`) is over at the first balance that can pay, ALL SET; with none, once the last has
+     * answered, down at once for what follows to say so. */
+    if (r.ok === true) { if (this.foxDone) this.foxDone('pfAsk'); }
+    else if (!list.some((e) => e.ok === null) && this.hideStage) this.hideStage('pfAsk');
     const s = this.state;
     const patch = { payFromList: ranked };
     // the cheapest stays chosen until the person picks one, and a pick that turned out short is no pick
@@ -34944,6 +35554,14 @@ class Component extends DCLogic {
     this._pf.go(e, true);
   }
 
+  /* PAYING FROM's pill on a request's confirmation (24-render-receive-and-send.js `requestSpec`): PAY FROM again, the
+   * source it is paid from ticked, as `openWalletPick` opens it for a Lightning payment. */
+  pfReopen() {
+    const s = this.state;
+    this.setState({ payFromReopen: true, payFromTapped: true, payFromPick: s.payMint ? this.pfKey(s.payMint, s.payUnit) : (s.payFromPick || '') });
+    this.go('payFrom');
+  }
+
   /* Back: to the confirmation when it was opened from there, and out of the payment when it came first. */
   pfBack() {
     if (this.state.payFromReopen || !this._pf) { this.back(); return; }
@@ -34955,46 +35573,58 @@ class Component extends DCLogic {
     this.setState({ screen: 'home', stack: [] });
   }
 
-  /* What a tile says it costs: the whole of it in its own unit, "no fee" where there is none. */
+  /* What a tile's fee line says (the keeper's 1p, 2026-11-06): "FEE $ 0.06", the fee in the tile's own unit, sats said in
+   * dollars where there is a price ("FEE < $ 0.01"); a swap's, what it takes in the unit that leaves; CALCULATING… while
+   * the mint is asked; nothing for one that cannot pay, whose tag says NOT ENOUGH. */
   pfCostText(e) {
     if (e.ok === null) return 'CALCULATING…';
     if (e.ok === false) return '';
-    if (e.swap) return this.pfSwapText(e, this.pfFull(e.key));
-    if (e.cost == null) return e.note || '';
-    const fig = this.unitFigure(e.cost, e.unit);
-    return 'Costs ' + fig + (Number(e.fee) === 0 ? ' · no fee' : '');
+    const fig = (n) => (e.unit === 'usd' ? this.unitFigure(n, 'usd') : this.money(n).main);
+    if (e.swap) {
+      const q = this.pfFull(e.key);
+      return q ? 'FEE ' + fig(this.pfSwapFee(q, e.unit === 'usd' ? 'usd' : 'sat')) : 'CALCULATING…';
+    }
+    if (e.cost == null) return String(e.note || '').toUpperCase();
+    // paid on a visit to a mint whose fee for its pieces is known only there: not said to be nothing
+    if (e.feeThere) return 'FEE NOT KNOWN YET';
+    return 'FEE ' + fig(Math.max(0, Math.round(Number(e.fee) || 0)));
   }
 
-  /* The tiles, in the CURRENCY screen's looks (`renderCurrency`): the one chosen in fur (orange), every other grey, whether
-   * it is still being asked, offered or short (decided); its own sign in the badge; CHEAPEST on the first once every mint
-   * has answered. */
+  /* The tiles, as the keeper drew PAY FROM (1p, 2026-11-06): the mint's name, under it the balance and what it holds ("BITCOIN
+   * · ₿ 19,622 ($ 14.71)"), a tick in the accent on the one chosen, and under a rule the fee line with the unit's badge at
+   * its end. The one chosen on a dark wash of the accent with an accent edge, every other on the surface; a fee in the
+   * accent, lighter on the others; CALCULATING… in grey while its mint is asked. One that cannot pay keeps its tag, NOT
+   * ENOUGH, and no fee line. No CHEAPEST: the cheapest is first. (`LOOK` and `SHADOW` are the CURRENCY screen's, and no
+   * longer drawn here.) */
   pfRows(LOOK, SHADOW) {
     const s = this.state;
     const list = this.pfList();
-    const offered = list.filter((e) => e.ok === true);
-    const known = list.every((e) => e.ok !== null) && offered.length > 1 && offered.every((e) => e.cost != null);
-    const best = known ? offered[0].key : '';
+    const rate = this.satUsd ? Number(this.satUsd()) || 0 : 0;
     return list.map((e) => {
       const short = e.ok === false, asking = e.ok === null;
       const chosen = e.key === s.payFromPick && !short;
-      const look = Object.assign({}, chosen ? LOOK.sat : LOOK.grey);
-      return Object.assign(look, {
-        key: e.key, sym: LOOK[e.unit === 'usd' ? 'usd' : 'sat'].sym, name: this.pfName(e.mint),
+      const usd = e.unit === 'usd';
+      const cost = this.pfCostText(e);
+      const words = asking || (e.ok === true && e.cost == null && !e.swap) || (e.ok === true && !!e.feeThere);
+      return {
+        key: e.key, name: this.pfName(e.mint), sym: usd ? '$' : '₿',
         unitLine: this.unitWord(e.unit) + ' · ' + this.unitFigure(e.have, e.unit),
-        // the cost is not drawn on the tile (the keeper, 2026-11-06: no descriptions in a choice); CHEAPEST says which
-        cost: this.pfCostText(e), costShown: false,
-        // a ring at the end of every tile, so each reads as a choice
-        pickShown: true, pickOn: chosen,
-        pickEdge: chosen ? 'rgba(255,255,255,.95)' : 'rgba(var(--pill-ink-rgb),.45)',
-        pickBg: chosen ? 'rgba(255,255,255,.95)' : 'transparent',
+        // the sats' worth in dollars after them, a shade fainter
+        unitAlt: (!usd && rate > 0) ? '(' + this.money(e.have).main + ')' : '',
+        cost: cost, feeShown: !short && !!cost,
+        feeInk: words ? 'rgba(var(--ink-rgb),.43)' : chosen ? 'var(--acc)' : 'var(--acc-lt)',
+        feeSize: words ? '16px' : '24px',
+        feeSpacing: words ? '.14em' : '-0.01em',
+        badgeBg: asking ? 'rgba(var(--ink-rgb),.12)' : usd ? '#BFE3EC' : 'var(--acc)',
+        badgeInk: asking ? (usd ? '#BFE3EC' : 'var(--acc-lt)') : usd ? '#0F2A33' : '#FFFFFF',
+        pickOn: chosen,
+        bg: chosen ? 'rgba(var(--acc-rgb),.1)' : 'var(--surface)',
+        edge: chosen ? '2px solid var(--acc)' : '1px solid rgba(var(--ink-rgb),.1)',
         tag: short ? (e.tag || 'NOT ENOUGH') : '', tagShown: short,
-        bestShown: e.key === best,
-        outline: chosen ? '3px solid rgba(255,255,255,.9)' : 'none',
-        shadow: short ? 'none' : SHADOW,
         cursor: (short || asking) ? 'default' : 'pointer',
-        opacity: asking ? '.8' : '1',
+        opacity: short ? '.6' : asking ? '.8' : '1',
         tap: () => this.pfTap(e.key),
-      });
+      };
     });
   }
 
@@ -35029,6 +35659,7 @@ class Component extends DCLogic {
     if (f === 'send' && this._sendRun) return;
     if (f === 'req' && (s.reqBusy || s.reqSwapping)) return;
     if (f === 'oc' && s.ocBusy) return;
+    if (this.hideStage) this.hideStage('pfAsk');
     this._pf = null;
     this._pfRun = (this._pfRun || 0) + 1;
     this.setState({ payFromFlow: '', payFromList: null, payFromPick: '', payFromAsk: '', payFromTapped: false, payFromReopen: false,
@@ -35179,26 +35810,37 @@ class Component extends DCLogic {
     }
     if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
     const base = {
-      title: 'CONFIRM PAYMENT', titleUp: true, amountLabel: 'TOTAL', rows: rows,
+      title: 'CONFIRMATION', titleUp: true, amountLabel: 'TOTAL', rows: rows,
       wallet: this.pfMany('send') ? { label: 'PAY FROM', word: this.pfName(s.payMint), go: () => this.openWalletPick() } : undefined,
       close: () => this.setState({ screen: 'home', stack: [] }),
       amountInk: 'var(--ink)',
       amount: total != null ? fig(total).main : this.sendAmountText(),
       amountSub: (total != null && unit === 'sat') ? fig(total).sub : '',
     };
+    /* The keeper's 1l (2026-11-06): the figures stacked, from that mint's quote, and PAYING FROM's pill naming it, which
+     * opens PAY FROM again where there is a choice. */
+    const look = (sp) => (!this.cfPayLook ? sp : this.cfPayLook(sp, {
+      gets: q ? fig(q.amount).main : this.sendAmountText(),
+      getsSub: (unit === 'usd' && asked) ? '₿ ' + this.group(asked) : '',
+      fee: q ? fig(fee).main : asking ? 'CHECKING…' : 'UNKNOWN',
+      paying: total != null ? fig(total).main : asking ? 'CHECKING…' : sp.amount,
+      receiver: this.sendToText(),
+      word: this.pfLabel(s.payMint, unit),
+      go: this.pfMany('send') ? () => this.openWalletPick() : null,
+    }));
     if (e && e.ok === false) {
-      return Object.assign(base, {
+      return look(Object.assign(base, {
         amountInk: '#FF5C5C',
         warn: e.why || 'More than your ' + this.unitWord(unit).toLowerCase() + ' at ' + this.pfName(s.payMint) + '.',
         cta: 'NOT ENOUGH', ctaTone: 'warn', go: () => {},
-      });
+      }));
     }
     const held = asking || this.connecting();
-    return Object.assign(base, {
-      cta: held ? 'CHECKING…' : 'PAY', ctaBusy: held, ctaTone: 'go',
+    return look(Object.assign(base, {
+      cta: held ? 'CHECKING…' : 'PAY' + (total != null ? ' ' + fig(total).main : ''), ctaBusy: held, ctaTone: 'go',
       // a visit is a switch of mints, which waits for money already moving
       go: held ? () => {} : () => { if (this.refuseSwitchWhileBusy && this.refuseSwitchWhileBusy()) return; this.startSend(); },
-    });
+    }));
   }
 
   // ---- a Cashu request ----
@@ -35234,7 +35876,8 @@ class Component extends DCLogic {
           ? W.sendShortfall(need, { locked: !!(req.lockTo && !this.offlineNow()) }) : null;
       } catch (x) { lack = null; }
       const fee = lack ? Math.max(0, Number(lack.fee) || 0) : 0;
-      return this.pfEntry(p, { pref: true, cost: need + fee, fee: fee, rank: fee, ok: !(lack && lack.short),
+      // (paid there on a visit, its mint's fee for the pieces is known only there: `feeThere`, and the tile does not say none)
+      return this.pfEntry(p, { pref: true, cost: need + fee, fee: fee, rank: fee, ok: !(lack && lack.short), feeThere: p.mint !== here,
         why: lack && lack.short ? String(lack.why || '') : '', tag: lack && lack.short ? 'NOT ENOUGH' : '' });
     });
     return this.pfReqOpen(req, swap ? list.concat([swap]) : list, want, this.money(need).main);
@@ -35411,14 +36054,20 @@ class Component extends DCLogic {
     const from = e.unit === 'usd' ? 'usd' : 'sat', to = e.toUnit === 'usd' ? 'usd' : 'sat';
     const held = (q) => !!(q && q.state === 'quoted' && Number(q.expiresAt) - Date.now() >= 20000);
     this.setState({ reqSwapping: true });
-    this.showMelt('Swapping ' + this.unitWord(from).toLowerCase() + ' into ' + this.unitWord(to).toLowerCase() + '…', 120000);
+    // the fox, the figure following the swap's own stages (26r-fox-wait.js); the melt loader where it cannot be drawn
+    const fox = !!(this.foxUp && this.foxUp('swapMove', 'swap', { forMs: 120000 }));
+    if (!fox) this.showMelt('Swapping ' + this.unitWord(from).toLowerCase() + ' into ' + this.unitWord(to).toLowerCase() + '…', 120000);
     console.log('[foxy] request: paying it from ' + (from === 'usd' ? 'dollars' : 'sats') + ' at ' + this.pfName(e.mint).toLowerCase()
       + ', swapped first');
-    const done = () => { this.hideMelt(); this.setState({ reqSwapping: false }); this.refreshBalance(); };
+    const done = (landed) => {
+      if (fox) this.foxEnd('swapMove', landed); else this.hideMelt();
+      this.setState({ reqSwapping: false }); this.refreshBalance();
+    };
+    const heard = (st) => console.log('[foxy] request: swap ' + st);
     Promise.resolve().then(() => (held(src.swap.q) ? src.swap.q : this.pfSwapQuote(e)))
-      .then((q) => W.swapRun(q, (st) => console.log('[foxy] request: swap ' + st)))
+      .then((q) => W.swapRun(q, fox ? this.foxHears('swapMove', heard) : heard))
       .then((r) => {
-        done();
+        done(!!(r && r.state === 'done'));
         if (this.loadHistory) this.loadHistory();
         if (r && r.state === 'done') {
           this.makeTokenForRequest(Object.assign({}, go || {}, { req: req, swapped: true }));
@@ -35451,7 +36100,7 @@ class Component extends DCLogic {
     if (piles.length < 2) return false;
     const ready = this._crossReady;
     const list = piles.map((p) => (p.mint === to
-      ? this.pfEntry(p, { pref: true, cost: want, fee: 0, rank: 0, ok: true })
+      ? this.pfEntry(p, { pref: true, cost: want, fee: 0, rank: 0, ok: true, feeThere: p.mint !== this.pfHere() })
       : this.pfEntry(p)));
     const quote = (e) => {
       const same = !!(ready && ready.sats === want && ready.to === to && ready.from === e.mint);
@@ -36503,7 +37152,7 @@ class Component extends DCLogic {
         const fee = w.unit === 'usd' ? Math.max(0, Math.round(Number(plan.feeUnit) || 0)) : Math.max(0, Math.round(Number(plan.feeSats) || 0));
         const px = (this.px && this.px()) || 0;
         const rank = w.unit === 'usd' ? (px > 0 ? Math.round(fee / 100 / px * 1e8) : fee * 1000) : fee;
-        console.log('[foxy] card: WITHDRAW TO ' + String(to).replace(/^https?:\/\//, '') + ' costs about ' + this.unitFigure(fee, w.unit));
+        console.log('[foxy] card: ' + (w.move ? 'TRANSFER TO ' : 'WITHDRAW TO ') + String(to).replace(/^https?:\/\//, '') + ' costs about ' + this.unitFigure(fee, w.unit));
         put({ state: 'ok', fee, rank });
       }, (e) => {
         put({ state: 'no', why: (W.reason ? W.reason(e) : String((e && e.message) || e)) });
@@ -36515,11 +37164,13 @@ class Component extends DCLogic {
     const w = this._fcWd;
     const fc = this.state.fc;
     const at = this.mintNameOf((w && w.card) || (fc && fc.mint) || '');
-    return 'This card is at ' + at + '. Any other mint costs a crossing by Lightning.';
+    return 'This card is at ' + at + '. Other mints cost a Lightning fee.';
   }
 
-  /* The rows, in the list's own look (`row`, 27-render-mints-restore-backup.js): the card's mint first at NO FEE, then the others
-   * the cheapest first, those still being asked after them, and those that cannot be reached last, greyed. */
+  /* The rows, in the list's tiles (`row`, 27-render-mints-restore-backup.js): the card's mint first with no line under its rule, then
+   * the others the cheapest first, those still being asked after them, and those that cannot be reached last, greyed. Under each
+   * other's rule what the crossing costs (FEE $0.05), CALCULATING… while it is asked, or NOT AVAILABLE. A tap picks one, the
+   * tick on it (`fcWdSel`); NEXT takes it (`fcListNext`). Nothing picked, the card's own mint is. */
   fcWdRows(row) {
     const w = this._fcWd;
     if (!w) return [];
@@ -36527,6 +37178,7 @@ class Component extends DCLogic {
     const quotes = this.state.wdQuotes || {};
     const all = this.allMints ? this.allMints() : [];
     const used = this.tillMints ? this.tillMints() : all;
+    const sel = strip(this.state.mintSel || w.card);
     const cardRow = all.find((m) => strip(m.url) === strip(w.card)) || { url: w.card, name: this.mintNameOf(w.card), host: strip(w.card), logo: '', tint: '#5A5A5A' };
     const q = (m) => quotes[String(m.url).replace(/\/+$/, '')] || { state: 'asking' };
     const order = (m) => { const x = q(m); return x.state === 'ok' ? 0 : x.state === 'asking' ? 1 : 2; };
@@ -36535,23 +37187,134 @@ class Component extends DCLogic {
       if (d) return d;
       return order(a) === 0 ? (q(a).rank - q(b).rank) : 0;
     });
-    const asLands = w.unit === 'usd' ? ' · AS BITCOIN' : '';
-    return [Object.assign(row(cardRow, true), { text: 'NO FEE', tap: () => this.fcWdPick(cardRow.url) })]
+    const none = { lineBal: false, lineWait: false, lineFee: false, fee: '', feeNote: '', feeNoteShown: false, wait: '' };
+    return [Object.assign(row(cardRow, sel === strip(w.card)), none, { text: 'NO FEE', tap: () => this.fcWdSel(cardRow.url) })]
       .concat(others.map((m) => {
-        const x = q(m);
-        const base = row(m, false);
-        const text = x.state === 'ok' ? 'FEE ABOUT ' + this.unitFigure(x.fee, w.unit) + asLands
-          : x.state === 'asking' ? 'CALCULATING…' : 'NOT AVAILABLE';
-        return Object.assign(base, {
-          text,
-          dim: x.state === 'no' ? '0.4' : base.dim,
-          ink: x.state === 'ok' ? 'var(--acc-ink)' : 'rgba(var(--ink-rgb),.45)',
-          tap: () => this.fcWdPick(m.url),
-        });
+        const base = row(m, sel === strip(m.url));
+        return Object.assign(base, this.fcFeeLine(q(m), w.unit, base), { tap: () => this.fcWdSel(m.url) });
       }));
   }
 
-  /* A row tapped: the card's own mint, or one whose crossing has been priced. Off the list, and on to the PIN (`go`). */
+  /* The line under a tile's rule on a card's WITHDRAW TO and TRANSFER TO, from that mint's answer (`wdQuotes`): FEE $0.05 once it
+   * has answered, CALCULATING… while it is asked, NOT AVAILABLE (greyed) where it could not be, and nothing where it was not asked.
+   * The fee in dollars first: cents as they are, sats at this phone's price, or in sats where there is none. A dollar card's money
+   * lands as bitcoin, said smaller after the fee so the line fits a small phone; not where it stays dollars (`keepsDollars`: a card's
+   * TRANSFER to a mint that issues dollars, 08a-flashcard.js `cardTransferQuote`). */
+  fcFeeLine(x, unit, base, keepsDollars) {
+    const none = { lineBal: false, lineWait: false, lineFee: false, fee: '', feeNote: '', feeNoteShown: false, wait: '', text: '' };
+    if (!x) return none;
+    const px = (this.px && this.px()) || 0;
+    const dol = (v) => (v > 0 && v < 0.005 ? '< $0.01' : '$' + (this.usd ? this.usd(v) : v.toFixed(2)));
+    const fee = Math.round(Number(x.fee) || 0);
+    const words = !(fee > 0) ? 'NO FEE'
+      : 'FEE ' + (unit === 'usd' ? dol(fee / 100) : px > 0 ? dol(fee / 1e8 * px) : this.unitFigure(fee, 'sat'));
+    const note = (unit === 'usd' && !keepsDollars) ? 'AS BITCOIN' : '';
+    if (x.state === 'ok') {
+      return Object.assign(none, { lineFee: true, fee: words, feeNote: note, feeNoteShown: !!note, text: words + (note ? ' \u00b7 ' + note : ''),
+        ink: 'var(--acc-ink)' });
+    }
+    const wait = x.state === 'asking' ? 'CALCULATING\u2026' : 'NOT AVAILABLE';
+    return Object.assign(none, { lineWait: true, wait, text: wait, ink: 'rgba(var(--ink-rgb),.45)',
+      dim: x.state === 'no' ? '0.4' : ((base && base.dim) || '1') });
+  }
+
+  /* A card's TRANSFER: the list of mints, TRANSFER TO, each other mint asked what the move there costs as WITHDRAW TO asks
+   * (`fcWdQuote`, an invoice there and the card's mint's quote for it, nothing paid), CALCULATING… meanwhile and NOT AVAILABLE
+   * where it does not answer. A card with nothing on it moves for nothing and asks nothing, and nothing is asked offline. Only the
+   * mints this phone uses are asked (`tillMints`, as WITHDRAW TO asks): a quote is not made at a mint it has never used. */
+  fcMoveAsk() {
+    const W = window.FoxyWallet;
+    const fc = this.state.fc;
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const card = String((fc && fc.mint) || (W && W.mintUrl) || '').replace(/\/+$/, '');
+    // the unit and the amount the move itself will take (26f-flashcard.js, `fcSwitchPick`)
+    const u0 = fc && fc.unit === 'usd' ? 'usd' : 'sat';
+    const unit = (fc && fc.bal && !(fc.bal[u0] > 0) && fc.bal[u0 === 'usd' ? 'sat' : 'usd'] > 0) ? (u0 === 'usd' ? 'sat' : 'usd') : u0;
+    const amount = Math.max(0, Math.round(Number(fc ? (fc.bal ? fc.bal[unit] : fc.balance) : 0) || 0));
+    const others = (this.tillMints ? this.tillMints() : []).filter((m) => strip(m.url) !== strip(card));
+    const ask = !!(W && W.transferQuote) && amount > 0 && others.length > 0 && !this.offlineNow();
+    const quotes = {};
+    let run = 0;
+    if (ask) {
+      run = (this._fcWdRun || 0) + 1;
+      this._fcWdRun = run;
+      this._fcWd = { run, go: null, unit, amount, card, move: true };
+      others.forEach((m) => { quotes[String(m.url).replace(/\/+$/, '')] = { state: 'asking' }; });
+      console.log('[foxy] card: TRANSFER TO, asking ' + others.length + ' mints what the move costs');
+    }
+    // through the one way into that list, which clears every other question it can be asking
+    this.goSwitchMint({ fcPick: true, wdQuotes: quotes });
+    if (ask) others.forEach((m) => this.fcWdQuote(String(m.url).replace(/\/+$/, ''), run));
+  }
+
+  /* TRANSFER TO's tiles (27-render-mints-restore-backup.js, `row`): the card's own mint first, ticked while no other is picked, with no
+   * line; then every other, its fee under the rule (`fcFeeLine`). A tap picks one (`mintSel`), except one that did not answer, which
+   * says why; NEXT moves the card (`fcListNext`). */
+  fcMoveRows(row) {
+    const W = window.FoxyWallet;
+    const s = this.state;
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const all = this.allMints ? this.allMints() : [];
+    const at = strip(s.fc && s.fc.mint);
+    const sel = s.mintSel ? strip(s.mintSel) : at;
+    const quotes = s.wdQuotes || {};
+    const own = all.find((m) => strip(m.url) === at) || { url: String((s.fc && s.fc.mint) || ''), name: this.mintNameOf(s.fc && s.fc.mint), host: at, logo: '', tint: '#5A5A5A' };
+    return [own].concat(all.filter((m) => strip(m.url) !== at)).map((m) => {
+      const r = row(m, strip(m.url) === sel);
+      const mine = strip(m.url) === at;
+      const x = mine ? null : quotes[String(m.url).replace(/\/+$/, '')];
+      const pick = () => {
+        if (x && x.state === 'no') { this.toast(String(x.why || (this.mintNameOf(m.url) + ' cannot be reached now.')), true); return; }
+        this.setState({ mintSel: mine ? '' : String(m.url).replace(/\/+$/, '') });
+      };
+      // a dollar card moved to a mint known to issue dollars stays dollars there: no AS BITCOIN under it
+      let units = [];
+      try { units = (W && typeof W.mintUnits === 'function') ? (W.mintUnits(m.url) || []) : []; } catch (e) { units = []; }
+      return Object.assign(r, this.fcFeeLine(x, (this._fcWd && this._fcWd.unit) || 'sat', r, units.indexOf('usd') >= 0),
+        { tap: this.mintReachable(m.url) ? pick : r.tap });
+    });
+  }
+
+  /* A tile tapped on WITHDRAW TO: the card's own mint, or one whose crossing has been priced, is picked (the tick moves to it); one
+   * still being asked, or that cannot be reached, says so and is not. */
+  fcWdSel(url) {
+    const w = this._fcWd;
+    if (!w || !this.state.wdPick) return;
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const own = strip(url) === strip(w.card);
+    const x = own ? { state: 'ok' } : ((this.state.wdQuotes || {})[String(url).replace(/\/+$/, '')] || { state: 'asking' });
+    if (x.state === 'asking') { this.toast('Still asking ' + this.mintNameOf(url) + ' what it costs.', true); return; }
+    if (x.state === 'no') { this.toast(String(x.why || (this.mintNameOf(url) + ' cannot be reached now.')), true); return; }
+    this.setState({ mintSel: own ? '' : String(url).replace(/\/+$/, '') });
+  }
+
+  /* NEXT under a card's WITHDRAW TO and TRANSFER TO: on with the mint picked. WITHDRAW TO always has one (the card's own, until
+   * another is picked); TRANSFER TO needs another mint than the card's. */
+  fcListNextOn() {
+    const s = this.state;
+    if (s.wdPick) return !!this._fcWd;
+    if (!s.fcPick) return false;
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    return !!s.mintSel && strip(s.mintSel) !== strip(s.fc && s.fc.mint);
+  }
+
+  fcListNext() {
+    const s = this.state;
+    if (s.wdPick) {
+      const w = this._fcWd;
+      if (w) this.fcWdPick(s.mintSel || w.card);
+      return;
+    }
+    if (!s.fcPick) return;
+    if (!this.fcListNextOn()) {
+      this.toast('This card is at ' + this.mintNameOf(s.fc && s.fc.mint) + '. Pick the mint to move it to.', true);
+      return;
+    }
+    this.fcSwitchPick(s.mintSel);
+  }
+
+  /* NEXT with a mint picked (`fcListNext`): the card's own mint, or one whose crossing has been priced. Off the list, and on to the
+   * PIN (`go`). */
   fcWdPick(url) {
     const w = this._fcWd;
     if (!w || !this.state.wdPick) return;
@@ -36564,7 +37327,7 @@ class Component extends DCLogic {
     this._fcWdFee = own ? 0 : Math.round(Number(x.fee) || 0);
     console.log('[foxy] card: WITHDRAW TO ' + strip(url) + (own ? ', the card’s own mint' : ', a crossing of about ' + this.unitFigure(this._fcWdFee, w.unit)));
     const go = w.go;
-    this.setState((p) => ({ wdPick: false, wdQuotes: {}, screen: p.stack.length ? p.stack[p.stack.length - 1] : 'flashcard', stack: p.stack.slice(0, -1) }));
+    this.setState((p) => ({ wdPick: false, wdQuotes: {}, mintSel: '', screen: p.stack.length ? p.stack[p.stack.length - 1] : 'flashcard', stack: p.stack.slice(0, -1) }));
     if (go) go();
   }
 
@@ -36582,7 +37345,9 @@ class Component extends DCLogic {
     const u = unit === 'usd' ? 'usd' : 'sat';
     const how = u === 'usd' ? { to, unit: 'usd' } : { to };
     const fee0 = Math.max(0, Math.round(Number(this._fcWdFee) || 0));
-    this.showMelt('Moving it to ' + name + '…', 0, { mint: name });
+    // the fox, the figure following the quote and the move's own stages (26r-fox-wait.js); the melt loader where it cannot be drawn
+    const fox = !!(this.foxUp && this.foxUp('wdMove', 'move', { forMs: this.MELT_PATIENCE_MS }));
+    if (!fox) this.showMelt('Moving it to ' + name + '…', 0, { mint: name });
     const ask = (n, left) => {
       if (!(n > 0)) return Promise.reject(new Error('What came off the card is too little to cross: the fees would take it all.'));
       return W.transferQuote(from, n, how).then(null, (e) => {
@@ -36597,19 +37362,22 @@ class Component extends DCLogic {
     console.log('[foxy] card: WITHDRAW TO ' + String(to).replace(/^https?:\/\//, '') + ': ' + this.unitFigure(got, u) + ' off the card cross from '
       + String(from).replace(/^https?:\/\//, ''));
     ask(first, 3)
-      .then((plan) => W.moveRun(plan, () => {}, { visit: true }))
+      .then((plan) => {
+        if (fox) this.foxStep('wdMove', 'answered');
+        return W.moveRun(plan, fox ? this.foxHears('wdMove') : () => {}, { visit: true });
+      })
       .then((done) => {
         const back = String(W.mintUrl || '').replace(/\/+$/, '') !== from ? W.connect(from).then(null, () => null) : Promise.resolve();
         return back.then(() => done);
       })
       .then((done) => {
-        this.hideMelt();
+        if (fox) this.foxEnd('wdMove', true); else this.hideMelt();
         this.refreshBalance();
         this.loadHistory();
         const sats = Math.round(Number(done && done.sats) || 0);
         this.toast('Moved ' + this.unitFigure(sats, 'sat') + ' to ' + name + '.');
       }, (e) => {
-        this.hideMelt();
+        if (fox) this.foxEnd('wdMove', false); else this.hideMelt();
         this.refreshBalance();
         // back at the card's mint, unless the crossing was paid and its claim is still being made where the phone is
         if (String(W.mintUrl || '').replace(/\/+$/, '') !== from && !(e && e.movePaid)) W.connect(from).then(null, () => null);
@@ -36623,11 +37391,12 @@ class Component extends DCLogic {
    *
    * The wallet's half is 08e-cashu-id.js and docs/CASHU-ID.md. Here:
    *
-   *   MY CASHU ID (the menu) ..... the stage screen that shows a code to be scanned (`stageScreen`), with SHARE above DONE,
+   *   MY CASHU ID (the menu, and home's round button at the top left)
+   *                                the stage screen that shows a code to be scanned (`stageScreen`), with SHARE above DONE,
    *                                the share sheet the app uses for a token; the ID string is the code.
    *   a pasted or scanned ID ..... NAME THIS CONTACT?, a card with a field (`blockedCard` `field`); your own is said to be
    *                                yours, a mistyped one is refused ("That is not a Cashu ID.").
-   *   paying one ................. CONTACTS (from SEND) → SET AMOUNT → the confirmation, which says once that the money
+   *   paying one ................. CONTACTS (from SEND or the menu) → SET AMOUNT → the confirmation, which says once that the money
    *                                comes back after thirty days if it is not collected → sent over Nostr.
    *   money at another mint ...... PAID AT ANOTHER MINT, a card with three answers (`cidOfferCard`): BRING IT HOME (its fee
    *                                under it, or why it cannot be done), KEEP IT THERE, and SEND IT BACK where the payer proved
@@ -36716,7 +37485,7 @@ class Component extends DCLogic {
     });
   }
 
-  /* ADD A CASHU ID and SCAN A CASHU ID, on the empty INBOX and the empty CONTACTS: the ID is read as a pasted or scanned one
+  /* ADD A CASHU ID and SCAN A CASHU ID, on the empty CONTACTS: the ID is read as a pasted or scanned one
    * is (`cidAddAsk`), which goes on to NAME THIS CONTACT?. */
   cidPasteAsk() { this.cidPasteCard('cidPaste', (text) => this.cidAddAsk(text)); }
 
@@ -36821,20 +37590,34 @@ class Component extends DCLogic {
     ];
     if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
     const back = { label: 'CANCEL', go: () => this.setState({ screen: 'home', stack: [], cidBusy: false, cidErr: '' }) };
+    /* The keeper's 1m (2026-11-06), with the contact's name where a Lightning payment names its invoice: RECEIVER GETS, FEE
+     * (this mint's for making the locked pieces, as the wallet counts it), PAYING, RECEIVER, and PAYING FROM's pill, which
+     * opens nothing: a contact is paid from this mint. CANCEL is the X. */
+    let fee = 0;
+    try {
+      const lack = (W && W.sendShortfall && amount > 0) ? W.sendShortfall(amount, { unit: unit, locked: true }) : null;
+      fee = lack ? Math.max(0, Math.round(Number(lack.fee) || 0)) : 0;
+    } catch (e) { fee = 0; }
+    const fig = (n) => (unit === 'usd' ? this.unitFigure(n, 'usd') : this.money(n).main);
+    const look = (sp) => (!this.cfPayLook ? sp : this.cfPayLook(Object.assign(sp, { close: back.go }), {
+      gets: figure.main, fee: fig(fee), paying: fig(amount + fee), receiver: name.toUpperCase(),
+      word: String(at).toUpperCase() + ' · ' + this.unitWord(unit), go: null,
+    }));
     if (s.cidErr) {
-      return {
+      return look({
         title: 'CONFIRMATION', amountLabel: 'SENDING', amount: figure.main, amountSub: figure.sub, amountInk: '#FF5C5C', rows: rows,
         warn: s.cidErr, cta: 'TRY AGAIN', ctaTone: 'warn', go: () => this.cidSend(), secondary: back,
-      };
+      });
     }
-    return {
+    return look({
       title: 'CONFIRMATION', amountLabel: 'SENDING', amount: figure.main, amountSub: figure.sub,
       // a copy goes to the seed's own recovery key once a relay has it (08e-cashu-id.js), so the words find it too
       subtitle: 'If ' + name + ' has not collected it in ' + days + ' days it comes back to you, here or wherever your words are restored.',
       rows: rows, secondary: back,
-      cta: s.cidBusy ? 'SENDING…' : 'SEND ' + figure.main, ctaTone: 'go', ctaBusy: !!s.cidBusy,
+      // PAY, as every confirmation's button says (the keeper, 2026-11-06)
+      cta: s.cidBusy ? 'SENDING…' : 'PAY ' + fig(amount + fee), ctaTone: 'go', ctaBusy: !!s.cidBusy,
       go: () => { if (!this.state.cidBusy) this.cidSend(); },
-    };
+    });
   }
 
   /* SEND: locked to their one-time key and handed to the relays. A payment no relay took yet is in the outbox, and goes
@@ -37008,10 +37791,12 @@ class Component extends DCLogic {
     W._onCashuIdOffer = (v) => { this.loadHistory(); this.cidOfferCard(v); };
     // a payment locked to the ID key itself, unblinded: asked, never signed for by itself
     W._onCashuIdUnblinded = (v) => this.cidBareCard(v);
-    // and the messages between Cashu IDs (26p-cashu-msg.js)
-    this.cmWake();
-    try { if (W.cashuIdListen) Promise.resolve(W.cashuIdListen()).catch(() => {}); } catch (e) {}
-    try { if (W.cashuIdDeliver) Promise.resolve(W.cashuIdDeliver()).catch(() => {}); } catch (e) {}
+    // (the listening opened again waits while a card's sheet is up: `cardAfter`)
+    const listen = () => {
+      try { if (W.cashuIdListen) Promise.resolve(W.cashuIdListen()).catch(() => {}); } catch (e) {}
+      try { if (W.cashuIdDeliver) Promise.resolve(W.cashuIdDeliver()).catch(() => {}); } catch (e) {}
+    };
+    if (W.cardAfter) W.cardAfter(listen); else listen();
   }
   /* ---- REMIND ME AFTER 15 DAYS (08i-remind.js, Reminder.swift) ----
    *
@@ -37083,268 +37868,12 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     this.blockedCard('remindAsk', {
       tone: 'ask', title: 'REMIND YOU?',
-      reason: 'Foxy can remind you after 15 days away, so a payment or message waiting for you is not missed.',
+      reason: 'Foxy can remind you after 15 days away, so a payment waiting for you is not missed.',
       retry: 'TURN ON', go: () => this.remindOn(),
       shut: { label: 'NOT NOW', tap: () => { if (W && W.remindNotNow) W.remindNotNow(); } },
     });
   }
 
-  /* ---- messages between Cashu IDs: a contact's screen ---------------------------------------------------------------
-   *
-   * The wallet's half is 08f-cashu-msg.js and docs/CASHU-ID.md ("Messages"). Here:
-   *
-   *   CONTACTS ................... a contact that is a Cashu ID opens its own screen (`cidOpen`); its row carries how many
-   *                                of its messages are unread. Someone who is not a contact and wrote (their first message
-   *                                carries their ID string) is under NEW MESSAGES, as "A Cashu ID".
-   *   the contact's screen ....... its name, PAY (the payment to a contact, `cidPayStart`), the messages oldest at the top
-   *                                and newest at the bottom, each of this phone's own marked "sending…" until a relay took it
-   *                                and "sent" after, and a field with SEND. Someone who is not a contact has
-   *                                ADD CONTACT in place of PAY (NAME THIS CONTACT?, with the ID string they sent).
-   *   no ID in use ............... no messages, no counts, no field: the screen says to open MY CASHU ID first, and PAY
-   *                                works as before.
-   *   CHAT ....................... home's round button at the top left (where CARD was; CARD is now beside SCAN and
-   *                                PASTE under the balance), with the number of unread messages on its corner, "9+" past nine. It opens
-   *   INBOX ...................... everyone this phone has written to, heard from, paid or been paid by, newest first by
-   *                                the latest of those, each with the last message's first line or the payment
-   *                                ("Paid $1.25", "Received 500 sats"), its time, and its unread count; a row opens that
-   *                                contact's screen (`cidOpen`). */
-
-  /* A contact (from CONTACTS) or a conversation's peer: its screen. Opening it marks its messages read. */
-  cidOpen(c) {
-    const W = window.FoxyWallet;
-    const peer = c && c.cid ? String(c.cid.id || '') : String((c && c.peer) || '');
-    if (!peer) return;
-    this.setState(p => ({ screen: 'cidChat', stack: p.stack.concat([p.screen]), cmPeer: peer, cmDraft: '', cmErr: '', cmBusy: false }));
-    if (W && W.cashuMsgOn && W.cashuMsgOn() && W.cashuMsgSeen) { W.cashuMsgSeen(peer); this.cmTick(); }
-  }
-
-  // something changed in the messages: what reads them reads again
-  cmTick() { this.setState(p => ({ cmsgTick: (p.cmsgTick || 0) + 1 })); }
-
-  /* The conversations, read once for each change (`cmsgTick`): by peer, for the contacts' counts and NEW MESSAGES. */
-  cmThreads() {
-    const W = window.FoxyWallet;
-    const tick = this.state.cmsgTick || 0;
-    const on = !!(W && W.cashuMsgOn && W.cashuMsgOn());
-    const n = (this.state.contacts || []).length;
-    const m = this._cmMemo;
-    if (m && m.w === W && m.on === on && m.tick === tick && m.n === n) return m.list;
-    let list = [];
-    try { list = (on && W.cashuMsgThreads) ? W.cashuMsgThreads() : []; } catch (e) { list = []; }
-    this._cmMemo = { w: W, on: on, tick: tick, n: n, list: list };
-    return list;
-  }
-
-  // a contact's unread count as its row says it: '' for none, '99+' past 99
-  cmUnreadOf(peer) {
-    const t = this.cmThreads().find((v) => v.peer === peer);
-    const n = t ? Number(t.unread) || 0 : 0;
-    return n <= 0 ? '' : n > 99 ? '99+' : String(n);
-  }
-
-  /* NEW MESSAGES: people who are not contacts and wrote, newest first. */
-  cmNewRows() {
-    return this.cmThreads().filter((v) => !v.contact && v.lastAt > 0)
-      .sort((a, b) => b.lastAt - a.lastAt)
-      .map((v) => {
-        const n = Number(v.unread) || 0;
-        return {
-          name: 'A Cashu ID', handle: 'Not in your contacts', ini: '?',
-          unread: n <= 0 ? '' : n > 99 ? '99+' : String(n), unreadSay: n + (n === 1 ? ' unread message' : ' unread messages'),
-          tap: () => this.cidOpen({ peer: v.peer }),
-        };
-      });
-  }
-
-  /* ---- CHAT and INBOX ---- */
-
-  // every unread message, across the conversations
-  cmUnreadTotal() {
-    return this.cmThreads().reduce((n, v) => n + Math.max(0, Number(v.unread) || 0), 0);
-  }
-
-  // CHAT's corner: '' for none, '9+' past nine
-  cmBadgeOf(n) {
-    return n <= 0 ? '' : n > 9 ? '9+' : String(n);
-  }
-
-  // CHAT, from home: INBOX, with the conversations read again
-  goInbox() {
-    this.setState(p => ({ screen: 'inbox', stack: p.stack.concat([p.screen]), cmsgTick: (p.cmsgTick || 0) + 1 }));
-  }
-
-  // an amount as INBOX says a payment: "$1.25", "500 sats", "1 sat"
-  cmSaid(amount, unit) {
-    const v = Math.round(Number(amount) || 0);
-    if (unit === 'usd') return '$' + (v / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    return v.toLocaleString('en-US') + (v === 1 ? ' sat' : ' sats');
-  }
-
-  /* INBOX's rows: one for each peer with a message or a payment either way, newest first by the latest of them. A
-   * message's row says its first line; a payment's, what it was. The name is the contact's, or "A Cashu ID" for someone
-   * who is not one. */
-  cmInboxRows() {
-    const W = window.FoxyWallet;
-    const by = {};
-    const at = (peer) => (by[peer] = by[peer] || { peer: peer, lastAt: 0, line: '', unread: 0, name: '', contact: false });
-    this.cmThreads().forEach((v) => {
-      if (!(Number(v.lastAt) > 0)) return;
-      const r = at(String(v.peer));
-      r.unread = Math.max(0, Number(v.unread) || 0);
-      r.name = v.contact ? String(v.name || '') : '';
-      r.contact = !!v.contact;
-      if (v.lastAt > r.lastAt) { r.lastAt = Number(v.lastAt); r.line = String(v.lastText || '').split('\n')[0]; }
-    });
-    let pays = [];
-    try { pays = (W && W.cashuMsgPayments) ? W.cashuMsgPayments() || [] : []; } catch (e) { pays = []; }
-    pays.forEach((p) => {
-      if (!p || !p.peer || !(Number(p.at) > 0)) return;
-      const r = at(String(p.peer));
-      if (p.at > r.lastAt) {
-        r.lastAt = Number(p.at);
-        r.line = (p.dir === 'out' ? 'Paid ' : 'Received ') + this.cmSaid(p.amount, p.unit);
-      }
-    });
-    const book = this.state.contacts || [];
-    return Object.keys(by).map((k) => by[k]).sort((a, b) => b.lastAt - a.lastAt).map((r) => {
-      const c = book.find((x) => x && x.cid && String(x.cid.id || '').toLowerCase() === r.peer) || null;
-      const name = c ? String(c.name || 'Cashu ID') : r.name || 'A Cashu ID';
-      const known = !!c || r.contact;
-      const n = r.unread;
-      return {
-        key: r.peer, name: name, ini: known ? (name.charAt(0).toUpperCase() || '?') : '?', known: known, stranger: !known,
-        line: r.line, time: this.cmWhen(r.lastAt),
-        unread: n <= 0 ? '' : n > 99 ? '99+' : String(n), unreadSay: n + (n === 1 ? ' unread message' : ' unread messages'),
-        tap: () => this.cidOpen({ peer: r.peer }),
-      };
-    });
-  }
-
-  /* CHAT's values on home, and INBOX's on its own screen. */
-  renderInbox(c) {
-    const { sc } = c;
-    const n = this.cmUnreadTotal();
-    const badge = this.cmBadgeOf(n);
-    const W0 = window.FoxyWallet;
-    const home = {
-      // ADD A CASHU ID and SCAN A CASHU ID, on the empty INBOX and the empty CONTACTS (26o-cashu-id.js); not offered where
-      // the wallet cannot read an ID
-      ibAddShown: !!(W0 && W0.cashuIdCheck),
-      ibAddGo: () => this.cidPasteAsk(),
-      ibScanShown: !!(W0 && W0.scan),
-      ibScanGo: () => this.cidScanAsk(),
-      ibFur: "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),"
-        + "linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),url('foxy-fur.webp')",
-      goChat: () => this.goInbox(),
-      chatBadge: badge,
-      chatBadgeShown: !!badge,
-      chatSay: n > 0 ? 'Chat, ' + n + (n === 1 ? ' unread message' : ' unread messages') : 'Chat',
-    };
-    // (not `sc === …`: render-snapshots.js draws this screen in messageViews, after the others, so their numbers stay)
-    if (sc !== 'inbox') return Object.assign(home, { isInbox: false });
-    const W = window.FoxyWallet;
-    const on = !!(W && W.cashuMsgOn && W.cashuMsgOn());
-    const rows = this.cmInboxRows();
-    return Object.assign(home, {
-      isInbox: true,
-      // the foot of the list: CONTACTS, with INBOX under it so back returns here
-      ibContactsGo: () => this.go('contacts'),
-      ibRows: rows,
-      ibAny: rows.length > 0,
-      ibOffShown: !on,
-      ibOffText: 'Messages go from your own Cashu ID. Open MY CASHU ID in the menu to start.',
-      ibEmptyShown: on && rows.length === 0,
-      ibEmpty: 'Ask another Foxy user for their Cashu ID to start chatting.',
-    });
-  }
-
-  // a message's time as HISTORY says one
-  cmWhen(at) {
-    const d = new Date(Number(at) || Date.now());
-    return this.txLabel ? this.txLabel(d, new Date()) : d.toISOString();
-  }
-
-  /* SEND: kept and waiting to go (the wallet's random wait, then the relays), or why not, under the field. */
-  cmSendGo() {
-    const W = window.FoxyWallet;
-    const s = this.state;
-    if (!W || !W.cashuMsgSend || s.cmBusy) return;
-    const text = String(s.cmDraft || '');
-    if (!text.trim()) { this.setState({ cmErr: 'Type a message first.' }); return; }
-    this.setState({ cmBusy: true, cmErr: '' });
-    Promise.resolve(W.cashuMsgSend(s.cmPeer, text)).then(() => {
-      this.setState({ cmBusy: false, cmDraft: '', cmErr: '' });
-      this.cmTick();
-    }).catch((e) => {
-      this.setState({ cmBusy: false, cmErr: W.reason ? W.reason(e) : String((e && e.message) || e) });
-    });
-  }
-
-  /* PAY for a contact (the payment to a contact, as from CONTACTS before); ADD CONTACT for someone who is not one. */
-  cmPayGo(view) {
-    if (view && view.contact) {
-      const c = (this.state.contacts || []).find((x) => x && x.cid && x.cid.id === view.peer);
-      if (c) { this.cidPayStart(c); return; }
-    }
-    if (view && view.card) { this.cidNameAsk(view.card, ''); return; }
-    this.toast('Add them to your contacts first.', true);
-  }
-
-  /* The screen's values. With no ID in use: the contact's name, PAY, and why there are no messages. */
-  renderCidChat(c) {
-    const { s, sc } = c;
-    // (not `sc === …`: render-snapshots.js draws this screen in messageViews, after the others, so their numbers stay)
-    if (sc !== 'cidChat') return { isCidChat: false };
-    const W = window.FoxyWallet;
-    const on = !!(W && W.cashuMsgOn && W.cashuMsgOn());
-    const contact = (s.contacts || []).find((x) => x && x.cid && x.cid.id === s.cmPeer) || null;
-    let view = null;
-    try { view = on && W.cashuMsgThread ? W.cashuMsgThread(s.cmPeer) : null; } catch (e) { view = null; }
-    const name = contact ? String(contact.name || 'Cashu ID') : (view && view.name) || 'A Cashu ID';
-    const isContact = !!contact;
-    const msgs = (view && view.msgs) || [];
-    const rows = msgs.slice().reverse().map((m) => {
-      const mine = m.dir === 'out';
-      return {
-        text: m.text, align: mine ? 'flex-end' : 'flex-start',
-        bg: mine ? 'var(--acc)' : 'var(--surface)', ink: mine ? '#fff' : 'var(--ink)',
-        foot: this.cmWhen(m.at) + (mine && m.mark ? ' · ' + m.mark : ''),
-      };
-    });
-    const busy = !!s.cmBusy;
-    return {
-      isCidChat: true,
-      cmTitle: name.toUpperCase(),
-      cmSub: on ? (isContact ? 'Messages go over Nostr, each to a key used once.' : 'Not in your contacts.') : 'CASHU ID',
-      cmPayLabel: isContact ? 'PAY' : 'ADD CONTACT',
-      cmPayGo: () => this.cmPayGo({ contact: isContact, peer: s.cmPeer, card: (view && view.card) || '' }),
-      cmOn: on,
-      cmOff: !on,
-      cmOffText: 'Messages go from your own Cashu ID. Open MY CASHU ID in the menu to start, then write to ' + name + ' here.',
-      cmRows: rows,
-      cmEmptyShown: on && rows.length === 0,
-      cmEmpty: 'No messages with ' + name + ' yet. What you write goes only to them.',
-      cmDraft: s.cmDraft || '',
-      cmDraftInput: (e) => this.setState({ cmDraft: String(e.target.value || '').slice(0, 1000), cmErr: '' }),
-      cmPlaceholder: 'Message ' + name,
-      cmSendGo: () => this.cmSendGo(),
-      cmSendLabel: busy ? 'SENDING…' : 'SEND',
-      cmSendBg: String(s.cmDraft || '').trim() && !busy ? 'var(--acc)' : 'rgba(var(--ink-rgb),.2)',
-      cmErrShown: !!s.cmErr,
-      cmErr: s.cmErr || '',
-    };
-  }
-
-  /* On every return to the foreground, with the Cashu ID's (`cidWake`): a message in, or one gone to a relay, and the
-   * screens read again; the open conversation's are read as they come. */
-  cmWake() {
-    const W = window.FoxyWallet;
-    if (!W) return;
-    W._onCashuMsg = (peer) => {
-      if (this.state.screen === 'cidChat' && this.state.cmPeer === peer && W.cashuMsgSeen) W.cashuMsgSeen(peer);
-      this.cmTick();
-    };
-  }
   /* ---- tips at the till, and CASHIER CODES as a list --------------------------------------------------------------------
    *
    * The wallet's half is 08f-till-tips.js. Here, every screen one the app has:
@@ -38187,6 +38716,307 @@ class Component extends DCLogic {
     const s = this.state || {};
     return s.screen === 'amount' && s.flow === 'send' && !!s.bankShort && !!this.bankNow();
   }
+  /* ---- the fox: the wait while a fee is checked or money moves (the design's 1j) ----------------------------------
+   *
+   * The keeper, 2026-11-06: shown at any time a fee is being checked or pieces are being moved, the percentage
+   * intelligent and the fox's motion timed to it; the video played frame by frame along with the progress, so when the
+   * progress slows the fox slows.
+   *
+   *   the screen ...... black, the title (on one line, made smaller where the phone is narrow), the percentage in the
+   *                     accent, the fox across the middle blended onto the black, CANCEL at the foot only where the
+   *                     wait can be cancelled. A stage screen (`stageScreen` with `o.fox`), so `hideStage(kind)`,
+   *                     `stageUp(kind)` and the wait's own time limit work as they do for every other stage. It is not
+   *                     a layer of its own: a later stage screen replaces it, which no caller does while money moves
+   *                     (the money-is-safe card waits its turn, 11-cards.js), and `foxEnd` then finds nothing to end.
+   *   the figure ...... each flow says its real steps (`foxStep`), and FOX_FLOWS turns a step into the figure it heads
+   *                     for. The figure eases toward it (`foxEase`), then creeps on toward halfway to the next step's,
+   *                     paced by how long that step is expected to take (`foxCreep`): so a slow step slows the figure,
+   *                     and the fox with it, without stopping it, and never reaches the next step's figure before that
+   *                     step has happened. Never back, never a jump. Only the real end (`foxDone`) takes it to 100,
+   *                     where the title says ALL SET for FOX_HOLD_MS before the screen comes down.
+   *   the fox ......... foxy-wait.mp4 (tools/make-intro.swift --wait), never played: each frame the video is put on the
+   *                     frame of the figure shown (`foxScrub`). Every frame of the file is a key frame, so each of
+   *                     those seeks decodes one frame (3 ms in the simulator). Until the video has a frame of its own
+   *                     its first frame shows, the fox asleep.
+   *   Reduce Motion ... the figure still moves; the fox is put on the figure's frame only every tenth point, and at 100.
+   *   in the background the video is paused, and it is let go of (`foxRelease`) when the screen comes down.
+   */
+  FOX_FLOWS = {
+    // a quote being asked: the question, then its answer. `ms`: how long a step is expected to take.
+    fee: { title: 'CHECKING THE FEE', start: 'asked', steps: { asked: 60 }, ms: { asked: 3000 } },
+    /* pieces moved between mints or to a card: the quote asked, the mint answered, the pieces made, landed. The
+     * wallet's own stage names (`moveRun`, `pay`) are read as these steps. */
+    move: { title: 'MOVING YOUR MONEY', start: 'asked', steps: { asked: 25, answered: 45, made: 75, landed: 95 },
+      ms: { asked: 3000, answered: 6000, made: 3000, landed: 3000 },
+      wallet: { quote: 'asked', melting: 'answered', inflight: 'made', switching: 'made', claiming: 'landed' } },
+    // a swap between the two balances at one mint (`swapRun`): the same steps, from its stage names
+    swap: { title: 'MOVING YOUR MONEY', start: 'asked', steps: { asked: 25, answered: 45, made: 75, landed: 95 },
+      ms: { asked: 2000, answered: 6000, made: 2000, landed: 3000 },
+      wallet: { paying: 'answered', paid: 'made', claiming: 'landed', done: 'landed' } },
+  };
+
+  FOX_VIDEO = 'img/foxy-wait.mp4';
+  FOX_POSTER = 'img/foxy-wait-first.png';
+  // the video's length, for the moment before the page has read it
+  FOX_VIDEO_S = 9.625;
+  // the design's: 100 is this far through the video, the fox standing
+  FOX_SHARE = 0.92;
+  FOX_HOLD_MS = 400;
+
+  /* The step `step` names in `flow` (a wallet stage name read as the step it is), or '' for one the flow does not have. */
+  foxStepName(flow, step) {
+    const f = this.FOX_FLOWS[flow] || this.FOX_FLOWS.fee;
+    const named = (f.wallet && f.wallet[step]) || step;
+    return typeof f.steps[named] === 'number' ? named : '';
+  }
+
+  /* The figure a step heads for in `flow`: a number, or null for a step the flow does not have. 'end' is 100. */
+  foxTarget(flow, step) {
+    if (step === 'end') return 100;
+    const f = this.FOX_FLOWS[flow] || this.FOX_FLOWS.fee;
+    const named = this.foxStepName(flow, step);
+    return named ? f.steps[named] : null;
+  }
+
+  /* Where the figure aims `ms` into the step `step` of `flow`: the step's own figure, and from there on toward halfway
+   * to the next step's (100 after the last), closing a share of what is left that grows with the time spent over
+   * twice the step's expected length. Never past just under the next step's figure. */
+  foxCreep(flow, step, ms) {
+    const f = this.FOX_FLOWS[flow] || this.FOX_FLOWS.fee;
+    const named = this.foxStepName(flow, step);
+    if (!named) return 0;
+    const at = f.steps[named];
+    const above = Object.keys(f.steps).map((k) => f.steps[k]).filter((v) => v > at);
+    const next = above.length ? Math.min.apply(null, above) : 100;
+    const len = Math.max(500, Number(f.ms && f.ms[named]) || 3000);
+    const t = Math.max(0, Number(ms) || 0);
+    const room = Math.min((next - at) / 2, next - 1 - at);
+    return at + room * (1 - Math.exp(-t / (2 * len)));
+  }
+
+  /* One frame of the figure: from `shown` toward `target`, `dtMs` after the last. Each frame covers a part of what is
+   * left, at most 75 a second; the end (`ending`) goes faster, at most 180 a second, and arrives. A frame longer than
+   * 50 ms counts as 50, so a page that was not drawn for a while does not leap when it is. */
+  foxEase(shown, target, dtMs, ending) {
+    const dt = Math.min(Math.max(Number(dtMs) || 0, 0), 50) / 1000;
+    const gap = Number(target) - Number(shown);
+    if (!(gap > 0)) return Number(shown);
+    const k = ending ? 7 : 1.6;
+    const cap = (ending ? 180 : 75) * dt;
+    let next = Number(shown) + Math.min(gap * (1 - Math.exp(-k * dt)), cap);
+    if (ending && Number(target) - next < 0.5) next = Number(target);
+    return Math.min(next, Number(target));
+  }
+
+  /* The figure as it is written: whole numbers, and 100 only once it is there. */
+  foxFigure(shown) {
+    const n = Number(shown) || 0;
+    return n >= 100 ? 100 : Math.max(0, Math.min(99, Math.floor(n)));
+  }
+
+  /* Where in the video the fox is at figure `pct`: pct / 100 × duration × 0.92, as the design has it. */
+  foxScrub(pct, duration) {
+    const d = Number(duration) > 0 && isFinite(Number(duration)) ? Number(duration) : this.FOX_VIDEO_S;
+    return Math.max(0, Math.min(100, Number(pct) || 0)) / 100 * d * this.FOX_SHARE;
+  }
+
+  /* Up as the stage `kind` for `flow` (FOX_FLOWS), where stage screens can be drawn. `o.go` puts CANCEL at the foot,
+   * `o.foxTitle` says something other than the flow's title, and `o.forMs` is how long it may stay up with nobody
+   * taking it down. False where there is no stage to draw, or where another stage screen that is not a fox is up (a
+   * card's own screen, say), which the fox does not take the place of: there the caller shows what it showed before. */
+  foxUp(kind, flow, o) {
+    if (!this.stageScreen || typeof document === 'undefined') return false;
+    const el = document.getElementById('foxy-stage');
+    if (el && el.getAttribute('data-stage') !== kind && !el.getAttribute('data-fox')) return false;
+    this.stageScreen(kind, Object.assign({}, o || {}, { fox: flow }));
+    return this.stageUp ? this.stageUp(kind) : true;
+  }
+
+  /* The title on one line: smaller, down to 20 px, while it does not fit. */
+  foxFit(el) {
+    if (!el) return;
+    let size = 34;
+    el.style.fontSize = size + 'px';
+    while (size > 20 && el.scrollWidth > el.clientWidth + 1) {
+      size -= 1;
+      el.style.fontSize = size + 'px';
+    }
+  }
+
+  /* The stage itself (`stageScreen` with `o.fox`). */
+  foxStage(kind, o) {
+    const flow = this.FOX_FLOWS[o.fox] ? o.fox : 'fee';
+    const f = this.FOX_FLOWS[flow];
+    const root = document.createElement('div');
+    root.id = 'foxy-stage';
+    root.setAttribute('data-stage', kind);
+    root.setAttribute('data-fox', flow);
+    root.style.cssText = 'position:fixed;inset:0;z-index:2147483300;overflow:hidden;background:#050505;color:#FFFFFF;'
+      + 'font-family:Sora,system-ui,sans-serif;animation:foxyIn .18s ease';
+    const top = 'calc(env(safe-area-inset-top) + 125px)';
+    root.innerHTML =
+      '<div style="position:absolute;left:0;right:0;top:' + top + ';display:flex;flex-direction:column;align-items:center;'
+      + 'gap:14px;text-align:center;padding:0 28px;box-sizing:border-box;z-index:1">'
+      + '<div data-fox-title style="width:100%;white-space:nowrap;overflow:hidden;font-weight:800;font-size:34px;'
+      + 'letter-spacing:.1em">' + (o.foxTitle || f.title) + '</div>'
+      + '<div style="font-weight:800;font-size:76px;line-height:1;letter-spacing:-.04em;color:#EB6A2E;'
+      + 'font-variant-numeric:tabular-nums"><span data-fox-pct>0</span>%</div></div>';
+    const reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    const place = 'position:absolute;left:-20px;right:-20px;top:calc(env(safe-area-inset-top) + min(331px, 39vh));'
+      + 'width:calc(100% + 40px);height:285px;object-fit:contain;mix-blend-mode:screen;pointer-events:none';
+    let vid = document.createElement('video');
+    vid.muted = true;
+    vid.defaultMuted = true;
+    vid.setAttribute('muted', '');
+    vid.setAttribute('playsinline', '');
+    vid.setAttribute('webkit-playsinline', '');
+    vid.setAttribute('disablepictureinpicture', '');
+    vid.setAttribute('preload', 'auto');
+    vid.setAttribute('poster', this.FOX_POSTER);
+    vid.setAttribute('aria-hidden', 'true');
+    vid.style.cssText = place;
+    vid.src = this.FOX_VIDEO;
+    /* Asked for at once: WebKit on a phone loads no more than a video's length for `preload` alone, and a seek on a
+     * video with no frames waits for ever (seen in the simulator: the fox sat on its poster throughout). */
+    try { vid.load(); } catch (e) {}
+    // a file that will not load: the fox asleep, still, and the figure carries on
+    vid.addEventListener('error', () => {
+      if (!vid || !vid.parentNode) return;
+      const img = document.createElement('img');
+      img.setAttribute('alt', '');
+      img.setAttribute('src', this.FOX_POSTER);
+      img.style.cssText = place;
+      vid.parentNode.replaceChild(img, vid);
+      vid = null;
+      if (this._fox && this._fox.root === root) this._fox.vid = null;
+    });
+    root.appendChild(vid);
+    if (typeof o.go === 'function') {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'position:absolute;left:0;right:0;bottom:0;z-index:2;padding:0 24px calc(40px + env(safe-area-inset-bottom))';
+      const b = document.createElement('div');
+      b.setAttribute('data-stage-button', '1');
+      b.style.cssText = 'height:58px;border-radius:999px;border:2px solid #2E2E2E;background:#121212;display:flex;'
+        + 'align-items:center;justify-content:center;font-weight:800;font-size:17px;letter-spacing:.08em;color:#FFFFFF;cursor:pointer';
+      b.textContent = o.button || 'CANCEL';
+      b.addEventListener('click', () => {
+        this.hideStage(kind);
+        o.go();
+      });
+      wrap.appendChild(b);
+      root.appendChild(wrap);
+    }
+    document.body.appendChild(root);
+    this.foxFit(root.querySelector('[data-fox-title]'));
+    if (this.syncPreview) this.syncPreview();
+    const fox = { kind, flow, root, vid, reduce, shown: 0, target: this.foxTarget(flow, f.start) || 0, step: f.start,
+      stepAt: 0, ending: false, at: 0, figure: -1, held: false, still: -1 };
+    // the video waits in the background, where nothing draws it
+    fox.away = () => { if (document.hidden && fox.vid && !fox.vid.paused) fox.vid.pause(); };
+    document.addEventListener('visibilitychange', fox.away);
+    this._fox = fox;
+    console.log('[foxy] screen: ' + kind + ', the fox (' + flow + ')');
+    const tick = (now) => {
+      if (!root.isConnected || this._fox !== fox) { this.foxRelease(root); return; }
+      const dt = fox.at ? now - fox.at : 16;
+      fox.at = now;
+      if (!fox.stepAt) fox.stepAt = now;
+      const aim = fox.ending ? 100 : Math.max(fox.target, this.foxCreep(flow, fox.step, now - fox.stepAt));
+      fox.shown = this.foxEase(fox.shown, aim, dt, fox.ending);
+      const fig = this.foxFigure(fox.shown);
+      if (fig !== fox.figure) {
+        fox.figure = fig;
+        const p = root.querySelector('[data-fox-pct]');
+        if (p) p.textContent = String(fig);
+      }
+      this.foxFollow(fox);
+      if (fig >= 100 && !fox.held) {
+        fox.held = true;
+        const t = root.querySelector('[data-fox-title]');
+        if (t) { t.textContent = 'ALL SET'; this.foxFit(t); }
+        setTimeout(() => { if (root.isConnected) this.hideStage(kind); }, this.FOX_HOLD_MS);
+        return;
+      }
+      fox.raf = requestAnimationFrame(tick);
+    };
+    fox.raf = requestAnimationFrame(tick);
+    this._stageT = setTimeout(() => this.hideStage(kind), Number(o.forMs) || 100000);
+  }
+
+  /* The video on the frame of the figure shown. Not while a seek is still being made (the next frame asks again), and
+   * not for less than half a frame. Under Reduce Motion only every tenth point, and 100. At 100 always, so ALL SET
+   * shows the fox standing. */
+  foxFollow(fox) {
+    const v = fox.vid;
+    if (!v || v.readyState < 1) return;
+    if (fox.reduce) {
+      const at = fox.figure >= 100 ? 100 : Math.floor(Math.max(0, fox.figure) / 10) * 10;
+      if (at === fox.still) return;
+      fox.still = at;
+      try { v.currentTime = this.foxScrub(at, v.duration); } catch (e) {}
+      return;
+    }
+    const want = this.foxScrub(fox.figure >= 100 ? 100 : fox.shown, v.duration);
+    if (v.seeking && fox.figure < 100) return;
+    if (Math.abs(v.currentTime - want) < 1 / 48) return;
+    try { v.currentTime = want; } catch (e) {}
+  }
+
+  /* Let go of the fox's video when its screen comes down (`hideStage`): paused, its file dropped, no listener left. */
+  foxRelease(root) {
+    const fox = this._fox;
+    if (!fox || (root && fox.root !== root)) return;
+    if (fox.raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(fox.raf);
+    if (fox.away) document.removeEventListener('visibilitychange', fox.away);
+    const v = fox.vid;
+    if (v) {
+      try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+    }
+    fox.vid = null;
+    this._fox = null;
+  }
+
+  /* The fox stage `kind`, if it is the one up. */
+  foxOn(kind) {
+    const fox = this._fox;
+    return fox && fox.root && fox.root.isConnected && (!kind || fox.kind === kind) ? fox : null;
+  }
+
+  /* A step of the wait under `kind` has happened: the figure heads for that step's (never back). The wallet's stage
+   * names are understood for the flows that have them. */
+  foxStep(kind, step) {
+    const fox = this.foxOn(kind);
+    if (!fox || fox.ending) return false;
+    const t = this.foxTarget(fox.flow, step);
+    if (t == null || t <= fox.target) return false;
+    fox.target = Math.min(t, 99);
+    fox.step = this.foxStepName(fox.flow, step);
+    fox.stepAt = 0;
+    return true;
+  }
+
+  /* A listener for a wallet call's stages (`moveRun`, `swapRun`, `carryHome`), for the stage `kind`. */
+  foxHears(kind, also) {
+    return (st) => {
+      this.foxStep(kind, st);
+      if (typeof also === 'function') also(st);
+    };
+  }
+
+  /* The real end: to 100, ALL SET, and down after FOX_HOLD_MS. False when that stage is not up. */
+  foxDone(kind) {
+    const fox = this.foxOn(kind);
+    if (!fox) return false;
+    fox.ending = true;
+    fox.target = 100;
+    return true;
+  }
+
+  /* The end of a wait that showed the fox: ALL SET where it `landed`, down at once where it did not. */
+  foxEnd(kind, landed) {
+    if (landed && this.foxDone(kind)) return;
+    if (this.hideStage) this.hideStage(kind);
+  }
 
   /* switchMint: the mint list. */
   /** @param {RenderContext} c */
@@ -38195,11 +39025,36 @@ class Component extends DCLogic {
     /* And the till's lists, in the same rows (26p-till-tips.js, `tillListVals`): who its tips go to, a group's shares, and its
      * CASHIER CODES with those that have ended under PAST. Null outside them. */
     const L = (sc === 'switchMint' && s.tillList && this.tillListVals) ? this.tillListVals() : null;
-    const tillOn = L ? !!L.next.on : s.tillPick === 'set' && !!this.tillSetNow && this.tillSetNow().length > 0;
+    /* The lists of mints are drawn as tiles (the keeper's design of 2026-11-06, "To which mint?"): the name large, its host, a rule,
+     * and under it what is held there. The till's lists of people and codes, and BANK ACCOUNT's exchanges, keep their rows. */
+    const tiles = !L && !s.bankPick;
+    /* A card's WITHDRAW TO (`wdPick`) and TRANSFER TO (`fcPick`): the card's own mint first, ticked, then the others, the line under
+     * each rule what the crossing there costs where that is asked (26n-card-withdraw-to.js). A tap picks a mint, NEXT goes on. */
+    const cardList = tiles && (!!s.wdPick || !!s.fcPick);
+    const cardNextOn = cardList && !!this.fcListNextOn && this.fcListNextOn();
+    const tillOn = L ? !!L.next.on : cardList ? cardNextOn : s.tillPick === 'set' && !!this.tillSetNow && this.tillSetNow().length > 0;
+    const nowLine = L ? L.line
+      : s.bankPick ? 'Trade your Foxy balance for dollars with one of these exchanges.'
+      : s.wdPick ? (this.fcWdLine ? this.fcWdLine() : '')
+      : s.tillPick === 'default' ? 'Payments from mints you did not pick are moved here. Invoices are made here.'
+      : s.tillPick ? 'Pick every mint this till takes. Payments from other mints cross into the default, the payer paying the fee.'
+      : s.fcPick ? 'This card is at ' + this.mintNameOf(s.fc && s.fc.mint) + '. Other mints cost a Lightning fee.'
+      : s.trStep === 'from' ? 'Move money between the mints you use.'
+      : s.trStep === 'to' ? 'Moving from ' + this.mintNameOf(s.trFrom) + '.'
+      /* switching: no line, as designed; the mint you are on is the ticked tile, and each tile says what it holds in every unit.
+       * Only a phone on no mint is told so, which no tile says. */
+      : this.mintHost() ? '' : 'Connected to no mint.';
     const FUR = "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),"
       + "linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),url('foxy-fur.webp')";
     return {
       isSwitchMint: sc === 'switchMint',
+      mintTilesShown: tiles,
+      mintRowsShown: !tiles,
+      // the tiles sit closer to the screen's edges than the rows did, as designed, and a card's list closer to each other
+      mintListPad: tiles ? '22px 18px 12px' : '12px 24px 12px',
+      mintListGap: cardList ? '12px' : tiles ? '16px' : '12px',
+      // the foot holds NEXT, or the till's second button; with neither, only the room the screen's edge wants
+      mintFootPad: (L ? (!!L.next.shown || !!L.add.shown) : (cardList || s.tillPick === 'set')) ? '12px 24px 30px' : '0 0 22px',
       // adding a mint belongs to switching, not to picking one to move between
       mintPickers: !s.trStep && !s.fcPick && !s.tillPick && !s.wdPick && !s.tillList && !s.bankPick,
       /* The same list does three jobs: switching, and the two steps of a
@@ -38216,25 +39071,17 @@ class Component extends DCLogic {
         : s.wdPick ? 'WITHDRAW TO'
         : s.tillPick === 'default' ? 'DEFAULT MINT'
         : s.tillPick ? 'TILL AT WHICH MINTS?'
-        : s.fcPick ? 'TO WHICH MINT?'
+        : s.fcPick ? 'TRANSFER TO'
         : s.trStep === 'from' ? 'FROM WHICH MINT?'
-        : s.trStep === 'to' ? 'TO WHICH MINT?' : 'SWITCH MINT',
-      mintNowLine: L ? L.line
-        : s.bankPick ? 'Trade your Foxy balance for dollars with one of these exchanges.'
-        : s.wdPick ? (this.fcWdLine ? this.fcWdLine() : '')
-        : s.tillPick === 'default' ? 'Payments from mints you did not pick are moved here. Invoices are made here.'
-        : s.tillPick ? 'Pick every mint this till takes. Payments from other mints cross into the default, the payer paying the fee.'
-        : s.fcPick ? 'This card is at ' + this.mintNameOf(s.fc && s.fc.mint) + '.'
-        : s.trStep === 'from' ? 'Move money between the mints you use.'
-        : s.trStep === 'to' ? 'Moving from ' + this.mintNameOf(s.trFrom) + '.'
-        : 'Connected to ' + (this.mintHost() || 'no mint')
-        // balances in other units, which no sat figure on this screen includes
-        + (this.otherUnitsLine() ? '. ' + this.otherUnitsLine() : ''),
+        : 'TO WHICH MINT?',
+      mintNowLine: nowLine,
+      mintNowShown: !!nowLine,
       /* The mint you are on comes first and looks different. It used to be
        * filtered out, which left the screen showing every mint except the one
        * that matters. */
       mintRows: L ? L.rows : (() => {
         const all = this.allMints();
+        const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
         const row = (m, here) => {
           const pile = this.mintPile(m.url);
           const busy = s.mintBusy === m.url.replace(/\/+$/, '');
@@ -38244,8 +39091,27 @@ class Component extends DCLogic {
            * be connected to. Greyed out, with the reason under its name, and a
            * tap says it rather than doing nothing. */
           const reach = this.mintReachable(m.url);
+          /* The tile's line: what is held there, the sat sign and the sats, then each other unit ('25,066 + $10.33'), and what it all
+           * comes to in dollars ('≈ $29.12') where there is a price and nothing in a unit that has none. */
+          const rate = (this.satUsd && this.satUsd()) || 0;
+          const dol = (v) => '$' + (this.usd ? this.usd(v) : v.toFixed(2));
+          const held = (pile.units || []).filter(b => b && b.amount > 0);
+          const satSign = pile.sats > 0 || !held.length;
+          const usdOnly = held.every(b => b.unit === 'usd');
+          const cents = held.reduce((n, b) => n + (b.unit === 'usd' ? Number(b.amount) || 0 : 0), 0);
+          const balMain = (satSign ? [this.group(pile.sats)] : []).concat(held.map(b => b.unit === 'usd' ? dol(b.amount / 100) : this.unitMoney(b.amount, b.unit))).join(' + ');
+          const balAbout = (rate > 0 && usdOnly && pile.sats > 0) ? '\u2248 ' + dol(pile.sats * rate + cents / 100) : '';
           return {
             name: m.name, host: m.host,
+            big: String(m.name || '').toUpperCase(),
+            // under the rule: the balance, or a word in grey (CONNECTING…), or a fee (a card's lists, 26n-card-withdraw-to.js), or nothing
+            lineBal: !busy, lineWait: busy, lineFee: false,
+            balSym: satSign, balMain: balMain, balAbout: balAbout, balAboutShown: !!balAbout,
+            wait: busy ? 'CONNECTING\u2026' : '', fee: '', feeNote: '', feeNoteShown: false,
+            linePad: cardList ? '12px' : '16px',
+            nameSize: cardList ? '32px' : '38px', hostSize: cardList ? '16px' : '17px',
+            pad: cardList ? '20px 22px' : '24px 22px', radius: cardList ? '26px' : '28px', gap: cardList ? '14px' : '18px',
+            edge: here ? '2px' : '1px',
             dim: reach ? '1' : '0.4',
             down: !!downText, downText: downText,
             initial: m.name.slice(0, 1).toUpperCase(),
@@ -38256,7 +39122,7 @@ class Component extends DCLogic {
             ink: (here || busy) ? 'var(--acc-ink)' : pile.ink,
             busy: busy,
             bg: here ? 'rgba(var(--acc-rgb),.12)' : 'var(--surface)',
-            border: here ? 'rgba(var(--acc-rgb),.75)' : 'rgba(var(--ink-rgb),.12)',
+            border: here ? 'var(--acc)' : 'rgba(var(--ink-rgb),.12)',
             // tapping the one you are already on should do nothing at all
             tap: !reach ? (() => this.offlineNo('Switching to ' + m.name))
               : s.tillPick === 'default' ? (() => this.tillMintPick(m.url))
@@ -38275,11 +39141,8 @@ class Component extends DCLogic {
         }
         if (s.bankPick) return this.bankRows ? this.bankRows() : [];
         if (s.wdPick) return this.fcWdRows ? this.fcWdRows(row) : [];
-        if (s.fcPick) {
-          // every mint but the one the card is at
-          const at = String((s.fc && s.fc.mint) || '').replace(/\/+$/, '');
-          return all.filter(m => m.url.replace(/\/+$/, '') !== at).map(m => row(m, false));
-        }
+        // a card's TRANSFER TO (26n-card-withdraw-to.js), each other mint with what the move there costs
+        if (s.fcPick) return this.fcMoveRows ? this.fcMoveRows(row) : [];
         if (s.trStep === 'from') {
           // only mints with something at them can be moved from (dollars too: a mint holding only dollars is one to move from)
           return all.filter(m => this.mintPile(m.url).sats > 0 || (this.mintPile(m.url).units || []).some(b => b && b.unit === 'usd' && b.amount > 0))
@@ -38293,8 +39156,9 @@ class Component extends DCLogic {
           .concat(all.filter(m => !this.onMint(m.url)).map(m => row(m, false)));
       })(),
       // NEXT under the till's set list: the fur once a mint is ticked, grey and nothing before (26m-till.js, `tillSetNext`)
-      tillNextShown: L ? !!L.next.shown : s.tillPick === 'set',
-      tillNext: L ? L.next.tap : () => this.tillSetNext(),
+      // (and under a card's WITHDRAW TO and TRANSFER TO, in fur once a mint it can go to is picked: 26n-card-withdraw-to.js, `fcListNext`)
+      tillNextShown: L ? !!L.next.shown : cardList || s.tillPick === 'set',
+      tillNext: L ? L.next.tap : cardList ? () => this.fcListNext() : () => this.tillSetNext(),
       tillNextLabel: L ? L.next.label : 'NEXT',
       // the till's lists' second button (ADD, PASTE A CASHU ID), and CASHIER CODES' PAST
       tillAddShown: !!(L && L.add.shown),

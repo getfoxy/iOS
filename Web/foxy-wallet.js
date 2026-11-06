@@ -103,12 +103,14 @@
     }
   }());
 
-  /* Two stores an earlier test build kept for features Foxy no longer has, read by nothing now: removed at every boot
-   * (two lookups, nothing once they are gone). Not a schema step, so a phone can still go back to a build that knows
-   * fewer steps. The lock-key rows those codes were filed under stay: their keys are the seed's. */
+  /* Stores an earlier build kept for features Foxy no longer has, read by nothing now: removed at every boot (a lookup
+   * each, nothing once they are gone). Not a schema step, so a phone can still go back to a build that knows fewer steps.
+   * The push wake's and the private LNURL's (the lock-key rows those codes were filed under stay: their keys are the
+   * seed's), and the messages between Cashu IDs: the conversations, what waited to go, and the first messages read. */
+  var RETIRED_STORES = ['foxy.wake', 'foxy.lnurl.codes', 'foxy.msg.threads', 'foxy.msg.outbox', 'foxy.msg.seen'];
   (function dropRetiredStores() {
     if (storageNewer) return;
-    try { localStorage.removeItem('foxy.wake'); localStorage.removeItem('foxy.lnurl.codes'); } catch (e) {}
+    RETIRED_STORES.forEach(function (k) { try { localStorage.removeItem(k); } catch (e) {} });
   }());
 
   var K = {
@@ -13763,8 +13765,14 @@
   /* Ask the card one thing. `ask` answers { data, sw } whatever the status;
    * `want` answers the data and throws anything but 9000 as what it means. */
   function cardTalk(link) {
+    /* When the card first answered in this sheet and when it last did, on the link: a write's log line says the time the card was
+     * held for, from the one to the other (`cardWrite`). */
+    var heard = function () {
+      try { var now = Date.now(); if (!link.firstAnswerAt) link.firstAnswerAt = now; link.lastAnswerAt = now; } catch (e) {}
+    };
     function ask(apdu) {
       return Promise.resolve().then(function () { return link.send(apdu); }).then(function (hex) {
+        heard();
         var h = String(hex || '').toLowerCase();
         if (h.length < 4 || h.length % 2 || /[^0-9a-f]/.test(h)) throw cardError('gone', 'Card taken away too soon.');
         return { data: h.slice(0, -4), sw: h.slice(-4) };
@@ -13772,9 +13780,31 @@
         throw (e && e.card) ? e : cardError('gone', 'Card taken away too soon.');
       });
     }
+    /* Several commands at once, where the link can (`link.sendMany`): resolves [{ data, sw }] in order, the last the first that
+     * was not 9000, with `lost` on the list where the card left part way; null where the link cannot, and the caller sends them
+     * one at a time. Rejects as `ask` does when the card is gone before any answer. */
+    function many(apdus) {
+      if (!link || typeof link.sendMany !== 'function') return Promise.resolve(null);
+      return Promise.resolve().then(function () { return link.sendMany(apdus); }).then(function (got) {
+        heard();
+        var out = /** @type {any} */ ((got && got.answers || []).map(function (hex) {
+          var h = String(hex || '').toLowerCase();
+          if (h.length < 4 || h.length % 2 || /[^0-9a-f]/.test(h)) throw cardError('gone', 'Card taken away too soon.');
+          return { data: h.slice(0, -4), sw: h.slice(-4) };
+        }));
+        out.lost = !!(got && got.lost);
+        return out;
+      }, function (e) {
+        if (e && e.unsupported) return null;
+        throw (e && e.card) ? e : cardError('gone', 'Card taken away too soon.');
+      });
+    }
     return {
       link: link,
       ask: ask,
+      many: many,
+      // whether the link can be handed several commands at once (a phone that answered it cannot is not asked again)
+      canMany: function () { return !!(link && typeof link.sendMany === 'function' && !link.noMany); },
       want: function (apdu, doing) {
         return ask(apdu).then(function (r) {
           if (r.sw !== '9000') throw cardRefused(r.sw, doing);
@@ -13890,6 +13920,9 @@
    *                                             tap, and kept on the phone for the card until then
    *   { label: 'set-limit', figures }           which of 'day', 'tap' and 'noPin' the keeper set
    *   and `card`, the card's key, where the screen is the card's.
+   * `lift: true` (with reset, set-card or set-limit): the same tap takes money off the card, under its limits lifted and put back
+   * (`cardUnderPin`), and the one yes covers that too; `{ label: 'set-limit', lift: true }` with no figures is the lift alone, for a
+   * withdrawal. The phone then signs set-limit to nothing from what the card said in the tap, and back to exactly that, and no other.
    * Resolves true at a yes; a no, or no answer, rejects `declined`. */
   function cardApprove(op) {
     var o = op || {};
@@ -13902,7 +13935,8 @@
         body.mint = canonicalMint(o.mint || mintOf(wallet));
         if (Array.isArray(o.units) && o.units.length) body.units = o.units.map(function (u) { return unitOf(u) || u; });
         if (o.keep) body.keep = true;
-      } else if (o.label === 'set-limit') body.figures = (o.figures || []).slice();
+      } else if (o.label === 'set-limit' && !(o.lift && !(o.figures || []).length)) body.figures = (o.figures || []).slice();
+      if (o.lift && (o.label === 'reset' || o.label === 'set-card' || o.label === 'set-limit')) body.lift = true;
     } catch (e) { return Promise.reject(e); }
     return nativeJson('cardOwnerApprove', body, 60000).then(function (j) {
       if (!j || j.approved !== true) throw new Error('not approved');
@@ -14314,6 +14348,25 @@
   /* The last card any flow read here: its key and what it is (`info`), for the app to know the card in hand off its own screen. */
   var lastCardRead = null;
 
+  /* While a card's sheet is up (`cardSession`, from the sheet asked for until the card is let go or the tap has settled), the
+   * page's own background work waits (`cardAfter`): the held quote sweep, the inboxes opened again on a return, the small-change
+   * top-up. Every command to the card and every answer from it rides the one thread that work also runs on, and a tap made
+   * just after Foxy came back took 2 to 4 times as long a command as one made with the phone settled (2026-11-06). The work
+   * waiting runs once the last sheet is down, each in a turn of its own. */
+  var cardSheets = 0;
+  var cardAfterQ = [];
+  function cardSheetUp() { return cardSheets > 0; }
+  function cardAfter(fn) {
+    if (typeof fn !== 'function') return;
+    if (!cardSheets) { fn(); return; }
+    cardAfterQ.push(fn);
+  }
+  function cardSheetDown() {
+    cardSheets = Math.max(0, cardSheets - 1);
+    if (cardSheets) return;
+    cardAfterQ.splice(0).forEach(function (fn) { setTimeout(function () { try { fn(); } catch (e) {} }, 0); });
+  }
+
   function cardLook(link, opts) {
     var o = opts || {};
     var t = cardTalk(link);
@@ -14538,7 +14591,11 @@
          * moved: the card's sats are set to match, with the owner's proof.
          * Only a bitcoin card's: a dollar card's limits are cents already,
          * and no price ever moves them. */
-        var want = (c.mine && c.info.paced && c.record.unit === 'sat') ? cardPaceSats(c.key, o.price) : 0;
+        /* Only in a read whose tap the keeper said yes to that figure for (`o.repeg`): the phone signs a limit only against the
+         * keeper's yes, and the sats this one becomes are the page's sum, not a figure the card said, so a re-peg in any other tap
+         * would be refused, or would use up the yes the keeper gave that tap's own command. (A card of 1.23 keeps cents, and only
+         * its rate follows the price, which the phone signs unasked: `cardRepeg23` above.) */
+        var want = (o.repeg && c.mine && c.info.paced && c.record.unit === 'sat') ? cardPaceSats(c.key, o.price) : 0;
         var has = Number(c.info.tapLimit) || 0;
         if (!(want > 0) || !(has > 0) || Math.abs(want - has) <= has * CARD_PACE_DRIFT) return c;
         return cardLimitTo(t, c.key, c.info.limit, want).then(function () {
@@ -14552,7 +14609,7 @@
       }).then(function (c) {
         /* And the no-PIN allowance, set in dollars the same way (software 1.16): the card's sats are set to match when the
          * price has moved, in the one command that carries the day's limit and the tap's as they stand. */
-        var wantNp = (c.mine && c.info.noPinKnown && c.info.pinSet && c.record.unit === 'sat' && !cardIs123(c)) ? cardPaceNoPinSats(c.key, o.price) : 0;
+        var wantNp = (o.repeg && c.mine && c.info.noPinKnown && c.info.pinSet && c.record.unit === 'sat' && !cardIs123(c)) ? cardPaceNoPinSats(c.key, o.price) : 0;
         var hasNp = Number(c.info.noPin && c.info.noPin.limit) || 0;
         if (!(wantNp > 0) || !(hasNp > 0) || Math.abs(wantNp - hasNp) <= hasNp * CARD_PACE_DRIFT) return c;
         return cardLimitTo(t, c.key, c.info.limit, Number(c.info.tapLimit) || 0, wantNp).then(function () {
@@ -15373,7 +15430,9 @@
    *
    * A card of 128 places (`info.wide`) is cut deep instead: CARD_DEEP of each
    * size from 1 up to CARD_DEEP_TOP, smallest first as far as the money goes,
-   * and what is left of the amount in powers of two. Smallest first, because
+   * and what is left of the amount in powers of two. Where that is more pieces
+   * than a tap writes (five seconds, since 2026-11-06), a whole set at a time
+   * instead, as far as the tap's pieces go, and the next taps carry on. Smallest first, because
    * the small sizes are the ones a payment cannot do without; and the money
    * that does not reach a size is no loss to it, since a payment is one
    * signature however many pieces it is made of, and smaller pieces make a
@@ -15406,13 +15465,57 @@
   var CARD_WIDE_LOAD = 112;
   var CARD_WIDE_CHANGE = 32;
 
+  /* ---- five seconds a tap ------------------------------------------------------
+   * Decided 2026-11-06: a load should not hold the card for more than five seconds of signing and loading. A tap is
+   * budgeted at CARD_PIECE_MS for each piece written (89 ms was measured on a phone held well, 2026-11-06 08:01; the margin
+   * is for a phone less settled) and, besides the pieces, what the tap itself does: for a load, the read with the card's
+   * proof of its key and the PIN or the owner's grant (CARD_LOAD_OWN_MS); for a payment whose change goes back on in the
+   * same sheet, the read, the signing and the wait the card's software makes (CARD_PAY_OWN_MS). The mint's own time between
+   * the signing and the change is not the card's and is not counted. What is left is how many pieces one tap writes: a load
+   * (CARD_TAP_LOAD), and change (CARD_TAP_CHANGE).
+   *
+   * So a card's drawer is not written in one go. Its first load is one binary set of the amount (CARD_FIRST_DEPTH of each
+   * size, 1 to 1,024, and what is left in powers of two: $25.00 is sixteen pieces), which pays one price exactly offline,
+   * whatever it is, and any number online. Every later tap that writes (a top-up, or a payment whose change comes back)
+   * deepens it with what it writes, at most what fits the five seconds, the smallest sizes still short first, a whole set
+   * at a time (`cardDeepLadder`), so that a second exact payment is there as early as can be; three or four such taps fill
+   * the drawer's whole plan (CARD_DEEP of each). */
+  var CARD_TAP_MS = 5000;
+  var CARD_PIECE_MS = 110;
+  var CARD_LOAD_OWN_MS = 1600;
+  var CARD_PAY_OWN_MS = 3000;
+  var CARD_TAP_LOAD = Math.floor((CARD_TAP_MS - CARD_LOAD_OWN_MS) / CARD_PIECE_MS);
+  var CARD_TAP_CHANGE = Math.floor((CARD_TAP_MS - CARD_PAY_OWN_MS) / CARD_PIECE_MS);
+  // how many of each size a card's first load is: one binary set
+  var CARD_FIRST_DEPTH = 1;
+  /* For a phone test, a debug build launched with `-FoxyFirstDepth N` (Foxy/FoxyWebView.swift) cuts first loads N deep for that
+   * run: read once, and only where the page is a debug build's. 0: not given, and CARD_FIRST_DEPTH stands. */
+  var cardFirstDepthRun = null;
+  function cardFirstDepthNow() {
+    if (cardFirstDepthRun === null) {
+      var n = 0;
+      try { var win = /** @type {any} */ (window); n = (win.FOXY_DEBUG === true) ? Math.floor(Number(win.__foxyFirstDepth) || 0) : 0; } catch (e) { n = 0; }
+      cardFirstDepthRun = (n >= 1 && n <= CARD_DEEP) ? n : 0;
+      if (cardFirstDepthRun) console.log('[foxy] card: a first load is cut ' + cardFirstDepthRun + ' deep for this run (a debug build\u2019s launch argument)');
+    }
+    return cardFirstDepthRun || CARD_FIRST_DEPTH;
+  }
+  // the time a tap holds the card for, by the budget above: `kind` 'load' or 'change', `pieces` written in it
+  function cardTapEstimate(kind, pieces) {
+    return (kind === 'change' ? CARD_PAY_OWN_MS : CARD_LOAD_OWN_MS) + Math.max(0, Math.floor(Number(pieces) || 0)) * CARD_PIECE_MS;
+  }
+
   /* As `cardLadder`, for a card with a deep drawer. `extra` is always 0, but
    * where not even the plain powers of two fit `most` pieces: then the amount
    * is cut as a card of fewer places would have it (`cardLadder`), which may
    * round it up. */
   /* `depth`: how many of each size the drawer is cut to (CARD_DEEP where not given). A card of 1.23 that holds both units, or is about to,
    * is cut to CARD_DEEP_BOTH of each in each unit (`cardDepthFor`, design 9.2): both units deep are the 88 pieces one unit eight deep was. */
-  function cardDeepLadder(sats, most, biggest, have, depth) {
+  /* `sets`: where the plan is more pieces than `most`, deepen it a whole set at a time (pieces this phone writes, at a load's speed);
+   * without it, the plan one shallower until it fits, as the card's own change is cut (each of those is the card's work to make). */
+  /* `exact` (a card's first load): what is left after the drawer is cut so that every price up to the whole stays exact (`cardExactRest`),
+   * where those pieces fit `most`. */
+  function cardDeepLadder(sats, most, biggest, have, depth, sets, exact) {
     var n = Math.max(0, Math.floor(Number(sats) || 0));
     var deepest = Math.max(0, Math.min(CARD_DEEP, Math.floor(Number(depth) || CARD_DEEP)));
     var cap = Math.max(1, Math.floor(Number(most) || CARD_WIDE_LOAD));
@@ -15431,6 +15534,7 @@
       }
       return out;
     };
+    // the drawer as it has always been cut: `deep` of each size, the smallest first, as far as the money goes
     var build = function (deep) {
       var out = [], rest = n;
       for (var d = 1; d <= CARD_DEEP_TOP && (!top || d <= top); d *= 2) {
@@ -15441,22 +15545,106 @@
         // the money has run out at this size: what is left is less than one more of it
         if (take < short) break;
       }
-      return out.concat(cut(rest));
+      var res = /** @type {any} */ (out.concat(cut(rest)));
+      res.drawn = out;
+      res.rest = rest;
+      return res;
     };
-    for (var deep = deepest; deep >= 0; deep--) {
-      var pieces = build(deep);
-      if (pieces.length <= cap) {
-        pieces.sort(function (a, b) { return b - a; });
-        return { sats: n, extra: 0, denominations: pieces };
+    // how many pieces the whole plan is: `deep` of every size this mint makes up to CARD_DEEP_TOP, less what the card holds
+    var sizesUpTo = function (deep) {
+      var k = 0;
+      for (var d = 1; d <= CARD_DEEP_TOP && (!top || d <= top); d *= 2) k += Math.max(0, deep - (held[d] || 0));
+      return k;
+    };
+    var whole = build(deepest);
+    if (exact) {
+      // the drawer's own pieces, and the rest cut so that no price up to the whole falls in a gap
+      var exactly = cardExactRest(whole.drawn, whole.rest, top, have);
+      if (exactly && whole.drawn.length + exactly.length <= cap) {
+        var all = whole.drawn.concat(exactly).sort(function (a, b) { return b - a; });
+        return { sats: n, extra: 0, denominations: all };
       }
+      /* More pieces than the tap writes (an amount in the millions): as many of those as leave room for the rest in powers of two,
+       * so that the prices that are exact reach as far as the pieces allow. */
+      if (exactly) {
+        var taken = [], left = whole.rest;
+        for (var e = 0; e < exactly.length; e++) {
+          if (whole.drawn.length + taken.length + 1 + cut(left - exactly[e]).length > cap) break;
+          taken.push(exactly[e]);
+          left -= exactly[e];
+        }
+        var most2 = whole.drawn.concat(taken, cut(left));
+        if (most2.length <= cap) {
+          most2.sort(function (a, b) { return b - a; });
+          return { sats: n, extra: 0, denominations: most2 };
+        }
+      }
+    }
+    var setwise = !!sets && !FoxyWallet._cardTapUncapped;
+    // (the whole plan, or the plan as far as the money goes the old way, where pieces are not cut a set at a time)
+    if (whole.length <= cap && (!setwise || whole.rest === 0 || whole.drawn.length >= sizesUpTo(deepest))) {
+      whole.sort(function (a, b) { return b - a; });
+      return { sats: n, extra: 0, denominations: whole };
+    }
+    if (!setwise) {
+      for (var shallower = deepest - 1; shallower >= 0; shallower--) {
+        var fewer = build(shallower);
+        if (fewer.length <= cap) {
+          fewer.sort(function (a, b) { return b - a; });
+          return { sats: n, extra: 0, denominations: fewer };
+        }
+      }
+      return cardLadder(sats, most, biggest, have);
+    }
+    /* Cut a set at a time (pieces this phone writes): the drawer deepens a whole set at a time, every
+     * size from 1 up one deeper, the smallest first, before any is two deeper, so that the next exact payment is there as early
+     * as can be; as far as the money and the tap's pieces go, and what is left in powers of two. The taps after carry on. */
+    var sizes = [];
+    for (var z = 1; z <= CARD_DEEP_TOP && (!top || z <= top); z *= 2) sizes.push(z);
+    var out = [], rest = n, added = {};
+    level: for (var L = 1; L <= deepest; L++) {
+      for (var i = 0; i < sizes.length; i++) {
+        var d = sizes[i];
+        if ((held[d] || 0) + (added[d] || 0) >= L) continue;
+        // the money has run out at this size, or the tap's pieces have: what is left goes in powers of two
+        if (rest < d || out.length + 1 + cut(rest - d).length > cap) break level;
+        out.push(d);
+        added[d] = (added[d] || 0) + 1;
+        rest -= d;
+      }
+    }
+    var pieces = out.concat(cut(rest));
+    if (pieces.length <= cap) {
+      pieces.sort(function (a, b) { return b - a; });
+      return { sats: n, extra: 0, denominations: pieces };
     }
     return cardLadder(sats, most, biggest, have);
   }
 
+  /* What is left of a first load after its drawer (`drawn`), cut so that every price up to the whole is exact: each piece the largest
+   * power of two no more than one past what the pieces so far reach (`cardReach`), and no more than what is left or the mint's largest
+   * (`top`). A plain cut of the rest left gaps: 12,345 cut 2,047 of drawer and then 8,192 and 2,048 and so on reached 4,153 and no
+   * further. Null where the mint's largest stops the reach short of the whole. */
+  function cardExactRest(drawn, rest, top, have) {
+    var reach = cardReach((Array.isArray(have) ? have : []).concat(drawn));
+    var out = [], left = Math.max(0, Math.floor(Number(rest) || 0));
+    for (var guard = 0; left > 0 && guard < 64; guard++) {
+      var limit = Math.min(left, reach + 1);
+      var p = 1;
+      while (p * 2 <= limit && (!top || p * 2 <= top)) p *= 2;
+      if (p > reach + 1) return null;
+      out.push(p);
+      reach += p;
+      left -= p;
+    }
+    return left > 0 ? null : out;
+  }
+
   /* The pieces for `sats` to go onto `card`: a deep drawer where the card has
    * the places for one, and the drawer of a card of sixty-four where not. */
-  function cardCutFor(card, sats, most, biggest, have) {
-    return cardIsDeep(card) ? cardDeepLadder(sats, most, biggest, have, cardDepthFor(card)) : cardLadder(sats, most, biggest, have);
+  /* `depth`, where given: how deep the drawer is cut on this card (a deep card's first load, CARD_FIRST_DEPTH). */
+  function cardCutFor(card, sats, most, biggest, have, depth, exact) {
+    return cardIsDeep(card) ? cardDeepLadder(sats, most, biggest, have, depth || cardDepthFor(card), true, exact) : cardLadder(sats, most, biggest, have);
   }
 
   /* Whether a card is cut deep: it has the places for it (`wide`), and it
@@ -15497,19 +15685,19 @@
    * the places at that size, as much of it as fits is cut under the cap and
    * the rest goes in the plain powers of two, no larger than the mint's own
    * (`biggest`): `above` says how much is in such pieces, for the screen. */
-  function cardCutUnder(card, sats, room, cap, biggest, have) {
+  function cardCutUnder(card, sats, room, cap, biggest, have, depth, exact) {
     var n = Math.max(0, Math.floor(Number(sats) || 0));
     var most = Math.max(1, Math.floor(Number(room) || 1));
     var top = Math.max(0, Math.floor(Number(biggest) || 0));
     var fits = function (cut, places) { return !!cut && !(cut.extra > 0) && cut.denominations.length <= places; };
-    if (!(cap > 0) || (top > 0 && cap >= top)) return Object.assign({ above: 0 }, cardCutFor(card, n, most, top, have));
-    var whole = cardCutFor(card, n, most, cap, have);
+    if (!(cap > 0) || (top > 0 && cap >= top)) return Object.assign({ above: 0 }, cardCutFor(card, n, most, top, have, depth, exact));
+    var whole = cardCutFor(card, n, most, cap, have, depth, exact);
     if (fits(whole, most)) return Object.assign({ above: 0 }, whole);
     for (var under = n - cap; under >= 0; under -= cap) {
       var over = cardLadder(n - under, most, top, null, true);
       var left = most - over.denominations.length;
       if (over.extra > 0 || left < 1) continue;
-      var small = under > 0 ? cardCutFor(card, under, left, cap, have) : { sats: 0, extra: 0, denominations: [] };
+      var small = under > 0 ? cardCutFor(card, under, left, cap, have, depth) : { sats: 0, extra: 0, denominations: [] };
       if (!fits(small, left)) continue;
       return { sats: n, extra: 0, above: n - under,
                denominations: over.denominations.concat(small.denominations).sort(function (a, b) { return b - a; }) };
@@ -15559,7 +15747,11 @@
     var hold = Math.max(4, Number(keep) || 0);
     var room = (Number(info.empty) || 0) + (Number(info.spent) || 0) + ((signed && signed.length) || 0) - hold;
     // a card cut deep: a load (it is a load that keeps places back) may be most of the card; change is kept short
-    var most = !cardIsDeep(card) ? CARD_LOAD_PIECES : (Number(keep) > 0 ? CARD_WIDE_LOAD : CARD_WIDE_CHANGE);
+    /* (and no more than five seconds of the card's time a tap, CARD_TAP_LOAD and CARD_TAP_CHANGE: what is more waits for the next) */
+    // (`_cardTapUncapped`: for the suites whose subject is a drawer written in one tap, as before 2026-11-06)
+    var timed = !FoxyWallet._cardTapUncapped;
+    var most = !cardIsDeep(card) ? CARD_LOAD_PIECES : (Number(keep) > 0 ? (timed ? Math.min(CARD_WIDE_LOAD, CARD_TAP_LOAD) : CARD_WIDE_LOAD)
+                                                                      : (timed ? Math.min(CARD_WIDE_CHANGE, CARD_TAP_CHANGE) : CARD_WIDE_CHANGE));
     return Math.max(1, Math.min(most, room));
   }
 
@@ -15574,7 +15766,16 @@
   var CARD_FULL_WORDS = 'The card has no room for that. Take some money off it first.';
   function cardLoadCut(w, card, want) {
     var biggest = cardMaxPiece(w);
-    var ladder = cardCutUnder(card, want, cardRoomFor(card, null, CARD_CHANGE_ROOM), cardLimitCap(card, biggest), biggest, cardHeldAmounts(card));
+    var have = cardHeldAmounts(card);
+    /* A card's first load (nothing on it in either unit, nothing owed to it): one binary set, CARD_FIRST_DEPTH of each size, and
+     * never deeper than the card is cut (`cardDepthFor`). (`_cardFirstDepth`: for the suites whose subject is a drawer as a first
+     * load cut it before 2026-11-06.) */
+    var empty = !have.length && !(((card.whole || card).pieces) || []).length
+      && !cardStore(CARD_OWED).some(function (r) { return r && r.card === card.key && !r.stuck; });
+    var first = empty && cardIsDeep(card);
+    var firstDepth = Number(FoxyWallet._cardFirstDepth) > 0 ? Math.floor(Number(FoxyWallet._cardFirstDepth)) : cardFirstDepthNow();
+    var ladder = cardCutUnder(card, want, cardRoomFor(card, null, CARD_CHANGE_ROOM), cardLimitCap(card, biggest), biggest, have,
+                              first ? Math.min(firstDepth, cardDepthFor(card)) : 0, first);
     var room = card.info.empty + card.info.spent;
     return { ladder: ladder, room: room, full: ladder.denominations.length + 4 > room };
   }
@@ -15589,14 +15790,16 @@
     var top = cardMaxPiece(w);
     // no card read (a lost answer found later): its drawer is not known, so the plain powers of two
     if (!card) return cardLadder(sats, 64, top, null, true).denominations;
-    return cardChangeFor(sats, cardRoomFor(card, except), top, cardHeldAmounts(card, except), cardIsDeep(card), cardDepthFor(card));
+    return cardChangeFor(sats, cardRoomFor(card, except), top, cardHeldAmounts(card, except), cardIsDeep(card), cardDepthFor(card), true);
   }
 
   /* The same cut from its parts: `sats` of change in no more than `room` pieces
    * for a card that holds `held` (amounts). A payment is chosen by what this
    * would give back (`cardPick`), so the choosing and the making are one rule. */
-  function cardChangeFor(sats, room, top, held, wide, depth) {
-    var cut = wide ? cardDeepLadder(sats, room, top, held, depth) : cardLadder(sats, room, top, held);
+  /* `sets`: change this phone makes and writes (`cardChangeCut`), deepened a whole set at a time where the plan is more than the
+   * tap writes; the card's own change (`cardOwnChangeCut`) is cut as it was. */
+  function cardChangeFor(sats, room, top, held, wide, depth, sets) {
+    var cut = wide ? cardDeepLadder(sats, room, top, held, depth, sets) : cardLadder(sats, room, top, held);
     return (cut.extra > 0 ? cardLadder(sats, 64, top, null, true) : cut).denominations;
   }
 
@@ -15990,9 +16193,51 @@
    *         written first, at this phone's price, with the figures as the card says them, and the load sent again; otherwise said plainly;
    *   6A9D, a new currency on a card with no owner under the PIN alone: the holder's say is the history held for in the tap
    *         (`cardHoldOn`), and the load is sent again. */
-  function cardLoadSend(t, card, p1, body, le, doing, unit) {
+  /* The card as it is after a write that went whole, from what was read of it in this tap and what the write put on it
+   * (`cardWriteOwed`'s `pieces`): no read after the write, which was a fifth to a third of a second of every load. Null, and the
+   * card is read again, wherever what it is now is not known for certain from that: a row not written or refused, the card's own
+   * change (finished from its openings), a rate or a mint written to it in the tap, a piece of a keyset its table does not
+   * name yet, or a count that does not add up. */
+  function cardAfterWrite(card, wrote) {
+    if (!card || !card.info || !card.slots || !wrote || !Array.isArray(wrote.pieces)) return null;
+    if (wrote.blind || (wrote.left && wrote.left.length) || wrote.why || card.repointed || card.rated) return null;
+    if (card.table && wrote.pieces.some(function (p) { return !card.table.of[p.keyset]; })) return null;
+    // a card with no table yet given a piece of the other unit has one now (and another format), which only a read says
+    var ru0 = (card.record && card.record.unit) || 'sat';
+    if (!card.table && wrote.pieces.some(function (p) { return p.unit && p.unit !== ru0; })) return null;
+    var info = Object.assign({}, card.info);
+    var slots = card.slots.filter(function (x) { return !(wrote.cleared && x.state !== 'unspent'); });
+    if (wrote.cleared) { info.empty = (Number(info.empty) || 0) + (Number(info.spent) || 0); info.spent = 0; }
+    var n = wrote.pieces.length;
+    if (!(Number(info.empty) >= n)) return null;
+    // a PIN typed right in this tap gives the card its tries back, which only a read says: a card that had lost some is read again
+    if (card.pinGiven && !(Number(info.tries) >= 3)) return null;
+    // and the owner's grant ends a card of 1.25's no-PIN window (its total and its start), which only a read says
+    if (card.granted && info.noPinOwn) return null;
+    info.empty -= n;
+    info.unspent = (Number(info.unspent) || 0) + n;
+    wrote.pieces.forEach(function (p) {
+      // (where it stands on the card is not known without a read: a till's payment reads the card afresh, and chooses by what it reads)
+      slots.push(card.bare ? { state: 'unspent', i: -1, bare: true, keyset: p.keyset, amount: p.amount, nonce: '', C: '', date: p.date }
+                           : { state: 'unspent', i: -1, keyset: p.keyset, amount: p.amount, nonce: p.nonce, C: p.C, date: p.date });
+    });
+    var out = /** @type {any} */ (Object.assign({}, card, { info: info, slots: slots, written: true }));
+    out.pieces = slots.filter(function (x) { return x.state === 'unspent'; });
+    cardSortUnits(out);
+    out.balance = out.pieces.reduce(function (sum, x) { return sum + x.amount; }, 0);
+    if (out.units) out.balance = out.units[out.record.unit === 'usd' ? 'usd' : 'sat'].balance;
+    return out;
+  }
+
+  // LOAD_PROOF as `cardLoadSend` sends it, and as a batch of them is (`cardWriteOwed`): the same bytes either way
+  function cardLoadApdu(card, p1, body, le, unit) {
     var labelled = cardIs123(card);
-    var apdu = cardCommand(CARD_INS.load, p1, (labelled ? cardUnitByte(unit) : '') + body, le, labelled ? 1 : 0);
+    return cardCommand(CARD_INS.load, p1, (labelled ? cardUnitByte(unit) : '') + body, le, labelled ? 1 : 0);
+  }
+  // how many proved pieces go to the phone in one list (`t.many`): about three-quarters of a second of a card held well
+  var CARD_BATCH = 8;
+  function cardLoadSend(t, card, p1, body, le, doing, unit) {
+    var apdu = cardLoadApdu(card, p1, body, le, unit);
     var tried = { rate: false, hold: false };
     var go = function () {
       return t.want(apdu, doing).then(null, function (e) {
@@ -16019,6 +16264,7 @@
       if (!(rate > 0)) throw cardError('no-rate', 'This card has a limit and no rate, and this phone has no Bitcoin price to give it one. Get online once and try again.');
       ['limit', 'windowStart', 'spentToday', 'tapLimit', 'noPin', 'rate', 'rateSaid', 'book'].forEach(function (k) { card.info[k] = now[k]; });
       console.log('[foxy] card: it has a limit and no rate; its rate is written first, ' + rate + ' sats a dollar');
+      card.rated = true;
       return cardLimit23(t, card, { day: now.limit, tap: now.tapLimit, noPin: now.noPin.limit, rate: rate });
     });
   }
@@ -16028,7 +16274,8 @@
     /* From 1.21 the card's own change goes on with no PIN and anything else wants it: the change first, so that a refusal of a
      * later row for want of the PIN never stops the change from going on. */
     if (cardIs121(card)) mine = mine.filter(function (r) { return !!r.blind; }).concat(mine.filter(function (r) { return !r.blind; }));
-    if (!mine.length) return Promise.resolve({ unit: (card.record && card.record.unit) || 'sat', amount: 0, sats: 0, back: 0, change: 0, refund: 0, done: [], left: [], mended: 0, refused: 0 });
+    if (!mine.length) return Promise.resolve({ unit: (card.record && card.record.unit) || 'sat', amount: 0, sats: 0, back: 0, change: 0, refund: 0, done: [], left: [], mended: 0, refused: 0,
+                                               pieces: [], blind: false, cleared: false });
     /* What is on the card already, by nonce, where the read gave nonces. A
      * short read gives none: then the card itself says which pieces it
      * holds, by refusing them (`on-card`, below). */
@@ -16053,9 +16300,12 @@
     /* For the one line this write leaves in the log (how many pieces went on, how many with the mint's proof, how many of those the card kept,
      * and how long the loading took), and for the real store: the nonces of the pieces that went on and are from the mint itself. A card that
      * says it has no room for proofs (`noRoom`, once, as the answer to a load with one) is sent the rest plain, three to a command. */
-    var sentWith = 0, kept = 0, noRoom = false, loadBegan = 0, fresh = [];
+    var sentWith = 0, kept = 0, noRoom = false, loadBegan = 0, fresh = [], batches = 0;
+    /* What this write put on the card that was not on it, piece by piece; whether any was the card's own change (finished from its
+     * openings); and whether its used places were freed: what the card is after the write, with no read of it (`cardAfterWrite`). */
+    var newly = [], blindWrote = false, cleared = false;
     // its used places freed first, where it has any: a card with none is not asked
-    var walk = !(card.info && card.info.spent > 0) ? Promise.resolve() : t.want(cardCommand(CARD_INS.clear, 0, '', 1), 'to free its used places').then(function () {}, function (e) {
+    var walk = !(card.info && card.info.spent > 0) ? Promise.resolve() : t.want(cardCommand(CARD_INS.clear, 0, '', 1), 'to free its used places').then(function () { cleared = true; }, function (e) {
       // a locked card frees nothing, and may still have room; nor does a 1.21 card with no PIN given in this tap
       if (!(e && (e.card === 'locked' || e.card === 'pin-needed'))) throw e;
     });
@@ -16092,6 +16342,7 @@
             throw cardError('wrong-unit', 'That money is in ' + balanceWord(ru) + ', and this card holds ' + balanceWord(cu) + '.', { cardUnit: cu, unit: ru });
           }
           // the card's own change is finished from its openings; any other row is the pieces its token holds
+          if (row.blind) blindWrote = true;
           got = row.blind ? openingsOf().then(function (list) {
                               return cardIs121(card) ? cardLoadChange(t, card, row, list, function (piece) {
                                 onCard[piece.nonce] = true; written += 1; sentWith += 1; kept += 1; fresh.push(piece.nonce);
@@ -16128,7 +16379,7 @@
             if (!loadBegan) loadBegan = Date.now();
             return cardLoadSend(t, card, 0, some.map(cardPieceBytes).join(''), some.length, some.length > 1 ? 'some pieces' : 'a piece', ru).then(function (d) {
               var stored = some.length === 1 ? 1 : Math.min(some.length, Math.floor(String(d || '').length / 2));
-              for (var k = 0; k < stored; k++) { onCard[some[k].nonce] = true; written += 1; if (fromMint) fresh.push(some[k].nonce); }
+              for (var k = 0; k < stored; k++) { onCard[some[k].nonce] = true; written += 1; newly.push(Object.assign({ unit: ru }, some[k])); if (fromMint) fresh.push(some[k].nonce); }
               return some.slice(stored).reduce(function (chain, piece) {
                 return chain.then(function () { return send([piece]); });
               }, Promise.resolve());
@@ -16153,6 +16404,7 @@
               var h = String(d || '').toLowerCase();
               onCard[piece.nonce] = true;
               written += 1;
+              newly.push(Object.assign({ unit: ru }, piece));
               sentWith += 1;
               if (fromMint) fresh.push(piece.nonce);
               if (h.length === 4 && h.substr(2, 2) === '01') kept += 1;
@@ -16167,8 +16419,46 @@
               return null;
             });
           };
+          /* Pieces with the mint's proof one after another go to the phone as one list (`t.many`), CARD_BATCH at a time, each
+           * command as `sendProved` sends it: the phone sends them back to back and stops at the first the card refuses. What
+           * went on is counted as `sendProved` counts it; the one refused is sent again by itself, to be met as one always is,
+           * and the rest carry on from it. A link that cannot send several is sent them one at a time. */
+          var batched = function (from) {
+            var some = [];
+            while (some.length < CARD_BATCH && from + some.length < todo.length && proved(todo[from + some.length])) some.push(todo[from + some.length]);
+            if (some.length < 2 || !t.canMany()) return null;
+            tell({ step: 'writing', i: written + 1, n: Math.max(toWrite, written + 1) });
+            if (!loadBegan) loadBegan = Date.now();
+            var apdus = some.map(function (piece) { return cardLoadApdu(card, 1, cardPieceBytes(piece) + piece.proof.e + piece.proof.s + piece.proof.r, 2, ru); });
+            return t.many(apdus).then(function (got) {
+              if (!got) return null;
+              var k = 0;
+              for (; k < got.length && got[k].sw === '9000'; k++) {
+                var h = String(got[k].data || '').toLowerCase();
+                onCard[some[k].nonce] = true;
+                written += 1;
+                newly.push(Object.assign({ unit: ru }, some[k]));
+                sentWith += 1;
+                if (fromMint) fresh.push(some[k].nonce);
+                if (h.length === 4 && h.substr(2, 2) === '01') kept += 1;
+                else if (h.length === 4 && h.substr(2, 2) === '00' && !noRoom) {
+                  noRoom = true;
+                  console.log('[foxy] card: this card has no room for the mint\u2019s proofs; its pieces go on without them');
+                }
+              }
+              batches += 1;
+              // the card left part way: what went on stays on, and the write ends as a card gone does
+              if (got.lost && k >= got.length) throw cardError('gone', 'Card taken away too soon.');
+              // all of them on: on from the next
+              if (k >= some.length) return next(from + k);
+              // one refused (or a proof the card has no room for: the rest go plain): that one alone, as ever, then on
+              return (proved(some[k]) ? sendProved(some[k]) : send([some[k]])).then(function () { return next(from + k + 1); });
+            });
+          };
           var next = function (from) {
             if (from >= todo.length) return Promise.resolve();
+            var many = proved(todo[from]) ? batched(from) : null;
+            if (many) return many.then(function (r) { return r === null ? sendProved(todo[from]).then(function () { return next(from + 1); }) : r; });
             if (proved(todo[from])) return sendProved(todo[from]).then(function () { return next(from + 1); });
             var some = [todo[from]];
             while (some.length < size && from + some.length < todo.length && !proved(todo[from + some.length])) some.push(todo[from + some.length]);
@@ -16211,13 +16501,14 @@
       });
     });
     return walk.then(function () {
+      var loadMs = loadBegan ? Date.now() - loadBegan : 0;
       /* What went on, from the mint itself, is real (`cardRealNote`); and the one line of it, so that the time it took can be read off a phone:
        * how many pieces, how many of them were sent with the mint's proof (and how many of those the card kept), and the milliseconds from
        * the first load command to the last answer. No secret, nonce or point in it. */
       if (fresh.length && card.info && card.info.proofs) { try { cardRealNote(card.key, fresh); } catch (xr) {} }
       if (written > 0) {
         console.log('[foxy] card: wrote ' + written + ' piece(s), ' + sentWith + ' with the mint\u2019s proof' + (sentWith ? ' (' + kept + ' kept by the card)' : '')
-          + ', in ' + (Date.now() - (loadBegan || Date.now())) + ' ms');
+          + ', in ' + (Date.now() - (loadBegan || Date.now())) + ' ms' + (batches ? ', ' + batches + ' list(s) to the phone' : ''));
       }
       /* Nothing finished, but some pieces went on before the card left: said on
        * the error (`wrote`), so the screen can ask for the tap that finishes it
@@ -16241,6 +16532,11 @@
       var out = /** @type {any} */ ({ unit: cu2, amount: sats, sats: cu2 === 'sat' ? sats : 0, back: back, change: change, refund: refund, done: done, left: left,
                why: why ? (why.card || 'refused') : '', mended: mended, refused: refusedMend });
       if (also) out.also = also;
+      out.pieces = newly;
+      out.written = written;
+      out.loadMs = loadMs;
+      out.blind = blindWrote;
+      out.cleared = cleared;
       return out;
     });
   }
@@ -17332,7 +17628,8 @@
       });
       var back = changeFor(w, total - fee - want);
       var room = card ? cardRoomFor(card, picked) : CARD_LOAD_PIECES;
-      var after = back > 0 ? rest.concat(cardChangeFor(back, room, top, rest, cardIsDeep(card), cardDepthFor(card))) : rest;
+      // (as `cardChangeCut` will cut it: one rule)
+      var after = back > 0 ? rest.concat(cardChangeFor(back, room, top, rest, cardIsDeep(card), cardDepthFor(card), true)) : rest;
       var sum = 0;
       after.forEach(function (a) { sum += a; });
       return cardReach(after) === sum;
@@ -21487,7 +21784,8 @@
    * back from mempool's onion to the clearnet; and it keeps the newest header that passes what is
    * checked below. A tap uses what is kept and never waits for
    * the fetch (`cardClock`, 08a-flashcard.js): the fetch happens when Tor comes up, when the app
-   * comes back to the front and when a card is tapped, if the one kept is older than two minutes
+   * comes back to the front, when a card is tapped and when a DEPOSIT's invoice goes up and its money comes in
+   * (`headerWarm`), if the one kept is older than two minutes
    * and the phone is online, and never more than once a minute after a failure. There is no timer
    * here: nothing runs that has to be stopped.
    *
@@ -21633,7 +21931,9 @@
     return String(body === undefined || body === null ? '' : body).trim().replace(/^"([^"]*)"$/, '$1').trim();
   }
 
-  /* One source's tip and its header, on the circuit `label` (both requests ride it). Rejects with why not. */
+  /* One source's tip and its header, on the circuit `label` (all its requests ride it). Rejects with why not.
+   * Two rounds over Tor, not three: the tip's hash, then its header and its height together. Each round to an onion is seconds
+   * (a phone's log, 2026-11-06: three in series took 10.3 s), and the height waited on the header for nothing. */
   function headerAsk(source, label) {
     var get = function (path) {
       return headerWithin(FoxyWallet.nativeRequest({ endpoint: source.url + path, method: 'GET', foxyText: true, foxyCircuit: label }),
@@ -21642,15 +21942,16 @@
     return Promise.resolve().then(function () { return get('/api/blocks/tip/hash'); }).then(function (text) {
       var tip = headerText(text).toLowerCase();
       if (!/^[0-9a-f]{64}$/.test(tip)) throw new Error('what it called the tip is not a block hash');
+      /* Its height, for the screen alone ("Block #…"): a header does not carry it, the source says it, and nothing is
+       * decided by it. A source that will not say it leaves it 0. Asked beside the header, and its failure fails nothing. */
+      var height = get('/api/blocks/tip/height').then(function (h) {
+        var n = parseInt(headerText(h), 10);
+        return (n > 0 && n < 100000000) ? n : 0;
+      }, function () { return 0; });
       return get('/api/block/' + tip + '/header').then(function (body) {
         var header = headerParse(headerText(body));
         if (header.hash !== tip) throw new Error('the header it gave is not the block it named');
-        /* Its height, for the screen alone ("Block #…"): a header does not carry it, the source says it, and nothing is
-         * decided by it. A source that will not say it leaves it 0. */
-        return get('/api/blocks/tip/height').then(function (h) {
-          var height = parseInt(headerText(h), 10);
-          return { source: source.name, tip: tip, header: header, height: (height > 0 && height < 100000000) ? height : 0 };
-        }, function () { return { source: source.name, tip: tip, header: header, height: 0 }; });
+        return height.then(function (n) { return { source: source.name, tip: tip, header: header, height: n }; });
       });
     });
   }
@@ -25386,8 +25687,7 @@
           cidInboxDrop(at);
           cidOfferDrop(at);
           if (r && r.hash) {
-            // and, where the payer proved to be a contact, whose it was, for INBOX (`cmsgPaymentsNow`)
-            try { amendTx(r.hash, name ? { memo: memo, cid: 'in', cidPeer: String(got.from).toLowerCase() } : { memo: memo, cid: 'in' }); } catch (x) {}
+            try { amendTx(r.hash, { memo: memo, cid: 'in' }); } catch (x) {}
             var note = got.note ? cidCleanName(String(got.note).slice(0, CID_NOTE_MAX)) : '';
             if (note) { try { FoxyWallet.tag(r.hash, { note: note }); } catch (x) {} }
           }
@@ -26157,11 +26457,6 @@
       });
     }).then(function (n) {
       return cidDrain().then(function () { return n; }, function () { return n; });
-    }).then(function (n) {
-      // and the messages between Cashu IDs: the contacts' next keys listened on, what waits to go sent (08f-cashu-msg.js)
-      Promise.resolve().then(function () { return cmsgListenNow(); }).then(null, function () {});
-      Promise.resolve().then(function () { return cmsgDeliverAll(); }).then(null, function () {});
-      return n;
     });
     cidListenRun = run;
     var done = function () { if (cidListenRun === run) cidListenRun = null; };
@@ -26720,7 +27015,6 @@
       Promise.resolve().then(function () { return cidListenNow({ ifClosed: true }); }).then(null, function () {});
       if (cidOutboxRows().some(function (r) { return cidDue(r, Date.now()); })) setTimeout(function () { cidDeliverAll().then(null, function () {}); }, 0);
       if (cidOutboxRows().some(function (r) { return cidCopyDue(r, Date.now()); })) setTimeout(function () { cidCopyAll().then(null, function () {}); }, 0);
-      cmsgOnRoute();
     }
     catch (e) { console.warn('[foxy] cashu id: sending on the route’s return:', (e && e.message) || e); }
   }
@@ -26838,748 +27132,6 @@
     if (b.by !== 'address') return save(BANK_KEY, { ex: ex, at: Date.now() });
     var user = bankUser(ex, raw);
     return user ? save(BANK_KEY, { ex: ex, user: user, at: Date.now() }) : false;
-  }
-  /* ---- messages between Cashu IDs ----------------------------------------------
-   *
-   * docs/CASHU-ID.md, "Messages", is the whole of it. Two Foxys that hold each
-   * other's ID work out one secret, natively, from their ID keys
-   * (SHA-256("foxy-msg-pair-v1" ‖ x(d_mine·ID_peer)), Foxy/Keychain/CashuMsg.swift),
-   * and from it a chain of keys for each direction: message i from one to the other
-   * goes to the x-only half of k_i = SHA-256("foxy-msg-recv-v1" ‖ secret ‖ dir ‖ i),
-   * a key used once, and its seal is signed by s_i, which only the two can work
-   * out. The relays see gift wraps to keys that never repeat.
-   *
-   * This page never holds the secret or any of the keys. It keeps, per contact:
-   *
-   *   out    the index its next message to them takes;
-   *   base   the lowest index of theirs it has not had, and `got`, the ones above it
-   *          it has had: the phone listens on the next eight it has not had
-   *          (`cmsgWindow`), so a message that arrives moves the window on;
-   *   known  whether they are listening on this phone's chain: false for a contact
-   *          new to messages and after a restore, and again (`resync`) when their
-   *          `next` says they are a window or more behind. While it is false, a
-   *          message goes once to their public delivery key instead, with this
-   *          phone's ID proved (`from`, `tag`, `E`, as a payment names its payer)
-   *          and the index it stands for: "ratchet from now". The receiver's window
-   *          for this phone starts after it. With no answer, every eighth message
-   *          past what they last said they read (`ack`) goes that way too
-   *          (`cmsgFirstDue`), in case their window stopped on messages the relays lost.
-   *
-   * Every message carries `next`, the sender's own `base` for the receiver, so each
-   * side learns how far the other has read. A message is padded to 512, 1,024 or
-   * 2,048 bytes, waits 0 to 20 seconds at random before it goes, and is tried
-   * until a relay takes it (the Cashu ID's outbox rules: once a minute, every
-   * quarter of an hour after thirty tries, at once when the route comes back).
-   *
-   * A restored phone has none of this: its words find its contacts' IDs only once
-   * they are added again. Then it listens from 0 on both chains of each one, its
-   * own messages included (both phones can open both chains), walks forward as
-   * they come, and so resumes where the relays still hold it. It tells each one
-   * where it stands at once, silently (CMSG_STAND, `cmsgStandOut`), and its first
-   * message to each goes by the delivery key. */
-
-  var CMSG_THREADS = 'foxy.msg.threads';
-  var CMSG_OUTBOX = 'foxy.msg.outbox';
-  var CMSG_SEEN = 'foxy.msg.seen';
-  var CMSG_TYPE = 'foxy-msg';
-  // a restored phone's "where I stand" to a contact: by the delivery key only, no text, never a line of a conversation
-  var CMSG_STAND = 'foxy-msg-stand';
-  var CMSG_V = 1;
-  // what one message may say, and the sizes its plaintext is padded to
-  var CMSG_TEXT_MAX = 1000;
-  var CMSG_BUCKETS = [512, 1024, 2048];
-  var CMSG_BODY_MAX = 4096;
-  // the keys listened on past the lowest not yet had, per contact (CashuMsg.window)
-  var CMSG_WINDOW = 8;
-  /* the highest index a message may take: the window of eight above it still fits below 2^32, so a window is never
-   * empty and the phone never names a contact with nothing to listen on */
-  var CMSG_INDEX_MAX = 4294967295 - CMSG_WINDOW;
-  // what is kept: the last 200 messages with each contact, a megabyte in all, ten people who are not contacts
-  var CMSG_PER_PEER = 200;
-  var CMSG_BYTES = 1024 * 1024;
-  var CMSG_STRANGERS = 10;
-  // of the megabyte, what the people who are not contacts may take between them: their oldest go first, before a contact's
-  var CMSG_STRANGER_BYTES = 128 * 1024;
-  // a first message's id, kept with its sender's conversation so that one read again is known
-  var CMSG_FIRSTS = 64;
-  // an `at` further back than the relays keep is brought up to that (CID_SINCE_S, 32 days)
-  var CMSG_PAST_MS = CID_SINCE_S * 1000;
-  var CMSG_PEERS_MAX = 60;
-  var CMSG_SEEN_MAX = 500;
-  var CMSG_OUTBOX_MAX = 100;
-  // a message waits 0 to 20 s at random before it goes, so a relay cannot pair it with a tap on SEND
-  var CMSG_DELAY_MS = 20000;
-  var CMSG_REOPEN_MS = 1500;
-  var CMSG_ID = /^[0-9a-f]{32}$/;
-
-  function cmsgUtf8Len(text) { return cidUtf8(String(text)).length; }
-
-  function cmsgRandom(n) {
-    var out = [];
-    while (out.length < n) {
-      var r = window.CashuTS.createRandomSecretKey();
-      for (var i = 0; i < r.length && out.length < n; i++) out.push(r[i]);
-    }
-    return out;
-  }
-
-  function cmsgNewId() { return hexOf(cmsgRandom(16)); }
-
-  /* The message's text as it is kept and sent: no control characters but line breaks (C0, DEL and C1 become spaces), no
-   * marks that turn the direction of a line (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069 become spaces),
-   * no invisible spaces (U+200B, U+2060, U+FEFF go; the joiners U+200C and U+200D stay, emoji and scripts need them),
-   * trimmed; '' when there is nothing, null when it is longer than a message may be. */
-  function cmsgClean(text) {
-    var t = String(text == null ? '' : text).replace(/\r\n?/g, '\n')
-      .replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, ' ')
-      .replace(/[\u200b\u2060\ufeff]/g, '').trim();
-    if (Array.from(t).length > CMSG_TEXT_MAX) return null;
-    return t;
-  }
-
-  /* The plaintext, padded with random characters to the smallest size that holds it. Throws past the largest. */
-  function cmsgPadded(j) {
-    var o = Object.assign({}, j, { pad: '' });
-    var n = cmsgUtf8Len(JSON.stringify(o));
-    var size = CMSG_BUCKETS.filter(function (b) { return b >= n; })[0];
-    if (!size) throw new Error('That message is too long.');
-    var A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
-    o.pad = cmsgRandom(size - n).map(function (b) { return A.charAt(b & 63); }).join('');
-    return JSON.stringify(o);
-  }
-
-  function cmsgDelay() {
-    if (CID_TESTS && FoxyWallet._cashuMsgDelayMs !== undefined && Number(FoxyWallet._cashuMsgDelayMs) >= 0) return Number(FoxyWallet._cashuMsgDelayMs);
-    var r = cmsgRandom(3);
-    return ((r[0] << 16) | (r[1] << 8) | r[2]) % (CMSG_DELAY_MS + 1);
-  }
-
-  function cmsgRetryMs() { return CID_TESTS && Number(FoxyWallet._cashuMsgRetryMs) > 0 ? Number(FoxyWallet._cashuMsgRetryMs) : CID_RETRY_MS; }
-
-  /* ---- what is kept ---- */
-
-  // { mine: <this phone's ID when it was written>, threads: { <peer ID hex>: thread } }
-  function cmsgAll() {
-    var a = load(CMSG_THREADS, null);
-    if (!a || typeof a !== 'object' || Array.isArray(a) || !a.threads || typeof a.threads !== 'object') a = { mine: '', threads: {} };
-    return a;
-  }
-
-  function cmsgNewThread(peer) {
-    return { peer: peer, out: 0, base: 0, got: [], known: false, resync: false, ack: 0, unread: 0, msgs: [], card: '', nostr: '', at: 0,
-      lost: cidRecovering(), firsts: [], firstAt: 0 };
-  }
-
-  function cmsgThread(all, peer, make) {
-    var t = all.threads[peer];
-    if (!t && make) { t = cmsgNewThread(peer); all.threads[peer] = t; }
-    return t || null;
-  }
-
-  /* Kept within its caps: 200 messages a contact, the oldest going first; the people who are not contacts within their
-   * own 128 KB, their oldest going first; and a megabyte in all, the oldest message of someone who is not a contact going
-   * first and then the oldest of any. So people nobody added cannot push a contact's messages out. */
-  function cmsgTrim(all) {
-    var strangers = [];
-    Object.keys(all.threads).forEach(function (p) {
-      var t = all.threads[p];
-      if (t.msgs.length > CMSG_PER_PEER) t.msgs = t.msgs.slice(t.msgs.length - CMSG_PER_PEER);
-      if (!cidContactOf(p)) strangers.push(p);
-    });
-    // the oldest message of the threads named, or null
-    var oldestOf = function (peers) {
-      var oldest = /** @type {{ p: string, m: any } | null} */ (null);
-      peers.forEach(function (p) {
-        var m = all.threads[p].msgs[0];
-        if (m && (!oldest || Number(m.at) < Number(oldest.m.at))) oldest = { p: p, m: m };
-      });
-      return oldest;
-    };
-    var bytesOf = function (m) { return cmsgUtf8Len(JSON.stringify(m)) + 1; };
-    var theirs = strangers.reduce(function (a, p) { return a + cmsgUtf8Len(JSON.stringify(all.threads[p].msgs)); }, 0);
-    while (theirs > CMSG_STRANGER_BYTES) {
-      var o = oldestOf(strangers);
-      if (!o) break;
-      theirs -= bytesOf(all.threads[o.p].msgs.shift());
-    }
-    var size = cmsgUtf8Len(JSON.stringify(all));
-    while (size > CMSG_BYTES) {
-      var oldest = oldestOf(strangers) || oldestOf(Object.keys(all.threads));
-      if (!oldest) break;
-      all.threads[oldest.p].msgs.shift();
-      size = cmsgUtf8Len(JSON.stringify(all));
-    }
-    return all;
-  }
-
-  function cmsgSave(all) { return save(CMSG_THREADS, cmsgTrim(all)); }
-
-  function cmsgOutbox() {
-    var l = load(CMSG_OUTBOX, []);
-    return Array.isArray(l) ? l.filter(function (r) { return r && typeof r.id === 'string' && typeof r.body === 'string'; }) : [];
-  }
-
-  function cmsgSeenList() {
-    var l = load(CMSG_SEEN, []);
-    return Array.isArray(l) ? l : [];
-  }
-
-  function cmsgChanged(peer) {
-    if (typeof FoxyWallet._onCashuMsg === 'function') {
-      try { FoxyWallet._onCashuMsg(peer); } catch (x) {}
-    }
-  }
-
-  // the contact's name, or '' for someone who is not one
-  function cmsgNameOf(peer) {
-    var c = cidContactOf(peer);
-    return c ? String(c.name || 'Cashu ID') : '';
-  }
-
-  // their delivery key: the contact's, or from the ID string they sent with their first message
-  function cmsgNostrOf(peer, t) {
-    var c = cidContactOf(peer);
-    if (c && CID_HEX32.test(String(c.cid.nostr || ''))) return c.cid.nostr;
-    return t && CID_HEX32.test(String(t.nostr || '')) ? t.nostr : '';
-  }
-
-  /* The keys to listen on for one thread: their next eight indices this phone has not had, and while they are not
-   * listening on this phone's chain (`known` false: new, or restored), its own next eight, read back. */
-  function cmsgWindow(t) {
-    var inward = [];
-    for (var i = Number(t.base) || 0; inward.length < CMSG_WINDOW && i < 4294967296; i++) {
-      if ((t.got || []).indexOf(i) < 0) inward.push(i);
-    }
-    var outward = [];
-    if (!t.known) for (var j = Number(t.out) || 0; outward.length < CMSG_WINDOW && j < 4294967296; j++) outward.push(j);
-    return { peer: t.peer, in: inward, out: outward };
-  }
-
-  /* ---- a message in ---- */
-
-  /* A message's body, read: the object, or null when it is not one this Foxy writes. `i` the index it came to, or
-   * null for a first message by the delivery key. A "where I stand" (CMSG_STAND) only by the delivery key, and only with
-   * no text: it is never a line of a conversation. No index above CMSG_INDEX_MAX: a window of eight past it would not fit
-   * below 2^32. */
-  function cmsgRead(body, i) {
-    var text = String(body || '');
-    if (text.length > CMSG_BODY_MAX || CMSG_BUCKETS.indexOf(cmsgUtf8Len(text)) < 0) return null;
-    var j = null;
-    try { j = JSON.parse(text); } catch (e) { return null; }
-    if (!j || typeof j !== 'object' || Array.isArray(j)) return null;
-    var stand = j.type === CMSG_STAND && i === null;
-    if (j.v !== CMSG_V || (j.type !== CMSG_TYPE && !stand) || typeof j.id !== 'string' || !CMSG_ID.test(j.id)) return null;
-    if (typeof j.text !== 'string' || cmsgClean(j.text) === null || (stand && j.text !== '')) return null;
-    if (stand && !Number.isInteger(j.next)) return null;
-    if (!Number.isInteger(j.i) || j.i < 0 || j.i > CMSG_INDEX_MAX || (i !== null && j.i !== i)) return null;
-    if (typeof j.at !== 'number' || !isFinite(j.at)) return null;
-    if (j.next !== undefined && (!Number.isInteger(j.next) || j.next < 0)) return null;
-    return j;
-  }
-
-  function cmsgHas(t, id) { return t.msgs.some(function (m) { return m.id === id; }); }
-
-  // a message's time as kept: never ahead of now, never further back than the relays keep
-  function cmsgAt(at, now) { return Math.min(Math.max(now - CMSG_PAST_MS, Number(at) || 0), now); }
-
-  // the newest time of theirs this conversation holds: a first message's, or a message's
-  function cmsgNewestIn(t) {
-    return t.msgs.reduce(function (a, m) { return m.dir === 'in' ? Math.max(a, Number(m.at) || 0) : a; }, Number(t.firstAt) || 0);
-  }
-
-  // what their `next` says: how far they have read this phone's chain, and whether they are a window or more behind
-  function cmsgHeard(t, next) {
-    t.ack = Math.max(Number(t.ack) || 0, next);
-    if ((Number(t.out) || 0) - next >= CMSG_WINDOW) t.resync = true;
-  }
-
-  /* A first message from them to go by the delivery key: theirs did not know this phone's place (`known` false), they
-   * said they are a window behind (`resync`), or this phone is eight, sixteen … past what they last said they read, with
-   * no answer: their window may have stopped on messages the relays lost. */
-  function cmsgFirstDue(t) {
-    var ahead = (Number(t.out) || 0) - (Number(t.ack) || 0);
-    return !t.known || !!t.resync || (ahead >= CMSG_WINDOW && ahead % CMSG_WINDOW === 0);
-  }
-
-  /* Taken into its thread: 'kept' or 'seen'. `first`: it came by the delivery key, and its index starts their chain.
-   *
-   * A first message is known again by its id, kept with its sender's conversation (CMSG_FIRSTS of them, which nobody else
-   * can push out), and never moves the window back when it is read again: below the window, only one newer than all of
-   * theirs this phone holds moves it (a phone of theirs that started its chain again after a restore); an older one never
-   * had (it came late) is kept as a line and the window stays. */
-  function cmsgTakeIn(all, t, j, first) {
-    if (cmsgHas(t, j.id)) return 'seen';
-    var i = j.i;
-    var now = Date.now();
-    if (first) {
-      var fid = j.id.slice(0, 16);
-      t.firsts = Array.isArray(t.firsts) ? t.firsts : [];
-      if (t.firsts.indexOf(fid) >= 0) return 'seen';
-      var newer = Number(j.at) > cmsgNewestIn(t);
-      // older than what is kept of a full conversation: it was had, and let go
-      if (i < t.base && !newer && t.msgs.length >= CMSG_PER_PEER && Number(j.at) < Number(t.msgs[0].at)) return 'seen';
-      t.firsts = t.firsts.concat([fid]).slice(-CMSG_FIRSTS);
-      if (newer) t.firstAt = Math.min(Number(j.at), now);
-      if (i >= t.base) {
-        // "ratchet from now": their next message comes to index i + 1
-        t.base = i + 1;
-        t.got = (t.got || []).filter(function (x) { return x > i; });
-      } else if (newer) {
-        // their chain started again: what was had above it was of the old one
-        t.base = i + 1;
-        t.got = [];
-      }
-      /* a first message says they have this phone in their book, and listen on its chain from their `next`. Not on a
-       * conversation begun in the week after this phone's words were restored (`lost`): one read again from the relays
-       * says nothing of where they listen now, and this phone's own first message goes by the delivery key, saying
-       * where it stands, before the ratchet. */
-      if (!t.lost) t.known = true;
-    } else {
-      if (i < t.base || (t.got || []).indexOf(i) >= 0) return 'seen';
-      t.got = (t.got || []).concat([i]);
-    }
-    cmsgAdvance(t);
-    if (Number.isInteger(j.next)) cmsgHeard(t, j.next);
-    t.msgs.push({ id: j.id, dir: 'in', text: cmsgClean(j.text), at: cmsgAt(j.at, now), i: i });
-    if (first && i < t.base - 1) t.msgs.sort(function (a, b) { return Number(a.at) - Number(b.at); });
-    t.unread = (Number(t.unread) || 0) + 1;
-    t.at = now;
-    cmsgSave(all);
-    return 'kept';
-  }
-
-  /* The window moved past what has come: the lowest index not had is the new base. With eight had above a gap, the gap
-   * is given up (a message the relays lost), so `got` stays short and the window keeps moving. */
-  function cmsgAdvance(t) {
-    t.got = (t.got || []).slice().sort(function (a, b) { return a - b; });
-    if (t.got.length >= CMSG_WINDOW) t.base = Math.max(t.base, t.got[0]);
-    while (t.got.indexOf(t.base) >= 0) {
-      var at = t.base;
-      t.got = t.got.filter(function (x) { return x !== at; });
-      t.base += 1;
-    }
-    t.got = t.got.filter(function (x) { return x > t.base; });
-  }
-
-  var cmsgArriving = Promise.resolve();
-
-  /* One message from the phone, opened by its key and sealed by the right one (`cashuIdMsgOpen`). `way`: 'in' for
-   * theirs, 'out' for this phone's own read back after a restore. 'kept', 'seen' or 'refused'; never rejects. */
-  function cmsgArrived(peer, way, i, body) {
-    var run = cmsgArriving.then(function () {
-      var p = String(peer || '').toLowerCase();
-      if (!CID_HEX33.test(p) || !Number.isInteger(i)) return 'refused';
-      var j = cmsgRead(body, i);
-      if (!j) { console.warn('[foxy] messages: a message was not one Foxy writes'); return 'refused'; }
-      var all = cmsgAll();
-      // a contact's conversation is made when its first message comes, if it was not when the phone was asked to listen
-      var t = cmsgThread(all, p, !!cidContactOf(p));
-      if (!t) return 'refused';
-      var got;
-      if (way === 'out') {
-        // this phone's own, from before a restore: kept as sent, and its chain goes on after it
-        t.out = Math.max(Number(t.out) || 0, i + 1);
-        if (cmsgHas(t, j.id)) { cmsgSave(all); return 'seen'; }
-        t.msgs.push({ id: j.id, dir: 'out', text: cmsgClean(j.text), at: cmsgAt(j.at, Date.now()), i: i, state: 'relay' });
-        t.msgs.sort(function (a, b) { return Number(a.at) - Number(b.at); });
-        cmsgSave(all);
-        got = 'kept';
-      } else {
-        got = cmsgTakeIn(all, t, j, false);
-      }
-      if (got === 'kept') { cmsgReopenSoon(); cmsgChanged(p); }
-      return got;
-    }).then(null, function (e) {
-      console.warn('[foxy] messages: a message could not be read:', (e && e.message) || e);
-      return 'refused';
-    });
-    cmsgArriving = run.then(function () {}, function () {});
-    return run;
-  }
-
-  // a delivery to the public key that is a message, not a payment
-  function cmsgIsFirst(body) {
-    try { var j = JSON.parse(String(body || '')); return !!j && (j.type === CMSG_TYPE || j.type === CMSG_STAND); } catch (e) { return false; }
-  }
-
-  /* A first message, by the delivery key (`_cashuIdArrived`): believed only where its tag is the one this phone works
-   * out from its own ID key, `from` and `E` (as a payment's payer is proved, `cidFromName`), and from someone who is a
-   * contact or sent the ID string that is theirs. At most ten people who are not contacts. 'kept', 'seen' or 'refused'. */
-  function cmsgFirstArrived(body) {
-    var run = cmsgArriving.then(function () {
-      if (!cidInUse()) return 'refused';
-      var j = cmsgRead(body, null);
-      if (!j) return 'refused';
-      var from = typeof j.from === 'string' ? j.from.toLowerCase() : '';
-      var tag = typeof j.tag === 'string' ? j.tag.toLowerCase() : '';
-      var E = typeof j.E === 'string' ? j.E.toLowerCase() : '';
-      if (!CID_HEX33.test(from) || !CID_HEX32.test(tag) || !CID_HEX33.test(E)) return 'refused';
-      if (cmsgSeenList().indexOf(j.id.slice(0, 16)) >= 0) return 'seen';
-      return cidMine().then(function (mine) {
-        if (mine.id === from) return 'refused';
-        return nativeJson('cashuIdTag', { peer: from, e: E }, 60000).then(function (k) {
-          if (String((k && k.tag) || '').toLowerCase() !== tag) {
-            console.warn('[foxy] messages: a first message did not prove who sent it');
-            return 'refused';
-          }
-          var all = cmsgAll();
-          var t = cmsgThread(all, from, false);
-          if (j.type === CMSG_STAND) return cmsgStandIn(all, t, from, j, mine);
-          var card = null;
-          if (typeof j.card === 'string') { var r = cidRead(j.card); if (r.id === from) card = r; }
-          if (!t) {
-            if (!cidContactOf(from)) {
-              if (!card) return 'refused';
-              var strangers = Object.keys(all.threads).filter(function (p) { return !cidContactOf(p); }).length;
-              if (strangers >= CMSG_STRANGERS) { console.warn('[foxy] messages: too many people who are not contacts'); return 'refused'; }
-            }
-            t = cmsgThread(all, from, true);
-          }
-          if (card) { t.card = cidEncode(card.id, card.nostr, card.sig); t.nostr = card.nostr; }
-          all.mine = mine.id;
-          var got = cmsgTakeIn(all, t, j, true);
-          var seen = cmsgSeenList().concat([j.id.slice(0, 16)]);
-          save(CMSG_SEEN, seen.slice(Math.max(0, seen.length - CMSG_SEEN_MAX)));
-          if (got === 'kept') { cmsgReopenSoon(); cmsgChanged(from); }
-          return got;
-        });
-      });
-    }).then(null, function (e) {
-      console.warn('[foxy] messages: a first message could not be read:', (e && e.message) || e);
-      return 'refused';
-    });
-    cmsgArriving = run.then(function () {}, function () {});
-    return run;
-  }
-
-  /* A contact's "where I stand" (a phone of theirs restored from the words, the conversation added back): no line and
-   * nothing unread; what it says is how far they have read this phone's chain, so a window or more behind, this phone's
-   * next message goes by the delivery key. Only from a contact, or someone this phone already has a conversation with. */
-  function cmsgStandIn(all, t, from, j, mine) {
-    if (!t && !cidContactOf(from)) return 'refused';
-    if (!t) t = cmsgThread(all, from, true);
-    var fid = j.id.slice(0, 16);
-    t.firsts = Array.isArray(t.firsts) ? t.firsts : [];
-    if (t.firsts.indexOf(fid) >= 0) return 'seen';
-    t.firsts = t.firsts.concat([fid]).slice(-CMSG_FIRSTS);
-    // what they say now, not the most they ever said: their stored state is gone
-    t.ack = j.next;
-    if ((Number(t.out) || 0) - j.next >= CMSG_WINDOW) t.resync = true;
-    all.mine = mine.id;
-    cmsgSave(all);
-    var seen = cmsgSeenList().concat([fid]);
-    save(CMSG_SEEN, seen.slice(Math.max(0, seen.length - CMSG_SEEN_MAX)));
-    return 'kept';
-  }
-
-  /* ---- listening ---- */
-
-  var cmsgListenRun = null;
-  var cmsgReopenTimer = null;
-
-  /* The phone listens on every contact's next keys, and on those of the people who are not contacts that wrote, in one
-   * request (`cashuIdMsgOpen`), only once this phone's ID is in use. A store written under another ID (the words
-   * changed) is let go first. */
-  function cmsgListenNow() {
-    if (cmsgListenRun) return cmsgListenRun;
-    if (!cidInUse()) return Promise.resolve(0);
-    var run = cidMine().then(function (mine) {
-      var all = cmsgAll();
-      if (all.mine && all.mine !== mine.id) { all = { mine: mine.id, threads: {} }; save(CMSG_OUTBOX, []); }
-      all.mine = mine.id;
-      var added = [];
-      cidContactsNow().forEach(function (c) {
-        if (c.cid.id === mine.id || all.threads[c.cid.id]) return;
-        var t = cmsgThread(all, c.cid.id, true);
-        if (t.lost) added.push(t.peer);
-      });
-      cmsgSave(all);
-      // a contact added back on a phone restored from the words: it is told where this phone stands (`cmsgStandOut`)
-      added.forEach(cmsgStandOut);
-      // a conversation with nothing left to listen on (a window at the very end of its chain) is left out, not refused
-      var list = Object.keys(all.threads).map(function (p) { return all.threads[p]; })
-        .sort(function (a, b) { return (Number(b.at) || 0) - (Number(a.at) || 0); })
-        .slice(0, CMSG_PEERS_MAX)
-        .map(cmsgWindow)
-        .filter(function (w) { return w.in.length + w.out.length > 0; });
-      if (!list.length) return 0;
-      var since = Math.floor(Date.now() / 1000) - CID_SINCE_S + 300;
-      return bridgeAsk('cashuIdMsgOpen', { since: since, peers: list }, 70000).then(function (n) {
-        return Number(String(n).trim()) || 0;
-      }, function (e) {
-        console.warn('[foxy] messages: the phone did not listen:', (e && e.message) || e);
-        return 0;
-      });
-    });
-    cmsgListenRun = run;
-    var done = function () { if (cmsgListenRun === run) cmsgListenRun = null; };
-    run.then(done, done);
-    return run;
-  }
-
-  // a message moved a window on: the phone listens on the next keys, once the messages arriving together are in
-  function cmsgReopenSoon() {
-    if (cmsgReopenTimer) clearTimeout(cmsgReopenTimer);
-    var ms = CID_TESTS && Number(FoxyWallet._cashuMsgReopenMs) > 0 ? Number(FoxyWallet._cashuMsgReopenMs) : CMSG_REOPEN_MS;
-    cmsgReopenTimer = setTimeout(function () {
-      cmsgReopenTimer = null;
-      Promise.resolve(cmsgListenRun).then(function () { return cmsgListenNow(); }).then(null, function () {});
-    }, ms);
-  }
-
-  /* ---- a message out ---- */
-
-  /* Write `text` to `peer` (an ID key, or a contact's ID string): kept in its thread as sent and in the outbox, and
-   * gone after its random wait. { id, i, first }. Rejects in words, and keeps nothing, for no ID in use, someone who is
-   * not a contact and never wrote, a message too long or empty. */
-  function cmsgSend(who, text) {
-    if (!cidInUse()) return Promise.reject(new Error('Open MY CASHU ID first: messages go from your own Cashu ID.'));
-    var clean = cmsgClean(text);
-    if (clean === null) return Promise.reject(new Error('That message is too long. A message is at most ' + CMSG_TEXT_MAX + ' characters.'));
-    if (!clean) return Promise.reject(new Error('Type a message first.'));
-    var w = String(who || '').trim();
-    var peer = CID_HEX33.test(w.toLowerCase()) ? w.toLowerCase() : (cidRead(w).id || '');
-    if (!peer) return Promise.reject(new Error('That is not a Cashu ID.'));
-    return cidMine().then(function (mine) {
-      if (peer === mine.id) throw new Error('That is your own Cashu ID.');
-      var all = cmsgAll();
-      if (all.mine && all.mine !== mine.id) all = { mine: mine.id, threads: {} };
-      all.mine = mine.id;
-      var t = cmsgThread(all, peer, false);
-      if (!t && !cidContactOf(peer)) throw new Error('Add them to your contacts first.');
-      if (!t) t = cmsgThread(all, peer, true);
-      var first = cmsgFirstDue(t);
-      var nostr = cmsgNostrOf(peer, t);
-      if (first && !nostr) throw new Error('Foxy does not know where to reach them yet.');
-      if (cmsgOutbox().length >= CMSG_OUTBOX_MAX) throw new Error('Too many messages are waiting to go. Try again once they have.');
-      var i = Number(t.out) || 0;
-      var j = /** @type {any} */ ({ v: CMSG_V, type: CMSG_TYPE, id: cmsgNewId(), text: clean, at: Date.now(), i: i, next: Number(t.base) || 0 });
-      var named = first ? cmsgProve(peer, mine, j) : Promise.resolve(j);
-      return named.then(function (body) {
-        var text = cmsgPadded(body);
-        // read again: another message may have been written while the tag was made
-        var now = cmsgAll();
-        var tt = cmsgThread(now, peer, true);
-        if ((Number(tt.out) || 0) !== i) { body.i = Number(tt.out) || 0; text = cmsgPadded(body); }
-        tt.out = body.i + 1;
-        if (first) tt.resync = false;
-        var made = tt.msgs.length === 0;
-        tt.msgs.push({ id: body.id, dir: 'out', text: clean, at: body.at, i: body.i, state: 'out' });
-        tt.at = Date.now();
-        now.mine = mine.id;
-        if (!cmsgSave(now)) throw new Error('Foxy could not keep that message: this phone’s storage is full.');
-        var rows = cmsgOutbox();
-        rows.push({ id: body.id, peer: peer, i: body.i, first: first, to: first ? nostr : '', body: text, sendAt: Date.now() + cmsgDelay(), tries: 0 });
-        save(CMSG_OUTBOX, rows);
-        cmsgChanged(peer);
-        cmsgArm();
-        // a conversation new to this phone: its keys are listened on from now
-        if (made) cmsgReopenSoon();
-        return { id: body.id, i: body.i, first: first };
-      });
-    });
-  }
-
-  /* A restored phone's "where I stand" to a contact added back: by the delivery key, proved as a first message is, with
-   * no text and its `next` (how far it has read their chain), so that a contact a window or more ahead goes by the
-   * delivery key to it. It takes no index and leaves `known` as it is: this phone's own next message still goes by the
-   * delivery key. Its body is made when it goes, after the random wait, so `next` says what was read back by then. */
-  function cmsgStandOut(peer) {
-    var rows = cmsgOutbox();
-    if (rows.length >= CMSG_OUTBOX_MAX || rows.some(function (r) { return r.stand && r.peer === peer; })) return;
-    var nostr = cmsgNostrOf(peer, null);
-    if (!nostr) return;
-    rows.push({ id: cmsgNewId(), peer: peer, i: 0, first: true, stand: true, to: nostr, body: '', sendAt: Date.now() + cmsgDelay(), tries: 0 });
-    save(CMSG_OUTBOX, rows);
-    cmsgArm();
-  }
-
-  // the stand's body, as it goes
-  function cmsgStandBody(r) {
-    return cidMine().then(function (mine) {
-      var t = cmsgThread(cmsgAll(), r.peer, false);
-      var j = /** @type {any} */ ({ v: CMSG_V, type: CMSG_STAND, id: r.id, text: '', at: Date.now(), i: t ? Number(t.out) || 0 : 0,
-        next: t ? Number(t.base) || 0 : 0 });
-      return cmsgProve(r.peer, mine, j).then(cmsgPadded);
-    });
-  }
-
-  /* A first message names its sender, proved as a payment's payer is: this phone's ID, a fresh E, the tag
-   * SHA-256("foxy-cashu-id-from-v1" ‖ x(d·their ID) ‖ E) the phone works out, and this phone's ID string so that
-   * someone who has not added it can. */
-  function cmsgProve(peer, mine, j) {
-    var e = window.CashuTS.createRandomSecretKey();
-    var E = hexOf(window.CashuTS.getPubKeyFromPrivKey(e));
-    return nativeJson('cashuIdTag', { peer: peer, e: E }, 60000).then(function (k) {
-      var tag = String((k && k.tag) || '').toLowerCase();
-      if (!CID_HEX32.test(tag)) throw new Error('This phone could not sign the message as yours.');
-      return Object.assign(j, { from: mine.id, tag: tag, E: E, card: mine.text });
-    });
-  }
-
-  var cmsgSending = null;
-  var cmsgTimer = null;
-
-  /* The message of an outbox row, marked as a relay took it: true once that is written (or there is nothing to mark). */
-  function cmsgMarkSent(r) {
-    var all = cmsgAll();
-    var t = cmsgThread(all, r.peer, false);
-    if (!t) return true;
-    // a stand leaves the chain as it is: this phone's next message still goes by the delivery key
-    if (r.first && !r.stand) { t.known = true; t.lost = false; }
-    t.msgs.forEach(function (m) { if (m.id === r.id) m.state = 'relay'; });
-    return cmsgSave(all);
-  }
-
-  // whether an outbox row's message is marked sent already (the row outlived the mark: an app killed between the two)
-  function cmsgMarked(all, r) {
-    var t = all.threads[r.peer];
-    return !!t && t.msgs.some(function (m) { return m.id === r.id && m.state === 'relay'; });
-  }
-
-  /* Every row whose wait is over, one at a time: to the delivery key by `nostrSend` for a first message, to the next
-   * key of the chain by `cashuIdMsgSend` otherwise. A row goes from the outbox only once a relay took it and its message
-   * is marked sent: a relay that took it while the store was full leaves the row `taken`, and only the mark is tried
-   * again, until there is room. */
-  function cmsgDeliverAll() {
-    if (cmsgSending) return cmsgSending;
-    var sent = 0;
-    var now = Date.now();
-    var kept = cmsgAll();
-    var stale = cmsgOutbox().filter(function (r) { return cmsgMarked(kept, r); });
-    if (stale.length) save(CMSG_OUTBOX, cmsgOutbox().filter(function (r) { return !cmsgMarked(kept, r); }));
-    var due = cmsgOutbox().filter(function (r) { return Number(r.sendAt) <= now; })
-      .sort(function (a, b) { return (a.peer === b.peer ? a.i - b.i : Number(a.sendAt) - Number(b.sendAt)); });
-    var run = due.reduce(function (chain, r) {
-      return chain.then(function () {
-        var tried = function (e) {
-          var rows = cmsgOutbox();
-          rows.forEach(function (x) {
-            if (x.id !== r.id) return;
-            x.tries = (Number(x.tries) || 0) + 1;
-            x.sendAt = Date.now() + cmsgRetryMs() * (x.tries >= CID_TRIES_FAST ? CID_RETRY_SLOW : 1);
-          });
-          save(CMSG_OUTBOX, rows);
-          if (e) console.warn('[foxy] messages: a message was not sent yet:', (e && e.message) || e);
-        };
-        // a relay took it, the mark not yet written: the mark again, a retry's wait from now
-        var markLater = function () {
-          var rows = cmsgOutbox();
-          rows.forEach(function (x) { if (x.id === r.id) { x.taken = true; x.sendAt = Date.now() + cmsgRetryMs(); } });
-          save(CMSG_OUTBOX, rows);
-        };
-        if (r.taken) {
-          if (cmsgMarkSent(r)) { save(CMSG_OUTBOX, cmsgOutbox().filter(function (x) { return x.id !== r.id; })); cmsgChanged(r.peer); }
-          else markLater();
-          return null;
-        }
-        if (!routeOpen()) { tried(null); return null; }
-        var body = r.stand && !r.body ? cmsgStandBody(r) : Promise.resolve(r.body);
-        var go = body.then(function (text) {
-          return r.first ? deliverOverNostr(cidNprofile(r.to), text)
-            : bridgeAsk('cashuIdMsgSend', { peer: r.peer, i: r.i, body: text }, 40000);
-        });
-        return go.then(function () {
-          if (cmsgMarkSent(r)) save(CMSG_OUTBOX, cmsgOutbox().filter(function (x) { return x.id !== r.id; }));
-          else markLater();
-          sent += 1;
-          cmsgChanged(r.peer);
-        }, tried);
-      });
-    }, Promise.resolve()).then(function () { cmsgArm(); return sent; }, function (e) {
-      console.warn('[foxy] messages: the outbox could not be sent:', (e && e.message) || e);
-      cmsgArm();
-      return sent;
-    });
-    cmsgSending = run;
-    var done = function () { if (cmsgSending === run) cmsgSending = null; };
-    run.then(done, done);
-    return run;
-  }
-
-  // the next row's moment, armed
-  function cmsgArm() {
-    if (cmsgTimer) { clearTimeout(cmsgTimer); cmsgTimer = null; }
-    var rows = cmsgOutbox();
-    if (!rows.length) return;
-    var next = Math.min.apply(null, rows.map(function (r) { return Number(r.sendAt) || 0; }));
-    cmsgTimer = setTimeout(function () {
-      cmsgTimer = null;
-      Promise.resolve(cmsgSending).then(function () { return cmsgDeliverAll(); }).then(null, function () {});
-    }, Math.max(0, next - Date.now()));
-  }
-
-  // the route has come back: whatever was tried and waits goes now (its random wait is not taken again)
-  function cmsgOnRoute() {
-    try {
-      var rows = cmsgOutbox();
-      if (!rows.some(function (r) { return Number(r.tries) > 0; })) return;
-      var now = Date.now();
-      rows.forEach(function (r) { if (Number(r.tries) > 0) r.sendAt = Math.min(Number(r.sendAt) || now, now); });
-      save(CMSG_OUTBOX, rows);
-      setTimeout(function () { cmsgDeliverAll().then(null, function () {}); }, 0);
-    } catch (e) { console.warn('[foxy] messages: sending on the route’s return:', (e && e.message) || e); }
-  }
-
-  /* ---- for the screens ---- */
-
-  function cmsgMarkWord(m) {
-    if (m.dir !== 'out') return '';
-    // the keeper's words (2026-11-05): "sending…" until a relay has taken it, "sent" after
-    return m.state === 'relay' ? 'sent' : 'sending\u2026';
-  }
-
-  function cmsgView(t) {
-    var name = cmsgNameOf(t.peer);
-    return {
-      peer: t.peer, name: name || 'A Cashu ID', contact: !!name, card: name ? '' : String(t.card || ''),
-      unread: Number(t.unread) || 0,
-      msgs: t.msgs.map(function (m) { return { id: m.id, dir: m.dir, text: m.text, at: Number(m.at) || 0, mark: cmsgMarkWord(m) }; }),
-    };
-  }
-
-  function cmsgThreadsNow() {
-    if (!cidInUse()) return [];
-    var all = cmsgAll();
-    return Object.keys(all.threads).map(function (p) {
-      var t = all.threads[p];
-      var last = t.msgs[t.msgs.length - 1] || null;
-      var name = cmsgNameOf(p);
-      return { peer: p, name: name || 'A Cashu ID', contact: !!name, unread: Number(t.unread) || 0,
-        lastAt: last ? Number(last.at) || 0 : 0, lastText: last ? last.text : '' };
-    }).filter(function (v) { return v.contact || v.lastAt > 0; });
-  }
-
-  /* INBOX's payments (26p-cashu-msg.js `renderInbox`): { peer, dir, unit, amount, at } for each payment to or from a
-   * Cashu ID this phone can put a name to, `at` in milliseconds. Out: every payment to a contact this phone made, which
-   * the outbox keeps (`cidPay`). In: the history rows whose payer proved to be a contact (`cidFromName`), which carry
-   * its ID key as `cidPeer`; a payer who did not prove who they are is no one's. Not only with the ID in use: a contact
-   * can be paid without it. */
-  function cmsgPaymentsNow() {
-    var list = [];
-    cidOutboxRows().forEach(function (r) {
-      var p = String(r.contact || '').toLowerCase();
-      if (!CID_HEX33.test(p)) return;
-      list.push({ peer: p, dir: 'out', unit: unitOf(r.unit) || 'sat', amount: Math.round(satsOf(r.amount)), at: Number(r.at) || 0 });
-    });
-    (load(K.log, []) || []).forEach(function (e) {
-      if (!e || e.cid !== 'in' || e.state === 'failed') return;
-      var p = String(e.cidPeer || '').toLowerCase();
-      if (!CID_HEX33.test(p)) return;
-      var unit = unitOf(e.unit) || 'sat';
-      var amount = satsOf(unit === 'sat' && e.sats != null ? e.sats : e.amount);
-      var at = Number(e.at) || 0;
-      list.push({ peer: p, dir: 'in', unit: unit, amount: Math.round(amount || 0), at: at > 1e11 ? at : at * 1000 });
-    });
-    return list.sort(function (a, b) { return b.at - a.at; });
-  }
-
-  function cmsgRead1(peer) {
-    var all = cmsgAll();
-    var t = cmsgThread(all, String(peer || '').toLowerCase(), false);
-    if (!t || !t.unread) return;
-    t.unread = 0;
-    cmsgSave(all);
   }
   /* ---- tips at the till, and the keeper's list of cashier codes ---------------
    *
@@ -27971,7 +27523,7 @@
   };
   /* ---- the reminder after fifteen days away -----------------------------------------------------------------------
    *
-   * Messages and payments to this phone's Cashu ID wait at the relays until Foxy is opened. So a phone whose ID is in use
+   * Payments to this phone's Cashu ID wait at the relays until Foxy is opened. So a phone whose ID is in use
    * (`cidInUse`) can have Foxy remind it, once, fifteen days after Foxy was last in front: a notification made on the
    * phone (Reminder.swift, the `reminder` action) and sent by nobody. The phone replaces it every time Foxy comes to the
    * front or goes away, so it fires only after fifteen days away. The words are the phone's own; the page gives none.
@@ -31285,6 +30837,8 @@
      * sweep to clear. */
     _sweepHeldNow: function () {
       if (!quoteSweepHeld || !routeOpen() || !wallet || wallet.foxyFromCache) return Promise.resolve([]);
+      // a card's sheet is up: once it is down (`cardAfter`)
+      if (cardSheetUp()) { cardAfter(function () { FoxyWallet._sweepHeldNow(); }); return Promise.resolve([]); }
       console.log('[foxy] a route is up and the quote sweep was held \u2014 running it now');
       return FoxyWallet.sweepQuotes().then(null, function (e) {
         console.warn('[foxy] the held quote sweep:', e && e.message);
@@ -41073,6 +40627,15 @@
     headerKept: function () { return headerKept(); },
     headerHeightOf: function (hash) { return headerHeightOf(hash); },
     headerRefresh: function (opts) { return headerRefresh(opts); },
+    /* The same, asked by a screen for a tap soon to come (a DEPOSIT's invoice up, its money in): fetched where what is kept is older
+     * than two minutes, never waited on by the tap; off where the suites turn the fetches that happen on their own off. */
+    /* Whether a card's sheet is up, and work to do once none is (08a-flashcard.js, `cardAfter`): at once where none is. */
+    cardSheetUp: function () { return cardSheetUp(); },
+    cardAfter: function (fn) { cardAfter(fn); },
+    headerWarm: function () {
+      if (FoxyWallet._headersOff) return Promise.resolve({ kept: headerKept(), fetched: false, why: 'off' });
+      return headerRefresh();
+    },
     headerShort: function (hash) { return headerShort(hash); },
     _headersOff: false,
     // how long after Tor comes up, or the app comes back, the header is asked for, in ms (the suites set it short)
@@ -41096,7 +40659,18 @@
     /* What goes onto a card is cut like a cash drawer, to fill the gaps in what it holds (08a-flashcard.js). */
     cardLadder: function (sats, most, biggest, have, plain) { return cardLadder(sats, most, biggest, have, plain); },
     // (`depth`: four for a card of 1.23 that holds both units, eight where not given)
-    cardDeepLadder: function (sats, most, biggest, have, depth) { return cardDeepLadder(sats, most, biggest, have, depth); },
+    cardDeepLadder: function (sats, most, biggest, have, depth, sets, exact) { return cardDeepLadder(sats, most, biggest, have, depth, sets, exact); },
+    /* The five seconds a tap (08a-flashcard.js, "five seconds a tap"): how many pieces a load and a payment's change write at
+     * most, the first load's depth, and the time a tap of `pieces` holds the card for by that budget. */
+    cardTapBudget: function () {
+      return { tapMs: CARD_TAP_MS, pieceMs: CARD_PIECE_MS, loadOwnMs: CARD_LOAD_OWN_MS, payOwnMs: CARD_PAY_OWN_MS,
+               load: CARD_TAP_LOAD, change: CARD_TAP_CHANGE, firstDepth: CARD_FIRST_DEPTH, deep: CARD_DEEP, deepTop: CARD_DEEP_TOP };
+    },
+    cardTapEstimate: function (kind, pieces) { return cardTapEstimate(kind, pieces); },
+    // for the suites: a first load cut this many deep instead of one binary set (0: as decided, CARD_FIRST_DEPTH)
+    _cardFirstDepth: 0,
+    // for the suites: no five-second cap on the pieces of one tap (a drawer written in one go, as before 2026-11-06)
+    _cardTapUncapped: false,
     /* What a card holds, as the amounts of its pieces, for cutting more for it. */
     cardHeld: function (card, except) { return cardHeldAmounts(card, except); },
     // (`unit`: the card's; a dollar card's largest piece is the dollar keyset's, in cents)
@@ -42347,7 +41921,11 @@
        * (`cardWriteOwed`), and what else is on the card it reads whole on
        * the card's own screen, which is where the bookkeeping is. */
       var how = { short: true };
+      var before = null;
+      // (a link that is not a sheet of the phone's, a card held to a reader in a suite, is timed from this write's own read)
+      if (link && !link.one) { try { link.firstAnswerAt = 0; } catch (e0) {} }
       return cardLook(link, how).then(function (card) {
+        before = card;
         if (card.info.pin === 'blocked') throw cardRefused('6983');
         if (!o.owner && !o.change && !pin && card.info.pinSet) throw cardError('bad-pin', 'A card PIN is 4 to 8 digits.');
         if (asOwner && !card.info.owner) throw cardRefused('6a90');
@@ -42377,7 +41955,8 @@
           });
         }).then(function () {
           return cardRepointFor(t, card);
-        }).then(function () {
+        }).then(function (moved) {
+          if (moved) card.repointed = true;
           // (1.23: the price a rate is written at where the card wants one, and the held tap's askings for the screen)
           card.price = o.price;
           card.onHold = o.onHold;
@@ -42385,9 +41964,19 @@
         });
       }).then(function (r) {
         wrote = r;
-        // after the write, what the card comes to: the short way for an owner as for a till
+        /* After the write, what the card comes to: from what was read before it and what went on, where that says it for certain
+         * (`cardAfterWrite`); otherwise read again, the short way for an owner as for a till. */
+        // (not for the owner's own read after, which asks what only its owner is told: its limits and its rate)
+        var after = asOwner ? null : cardAfterWrite(before, r);
+        if (after) return after;
         return cardLook(link, asOwner ? { mine: true, short: true } : { short: true });
       }).then(function (card) {
+        /* The line a phone test of the five seconds is read from: the pieces this write put on, the milliseconds from its first load
+         * command to its last answer, and the card's time in the field, from its first answer in this sheet to its last. */
+        try {
+          var contact = (link && link.firstAnswerAt && link.lastAnswerAt) ? link.lastAnswerAt - link.firstAnswerAt : 0;
+          console.log('[foxy] card: wrote ' + (Number(wrote.written) || 0) + ' piece(s) in ' + (Number(wrote.loadMs) || 0) + ' ms, contact ' + contact + ' ms from read to done');
+        } catch (eLog) {}
         // a short read lists no nonces, and says nothing of which pieces have left the card
         if (!card.bare && card.record.refundKey && cardsOnFile()[card.key]) cardRemember(card, card.pieces, true);
         // what went on, in the card's unit: `amount`, and `sats` for a bitcoin card only (`back`, `change` and `refund` are in it too)
@@ -43037,6 +42626,10 @@
      * sheet dismissed or timed out while it looks rejects with `fn`'s error and
      * `sheetClosed`, and the screen says what is left. */
     cardSession: function (text, fn, opts) {
+      // the page's background work waits while this sheet is up (`cardAfter`): until the card is let go, or the tap settles
+      cardSheets += 1;
+      var down = false;
+      var sheetDown = function () { if (down) return; down = true; cardSheetDown(); };
       var link = {
         released: false,
         // what is true of the card for as long as this sheet is up, and no longer (08a-flashcard.js, `cardProvedHere`)
@@ -43045,6 +42638,26 @@
           // once let go, nothing more is asked of the card; the sheet is gone
           if (link.released) return Promise.reject(new Error('the card was let go'));
           return bridgeAsk('cardSend', { apdu: String(apdu) }, 15000);
+        },
+        /* Several commands sent back to back by the phone (`cardSendMany`, FoxyBridge+Flashcard.swift): the answers in order, the
+         * last the first that was not 9000, and `lost` where the card left part way. One trip to the phone and back for all of
+         * them, where one each was most of a load's time on a busy phone. A phone with no such step answers `unsupported`, and
+         * the commands are sent one at a time (`cardTalk`). */
+        sendMany: function (apdus) {
+          if (link.released) return Promise.reject(new Error('the card was let go'));
+          if (link.noMany) return Promise.reject(Object.assign(new Error('unsupported'), { unsupported: true }));
+          var list = (apdus || []).map(String);
+          return bridgeAsk('cardSendMany', { apdus: list }, 15000 + 2000 * list.length).then(function (text) {
+            var parts = String(text || '').split(',').filter(function (x) { return x !== ''; });
+            var lost = parts.length > 0 && parts[parts.length - 1] === 'lost';
+            return { answers: lost ? parts.slice(0, -1) : parts, lost: lost };
+          }, function (e) {
+            if (/unknown action/i.test(String((e && e.message) || ''))) {
+              link.noMany = true;
+              throw Object.assign(new Error('unsupported'), { unsupported: true });
+            }
+            throw e;
+          });
         },
         say: function (line) {
           if (link.released) return Promise.resolve();
@@ -43057,6 +42670,7 @@
         release: function (line) {
           if (link.released) return Promise.resolve();
           link.released = true;
+          sheetDown();
           return bridgeAsk('cardEnd', { text: String(line || 'Done.') }, 5000).then(function () {}, function () {});
         },
         /* The card left part way through: the sheet stays up and looks for it
@@ -43081,8 +42695,8 @@
        * comes after takes the circuit made ready, and is not the one that waits
        * for a new one (`warmMint`). */
       if (opts && opts.warm) { try { FoxyWallet.warmMint(); } catch (e) {} }
-      // and the newest block header, if the one kept is old: for the next tap, not this one (`cardClock`)
-      headerSoon();
+      // and the newest block header, if the one kept is old: for the next tap, not this one (`cardClock`); a throw here must not leave the sheet counted up
+      try { headerSoon(); } catch (eH) { /* the next tap fetches it */ }
       var ended = function (e) {
         /* `e.sheetText`: the flow put things right in the sheet before it
          * failed (a refused payment's pieces put back on the card), and the
@@ -43135,7 +42749,7 @@
          * this deadline passing are the same kind but marked `quiet`, so the screen that asked can leave without making anything of it. */
         var quiet = /timed out|did not answer|interrupted/i.test(why);
         throw cardError('cancelled', /timed out|did not answer/i.test(why) ? 'No card was tapped.' : 'The card was not tapped.', quiet ? { quiet: true } : undefined);
-      });
+      }).then(function (r) { sheetDown(); return r; }, function (e) { sheetDown(); throw e; });
     },
 
 
@@ -43322,10 +42936,7 @@
       if (!r.id) return Promise.reject(new Error(String(r.why || 'That is not a Cashu ID.')));
       return cidMine().then(function (mine) {
         if (mine.id === r.id) throw new Error('That is your own Cashu ID.');
-        var row = cidKeep(r, name);
-        // a new contact's keys are listened on for its messages (08f-cashu-msg.js)
-        if (cidInUse()) cmsgReopenSoon();
-        return row;
+        return cidKeep(r, name);
       });
     },
 
@@ -43354,8 +42965,6 @@
      * for real, taken once it is) or 'refused'; never rejects. One every check on this phone has passed is said to the app
      * as arriving (`_onCashuIdArriving({ unit, amount, name, mint })`) before the mint swaps it, and as paid once it has. */
     _cashuIdArrived: function (body) {
-      // a message's first, to the public key, is not a payment (08f-cashu-msg.js)
-      if (cmsgIsFirst(body)) return cmsgFirstArrived(body);
       // read before the mint was connected for real: held until it is ('held', `cidHoldEarly`)
       if (cidHoldEarly(body)) return Promise.resolve('held');
       return cidArrived(body).then(null, function (e) {
@@ -43458,52 +43067,6 @@
       if (!b || !FoxyWallet.openCompany) return Promise.resolve();
       return FoxyWallet.openCompany(b.site);
     },
-    /* ---- messages between Cashu IDs (08f-cashu-msg.js, docs/CASHU-ID.md "Messages") -------------
-     *
-     * For the screens: CONTACTS shows each contact's unread count (`cashuMsgThreads`), a contact's screen its messages
-     * (`cashuMsgThread`) and SEND writes one (`cashuMsgSend`). Only once this phone's ID is in use (`cashuMsgOn`): with
-     * no ID in use there are no messages, none are listened for and none can be written. */
-
-    // whether messages can be read and written here: MY CASHU ID was shown, or its words restored
-    cashuMsgOn: function () { return cidInUse(); },
-
-    /* The conversations: { peer, name, contact, unread, lastAt, lastText }, contacts and the people who are not contacts
-     * yet that wrote ([] with no ID in use). */
-    cashuMsgThreads: function () { return cmsgThreadsNow(); },
-
-    /* One conversation, oldest first: { peer, name, contact, card, unread, msgs: [{ id, dir, text, at, mark }] }, `mark`
-     * 'sending…' or 'sent' for this phone's own, `card` the ID string of someone who is not a contact. null
-     * for none. */
-    cashuMsgThread: function (peer) {
-      if (!cidInUse()) return null;
-      var p = String(peer || '').toLowerCase();
-      var t = cmsgThread(cmsgAll(), p, false);
-      if (!t && cidContactOf(p)) t = cmsgNewThread(p);
-      return t ? cmsgView(t) : null;
-    },
-
-    /* The payments to and from Cashu IDs that INBOX lists beside the messages, newest first: { peer, dir, unit,
-     * amount, at } (`cmsgPaymentsNow`). */
-    cashuMsgPayments: function () { return cmsgPaymentsNow(); },
-
-    // their messages read: the unread count goes to 0
-    cashuMsgSeen: function (peer) { cmsgRead1(peer); },
-
-    /* Write to a contact (its ID key or ID string): resolves { id, i, first } once it is kept and waiting to go; rejects
-     * in words. */
-    cashuMsgSend: function (peer, text) { return cmsgSend(peer, text); },
-
-    cashuMsgListen: function () { return cmsgListenNow(); },
-    cashuMsgDeliver: function () { return cmsgDeliverAll(); },
-
-    /* One message from the phone (`cashuIdMsgOpen`): 'kept', 'seen' or 'refused'; never rejects. */
-    _cashuMsgArrived: function (peer, way, i, body) { return cmsgArrived(peer, way, Number(i), body); },
-
-    // the suites' waits (honoured only on a test's page, `CID_TESTS`)
-    _cashuMsgDelayMs: undefined,
-    _cashuMsgRetryMs: 0,
-    _cashuMsgReopenMs: 0,
-
 
     /* ---- tips at the till, and the keeper's list of codes (08f-till-tips.js) ---
      *
@@ -45065,4 +44628,4 @@
 /* GENERATED by tools/pack-index.py — do not edit. The build stamp: the sha256 of the joined
  * Web/foxy-wallet.js with this value blanked, the same as the page's meta foxy-wallet-stamp
  * (docs/BUILDING.md, "The build stamp"). */
-if (window.FoxyWallet) window.FoxyWallet.buildStamp = 'd934340f88f50fd2608395b0a315f91ecc3b990244dbb3b0b2d89ab72185f992';
+if (window.FoxyWallet) window.FoxyWallet.buildStamp = 'df9ca5f9e0c47634642abafbec628188fc6e6a054f8ed026d6e5106f450faf39';

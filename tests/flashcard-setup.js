@@ -349,14 +349,25 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
     await W.cardApprove({ label: 'reset' });
     await W.cardApprove({ label: 'set-card', mint: MINT + '/', units: ['usd'], keep: true, card: '02' + '11'.repeat(32) });
     await W.cardApprove({ label: 'set-limit', figures: ['tap'] });
-    const asked = P.phone.cardApprovals.map((m) => [m.label, m.value, m.mint, (m.units || []).join(), m.keep, m.card, (m.figures || []).join()]);
+    // a taking-off's lift: alone, with a reset, with a move, with a limit; never with a PIN
+    await W.cardApprove({ label: 'set-limit', lift: true });
+    await W.cardApprove({ label: 'reset', lift: true });
+    await W.cardApprove({ label: 'set-card', mint: MINT, keep: true, card: '02' + '11'.repeat(32), lift: true });
+    await W.cardApprove({ label: 'set-limit', figures: ['tap'], lift: true });
+    await W.cardApprove({ label: 'change-pin', pin: '2468', lift: true });
+    const asked = P.phone.cardApprovals.map((m) => [m.label, m.value, m.mint, (m.units || []).join(), m.keep, m.card, (m.figures || []).join(), m.lift]);
     ok(JSON.stringify(asked) === JSON.stringify([
       ['change-pin', '32343638', undefined, '', undefined, undefined, ''],
       ['reset', '03', undefined, '', undefined, undefined, ''],
       ['reset', '', undefined, '', undefined, undefined, ''],
       ['set-card', undefined, MINT, 'usd', true, '02' + '11'.repeat(32), ''],
-      ['set-limit', undefined, undefined, '', undefined, undefined, 'tap']]),
-      'the page asks the phone for the keeper’s yes with the exact PIN or opening, the mint as the card will hold it, and which limit', JSON.stringify(asked));
+      ['set-limit', undefined, undefined, '', undefined, undefined, 'tap'],
+      ['set-limit', undefined, undefined, '', undefined, undefined, '', true],
+      ['reset', '', undefined, '', undefined, undefined, '', true],
+      ['set-card', undefined, MINT, '', true, '02' + '11'.repeat(32), '', true],
+      ['set-limit', undefined, undefined, '', undefined, undefined, 'tap', true],
+      ['change-pin', '32343638', undefined, '', undefined, undefined, '', undefined]].map((r) => r.length === 8 ? r : r.concat([undefined]))),
+      'the page asks the phone for the keeper’s yes with the exact PIN or opening, the mint as the card will hold it, which limit, and the lift of a taking-off, which names no figure', JSON.stringify(asked));
     P.phone.hooks.cardApprove = () => false;
     ok((await why(W.cardApprove({ label: 'reset' }))) === 'declined', 'a No is the keeper’s answer (`declined`), not a missing seed phrase');
     P.phone.hooks.cardApprove = null;

@@ -16,7 +16,7 @@
   renderVals() {
     const v = /** @type {ReturnType<Component["renderValsBase"]> & {
       clearHistory: () => void, clearContacts: () => void, open0: boolean, rot0: string,
-      toggleMenu: () => void, homeButtons: object[], menuItems: object[], menuAlert: string,
+      toggleMenu: () => void, cidHomeGo: () => void, homeButtons: object[], menuItems: object[], menuAlert: string,
       mintHostLabel: string, qrSrc: string, pageHash: string, homeButtonsTwo: object[],
       menuRingInk: string, menuRingInk2: string, menuRing: string,
       histRingInk: string, histRingInk2: string, histRing: string,
@@ -72,9 +72,7 @@
       mint: 'M3.5 9 12 4l8.5 5M5.5 9.5v7.5M9.8 9.5v7.5M14.2 9.5v7.5M18.5 9.5v7.5M3.5 20h17',
       // a wrench (the menu's TOOLS)
       tools: 'M14.6 3.8a4.6 4.6 0 0 0-4.3 6.2l-6.1 6.1a2 2 0 0 0 2.8 2.8l6.1-6.1a4.6 4.6 0 0 0 6.2-4.3l-2.6 2.6-2.6-.6-.6-2.6Z',
-      // a speech bubble with two lines in it, its tail at the lower left: home's CHAT, and the menu's
-      chat: 'M5.1 4.5h13.8a2.1 2.1 0 0 1 2.1 2.1v8.6a2.1 2.1 0 0 1-2.1 2.1H10.2l-4.7 3.7v-3.7h-.4A2.1 2.1 0 0 1 3 15.2V6.6a2.1 2.1 0 0 1 2.1-2.1ZM7.5 9.4h9M7.5 12.9h5.6',
-      // a head over a pair of shoulders: a person's own profile (MY CASHU ID)
+      // a head over a pair of shoulders: a person's own profile (MY CASHU ID, and home's round button at the top left)
       profile: 'M12 12.2a4.1 4.1 0 1 0 0-8.2 4.1 4.1 0 0 0 0 8.2ZM4.5 20.5c0-3.9 3.4-6.4 7.5-6.4s7.5 2.5 7.5 6.4',
     };
     /* A row that opens something: the drawer shuts, and the screen it opens goes back to the menu when it is left
@@ -99,6 +97,9 @@
     v.rot0 = this.state.open0 ? 'rotate(90deg)' : 'rotate(0deg)';
     // opened or shut by hand: nothing is waiting to open it again
     v.toggleMenu = () => this.setState(p => ({ open0: !p.open0, menuReturn: null }));
+    /* Home's round button at the top left, the menu button's twin: MY CASHU ID (26o-cashu-id.js, `cidShow`), the same
+     * screen as the menu's row. Opened from home, not the menu, so nothing is armed: DONE goes back to home. */
+    v.cidHomeGo = () => this.cidShow();
     /* SCAN and PASTE are the two ways money arrives at a phone, so they are on
      * home rather than a screen in. PASTE carries the marker
      * Apple's paste control is laid over (15-paid-wake-keyboard.js).
@@ -126,7 +127,7 @@
     const twoHere = this.twoUnitsOn();
     v.homeButtonsTwo = !twoHere ? [] : v.homeButtons.map(b => Object.assign({ dim: '1' }, b));
     /* The menu drawer, from the right: everything that is not RECEIVE, SEND,
-     * SCAN, PASTE or CHAT, in its sections (below). */
+     * SCAN, PASTE or MY CASHU ID's round button, in its sections (below). */
     /* A balance with no verified backup: the menu button and BACKUP glow red,
      * so the way to fix it is visible from home. */
     // a balance in either unit: dollars are lost with the words as surely as sats
@@ -193,7 +194,11 @@
     /* And for the audit: red while the balance and the payments disagree,
      * and red too while change is waiting to be scanned or shown. The card is on
      * the history screen; this is what says to go and look. */
-    const AU = this.histAudit ? this.histAudit() : { whole: false, off: 0, dueChange: 0, toShowCount: 0 };
+    /* (while a card's sheet is up, the books as they were last added up: the walk through every entry waits for the sheet to go,
+     * every command to the card riding the thread it runs on) */
+    const W0 = window.FoxyWallet;
+    const sheet = !!(W0 && W0.cardSheetUp && W0.cardSheetUp()) && !!this._auditKept;
+    const AU = sheet ? this._auditKept : (this.histAudit ? (this._auditKept = this.histAudit()) : { whole: false, off: 0, dueChange: 0, toShowCount: 0 });
     // and the dollars' own books, at a mint with two balances: each adds up in its own unit
     const AUusd = (twoHere && this.histAuditUsd) ? this.histAuditUsd() : { whole: false, off: 0 };
     /* Not at the first sign of it. The balance is read a moment before the
@@ -231,7 +236,7 @@
      *
      *   BACKUP ACCOUNT, at the very top and only while the wallet holds a balance and its words have not been checked
      *     (`unbacked`), with the backup's red ring
-     *   WALLET:   MY CASHU ID · HISTORY · CHAT · CONTACTS · HIDE BALANCE
+     *   WALLET:   MY CASHU ID · HISTORY · CONTACTS · HIDE BALANCE
      *   MINTS:    SWITCH/ADD MINTS · TRANSFER MONEY (money at two mints or more) · and, at a mint with two balances, SWAP
      *             and CURRENCIES · OTHER MINTS (only while an answer is remembered)
      *   TOOLS:    POINT OF SALE · SPLIT A BILL   (WITHDRAW TO BANK left the menu 2026-11-05; the send screen's BANK ACCOUNT stays)
@@ -240,8 +245,8 @@
      *
      * Every section is open until it is tapped shut (`menuShut`, which remembers the shut ones while Foxy is open). Each
      * heading after the first has the gap over it that the eye sees between MENU and WALLET (`headTop`). The card is home's CARD button
-     * (`homeButtons`), not a row here; SWAP is a row here, not home's. CHAT opens INBOX, as home's round button at the top
-     * left does (26p-cashu-msg.js, `renderInbox`), and CONTACTS stays the full list. YOUR CHANGE is not a row any
+     * (`homeButtons`), not a row here; SWAP is a row here, not home's. MY CASHU ID is also home's round button at the top
+     * left (`cidHomeGo`), and CONTACTS is the full list, a contact opening its payment. YOUR CHANGE is not a row any
      * more: the change screen (`goChange`) stays. BLUETOOTH TAP is a switch in SETTINGS (26d-tap.js, `tapAutoArms`).
      * A screen opened from a row goes back to the menu when it is left (01-ui-basics.js, `menuReturnArm`).
      * Rows inside a section are indented; a switch shows its state, so its label never has to. No balance is kept for a
@@ -277,7 +282,6 @@
       { label: 'MY CASHU ID', path: MENU_ICON.profile, tap: shut(() => this.cidShow()) },
       { label: 'HISTORY', path: MENU_ICON.history, tap: shut(() => this.go('history')),
         ringInk: v.histRingInk, ringInk2: v.histRingInk2, ring: v.histRing },
-      { label: 'CHAT', path: MENU_ICON.chat, tap: shut(() => this.goInbox()) },
       { label: 'CONTACTS', path: MENU_ICON.contacts, tap: shut(v.goContacts) },
       /* The label says what the tap will do, so it reads the same whichever way round it is. */
       { label: this.state.hidden ? 'SHOW BALANCE' : 'HIDE BALANCE', path: MENU_ICON.hide, tap: shutOnly(v.toggleHide) },
@@ -469,8 +473,6 @@
       ...this.renderHistory(c),
       ...this.renderTxDetail(c),
       ...this.renderContacts(c),
-      ...this.renderCidChat(c),
-      ...this.renderInbox(c),
       ...this.renderMints(c),
       ...this.renderFlashcard(c),
       ...this.renderCardScreens(c),
