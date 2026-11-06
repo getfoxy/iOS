@@ -1157,10 +1157,11 @@ The only path where money crosses without a network at all. The full design,
 the six-message handshake and what a listener nearby can learn are in
 `TAP-TO-PAY.md`; what moves value is this:
 
-1. The **receiver** holds up an invoice screen, or one share of a split. The
-   screen arms itself and goes on the air, under a service UUID made fresh for
-   this payment, without a press; a press of TAP (or a shake) does anything
-   only on a screen that is not already on the air. Whoever advertises is findable, which is why a
+1. The **receiver** holds up an invoice screen, or one share of a split. By
+   default (BLUETOOTH TAP) the screen arms itself and goes on the air, under
+   a service UUID made fresh for this payment, without a press; with that
+   setting off, a press of TAP (or a shake) does it, and an orange card covers
+   the QR and says TAP HERE. Whoever advertises is findable, which is why a
    payer never advertises and a receiver advertises only while an invoice is on
    its screen. Its offer is the Lightning invoice and a NUT-18
    payment request naming its mint — or, on the CASHU rail, the request alone,

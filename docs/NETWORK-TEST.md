@@ -404,7 +404,7 @@ the rule list blocks anything else.
 ### Bluetooth — a second radio, outside every capture in this file
 
 A receiver's phone advertises over Bluetooth LE while an invoice is on its screen
-(it arms itself)
+(it arms itself by default; with BLUETOOTH TAP off, from the press of TAP)
 until a payer subscribes, and the ecash itself crosses that link
 (`Foxy/Bluetooth/`, `TAP-TO-PAY.md`). **No capture method in this file can
 see it**: Internet Sharing and `tcpdump` on `bridge100` watch IP traffic, and

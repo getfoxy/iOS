@@ -241,8 +241,8 @@
      * Every section is open until it is tapped shut (`menuShut`, which remembers the shut ones while Foxy is open). Each
      * heading after the first has the gap over it that the eye sees between MENU and WALLET (`headTop`). The card is home's CARD button
      * (`homeButtons`), not a row here; SWAP is a row here, not home's. CHAT opens INBOX, as home's round button at the top
-     * left does (26p-cashu-msg.js, `renderInbox`), and CONTACTS stays the full list. AUTO TAP TO PAY and YOUR CHANGE are
-     * not rows any more: the switch's setting (26d-tap.js, `tapAutoArms`) and the change screen (`goChange`) stay.
+     * left does (26p-cashu-msg.js, `renderInbox`), and CONTACTS stays the full list. YOUR CHANGE is not a row any
+     * more: the change screen (`goChange`) stays. BLUETOOTH TAP is a switch in SETTINGS (26d-tap.js, `tapAutoArms`).
      * A screen opened from a row goes back to the menu when it is left (01-ui-basics.js, `menuReturnArm`).
      * Rows inside a section are indented; a switch shows its state, so its label never has to. No balance is kept for a
      * receive or a send to start in: with two, each one asks (01-ui-basics.js, `walletNow`). */
@@ -254,6 +254,7 @@
       } catch (e) { return 0; }
     })();
     const shutNow = this.state.menuShut || {};
+    const tapAuto = this.tapAutoArms();
     const faceOn = !!(W22 && W22.secureChoice && W22.secureChoice() === 'device');
     const inSection = (m) => Object.assign({ indent: '10px' }, m);
     const sw = (on) => ({ hasSwitch: true, swBg: on ? 'var(--acc)' : 'rgba(var(--ink-rgb),.22)', swX: on ? '18px' : '0px' });
@@ -352,6 +353,9 @@
     const settingRows = /** @type {any[]} */ ([]).concat(
       // REMIND ME AFTER 15 DAYS, the first row of SETTINGS (26o-remind.js): only with a Cashu ID in use
       this.remindMenuRow ? this.remindMenuRow(sw) : [],
+      /* Whether an invoice goes on the air by itself. A switch, and the drawer stays open so it can be seen to move. */
+      [Object.assign({ label: 'BLUETOOTH TAP', path: MENU_ICON.change,
+        tap: () => { this.tapAutoSet(!tapAuto); this.setState({ menuTick: (this.state.menuTick || 0) + 1 }); } }, sw(tapAuto))],
       [pinRow, faceRow],
       [
         { label: 'BACKUP', path: MENU_ICON.backup, tap: shut(() => this.showSeedOnPhone(false)) },

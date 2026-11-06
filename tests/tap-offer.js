@@ -39,7 +39,7 @@ function method(sig) {
   return block(at + 3);
 }
 const methods = new Function('return {' + [
-  'syncTap() {', 'tapOffering() {', 'tapGaveNothing(why) {',
+  'syncTap() {', 'tapAutoArms() {', 'tapOffering() {', 'tapGaveNothing(why) {',
   'railRequestPending(sats, purpose, usdCents) {',
   // syncTap asks it: the link is held open while a receiver owes change back
   'changeStillDue() {',
@@ -591,6 +591,29 @@ function run(a) {
     !('sats4usd' in offered({ hold: 'dollars', unit: 'sat', recv: 'sat' })), 'a sat request');
   check('nor a mint with one balance',
     !('sats4usd' in offered({ hold: 'dollars', unit: 'usd', two: false })), 'one unit');
+}
+
+// ---- BLUETOOTH TAP: the stored switch decides whether a receive screen arms itself ----
+{
+  const store = {};
+  global.localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
+  const real = (extra) => {
+    const a = app(Object.assign({ state: { tapArmed: false } }, extra));
+    a.tapAutoArms = methods.tapAutoArms;
+    return a;
+  };
+  check('BLUETOOTH TAP unset: the default is on', real().tapAutoArms() === true, 'default');
+  const on = real();
+  run(on);
+  check('and an invoice screen arms itself', on.state.tapArmed === true, JSON.stringify(on.state));
+  store['foxy.tap.auto'] = 'off';
+  check('BLUETOOTH TAP off in the store is read again', real().tapAutoArms() === false, 'off');
+  const off = real();
+  const saidOff = run(off);
+  check('and a receive screen then does not arm or say anything until TAP', off.state.tapArmed === false && saidOff.length === 0, JSON.stringify([off.state, saidOff]));
+  store['foxy.tap.auto'] = 'on';
+  check('and on again arms', real().tapAutoArms() === true, 'on');
+  delete global.localStorage;
 }
 
 results.forEach((r) => console.log(r));

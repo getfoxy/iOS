@@ -221,17 +221,14 @@ needed them.
 you added for testing. Debugger detached and Console.app streaming, as in the
 setup above, unless a step says otherwise.
 
-**Menu paths.** The menu has five sections, each open until tapped shut:
-WALLET (MY CASHU ID, HISTORY, CHAT, CONTACTS, HIDE BALANCE), MINTS (SWITCH/ADD
-MINTS, TRANSFER MONEY, and SWAP at a mint with two balances), TOOLS (POINT OF
-SALE, SPLIT A BILL), SETTINGS (SET PIN, FACE ID LOCK, BACKUP, RESTORE, RESTORE
-LOST CARD, TEST LOGS) and OFFLINE LIMITS (PER PERSON, TOTAL). BACKUP ACCOUNT is
-at the very top while the wallet holds money and the words are not verified;
-BACKUP is always under SETTINGS. LOGS is TEST LOGS; SPLIT is SPLIT A BILL; the
-card is home's CARD button, beside SCAN and PASTE (home's top-left button is
-CHAT, which opens INBOX). A screen opened from the menu goes back to the menu
-when it is left. AUTO TAP TO PAY is no longer a row, and every receive screen
-arms itself whatever a phone kept from the switch.
+**Menu paths.** The menu has four sections, each open until tapped shut:
+WALLET (FOXY CARD, MY CASHU ID, HISTORY, CHAT, CONTACTS, HIDE BALANCE, YOUR
+CHANGE), MINTS (SWITCH/ADD MINTS, TRANSFER MONEY), TOOLS (POINT OF SALE, SPLIT A
+BILL) and SETTINGS (BLUETOOTH TAP, SET PIN, FACE ID LOCK, BACKUP,
+RESTORE, RESTORE LOST CARD, TEST LOGS). BACKUP ACCOUNT is at the very top while
+the wallet holds money and the words are not verified; BACKUP is always under
+SETTINGS. LOGS is TEST LOGS; SPLIT is SPLIT A BILL; the card is MENU → FOXY CARD
+(home's top-left button is CHAT, which opens INBOX).
 
 ### A. Tor, the network, and what leaves the phone
 
@@ -1283,7 +1280,9 @@ the diary (`[tap] `, kept by `FieldLog`).
 #### 22a. A payment crosses, and the receiver is on the air only from its own screen
 
 Receiver: RECEIVE, an amount. The screen puts the phone on the air by itself
-(`tap: armed by the screen`); the QR stays up and the TAP button lights. Payer: just hold the
+(`tap: armed by the screen`); the QR stays up and the TAP button lights. With
+MENU → SETTINGS → BLUETOOTH TAP off, nothing is on the air until **TAP** is
+pressed, and the QR should then go orange and say TAP HERE. Payer: just hold the
 phone against the receiver's — from home or from SEND, with no button to press.
 
 Expect on the **payer** `a receiver at -NN dBm (needs -33, advertised),
@@ -1309,13 +1308,16 @@ problem.
 Then the part that is a privacy property, not a feature: the payer must never
 be on the air, so a phone on home or on SEND, listening, shows nothing to a
 scanner; and the receiver's one advertisement is a random service UUID and
-nothing else (§22b). Whoever advertises is findable, and a receive screen can be open for minutes.
+nothing else (§22b). With BLUETOOTH TAP off, a receive screen with the
+invoice up and TAP **not** pressed must be invisible to the other phone too.
+Whoever advertises is findable, and a receive screen can be open for minutes.
 `tests/tap-offer.js` checks the arming and smoke check 43 reads both sides, but
 only two phones show it for real.
 
 #### 22a-ii. TAP before the invoice is ready
 
-Enter the amount and touch the phones together at once, before the QR settles. The
+Enter the amount and touch the phones together at once, before the QR settles
+(with BLUETOOTH TAP off, press TAP the instant the amount is entered). The
 handshake should finish and both screens should show the code while the
 receiver is still making the payment request; the offer follows and the payment
 completes as normal. Expect `on the air, offering nothing yet — the request is
@@ -1412,9 +1414,9 @@ do not change that trade.
 
 `TAP-TO-PAY.md`, *Shake*. On the receive invoice screen with an amount,
 shaking the receiver's phone — the same shake as shake to undo — presses TAP,
-but only when nothing is on the air yet. Every receive screen arms itself now
-(the AUTO TAP TO PAY switch has left the menu), so steps 1 to 4 have no screen
-to run on for now; step 5 is what a shake does. Read the `[foxy] tap: shaken` lines off the
+but only when nothing is on the air yet. With BLUETOOTH TAP on, the default,
+the screen has already armed itself and a shake does nothing, so switch it off
+(MENU → SETTINGS) for steps 1 to 4. Read the `[foxy] tap: shaken` lines off the
 field log.
 
 1. Shake: expect `shaken; pressing TAP` and the phone on the air.
@@ -1423,7 +1425,7 @@ field log.
 3. Press TAP, then shake while the code card is up: the card stays and the
    log says `shake ignored — already on the air`.
 4. With a payer connecting, shake: the link is kept.
-5. Shake on a receive invoice screen that has armed itself: the log says
+5. With BLUETOOTH TAP on, shake on a receive invoice screen: the log says
    `shake ignored — already on the air` and nothing else changes.
 6. Shake on home, or on a send screen: `shaken, but shake to tap is off`.
 

@@ -15944,8 +15944,8 @@ class Component extends DCLogic {
      * Every section is open until it is tapped shut (`menuShut`, which remembers the shut ones while Foxy is open). Each
      * heading after the first has the gap over it that the eye sees between MENU and WALLET (`headTop`). The card is home's CARD button
      * (`homeButtons`), not a row here; SWAP is a row here, not home's. CHAT opens INBOX, as home's round button at the top
-     * left does (26p-cashu-msg.js, `renderInbox`), and CONTACTS stays the full list. AUTO TAP TO PAY and YOUR CHANGE are
-     * not rows any more: the switch's setting (26d-tap.js, `tapAutoArms`) and the change screen (`goChange`) stay.
+     * left does (26p-cashu-msg.js, `renderInbox`), and CONTACTS stays the full list. YOUR CHANGE is not a row any
+     * more: the change screen (`goChange`) stays. BLUETOOTH TAP is a switch in SETTINGS (26d-tap.js, `tapAutoArms`).
      * A screen opened from a row goes back to the menu when it is left (01-ui-basics.js, `menuReturnArm`).
      * Rows inside a section are indented; a switch shows its state, so its label never has to. No balance is kept for a
      * receive or a send to start in: with two, each one asks (01-ui-basics.js, `walletNow`). */
@@ -15957,6 +15957,7 @@ class Component extends DCLogic {
       } catch (e) { return 0; }
     })();
     const shutNow = this.state.menuShut || {};
+    const tapAuto = this.tapAutoArms();
     const faceOn = !!(W22 && W22.secureChoice && W22.secureChoice() === 'device');
     const inSection = (m) => Object.assign({ indent: '10px' }, m);
     const sw = (on) => ({ hasSwitch: true, swBg: on ? 'var(--acc)' : 'rgba(var(--ink-rgb),.22)', swX: on ? '18px' : '0px' });
@@ -16055,6 +16056,9 @@ class Component extends DCLogic {
     const settingRows = /** @type {any[]} */ ([]).concat(
       // REMIND ME AFTER 15 DAYS, the first row of SETTINGS (26o-remind.js): only with a Cashu ID in use
       this.remindMenuRow ? this.remindMenuRow(sw) : [],
+      /* Whether an invoice goes on the air by itself. A switch, and the drawer stays open so it can be seen to move. */
+      [Object.assign({ label: 'BLUETOOTH TAP', path: MENU_ICON.change,
+        tap: () => { this.tapAutoSet(!tapAuto); this.setState({ menuTick: (this.state.menuTick || 0) + 1 }); } }, sw(tapAuto))],
       [pinRow, faceRow],
       [
         { label: 'BACKUP', path: MENU_ICON.backup, tap: shut(() => this.showSeedOnPhone(false)) },
@@ -20461,7 +20465,8 @@ class Component extends DCLogic {
      * CONNECT TO PAY cards wait for that — so the link is given a head start
      * while the amount is still being typed, and the cards are up the moment
      * the invoice screen is. Nothing can be paid from
-     * here: the offer is M4 and there is none until the next screen. */
+     * here: the offer is M4 and there is none until the next screen. With
+     * BLUETOOTH TAP off this screen has no TAP button and never arms. */
     if (s.screen === 'amount' && s.flow === 'receive') {
       return this.tapAutoArms() ? { inv: '', req: '', waiting: true } : null;
     }
@@ -21210,11 +21215,10 @@ class Component extends DCLogic {
    * would put the same number back on the air and hand the next customer a
    * conversation the last payer's keys belong to (FoxyBridge+Tap.swift).
    * Here that is just: clear what the last payer left on screen, and ask. */
-  /* Whether the invoice screen arms itself: always. The menu's switch that turned it off (AUTO TAP TO PAY) is gone, so
-   * an "off" a phone kept from it (`foxy.tap.auto`) is no longer read: a choice nobody can see or change back is not
-   * kept. `tapAutoSet` stays for the screens' tests. */
+  /* Whether the invoice screen arms itself. On unless the person turned it off (MENU > SETTINGS > BLUETOOTH TAP, the
+   * stored `foxy.tap.auto`); the press and the shake work either way. */
   tapAutoArms() {
-    return true;
+    try { return localStorage.getItem('foxy.tap.auto') !== 'off'; } catch (e) { return true; }
   }
 
   tapAutoSet(on) {
@@ -21234,7 +21238,7 @@ class Component extends DCLogic {
    * real payer who is still reading their screen, so it is the person's call
    * instead — a code up and nobody paying is something they can see, and this
    * is the one press that answers it. If it keeps
-   * happening, Bluetooth off ends it.
+   * happening, Bluetooth off, or BLUETOOTH TAP off, ends it.
    *
    * Not while a payment or a price is in the middle of crossing: then X only
    * puts the card away, as it always did, and the link is left alone. */

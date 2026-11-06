@@ -212,8 +212,8 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     const W = twoWallet({ real: realChoice({ hold: 'both' }) });
     await fresh(W);
     const l = labels();
-    ok(l.indexOf('SET PIN') >= 0 && l.indexOf('SET PIN') + 1 === l.indexOf('FACE ID LOCK') && l.indexOf('SET PIN') === l.indexOf('SETTINGS') + 1 && l.indexOf('AUTO TAP TO PAY') < 0,
-      'holding both: SET PIN and FACE ID LOCK open SETTINGS straight away, with no AUTO TAP TO PAY', l.join(', '));
+    ok(l.indexOf('SET PIN') >= 0 && l.indexOf('SET PIN') + 1 === l.indexOf('FACE ID LOCK') && l.indexOf('SET PIN') === l.indexOf('SETTINGS') + 2 && l.indexOf('BLUETOOTH TAP') === l.indexOf('SETTINGS') + 1 && l.indexOf('AUTO TAP TO PAY') < 0,
+      'holding both: SET PIN and FACE ID LOCK follow BLUETOOTH TAP in SETTINGS, with no AUTO TAP TO PAY', l.join(', '));
   }
 
   // ---- 2. holding both: every receive asks, and nothing is kept ------------------------------

@@ -615,30 +615,17 @@ its time, and its unread count; a row opens that contact's screen. A payment is
 listed under a contact when this phone paid their ID (its outbox row, kept a
 week after it is collected or comes back) or when the payer proved who they are
 (`cidPeer` on the history row); a payer who did not is no one's. With nothing
-yet: a graphic (the CHAT icon, large, in the accent), "Ask another Foxy user for
-their Cashu ID to start chatting." and ADD A CASHU ID, a card with a field to
-paste the ID into (PASTE A CASHU ID, NEXT reads it as a pasted one is), and SCAN
-A CASHU ID under it (the camera, then the same). Neither is offered where the
-wallet cannot read an ID, and SCAN is not where it cannot scan. With no
-ID in use, the line the contact's screen has. A CONTACTS button sits at the
-bottom of INBOX, in every state; it opens CONTACTS with INBOX under it, so back
-returns to INBOX, and a contact there opens that contact's screen. An empty
-CONTACTS says "Ask another Foxy user to share their Cashu ID with you to add
-them as a contact." with the same two buttons. CONTACTS stays the full list.
+yet: "No conversations yet. Share MY CASHU ID to be paid or messaged." With no
+ID in use, the line the contact's screen has. CONTACTS stays the full list.
 
 The menu, in this order, every section open until it is tapped shut:
 
     BACKUP ACCOUNT    only while the wallet holds a balance and the words are not verified
-    WALLET            MY CASHU ID · HISTORY · CHAT · CONTACTS · HIDE BALANCE
-    MINTS             SWITCH/ADD MINTS · TRANSFER MONEY (money at two mints or more) · SWAP and CURRENCIES
+    WALLET            FOXY CARD · MY CASHU ID · HISTORY · CHAT · CONTACTS · HIDE BALANCE · YOUR CHANGE
+    MINTS             SWITCH/ADD MINTS · TRANSFER MONEY (money at two mints or more) · SWAP and WHAT YOU HOLD
                       (a mint with two balances) · OTHER MINTS (an answer remembered)
     TOOLS             POINT OF SALE · SPLIT A BILL
-    SETTINGS          SET PIN · FACE ID LOCK · BACKUP · RESTORE · RESTORE LOST CARD · TEST LOGS
-    OFFLINE LIMITS    PER PERSON · TOTAL (while the wallet has limits to show)
-
-A screen opened from the menu goes back to the menu when it is left; a flow
-that ends somewhere else (PAID, SENT, SWAPPED, a token shown, a mint switched
-to, an open till) ends at home with the menu shut.
+    SETTINGS          BLUETOOTH TAP · SET PIN · FACE ID LOCK · BACKUP · RESTORE · RESTORE LOST CARD · TEST LOGS
 
 ### Kept
 

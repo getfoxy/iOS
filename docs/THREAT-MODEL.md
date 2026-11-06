@@ -1667,8 +1667,8 @@ describe the superseded gate:
   find (`build/wallet/20-helpers.js`, `tests/p2pk-round-trip.js`).
 - **Tap to pay puts a radio on the air**, which the reviewed app did not have.
   The receiver advertises while an invoice with an amount is on its screen: it
-  arms itself (a press of TAP or a shake acts only on a screen not already on
-  the air), and the payer never advertises. §1 has
+  arms itself by default (BLUETOOTH TAP, which the person can turn off,
+  leaving a press of TAP or a shake), and the payer never advertises. §1 has
   its bridge actions and `TAP-TO-PAY.md` has the handshake and what a listener
   nearby can learn. It was wrong once, in the way that matters: the page armed
   from the home screen as well, left over from when the payer was the listener,

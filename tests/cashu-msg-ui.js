@@ -22,7 +22,7 @@
  *      too), a payment that ends on PAID does not, nor one that comes in over home, nor a swap still going; a row that
  *      only says something (SWAP offline) leaves nothing armed
  *  10  the whole menu in the keeper's order (21-render-values.js): WALLET, MINTS, TOOLS, SETTINGS, OFFLINE LIMITS, every
- *      section open and each shutting in place, the gap above each heading the gap under MENU; no AUTO TAP TO PAY and no
+ *      section open and each shutting in place, the gap above each heading the gap under MENU; BLUETOOTH TAP first in SETTINGS and no
  *      YOUR CHANGE; OFFLINE LIMITS with PER PERSON and TOTAL; the renamed rows doing what they did; BACKUP
  *      ACCOUNT at the very top only with money and the words not checked; TRANSFER MONEY keeps its rule; no PUSH
  *      NOTIFICATIONS and no PRIVATE LNURL, whatever the wallet offers (Foxy talks to no server run for it)
@@ -671,7 +671,7 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
     const ORDER = ['WALLET', 'MY CASHU ID', 'HISTORY', 'CHAT', 'CONTACTS', 'HIDE BALANCE',
       'MINTS', 'SWITCH/ADD MINTS', 'TRANSFER MONEY',
       'TOOLS', 'POINT OF SALE', 'SPLIT A BILL',
-      'SETTINGS', 'SET PIN', 'FACE ID LOCK', 'BACKUP', 'RESTORE', 'RESTORE LOST CARD', 'TEST LOGS',
+      'SETTINGS', 'BLUETOOTH TAP', 'SET PIN', 'FACE ID LOCK', 'BACKUP', 'RESTORE', 'RESTORE LOST CARD', 'TEST LOGS',
       'OFFLINE LIMITS', 'PER PERSON', 'TOTAL'];
     const full = (o) => {
       const W = withMessages(stubWallet(), true, []);
@@ -693,6 +693,21 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
        && items.filter((m) => heads.indexOf(m.label) >= 0).every((m) => m.indent === '0px'),
       'every row a step in, PER PERSON and TOTAL too', items.map((m) => m.label + ' ' + m.indent).join(', '));
     ok(['AUTO TAP TO PAY', 'YOUR CHANGE', 'FOXY CARD'].every((l) => labels().indexOf(l) < 0), 'no AUTO TAP TO PAY, no YOUR CHANGE, no FOXY CARD', labels().join(', '));
+    {
+      // BLUETOOTH TAP: a switch in SETTINGS before SET PIN, on by default; pressing it writes the stored key and the next draw shows it
+      const row = () => V().menuItems.find((m) => m.label === 'BLUETOOTH TAP');
+      const L = labels();
+      ok(!!row() && L.indexOf('BLUETOOTH TAP') === L.indexOf('SETTINGS') + 1 && L.indexOf('SET PIN') === L.indexOf('BLUETOOTH TAP') + 1,
+        'BLUETOOTH TAP is a row of SETTINGS, straight before SET PIN', L.join(', '));
+      ok(row().hasSwitch === true && row().swX === '18px' && row().indent === '10px' && A.tapAutoArms() === true, 'a switch, on by default, a step in');
+      const keep = w.localStorage.getItem('foxy.tap.auto');
+      row().tap();
+      ok(w.localStorage.getItem('foxy.tap.auto') === 'off' && A.tapAutoArms() === false, 'pressed: the stored key is off and receive screens do not arm');
+      ok(row().swX === '0px', 'and the switch shows it off');
+      row().tap();
+      ok(w.localStorage.getItem('foxy.tap.auto') === 'on' && A.tapAutoArms() === true, 'pressed again: on');
+      if (keep === null) w.localStorage.removeItem('foxy.tap.auto'); else w.localStorage.setItem('foxy.tap.auto', keep);
+    }
     /* The gap above a heading is the gap the eye sees under MENU: the word about 8px up in its 44px row, the header's 6px
      * and the list's 10px, so 14px more than the list's 10px over every heading after the first, and nothing over a row. */
     ok(items.every((m) => m.headTop === (m.hasChev && m.label !== 'WALLET' ? '14px' : '0px')), 'a heading after the first has 14px over it, nothing else does',
@@ -775,7 +790,7 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
     old.wakeView = () => ({ state: 'on', forget: false, server: true });
     old.lnurlView = () => ({ code: 'lnurl1dp68gurn8ghj7', collecting: 0 });
     await fresh(old, { open0: true });
-    ok(labels().indexOf('PUSH NOTIFICATIONS') < 0 && labels().indexOf('PRIVATE LNURL') < 0 && labels().indexOf('SET PIN') === labels().indexOf('SETTINGS') + 1,
+    ok(labels().indexOf('PUSH NOTIFICATIONS') < 0 && labels().indexOf('PRIVATE LNURL') < 0 && labels().indexOf('SET PIN') === labels().indexOf('SETTINGS') + 2,
       'no PUSH NOTIFICATIONS and no PRIVATE LNURL rows: Foxy talks to no server run for it', labels().join(', '));
     // and TRANSFER MONEY its own: money at one mint, none
     const one = full({ verified: true });
