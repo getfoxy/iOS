@@ -120,7 +120,8 @@
         title: 'ENTER YOUR PIN',
         subtitle: why || 'To go on.',
         cta: 'CONTINUE',
-        onCancel: () => {},
+        // given up from the menu's POINT OF SALE: the menu again (01-ui-basics.js `menuReturnSettle`)
+        onCancel: () => { if (this.menuReturnSettle) this.menuReturnSettle(); },
         onSubmit: (pin, warn) => {
           // the lock's own count of tries and its wait, as every PIN this app asks
           const r = this.pinTry(pin);
@@ -132,8 +133,9 @@
     };
     if (!face) { pad(); return; }
     /* With no PIN the phone's own passcode may stand in for the face, as at launch; and a phone that cannot check either is
-     * let through, which is no worse than the phone itself (`pinLock`). With a PIN, a face that will not scan falls to it. */
-    Promise.resolve(W.biometric(String(why || 'Foxy').replace(/\.$/, ''), !pinSet)).then((answer) => {
+     * let through, which is no worse than the phone itself (`pinLock`). With a PIN, a face that will not scan falls to it.
+     * The answer's promise is handed back: the menu's POINT OF SALE waits on it (21-render-values.js, `shut`). */
+    return Promise.resolve(W.biometric(String(why || 'Foxy').replace(/\.$/, ''), !pinSet)).then((answer) => {
       if (answer === 'yes' || (answer === 'unavailable' && !pinSet)) {
         if (answer === 'yes' && W.pinTriesClear) W.pinTriesClear();
         go();

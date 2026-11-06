@@ -78,7 +78,7 @@ function page(o) {
         ctx.trace.push('begin');
         ctx.ended = false;
         if (ctx.nfc === 'off') return reply(w, m.id, null, 'NFC is not available on this phone');
-        if (!ctx.nfc) return reply(w, m.id, null, 'the session was cancelled');
+        if (!ctx.nfc) return reply(w, m.id, null, ctx.beginWhy || 'the session was cancelled');
         ctx.nfc.tap();
         report(w, 'connected', 'Reading the card');
         return reply(w, m.id, 'ok');

@@ -32,6 +32,8 @@ enum CardLinkError: Error, Equatable {
     case timedOut
     /// The card left, or the session ended under it.
     case lost
+    /// iOS ended the sheet for a reason that is not the person's own dismissal.
+    case interrupted
 
     var words: String {
         switch self {
@@ -39,6 +41,7 @@ enum CardLinkError: Error, Equatable {
         case .cancelled: return "the session was cancelled"
         case .timedOut: return "the session timed out"
         case .lost: return "the tag was lost"
+        case .interrupted: return "the session was interrupted"
         }
     }
 }
@@ -149,10 +152,13 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
     }
 
     /// Close the sheet: with a tick and `text`, or with `error` said in red.
-    func end(error: String?, text: String?) {
+    func end(error: String?, text: String?) { end(error: error, text: text, reason: .cancelled) }
+
+    /// `reason`: what a page still waiting for a card is told. Foxy being put away is `.interrupted`, not the person's own cancel.
+    func end(error: String?, text: String?, reason: CardLinkError) {
         guard let session else {
             // closed between a refusal and the sheet opened again: it is not opened again, and the wait ends
-            if let tell = found { found = nil; tell(.cancelled) }
+            if let tell = found { found = nil; tell(reason) }
             return
         }
         self.session = nil
@@ -163,7 +169,7 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
          * `invalidate`, and the page's wait would run to its own timeout, with
          * CANCEL pressed and nothing happening. Told here, the delegate finds
          * nothing left to tell. */
-        if let tell = found { found = nil; tell(.cancelled) }
+        if let tell = found { found = nil; tell(reason) }
         if let error, !error.isEmpty {
             onProgress?("end", error)
             session.invalidate(errorMessage: error)
@@ -178,7 +184,7 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
         NotificationCenter.default.removeObserver(self, name: UIApplication.didEnterBackgroundNotification, object: nil)
         guard session != nil, card == nil, found != nil else { return }
         print("[card] sheet: Foxy was put away while it waited for a card; the wait ends")
-        end(error: "Foxy was put away", text: nil)
+        end(error: "Foxy was put away", text: nil, reason: .interrupted)
     }
 
     func tagReaderSessionDidBecomeActive(_ session: NFCTagReaderSession) {
@@ -216,7 +222,7 @@ final class NFCCardLink: NSObject, NFCTagReaderSessionDelegate {
         case .readerSessionInvalidationErrorSessionTimeout: why = .timedOut
         // no NFC, or a build signed without the entitlement that allows it
         case .readerErrorUnsupportedFeature, .readerErrorSecurityViolation: why = .unavailable
-        default: why = .cancelled
+        default: why = .interrupted
         }
         // before `found` and `onGone`, which let the bridge forget this link
         if !ended { onProgress?("lost", why.words) }

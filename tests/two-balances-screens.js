@@ -85,8 +85,8 @@ const satsOfCents = (c) => Math.round((c / 100) / MINT_RATE * 1e8);
 
 function twoWallet(o) {
   const opt = Object.assign({ units: ['sat', 'usd'], sat: 50000, usd: 4205, online: true }, o || {});
-  const rec = { sets: [], invoices: [], watches: [], quotes: [], pays: [], tokens: [], needs: [] };
-  const st = { choice: Object.assign({ hold: '' }, opt.choice || {}), sat: opt.sat, usd: opt.usd };
+  const rec = { sets: [], setAt: [], invoices: [], watches: [], quotes: [], pays: [], tokens: [], needs: [] };
+  const st = { choice: Object.assign({ hold: '' }, opt.choice || {}), sat: opt.sat, usd: opt.usd, at: {}, keptAt: {} };
   let n = 0;
   const invoiceSats = new Map();
   const W = {
@@ -119,17 +119,34 @@ function twoWallet(o) {
     mintUnits: () => opt.units.slice(),
     twoUnits: () => opt.units.indexOf('sat') >= 0 && opt.units.indexOf('usd') >= 0,
     // the wallet's contract: the hold, and the one balance it makes (no balance is kept for receives or sends)
-    walletChoice: () => {
-      const one = st.choice.hold === 'dollars' ? 'usd' : st.choice.hold === 'bitcoin' ? 'sat' : '';
-      return { hold: st.choice.hold, recv: one, send: one };
+    /* Each mint its own choice, as the wallet keeps it: this mint's (MINT) in st.choice, another's in st.at, written
+     * where `setWalletChoice` is told (or the connected mint), and which mint each write was for in rec.setAt. The
+     * balances are one pair: a test that connects another mint does it only to see where a choice is written. */
+    walletChoice: (mint) => {
+      const m = mint || W.mintUrl;
+      const hold = m === MINT ? st.choice.hold : (st.at[m] || '');
+      const one = hold === 'dollars' ? 'usd' : hold === 'bitcoin' ? 'sat' : '';
+      return { hold, recv: one, send: one };
     },
-    setWalletChoice(p) {
+    setWalletChoice(p, mint) {
       rec.sets.push(Object.assign({}, p));
+      rec.setAt.push(mint || W.mintUrl);
       if (p.recv !== undefined || p.send !== undefined) throw new Error('Foxy does not know that choice.');
+      if (p.kept !== undefined && p.kept !== 0) throw new Error('Foxy does not know that choice.');
       if (p.hold != null) {
         if (['dollars', 'bitcoin', 'both'].indexOf(p.hold) < 0) throw new Error('Foxy does not know that choice.');
-        st.choice.hold = p.hold;
+        const m = mint || W.mintUrl;
+        // the wallet keeps what a swap of all left in the other currency (`holdKept`), none where it was told so
+        const kept = p.kept === 0 ? 0 : p.hold === 'dollars' ? st.sat : p.hold === 'bitcoin' ? st.usd : 0;
+        if (m === MINT) { st.choice.hold = p.hold; st.kept = kept; } else { st.at[m] = p.hold; st.keptAt[m] = kept; }
       }
+    },
+    // never more than is there now: read below it, it is lowered (spent dust is not a line for later money)
+    holdKept: () => {
+      if (W.mintUrl !== MINT || !(st.choice.hold === 'dollars' || st.choice.hold === 'bitcoin')) return 0;
+      const now = st.choice.hold === 'bitcoin' ? st.usd : st.sat;
+      if (now < (st.kept || 0)) st.kept = now;
+      return st.kept || 0;
     },
     balanceOf: (u) => (u === 'usd' ? st.usd : st.sat),
     heldIn: () => 0,
@@ -244,7 +261,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq(v.homePillRows.map((p) => p.sym), ['₿'], 'one balance: one pill, the bitcoin one');
     ok(!/YOUR MONEY/.test(textOf(w)) && textOf(w).indexOf(v.homeMintName) >= 0, 'one balance: the sheet is headed by the mint, not YOUR MONEY');
     eq(v.homeButtonsTwo, [], 'one balance: no SWAP row of three');
-    ok(!v.menuItems.some((m) => m.label === 'SWAP' || m.label === 'WHAT YOU HOLD'), 'one balance: no SWAP or WHAT YOU HOLD in the menu');
+    ok(!v.menuItems.some((m) => m.label === 'SWAP' || m.label === 'CURRENCIES'), 'one balance: no SWAP or CURRENCIES in the menu');
     eq(A.state.balUsdCents, null, 'one balance: no dollar figure kept');
     A.offerHoldChoice();
     await settle();
@@ -273,9 +290,14 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     A.setState({ satUsd: PRICE / 1e8, livePrice: PRICE });
     eq([v.homePillRows[1].big, v.homePillRows[1].small], ['50,000', '$40.00 USD'], 'the fur pill: the sats, their dollar worth under');
     ok(v.homePillRows[0].ink === '#10161B' && v.homePillRows[1].ink === '#FFFFFF', 'frost has dark ink, fur white');
-    eq(v.homeButtonsTwo.map((b) => b.label), ['SCAN', 'PASTE', 'SWAP'], 'two pills: SCAN / PASTE / SWAP');
+    eq(v.homeButtonsTwo.map((b) => b.label), ['SCAN', 'PASTE', 'CARD'], 'two pills: SCAN / PASTE / CARD, no SWAP on home');
+    {
+      const l = v.menuItems.map((m) => m.label);
+      ok(l.indexOf('SWAP') > l.indexOf('MINTS') && l.indexOf('SWAP') < l.indexOf('TOOLS') && l.indexOf('SWAP') === Math.max(l.indexOf('SWITCH/ADD MINTS'), l.indexOf('TRANSFER MONEY')) + 1,
+        'two pills: SWAP is a row of MINTS, under TRANSFER MONEY (or SWITCH/ADD MINTS where there is none)', l.join(', '));
+    }
     const t = textOf(w);
-    ok(t.indexOf(v.homeMintName) >= 0 && !/\bMINT\b/.test(t) && /42\.05/.test(t) && /50,000/.test(t) && /SWAP/.test(t), 'the page draws the heading (the mint’s name alone, no MINT under it), both pills and SWAP');
+    ok(t.indexOf(v.homeMintName) >= 0 && !/\bMINT\b/.test(t) && /42\.05/.test(t) && /50,000/.test(t) && /CARD/.test(t), 'the page draws the heading (the mint’s name alone, no MINT under it), both pills and CARD');
     ok(!/YOUR MONEY/.test(t), 'YOUR MONEY is gone at a mint with two balances');
     eq(v.priceTopPad, 8, 'BITCOIN PRICE level with the round buttons');
     // hidden
@@ -292,7 +314,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     await fresh(W, { balSats: 0 });
     const d = V();
     eq(d.homePillRows.map((p) => p.sym), ['$'], 'Dollars: one frost pill');
-    eq(d.homeButtonsTwo.map((b) => b.label), ['SCAN', 'PASTE'], 'one pill: no SWAP button');
+    eq(d.homeButtonsTwo.map((b) => b.label), ['SCAN', 'PASTE', 'CARD'], 'one pill: SCAN / PASTE / CARD');
     ok(d.menuItems.some((m) => m.label === 'SWAP'), 'one pill: SWAP is a row in the menu');
     // money held is never hidden
     W.st.sat = 1200;
@@ -306,15 +328,16 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     // offline: SWAP dimmed, and says why
     const off = twoWallet({ choice: { hold: 'both' }, online: false });
     await fresh(off);
-    const sw = V().homeButtonsTwo.find((b) => b.label === 'SWAP');
-    eq(sw.dim, '0.38', 'offline: SWAP is dimmed');
+    ok(!V().homeButtonsTwo.some((b) => b.label === 'SWAP'), 'offline: no SWAP on home either');
+    const sw = V().menuItems.find((m) => m.label === 'SWAP');
     sw.tap();
     eq(toasts.pop(), 'Swapping needs the mint.', 'offline: a tap on SWAP says it needs the mint');
   }
 
-  // ---- 3. the last first step: WHAT DO YOU WANT TO HOLD? ---------------------------------------
+  // ---- 3. the last first step: CURRENCIES ------------------------------------------------------
   {
-    const W = twoWallet();
+    // (nothing in bitcoin yet: Dollars leaves nothing behind, so it is DONE; with bitcoin held it is NEXT, below)
+    const W = twoWallet({ sat: 0 });
     await fresh(W);
     A.offerHoldChoice();
     await settle();
@@ -322,7 +345,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     const v = V();
     ok(v.isHoldChoice, 'the hold screen is drawn');
     eq(v.holdRows.map((h) => h.name), ['DOLLARS', 'BITCOIN', 'BOTH'], 'Dollars / Bitcoin / Both');
-    ok(/WHAT DO YOU/.test(textOf(w)) && /WANT TO HOLD\?/.test(textOf(w)) && /LAST STEP/.test(textOf(w)), 'its words');
+    ok(/CURRENCIES/.test(textOf(w)) && /At forge\.example\.com/.test(textOf(w)) && /LAST STEP/.test(textOf(w)), 'its words');
     v.holdDone();
     ok(toasts.pop() === 'Pick one first.' && A.state.screen === 'holdChoice', 'DONE with nothing picked does nothing but say so');
     V().holdRows[0].tap();
@@ -906,8 +929,8 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     ok(A.walletNow('receive') === 'sat' && A.walletNow('send') === 'sat', 'Bitcoin: its flows use bitcoin');
     const v = V();
     eq(v.homePillRows.map((p) => p.sym), ['₿'], 'Bitcoin, nothing in dollars: one fur pill');
-    eq(v.homeButtonsTwo.map((b) => b.label), ['SCAN', 'PASTE'], 'and SCAN / PASTE, no SWAP');
-    ok(v.menuItems.some((m) => m.label === 'SWAP') && v.menuItems.some((m) => m.label === 'WHAT YOU HOLD'), 'SWAP and WHAT YOU HOLD are menu rows');
+    eq(v.homeButtonsTwo.map((b) => b.label), ['SCAN', 'PASTE', 'CARD'], 'and SCAN / PASTE / CARD, no SWAP');
+    ok(v.menuItems.some((m) => m.label === 'SWAP') && v.menuItems.some((m) => m.label === 'CURRENCIES'), 'SWAP and CURRENCIES are menu rows');
     V().goReceive(); await settle();
     ok(A.state.screen === 'amount' && A.walletNow('receive') === 'sat', 'holding Bitcoin: RECEIVE goes straight to SET AMOUNT, in bitcoin');
     eq(V().swapVis, 'visible', 'a bitcoin receive keeps its ⇅ toggle, as today');
@@ -958,10 +981,10 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     ok(A.state.screen === 'home' && W.rec.sets.length === 0, 'back from the hold question: home, nothing written');
     A.offerHoldChoice(); await settle();
     eq(A.state.screen, 'home', 'and not asked again until the next launch');
-    // MENU › WHAT YOU HOLD asks it again, with the answer given outlined
+    // MENU › CURRENCIES asks it again, with the answer given outlined
     W.st.choice.hold = 'dollars';
-    V().menuItems.find((m) => m.label === 'WHAT YOU HOLD').tap(); await settle();
-    eq([A.state.screen, V().holdRows.map((h) => h.outline !== 'none')], ['holdChoice', [true, false, false]], 'MENU › WHAT YOU HOLD: the question, Dollars outlined');
+    V().menuItems.find((m) => m.label === 'CURRENCIES').tap(); await settle();
+    eq([A.state.screen, V().holdRows.map((h) => h.outline !== 'none')], ['holdChoice', [true, false, false]], 'MENU › CURRENCIES: the question, Dollars outlined');
   }
   {
     // the automatic choice is this payment's only: the next one asks again
@@ -1082,6 +1105,307 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq(V().sentFromShown, false, 'one balance: the sent screen has no FROM line');
     A.setState({ screen: 'history', stack: ['home'] }); await settle();
     eq([V().histTabsShown, V().histTabs.length], [false, 0], 'one balance: history has no DOLLARS / BITCOIN tab');
+    A.setState({ screen: 'home', stack: [] }); await settle();
+  }
+
+  /* ---- CURRENCIES: the choice is made for this mint, and changes the balances seen -------------
+   *
+   * The keeper's rules: the screen says which mint it is for; Both shows both and receives in both; one currency with
+   * nothing in the other is one balance at once; one currency with money in the other is NEXT, the swap's own
+   * confirmation for the whole of the other balance with its fee, and CONFIRM moves it and goes home with one balance,
+   * the choice kept; CANCEL, or a swap that fails, keeps the choice as it was; what a swap of all leaves (too little for
+   * the mint after its fee) is a line under the chosen balance, not a pill, and a receive does not ask about it.
+   * The stand-in leaves what the real wallet leaves at the harness mint: 8 cents of dollars, 115 sats of bitcoin. */
+  // the stand-in's swap calls, keeping cents and sats apart (as tests/two-balances-swap.js has them)
+  const swapping = (W, how) => {
+    const run = Object.assign({ asked: [], ran: [], as: 'done', pending: [], outcome: {} }, how || {});
+    W.mintRate = () => ({ usdPerBtc: MINT_RATE });
+    W.unitSwapsPending = () => run.pending.map((id) => ({ id, at: 1, from: { unit: 'usd', amount: 0 }, to: { unit: 'sat', amount: 0 } }));
+    W.swapOutcome = (id) => run.outcome[id] || '';
+    // what a swap of all leaves behind at the harness mint (review probe: $ 0.08 and ₿ 115 with no input fee)
+    const LEAVE = { usd: 8, sat: 115 };
+    W.sweepMelts = () => Promise.resolve([]);
+    W.recoverSwaps = () => Promise.resolve([]);
+    W.swapProbe = () => Promise.resolve({ usdPerBtc: MINT_RATE });
+    W.swapQuote = (from, to, amount, o) => {
+      run.asked.push({ from, to, amount, all: !!(o && o.all) });
+      if (run.refuse) return Promise.reject(new Error(run.refuse));
+      const total = (o && o.all) ? (from === 'usd' ? W.st.usd : W.st.sat) - LEAVE[from] : amount;
+      const fee = from === 'usd' ? 2 : 3;
+      return Promise.resolve({ id: 'uswap-' + run.asked.length, mint: MINT, from, to, total, amount: total - fee, fee,
+        get: from === 'usd' ? Math.floor((total - fee) / 100 / MINT_RATE * 1e8) : Math.floor((total - fee) * MINT_RATE / 1e8 * 100),
+        rate: { usdPerBtc: MINT_RATE, by: 'forge.example.com' }, market: PRICE, spread: 0, spreadWarn: false,
+        expiresAt: Date.now() + 67500, state: 'quoted' });
+    };
+    W.swapRun = (q, stage) => {
+      run.ran.push(q);
+      if (run.as === 'throw') return Promise.reject(new Error('The mint is busy. Try again in a moment.'));
+      if (run.as === 'failed') return Promise.resolve({ id: q.id, state: 'failed', from: { unit: q.from, amount: q.total }, to: { unit: q.to, amount: 0 } });
+      const pend = { id: q.id, state: 'pending', from: { unit: q.from, amount: q.total }, to: { unit: q.to, amount: q.get }, fee: q.fee, rate: q.rate };
+      // with the mint, then given back (nothing moved) or finished (both moved), as `run.settle` says, by `run.land()`
+      if (run.as === 'pending') {
+        run.pending.push(q.id);
+        if (q.from === 'usd') W.st.usd -= q.total; else W.st.sat -= q.total;
+        run.land = (how) => {
+          run.pending = run.pending.filter((x) => x !== q.id);
+          if (how === 'back') { if (q.from === 'usd') W.st.usd += q.total; else W.st.sat += q.total; run.outcome[q.id] = run.word ? 'failed' : ''; }
+          else { if (q.from === 'usd') W.st.sat += q.get; else W.st.usd += q.get; run.outcome[q.id] = run.word ? 'done' : ''; }
+        };
+        if (run.landAt === 'now') run.land(run.settle);
+        return Promise.resolve(pend);
+      }
+      stage('paying'); stage('done');
+      if (q.from === 'usd') { W.st.usd -= q.total; W.st.sat += q.get; } else { W.st.sat -= q.total; W.st.usd += q.get; }
+      return Promise.resolve({ id: q.id, state: 'done', from: { unit: q.from, amount: q.total }, to: { unit: q.to, amount: q.get }, fee: q.fee, rate: q.rate });
+    };
+    return run;
+  };
+  const openCurrencies = async () => {
+    V().menuItems.find((m) => m.label === 'CURRENCIES').tap();
+    await settle();
+  };
+  {
+    // the screen: titled CURRENCIES, and it says which mint the choice is for
+    const W = twoWallet({ choice: { hold: 'both' } });
+    await fresh(W);
+    await openCurrencies();
+    const t = textOf(w);
+    ok(A.state.screen === 'holdChoice' && /CURRENCIES/.test(t) && !/WHAT DO YOU WANT TO HOLD/.test(t), 'MENU › CURRENCIES: a screen titled CURRENCIES', t.slice(0, 200));
+    ok(/At forge\.example\.com/.test(t) && V().holdMint === 'At forge.example.com', 'it says the mint the choice is for', V().holdMint);
+    ok(/at this mint/i.test(V().holdSub), 'and that the choice is this mint’s', V().holdSub);
+    ok(!/LAST STEP/.test(t) && V().holdStep === '', 'from the menu it is not LAST STEP');
+  }
+  {
+    // Both, after one: both balances on home, and a receive offers both
+    const W = twoWallet({ choice: { hold: 'bitcoin' }, usd: 0 });
+    await fresh(W);
+    eq(V().homePillRows.map((p) => p.sym), ['₿'], 'holding bitcoin, nothing in dollars: one pill');
+    await openCurrencies();
+    V().holdRows[2].tap(); await settle();
+    eq(V().holdDoneLabel, 'DONE', 'Both: the button reads DONE');
+    V().holdDone(); await settle();
+    eq([A.state.screen, W.rec.sets.pop()], ['home', { hold: 'both' }], 'Both: home, and Both kept');
+    eq(V().homePillRows.map((p) => p.sym), ['$', '₿'], 'Both: both balances on home');
+    V().goReceive(); await settle();
+    ok(A.state.screen === 'currency' && V().curCards.length === 2, 'and a receive offers both');
+    A.setState({ screen: 'home', stack: [] }); await settle();
+  }
+  {
+    // one currency, the other at 0: home at once, one balance, no swap asked, receives only in the one
+    const W = twoWallet({ choice: { hold: 'both' }, usd: 0 });
+    const run = swapping(W);
+    await fresh(W);
+    await openCurrencies();
+    V().holdRows[1].tap(); await settle();
+    eq(V().holdDoneLabel, 'DONE', 'Bitcoin with no dollars: the button reads DONE');
+    V().holdDone(); await settle();
+    eq([A.state.screen, W.rec.sets.pop(), run.asked.length], ['home', { hold: 'bitcoin' }, 0], 'home at once, Bitcoin kept, no swap asked');
+    eq(V().homePillRows.map((p) => p.sym), ['₿'], 'one balance on home');
+    V().goReceive(); await settle();
+    ok(A.state.screen === 'amount' && A.walletNow('receive') === 'sat', 'a receive is in bitcoin, dollars not offered');
+    A.setState({ screen: 'home', stack: [] }); await settle();
+  }
+  {
+    // one currency, the other funded: NEXT, the swap's confirmation for all of it with its fee, SWAP, home with one balance
+    const W = twoWallet({ choice: { hold: 'both' }, usd: 4205, sat: 50000 });
+    const run = swapping(W);
+    await fresh(W);
+    await openCurrencies();
+    V().holdRows[1].tap(); await settle();
+    eq(V().holdDoneLabel, 'NEXT', 'Bitcoin with dollars held: the button reads NEXT');
+    ok(/\$ 42\.05/.test(V().holdNote) && /bitcoin/i.test(V().holdNote), 'and says the dollars will be swapped into bitcoin first', V().holdNote);
+    V().holdDone(); await settle(); await settle();
+    eq(W.rec.sets.length, 0, 'NEXT writes nothing yet');
+    eq(run.asked.pop(), { from: 'usd', to: 'sat', amount: 4205, all: true }, 'the rate is asked for all of the dollars');
+    const t = textOf(w);
+    ok(A.state.screen === 'swapConfirm' && /YOU ARE GETTING/.test(t) && /YOU ARE SPENDING\s*\$ 41\.97 in DOLLARS/.test(t) && /FEE\s*\$ 0\.02/.test(t),
+      'the swap confirmation: what arrives, all the dollars the mint will take ($ 41.97 of $ 42.05), and the fee', t.slice(0, 300));
+    eq(V().cfCtaLabel, 'SWAP', 'its button is SWAP, as every swap’s');
+    // CANCEL (the round ✕): the choice as it was
+    V().cfClose(); await settle();
+    eq([A.state.screen, W.rec.sets.length, run.ran.length, W.st.choice.hold], ['home', 0, 0, 'both'], 'CANCEL: home, nothing moved, the choice as it was');
+    // back from the confirmation: CURRENCIES again, nothing kept
+    await openCurrencies();
+    V().holdRows[1].tap(); V().holdDone(); await settle(); await settle();
+    A.back(); await settle();
+    eq([A.state.screen, W.rec.sets.length, W.st.choice.hold], ['holdChoice', 0, 'both'], 'back: CURRENCIES again, the choice as it was');
+    V().holdDone(); await settle(); await settle();
+    A._preSettle = null;
+    V().cfGo(); await settle(); await settle();
+    eq(run.ran.length, 1, 'SWAP runs the swap');
+    eq([A.state.screen, W.rec.sets.pop()], ['home', { hold: 'bitcoin' }], 'and home, Bitcoin kept');
+    eq(W.st.usd, 8, 'all the dollars the mint would take are moved: 8 cents are left, as at a real mint');
+    A.refreshUsd(); await settle();
+    eq(V().homePillRows.map((p) => p.sym), ['₿'], 'one balance on home, not a pill for the 8 cents');
+    eq([V().homeLeftShown, V().homeLeft], [true, 'Also here: $ 0.08 in dollars'], 'the 8 cents a line under it, so nothing is hidden');
+    ok(/Also here: \$ 0\.08 in dollars/.test(textOf(w)), 'drawn on the page');
+    V().goReceive(); await settle();
+    ok(A.state.screen === 'amount' && A.walletNow('receive') === 'sat', 'a receive is in bitcoin with no question', A.state.screen);
+    A.setState({ screen: 'home', stack: [] }); await settle();
+    // money that comes in dollars since: past what was left, its own pill again, the choice as set
+    W.st.usd = 508; A.refreshUsd(); await settle();
+    eq([V().homePillRows.map((p) => p.sym), V().homeLeftShown, W.st.choice.hold], [['₿', '$'], false, 'bitcoin'], 'dollars paid in since: their pill again, bitcoin first');
+    // the leftover spent, then a little paid in: not taken for the leftover (it only goes down as it is spent)
+    W.st.usd = 8; W.st.kept = 8; A.refreshUsd(); await settle();
+    eq(V().homeLeftShown, true, 'back to the 8 cents: the line');
+    W.st.usd = 0; A.refreshUsd(); await settle();
+    eq([V().homePillRows.map((p) => p.sym), V().homeLeftShown, W.st.kept], [['₿'], false, 0], 'the 8 cents spent: no line, and nothing recorded as left');
+    W.st.usd = 5; A.refreshUsd(); await settle();
+    eq([V().homePillRows.map((p) => p.sym), V().homeLeftShown], [['₿', '$'], false], '5 cents paid in later: a pill, not the line');
+  }
+  {
+    // still going through at one mint, landing while another is connected: the choice is the first mint's, with its
+    // own leftover, and the other mint's choice is as it was
+    const B = 'https://other.example.com';
+    const W = twoWallet({ choice: { hold: 'both' }, usd: 4205, sat: 50000 });
+    const run = swapping(W, { as: 'pending', word: true });
+    W.st.at[B] = 'both';
+    await fresh(W);
+    await openCurrencies();
+    V().holdRows[1].tap(); V().holdDone(); await settle(); await settle();
+    A._preSettle = null;
+    A.SWAP_WAIT_MS = 0; A.HOLD_WATCH_MS = 20;
+    V().cfGo(); await settle(); await settle();
+    [...w.document.body.children].filter((el) => /SWAP STILL GOING/.test(el.textContent)).forEach((el) => el.remove());
+    A._blockedEl = null; A._blockedKind = ''; A._cardQueue = [];
+    W.mintUrl = B;
+    run.land('done');
+    await wait(80); await settle();
+    eq([W.rec.setAt.pop(), W.rec.sets.pop()], [MINT, { hold: 'bitcoin' }], 'it lands with another mint connected: written at the mint it was made at');
+    eq([W.st.choice.hold, W.st.kept, W.st.at[B], W.st.keptAt[B]], ['bitcoin', 8, 'both', undefined], 'that mint holds bitcoin with its 8 cents left; the other is as it was');
+    W.mintUrl = MINT;
+    // a switch of mint, a wipe and a restore stop the look
+    const src = (f) => fs.readFileSync(path.join(ROOT, 'build', 'app', f), 'utf8');
+    const stops = (f, fn) => { const t = src(f); const i = t.indexOf('  ' + fn + '('); const j = t.indexOf('\n  }\n', i); return i > 0 && t.slice(i, j).indexOf('this.holdSwapWatchStop()') > 0; };
+    ok(stops('09-melt-paste-switch.js', 'justSwitch') && stops('14-reconcile-seed-restore.js', 'wipedAndRestarting') && stops('06-wallet-boot-and-restore.js', 'adoptRestoreMint'),
+      'a switch of mint, a wipe and a restore stop the look');
+    A.HOLD_WATCH_MS = 20;
+    A.holdSwapWatch({ id: 'x', hold: 'bitcoin', from: 'usd', before: 0, total: 1, mint: MINT });
+    A.holdSwapWatchStop();
+    ok(!A._holdWatchT, 'and stopping it leaves no timer');
+    A.HOLD_WATCH_MS = 5000;
+  }
+  {
+    // and the other way round: dollars, bitcoin held
+    const W = twoWallet({ choice: { hold: 'both' }, usd: 4205, sat: 50000 });
+    const run = swapping(W);
+    await fresh(W);
+    await openCurrencies();
+    V().holdRows[0].tap(); await settle();
+    eq(V().holdDoneLabel, 'NEXT', 'Dollars with bitcoin held: NEXT');
+    V().holdDone(); await settle(); await settle();
+    eq(run.asked.pop(), { from: 'sat', to: 'usd', amount: 50000, all: true }, 'the rate is asked for all of the bitcoin');
+    A._preSettle = null;
+    V().cfGo(); await settle(); await settle();
+    eq([A.state.screen, W.rec.sets.pop(), W.st.sat], ['home', { hold: 'dollars' }, 115], 'SWAP: home, Dollars kept, 115 sats left as at a real mint');
+    A.refreshUsd(); A.setState({ balSats: W.st.sat }); await settle();
+    eq([V().homePillRows.map((p) => p.sym), V().homeLeft], [['$'], 'Also here: ₿ 115 in bitcoin'], 'one dollar pill, the sats a line under it');
+    V().goReceive(); await settle();
+    ok(A.state.screen === 'amount' && A.walletNow('receive') === 'usd', 'a receive is in dollars with no question', A.state.screen);
+    A.setState({ screen: 'home', stack: [] }); await settle();
+  }
+  {
+    // a swap that settles while the screen waits: kept only if it landed; one given back says the mint did not make it
+    for (const [settleAs, word] of [['back', false], ['back', true], ['done', false], ['done', true]]) {
+      const W = twoWallet({ choice: { hold: 'both' }, usd: 4205, sat: 50000 });
+      swapping(W, { as: 'pending', landAt: 'now', settle: settleAs, word });
+      await fresh(W);
+      await openCurrencies();
+      V().holdRows[1].tap(); V().holdDone(); await settle(); await settle();
+      A._preSettle = null;
+      A.SWAP_WAIT_MS = 400; A.SWAP_WAIT_STEP_MS = 20;
+      V().cfGo(); await settle(); await settle(); await wait(60); await settle();
+      const said = word ? ' (the wallet’s word)' : ' (by the balance)';
+      if (settleAs === 'back') {
+        ok(A.state.screen === 'swapConfirm' && W.rec.sets.length === 0 && W.st.choice.hold === 'both' && /did not make this swap/.test(V().cfChip),
+          'given back while the screen waited' + said + ': the choice not kept, and the mint did not make it', JSON.stringify([A.state.screen, W.rec.sets, V().cfChip]));
+      } else {
+        eq([A.state.screen, W.rec.sets.pop()], ['home', { hold: 'bitcoin' }], 'landed while the screen waited' + said + ': home, Bitcoin kept');
+      }
+      A.SWAP_WAIT_MS = 0;
+      A.setState({ screen: 'home', stack: [] }); await settle();
+    }
+  }
+  {
+    // still with the mint after the wait (SWAP STILL GOING THROUGH): kept when it lands, not if it comes back
+    for (const settleAs of ['done', 'back']) {
+      const W = twoWallet({ choice: { hold: 'both' }, usd: 4205, sat: 50000 });
+      const run = swapping(W, { as: 'pending', word: true });
+      await fresh(W);
+      await openCurrencies();
+      V().holdRows[1].tap(); V().holdDone(); await settle(); await settle();
+      A._preSettle = null;
+      A.SWAP_WAIT_MS = 0; A.HOLD_WATCH_MS = 20;
+      V().cfGo(); await settle(); await settle();
+      const card = [...w.document.body.children].map((el) => el.textContent).join(' ');
+      ok(A.state.screen === 'home' && /SWAP STILL GOING THROUGH/.test(card) && W.rec.sets.length === 0 && W.st.choice.hold === 'both',
+        'still going through: the card, and the choice not kept yet', JSON.stringify([A.state.screen, W.rec.sets]));
+      [...w.document.body.children].filter((el) => /SWAP STILL GOING/.test(el.textContent)).forEach((el) => el.remove());
+      A._blockedEl = null; A._blockedKind = ''; A._cardQueue = [];
+      await wait(60);
+      eq(W.rec.sets.length, 0, 'nothing kept while it is with the mint');
+      run.land(settleAs);
+      await wait(80); await settle();
+      if (settleAs === 'done') eq([W.rec.sets.pop(), W.st.choice.hold], [{ hold: 'bitcoin' }, 'bitcoin'], 'it lands: Bitcoin kept then');
+      else eq([W.rec.sets.length, W.st.choice.hold], [0, 'both'], 'it comes back: the choice stays Both');
+      ok(!A._holdWatchT, 'and the look stops');
+      A.HOLD_WATCH_MS = 5000;
+    }
+  }
+  {
+    // the first time, with no route: the choice is kept and the other money left where it is, a balance of its own
+    // (a pill) until it is swapped: only what a swap of all left is ever drawn as the line
+    const W = twoWallet({ usd: 4205, sat: 50000, online: false });
+    swapping(W);
+    await fresh(W);
+    A.offerHoldChoice(); await settle();
+    V().holdRows[1].tap(); await settle();
+    eq(V().holdDoneLabel, 'DONE', 'first time, offline, dollars held: DONE, not NEXT');
+    V().holdDone(); await settle();
+    eq([A.state.screen, W.rec.sets.pop()], ['home', { hold: 'bitcoin', kept: 0 }], 'Bitcoin kept, home, nothing recorded as left beside it');
+    A.refreshUsd(); await settle();
+    eq([V().homePillRows.map((p) => p.sym), V().homeLeftShown], [['₿', '$'], false], 'the dollars left where they are, still their own pill, bitcoin first');
+    // from the menu, offline, it is NEXT and says the swap needs the mint
+    V().menuItems.find((m) => m.label === 'CURRENCIES').tap(); await settle();
+    V().holdRows[0].tap(); await settle();
+    V().holdDone(); await settle();
+    ok(A.state.screen === 'holdChoice' && toasts.pop() === 'Swapping needs the mint.' && W.st.choice.hold === 'bitcoin', 'from the menu offline: the swap needs the mint, nothing changes');
+    A.setState({ screen: 'home', stack: [] }); await settle();
+  }
+  {
+    // a swap that fails: the choice is not kept, and the confirmation says why
+    for (const as of ['throw', 'failed']) {
+      const W = twoWallet({ choice: { hold: 'both' }, usd: 4205, sat: 50000 });
+      swapping(W, { as });
+      await fresh(W);
+      await openCurrencies();
+      V().holdRows[1].tap(); V().holdDone(); await settle(); await settle();
+      A._preSettle = null;
+      V().cfGo(); await settle(); await settle();
+      ok(A.state.screen === 'swapConfirm' && W.rec.sets.length === 0 && W.st.choice.hold === 'both',
+        'a swap that ' + (as === 'throw' ? 'cannot reach the mint' : 'the mint does not make') + ': the choice is not kept', JSON.stringify([A.state.screen, W.rec.sets]));
+      ok(!!V().cfChip && (as === 'throw' ? /busy/.test(V().cfChip) : /did not make this swap/.test(V().cfChip)), 'and the confirmation says why', V().cfChip);
+      A.setState({ screen: 'home', stack: [] }); await settle();
+    }
+  }
+  {
+    // dust: too little to swap after the fee is not nothing; it stays, a line under the chosen balance
+    const W = twoWallet({ choice: { hold: 'both' }, usd: 1, sat: 50000 });
+    const run = swapping(W, { refuse: 'That is too little to swap after the mint’s fee.' });
+    await fresh(W);
+    await openCurrencies();
+    V().holdRows[1].tap(); await settle();
+    eq(V().holdDoneLabel, 'NEXT', 'a cent of dollars is not nothing: NEXT');
+    V().holdDone(); await settle(); await settle();
+    ok(A.state.screen === 'swapConfirm' && /too little to swap/.test(V().cfChip) && /stays/.test(V().cfChip), 'too little to swap: the confirmation says it stays', V().cfChip);
+    ok(/under your bitcoin/.test(V().cfChip), 'and where home shows it', V().cfChip);
+    eq(V().cfCtaLabel, 'KEEP IT AND HOLD BITCOIN', 'and offers to keep it');
+    V().cfGo(); await settle();
+    eq([A.state.screen, W.rec.sets.pop(), run.ran.length], ['home', { hold: 'bitcoin' }, 0], 'home, Bitcoin kept, nothing swapped');
+    A.refreshUsd(); await settle();
+    eq([V().homePillRows.map((p) => p.sym), V().homeLeft], [['₿'], 'Also here: $ 0.01 in dollars'], 'one pill, the cent a line under it');
+    V().goReceive(); await settle();
+    ok(A.state.screen === 'amount' && A.walletNow('receive') === 'sat', 'and a receive asks nothing', A.state.screen);
     A.setState({ screen: 'home', stack: [] }); await settle();
   }
 

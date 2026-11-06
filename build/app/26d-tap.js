@@ -33,8 +33,7 @@
      * CONNECT TO PAY cards wait for that — so the link is given a head start
      * while the amount is still being typed, and the cards are up the moment
      * the invoice screen is. Nothing can be paid from
-     * here: the offer is M4 and there is none until the next screen. With
-     * AUTO TAP TO PAY off this screen has no TAP button and never arms. */
+     * here: the offer is M4 and there is none until the next screen. */
     if (s.screen === 'amount' && s.flow === 'receive') {
       return this.tapAutoArms() ? { inv: '', req: '', waiting: true } : null;
     }
@@ -783,10 +782,11 @@
    * would put the same number back on the air and hand the next customer a
    * conversation the last payer's keys belong to (FoxyBridge+Tap.swift).
    * Here that is just: clear what the last payer left on screen, and ask. */
-  /* Whether the invoice screen arms itself. On unless the person turned it
-   * off (MENU > TAP ON PRESS); the press and the shake work either way. */
+  /* Whether the invoice screen arms itself: always. The menu's switch that turned it off (AUTO TAP TO PAY) is gone, so
+   * an "off" a phone kept from it (`foxy.tap.auto`) is no longer read: a choice nobody can see or change back is not
+   * kept. `tapAutoSet` stays for the screens' tests. */
   tapAutoArms() {
-    try { return localStorage.getItem('foxy.tap.auto') !== 'off'; } catch (e) { return true; }
+    return true;
   }
 
   tapAutoSet(on) {
@@ -806,7 +806,7 @@
    * real payer who is still reading their screen, so it is the person's call
    * instead — a code up and nobody paying is something they can see, and this
    * is the one press that answers it. If it keeps
-   * happening, Bluetooth off, or AUTO TAP TO PAY off, ends it.
+   * happening, Bluetooth off ends it.
    *
    * Not while a payment or a price is in the middle of crossing: then X only
    * puts the card away, as it always did, and the link is left alone. */

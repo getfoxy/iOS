@@ -485,6 +485,12 @@
       return;
     }
     const { from, to } = this.swapUnits();
+    // opened from CURRENCIES for all of one balance: the choice is kept once this has landed (10-pin.js, `holdSwapStart`)
+    const holdFor = this.holdSwapFor ? this.holdSwapFor() : '';
+    // the mint it is made at: the choice is that mint's, whatever is connected when it lands
+    const holdMint = String(W.mintUrl || '');
+    let holdBefore = 0;
+    try { holdBefore = (W.balanceOf ? Number(holdMint ? W.balanceOf(from, holdMint) : W.balanceOf(from)) : this.unitBalance(from)) || 0; } catch (e) { holdBefore = this.unitBalance(from); }
     // the balances before, for the count-up on home once the screen is dismissed
     this._preSettle = this.balNow();
     this.setState({ swapBusy: true, swapNewRate: false, swapErr: '', swapErrAmount: false });
@@ -505,6 +511,22 @@
       this.loadHistory();
       // the next probe from this balance asks at this size, the likeliest next figure
       this._swapLast = Object.assign({}, this._swapLast || {}, { [from]: Number(q.total) || 0 });
+      /* CURRENCIES' swap: home with the one balance chosen, not SWAPPED, once it has landed. One that settled while the
+       * screen waited may have settled either way: the wallet's word, or the balance it left from, says which; one whose
+       * payment came back keeps the choice as it was and says so, as a swap the mint did not make. */
+      const watch = { id: r && r.id, hold: holdFor, from: from, before: holdBefore, total: Number(q.total) || 0, mint: holdMint };
+      if (holdFor && r && (r.state === 'done' || (r.state === 'pending' && r.held === false && this.holdSwapLanded(watch)))) {
+        this.setState({ swapBusy: false, swapQuote: null, swapResult: null });
+        this.holdSwapDone(holdFor);
+        return;
+      }
+      if (holdFor && r && r.state === 'pending' && r.held === false) {
+        this._preSettle = null;
+        this.setState({ swapBusy: false, swapQuote: null,
+          swapErr: 'The mint did not make this swap. Nothing moved, and your ' + this.unitWord(from).toLowerCase()
+            + ' are where they were.' });
+        return;
+      }
       if (r && r.state === 'done') {
         this.setState({ swapBusy: false, swapResult: r, screen: 'swapDone', stack: [] });
         return;
@@ -512,10 +534,17 @@
       if (r && r.state === 'pending' && r.held === false) {
         // settled while the screen waited: nothing is with the mint any more, and home shows where the money is
         this._preSettle = null;
+        // a swap that has ended, here at home: not back to the menu it may have come from (01-ui-basics.js)
+        if (this.menuReturnDrop) this.menuReturnDrop();
         this.setState({ swapBusy: false, swapQuote: null, screen: 'home', stack: [] });
         return;
       }
-      if (r && r.state === 'pending') { this.swapStillGoing(r); return; }
+      if (r && r.state === 'pending') {
+        // still with the mint: the choice is kept when it lands, and not if its payment comes back (10-pin.js, `holdSwapWatch`)
+        if (holdFor && this.holdSwapWatch) this.holdSwapWatch(watch);
+        this.swapStillGoing(r);
+        return;
+      }
       // the mint would not take the payment: it is back in the balance, and nothing moved
       this._preSettle = null;
       this.setState({ swapBusy: false, swapQuote: null,
@@ -572,6 +601,8 @@
    * the held pill names what is with the mint until the wallet finishes it. */
   swapStillGoing(r) {
     this._preSettle = null;
+    // home with the card, not the menu under it (01-ui-basics.js `menuReturnDrop`)
+    if (this.menuReturnDrop) this.menuReturnDrop();
     this.setState({ swapBusy: false, swapQuote: null, screen: 'home', stack: [] });
     this.swapPendingCard(r);
   }
@@ -857,6 +888,16 @@
           chip: 'The rate ran out. Nothing moved.',
           cta: 'GET A NEW RATE', ctaTone: 'go',
           go: () => { this.setState({ swapRequotes: 0 }); this.swapAsk(true); } });
+      }
+      /* CURRENCIES' swap of all of a balance, too little to swap after the fee: it stays where it is, and the choice
+       * can still be kept, home showing it after the one chosen (10-pin.js, `holdSwapStart`). */
+      const holdFor = this.holdSwapFor ? this.holdSwapFor() : '';
+      if (holdFor && s.swapErrAmount && /too little/i.test(String(s.swapErr || ''))) {
+        return Object.assign(base, { rows: rows,
+          chip: 'Your ' + this.unitFigure(s.swapAmount || 0, from) + ' in ' + this.unitWord(from).toLowerCase()
+            + ' is too little to swap after the mint’s fee. It stays, and home shows it under your ' + this.unitWord(to).toLowerCase() + '.',
+          cta: 'KEEP IT AND HOLD ' + this.unitWord(to), ctaTone: 'go',
+          go: () => this.holdKeep(holdFor) });
       }
       return Object.assign(base, { rows: rows,
         warn: s.swapErr || 'The mint has not given a rate yet.',

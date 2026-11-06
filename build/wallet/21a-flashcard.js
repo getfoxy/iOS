@@ -869,6 +869,10 @@
     /* The cards on file here: those this phone set up with a key to take their money back, and those it claimed (TIE OWNERSHIP),
      * { key: { mint, refundKey, at, ... } }. Not a card it only loaded, nor one it set up as cash for somebody else. */
     cardsKnown: function () { return cardsOnFile(); },
+    /* Whether a card has ever been tied to this phone: one on file (`cardsKnown`), or the lasting mark a read leaves when a card
+     * answers that it belongs to this phone (`cardTiedMark`), which a phone restored from its words earns on the first read of a
+     * card of its own, since the card file is not rebuilt by a restore. */
+    cardsTied: function () { return Object.keys(cardsOnFile()).length > 0 || load(CARD_TIED, 0) === 1; },
     // the hold a card's pieces are dated ahead by, in seconds (fourteen days; a local test build may shorten it)
     cardHoldSecs: function () { return cardHoldSecs(); },
     /* And the margins that scale with it, in seconds: `ahead` (a piece's date from now), `offline` (what a receiver with no route
@@ -2048,7 +2052,10 @@
       return bridgeAsk('cardBegin', { text: String(text || 'Tap behind the phone.') }, 63000).then(run, function (e) {
         var why = String((e && e.message) || '');
         if (/not available|cannot read|no nfc/i.test(why)) throw cardError('no-nfc', 'This phone cannot read a card.');
-        throw cardError('cancelled', /timed out|did not answer/i.test(why) ? 'No card was tapped.' : 'The card was not tapped.');
+        /* Only the person's own dismissal of the sheet is a plain cancel. The sheet timing out, iOS ending it for any other reason, and
+         * this deadline passing are the same kind but marked `quiet`, so the screen that asked can leave without making anything of it. */
+        var quiet = /timed out|did not answer|interrupted/i.test(why);
+        throw cardError('cancelled', /timed out|did not answer/i.test(why) ? 'No card was tapped.' : 'The card was not tapped.', quiet ? { quiet: true } : undefined);
       });
     },
 

@@ -183,7 +183,42 @@ const booksClose = (c, from) => Object.values(booksMove(c, from)).every((n) => n
     const said2 = await why(() => W.setWalletChoice({ send: 'USD!' }));
     ok(said === 'Foxy does not know that choice.' && said2 === said && W.walletChoice().hold === 'both',
       'anything else is refused in words, and nothing is written', said + ' / ' + said2);
-    ok(c.storage.getItem('foxy.wallet.hold') === '"both"', 'kept under foxy.wallet.hold');
+    ok(JSON.parse(c.storage.getItem('foxy.wallet.hold')).all === 'both', 'kept under foxy.wallet.hold (no mint yet: the whole wallet’s)');
+  }
+  {
+    // each mint its own choice (CURRENCIES says "At <mint>"): a mint never asked reads what was kept for the whole wallet
+    const c = await connected();
+    const W = c.W;
+    c.storage.setItem('foxy.wallet.hold', '"dollars"');
+    ok(W.walletChoice().hold === 'dollars' && W.walletChoice('https://other.test').hold === 'dollars', 'an older build’s one choice is every mint’s');
+    W.setWalletChoice({ hold: 'bitcoin' });
+    ok(W.walletChoice().hold === 'bitcoin' && W.walletChoice(MINT).hold === 'bitcoin', 'chosen here: this mint holds bitcoin');
+    ok(W.walletChoice('https://other.test').hold === 'dollars', 'and another mint keeps what it had');
+    W.setWalletChoice({ hold: 'both' }, 'https://other.test');
+    ok(W.walletChoice('https://other.test').hold === 'both' && W.walletChoice().hold === 'bitcoin', 'chosen there: only there');
+    // what the other currency held as one was chosen
+    await fund(c, 7, 'usd');
+    W.setWalletChoice({ hold: 'bitcoin' });
+    ok(W.holdKept() === 7 && W.holdKept('https://other.test') === 0, 'one currency chosen: the other’s 7 cents are kept beside it', String(W.holdKept()));
+    // it only goes down: read below it, it is lowered to what is there, and gone at nought
+    const book = () => JSON.parse(c.storage.getItem('foxy.wallet.hold'));
+    const b0 = book(); b0.kept[MINT] = 50; c.storage.setItem('foxy.wallet.hold', JSON.stringify(b0));
+    ok(W.holdKept() === 7 && book().kept[MINT] === 7, 'recorded above what is there: read as the 7 cents there, and lowered', JSON.stringify(book().kept));
+    const pileWas = c.storage.getItem(USD_PILE);
+    c.storage.setItem(USD_PILE, '[]');
+    ok(W.holdKept() === 0 && !(MINT in book().kept), 'the cents spent: nothing kept, and the record gone', JSON.stringify(book().kept));
+    c.storage.setItem(USD_PILE, pileWas);
+    ok(W.holdKept() === 0, 'and money there again later is not taken for what was left');
+    // chosen with no swap (kept: 0): nothing recorded beside it; anything else for kept is refused
+    W.setWalletChoice({ hold: 'bitcoin', kept: 0 });
+    ok(W.walletChoice().hold === 'bitcoin' && W.holdKept() === 0, 'kept: 0 records nothing beside the choice');
+    ok(await why(() => W.setWalletChoice({ hold: 'bitcoin', kept: 5 })) === 'Foxy does not know that choice.', 'a kept figure is never taken from the caller');
+    W.setWalletChoice({ hold: 'both' });
+    ok(W.holdKept() === 0, 'both: nothing kept beside it');
+    // a payment owed a swap reads the choice of its own mint
+    W.setWalletChoice({ hold: 'both' }, MINT);
+    W.setWalletChoice({ hold: 'bitcoin' }, 'https://other.test');
+    ok(W.walletChoice(MINT).hold === 'both', 'this mint both, the other bitcoin: a dollar payment here is not this mint’s to swap');
   }
 
   // ---- 3. the pile guard ----------------------------------------------------
@@ -524,6 +559,23 @@ const booksClose = (c, from) => Object.values(booksMove(c, from)).every((n) => n
     const r2 = await W.swapRun(all);
     ok(r2.state === 'done' && W.balanceOf('sat') < 400 && r2.to.unit === 'usd', 'and runs', JSON.stringify(r2) + ' left ' + W.balanceOf('sat'));
     ok(booksClose(c, from2), 'the books close again', JSON.stringify(booksMove(c, from2)));
+    {
+    // all of it at a mint that charges for the pieces a payment spends (1000 ppk): the quote leaves room for that fee,
+    // so the payment is not refused for want of it (CURRENCIES' swap of all), both ways, the books closing
+    for (const dir of [['usd', 'sat'], ['sat', 'usd']]) {
+      const c = await connected({ mintOpts: { feePpk: 1000, usdFeePpk: 1000 } });
+      const W = c.W;
+      await fund(c, 4205, 'usd'); await fund(c, 50000, 'sat');
+      const from = books(c);
+      const had = W.balanceOf(dir[0]);
+      let r = null;
+      const err = await why(async () => { const q = await W.swapQuote(dir[0], dir[1], 0, { all: true }); r = await W.swapRun(q, () => {}); });
+      ok(!err && r && r.state === 'done', 'fee mint, all of the ' + dir[0] + ': it runs', err || JSON.stringify(r));
+      ok(W.balanceOf(dir[0]) < had / 50, 'and leaves only what the fee and the rounding keep', W.balanceOf(dir[0]) + ' of ' + had);
+      ok(booksClose(c, from), 'the books close', JSON.stringify(booksMove(c, from)));
+      ok(r && W.swapOutcome(r.id) === 'done', 'and the wallet says the swap landed', r && W.swapOutcome(r.id));
+    }
+    }
 
     // refusals
     ok(await why(() => W.swapQuote('usd', 'usd', 10)) === 'Pick two different balances to swap.', 'the same unit twice is refused');

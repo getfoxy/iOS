@@ -280,13 +280,19 @@
    * were: there is no screen for no card.
    *
    * Except where cards can be taken back (FC_RECOVERABLE): the screen with
-   * no card on it is opened first and stays when the sheet goes. A lost card
+   * no card on it is opened first. It stays when the sheet goes for a swipe or a
+   * card's address; for the press of CARD it is left again, and a phone that has
+   * never had a card is told what one is (`fcCancelled`). A lost card
    * cannot be tapped: its money is taken back from home's MENU, RESTORE LOST
    * CARD (`fcRestoreLost`), not from this screen. */
-  goFlashcard() {
+  goFlashcard(how) {
     /* Never in the till (26m-till.js): the card's screen has LOAD and SEND on it, which move this phone's money, the very
      * thing the till keeps out of reach. A card tapped to the phone on the till's HISTORY opened it (review u1). */
     if (this.state.till) { console.log('[foxy] card: not in the till'); return; }
+    /* The first read of FOXY CARD, pressed on its own (home's CARD button): a sheet dismissed with no card has an answer of its
+     * own (`fcCancelled`). A swipe and a card's address (`how` 'swipe', 'tap') are not that press, and a TRY AGAIN or any read
+     * inside a flow never comes through here at all. `pushed`: this press put the card's screen on the stack. */
+    const own = !how ? { pushed: this.state.screen !== 'flashcard' } : null;
     // a card read on an earlier visit is not shown again: it may be somebody else's, and what it held may have changed
     this._fcCard = null;
     clearInterval(this._fcRollT);
@@ -294,11 +300,54 @@
     if (this.FC_RECOVERABLE) {
       // (from the card's own screen, which a card's address can come to, it is not put on the stack again)
       this.setState(p => ({ fc: null, screen: 'flashcard', stack: p.screen === 'flashcard' ? p.stack : p.stack.concat([p.screen]) }));
-      this.fcRead();
+      this.fcRead(false, own);
       return;
     }
     if (this.state.fc) this.setState({ fc: null });
-    this.fcRead(true);
+    this.fcRead(true, own);
+  }
+
+  /* The phone's sheet dismissed on the first read of FOXY CARD, with no card held up (`own` from `goFlashcard`; `e`, the error).
+   * The empty card screen the read opened is left, so the person is on the screen CARD was pressed on (home). If something else
+   * was raised over it meanwhile (a payment arriving), its place in the stack is taken out and nothing more is said. Then:
+   *   a dismissal that was not the person's (the sheet timing out, iOS ending it: `e.quiet`)   nothing more;
+   *   a phone that has tied a card to itself                                                  nothing more;
+   *   a phone that never has                                                                  is shown what a Foxy Card is, with
+   *                                                                                           a button to the website.
+   * "Has tied a card" is `cardsTied`: a card on file (the row kept for a card this phone set up with a key to take its money
+   * back, or claimed), or the lasting mark left when a card answered that it is this phone's. A phone restored from its words has
+   * no card file until it sets up or claims a card, and the mark only when a card of its own has been read: until then it is shown
+   * the screen. A card only read or loaded leaves neither. */
+  fcCancelled(own, e) {
+    // (where cards can be taken back the press opened the card's screen; if it is no longer the one showing, something came over it)
+    const moved = !!this.FC_RECOVERABLE && this.state.screen !== 'flashcard';
+    this.setState(p => {
+      if (p.screen === 'flashcard' && own.pushed) return { screen: p.stack.length ? p.stack[p.stack.length - 1] : 'home', stack: p.stack.slice(0, -1), fc: null };
+      const at = p.stack.lastIndexOf('flashcard');
+      if (this.FC_RECOVERABLE && own.pushed && p.screen !== 'flashcard' && at >= 0) return { stack: p.stack.slice(0, at).concat(p.stack.slice(at + 1)) };
+      return {};
+    });
+    /* A confirmation raised over the card's screen remembers that screen to go back to when it is dismissed (12-receive.js,
+     * `announcePayment`): the empty card screen is gone, so it goes back to the one under it. */
+    const back = this._returnTo;
+    if (own.pushed && back && (back.screen === 'flashcard' || (back.stack || []).indexOf('flashcard') >= 0)) {
+      const st = (back.stack || []).slice();
+      if (back.screen === 'flashcard') this._returnTo = { screen: st.length ? st[st.length - 1] : 'home', stack: st.slice(0, -1) };
+      else { st.splice(st.lastIndexOf('flashcard'), 1); this._returnTo = { screen: back.screen, stack: st }; }
+    }
+    const W = this.fcW();
+    let tied = true;
+    try { tied = !!(W && (W.cardsTied ? W.cardsTied() : (W.cardsKnown && Object.keys(W.cardsKnown() || {}).length))); } catch (x) { tied = true; }
+    const quiet = !!(e && e.quiet) || moved;
+    console.log('[foxy] card: sheet cancelled, ' + (quiet ? 'not by the person' : tied ? 'a card was tied before' : 'no card was ever tied'));
+    if (quiet || tied) return;
+    this.stageScreen('cardLearn', {
+      art: 'card', still: true, title: 'FOXY CARD',
+      body: 'A Foxy Card holds your ecash. Tap it to another phone to pay, with no phone of your own.',
+      above: 'VISIT WEBSITE',
+      aboveGo: () => { if (W && W.openCompany) W.openCompany('foxycard'); },
+      button: 'DONE',
+    });
   }
 
   /* ---- a card's address, from outside Foxy -----------------------------------
@@ -438,11 +487,12 @@
     this.cardTapAct();
   }
 
-  /* What the menu's row does when it is pressed: the drawer closes (`shut`), and the tap begins. */
+  /* What a card's address does when it opens Foxy: a drawer that is open closes, and the tap begins (as home's CARD
+   * button's tap does, 21-render-values.js `homeButtons`). */
   cardTapAct() {
     if (this.state.open0) this.setState({ open0: false });
     if (this.hideGetDollars) this.hideGetDollars();
-    this.goFlashcard();
+    this.goFlashcard('tap');
   }
 
   /* ---- an arrival, on the first run ------------------------------------------
@@ -909,7 +959,7 @@
     const again = retry ? { retry: 'TRY AGAIN', go: retry, shut: { label: 'CANCEL' } } : {};
     console.log('[foxy] card: ' + (kind || 'failed') + ' — ' + said);
     // their own cancel, or no card held up: the screen they were on is the answer
-    if (kind === 'cancelled') return;
+    if (kind === 'cancelled') { if (typeof opt.cancelled === 'function') opt.cancelled(e); return; }
     if (kind === 'waiting') { this.fcChecking(e && e.id, (e && e.after) ? Object.assign({}, opt, { after: e.after }) : opt); return; }
     // the unit of the card that refused, which every figure below is in: a dollar card's are its cents (08a-flashcard.js puts it on each)
     const u = this.fcUnitOf(e);
@@ -3426,7 +3476,7 @@
    *
    * And it is the read that asks a card of software 1.20 for the mint's proofs of the pieces this phone
    * does not know to be real (`real`): they are checked once the card is let go (`fcReal`). */
-  fcRead(open) {
+  fcRead(open, own) {
     const W = this.fcW();
     if (!W) return;
     // with the price, so that a limit this phone set in dollars is kept at those dollars (08a-flashcard.js, `cardLook`)
@@ -3449,7 +3499,7 @@
         // its owner, online, and its money near its date: the renewal is offered now
         this.fcRefreshMaybe(card);
         this.fcRekeyMaybe(card);
-      }, (e) => this.fcFailed(e, { again: () => this.fcRead(open) }));
+      }, (e) => this.fcFailed(e, { again: () => this.fcRead(open), cancelled: own ? (er) => this.fcCancelled(own, er) : null }));
   }
 
   /* What a card said, kept for the screen. Only on the FLASHCARD screen, or
@@ -6467,7 +6517,7 @@
 
   /* ---- home and the card --------------------------------------------------------------------------------------------
    *
-   * FOXY CARD, the first row of the menu's WALLET (home's round button at the top left was CARD, and is CHAT now), opens the
+   * CARD, the third of home's buttons under the balance (home's round button at the top left was CARD, and is CHAT now), opens the
    * card's screen as a card's address does (`goFlashcard`), which asks for the card to be tapped; nothing of a card is shown before it has been read. The card's screen has the HOME
    * button in the same place, which comes back home (`fcGoHome`). A swipe does the same (`fcSwipe`): to the left on home is CARD,
    * to the right on the card's screen is HOME; nothing is drawn for it and nothing of a card is kept for it. */
@@ -6542,7 +6592,7 @@
     if (s.till) return false;
     if (s.screen === 'home' && dir === 'left') {
       console.log('[foxy] swipe: to the card');
-      this.goFlashcard();
+      this.goFlashcard('swipe');
       return true;
     }
     if (s.screen === 'flashcard' && dir === 'right') {

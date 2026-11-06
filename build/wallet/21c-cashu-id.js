@@ -9,7 +9,8 @@
      * answered by `cashuIdDecide`; a remembered answer (`cashuIdChoices`) runs
      * by itself. */
 
-    /* ANY WALLET (MY CASHU ID's second button): a standard NUT-18 request any Cashu wallet pays, `opts.unit` 'sat' or
+    /* A one-time request (no screen shows it now: MY CASHU ID has no ANY WALLET
+     * button): a standard NUT-18 request any Cashu wallet pays, `opts.unit` 'sat' or
      * 'usd', no amount, this phone's mints that honour a lock (the default first), locked to a fresh key of the seed's
      * lock pool, delivered over Nostr to the ID's delivery key. Resolves { text (creqA…), id, pub, unit, mints, target };
      * rejects with the sentence to show. Each call takes a new key. */

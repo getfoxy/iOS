@@ -257,6 +257,8 @@
     const W = window.FoxyWallet;
     if (overlay) overlay.remove();
     clearInterval(this._refreshT);
+    // nothing waits to keep a choice in a wallet that is gone (10-pin.js, `holdSwapWatchStop`)
+    if (this.holdSwapWatchStop) this.holdSwapWatchStop();
     this.setState({
       walletLive: false, balSats: null, balUsd: null,
       screen: 'home', stack: [], contacts: [], txs: [],

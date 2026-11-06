@@ -167,8 +167,8 @@ Costs of gating at the link, compared with ranging for one second after M3:
 
 ## 7. Screens
 
-- **Unsupported phone:** no TAP emblem on the receive screen; AUTO TAP TO PAY
-  in Settings is greyed with one line saying this iPhone cannot measure distance.
+- **Unsupported phone:** no TAP emblem on the receive screen, and one line
+  saying this iPhone cannot measure distance.
 - **Permission off:** the same, with a button to Settings.
 - **Connecting:** as now. Ranging is already running by then, so the
   handshake adds only the B1/B2 round trip.

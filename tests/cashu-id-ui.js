@@ -13,8 +13,7 @@
  *      KEEP IT THERE, SEND IT BACK where the payer proved who it is, DECIDE LATER and the tick "Always do this for <mint>";
  *      unanswered, a row in HISTORY (At <mint> · tap to decide) that opens it again; SETTINGS > OTHER MINTS lists what was
  *      remembered and forgets it
- *   5  ANY WALLET under MY CASHU ID: a new request each opening (`cashuIdAnyRequest`, in the balance the phone is in), its
- *      code with COPY and SHARE and "Any Cashu wallet can pay this. It is good for one payment."
+ *   5  MY CASHU ID has SHARE and DONE and no ANY WALLET button
  *   6  paid to the ID key itself: PAID TO YOUR ID KEY, "<name or Someone> paid you without blinding the key. …", LEAVE IT
  *      first (quiet) and TAKE IT ANYWAY, each answered to `cashuIdUnblinded`
  *
@@ -410,45 +409,17 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
     ok(!A.state.cidBusy, 'and the screen is no longer busy');
   }
 
-  // ---- 5 ANY WALLET ----
+  // ---- 5 no ANY WALLET: MY CASHU ID shows its code with SHARE and DONE alone ----
   {
     const W = stubWallet();
-    const asked = [];
-    let n = 0;
-    W.cashuIdAnyRequest = (opts) => { asked.push(opts); n += 1; return Promise.resolve({ text: 'creqAstub' + n, id: 'id' + n, pub: '02' + String(n).repeat(64).slice(0, 64), unit: opts.unit, mints: [MINT] }); };
-    const copied = [];
-    A.copyText = (t) => { copied.push(String(t)); return true; };
+    W.cashuIdAnyRequest = () => Promise.resolve({ text: 'creqAstub', id: 'id1', pub: '02' + '1'.repeat(64), unit: 'sat', mints: [MINT] });
     await fresh(W);
     A.cidShowCode(ID_MINE);
     await settle();
-    ok(/ANY WALLET/.test(stage().textContent) && /SHARE/.test(stage().textContent) && /DONE/.test(stage().textContent), 'MY CASHU ID has a second button, ANY WALLET', stage().textContent.slice(-60));
-    press(stage(), 'ANY WALLET');
-    await settle();
-    const st = stage();
-    ok(!!st && st.getAttribute('data-stage') === 'cashuIdAny' && /ANY WALLET/.test(st.textContent), 'it opens ANY WALLET');
-    ok(asked.length === 1 && asked[0].unit === 'sat', 'asking for a request in the balance the phone is in', JSON.stringify(asked));
-    const img = st && st.querySelector('[data-stage-qr]');
-    ok(!!img && String(img.getAttribute('src')).indexOf(encodeURIComponent('creqAstub1')) >= 0, 'its code is the request');
-    ok(st.textContent.indexOf('Any Cashu wallet can pay this. It is good for one payment.') >= 0, 'Any Cashu wallet can pay this. It is good for one payment.');
-    press(st, 'COPY');
-    ok(copied.length === 1 && copied[0] === 'creqAstub1' && toasts.some((t) => t === 'Request copied'), 'COPY copies the request', JSON.stringify(copied));
-    press(stage(), 'SHARE');
-    ok(W.calls.shares.length === 1 && W.calls.shares[0] === 'creqAstub1', 'SHARE hands it to the share sheet');
-    press(stage(), 'DONE');
-    await settle();
-    ok(!stage(), 'DONE closes it');
-    A.cidShowCode(ID_MINE);
-    await settle();
-    press(stage(), 'ANY WALLET');
-    await settle();
-    ok(asked.length === 2 && String(stage().querySelector('[data-stage-qr]').getAttribute('src')).indexOf(encodeURIComponent('creqAstub2')) >= 0,
-      'opened again: a new request (a new key)');
+    ok(/SHARE/.test(stage().textContent) && /DONE/.test(stage().textContent), 'MY CASHU ID has SHARE and DONE', stage().textContent.slice(-60));
+    ok(!/ANY WALLET/.test(stage().textContent), 'and no ANY WALLET, even where the wallet could make that request', stage().textContent.slice(-80));
+    ok(typeof A.cidAnyShow === 'undefined' && typeof A.cidAnyShowCode === 'undefined', 'the screen it opened is gone');
     A.hideStage();
-    W.cashuIdAnyRequest = () => Promise.reject(new Error('None of your mints honours a payment locked to a key.'));
-    A.cidAnyShow();
-    await settle();
-    ok(!stage() && /None of your mints honours a payment locked to a key\./.test(card()), 'a request that cannot be made says why', card());
-    shutCard();
   }
 
   // ---- 6 paid to the ID key itself ----

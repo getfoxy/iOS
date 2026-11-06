@@ -116,8 +116,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   holder.goFlashcard();
   ok(H.sheet.length === 1 && /^begin: Tap behind the phone\.$/.test(H.sheet[0]), 'FLASHCARD in the menu asks for the card at once, with no screen to read first', H.sheet[0]);
   await settle();
-  ok(holder.state.screen === 'home' && !holder.state.fc && !card(holder) && !stage(H),
-     'the sheet dismissed: the person is where they were, with nothing over it and no screen for no card');
+  ok(holder.state.screen === 'home' && !holder.state.fc && !card(holder) && stage(H) === 'cardLearn',
+     'the sheet dismissed, with no card ever tied to this phone: the person is where they were, with no screen for no card but the one that says what a Foxy Card is (tests/card-cancel.js)');
+  H.window.document.getElementById('foxy-stage').remove();
   H.nfc = c;
   holder.goFlashcard();
   await until('the new card to be read', () => !!holder.state.fc);
@@ -1153,7 +1154,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   const firstCard = c;
   const rc = newCard(H);
   H.nfc = null;
-  holder.goFlashcard();
+  // (not the press of FOXY CARD, whose dismissal goes back: a swipe, a card's address)
+  holder.goFlashcard('swipe');
   await settle();
   v = vals(holder);
   ok(holder.state.screen === 'flashcard' && v.fcNone && !holder.state.fc,

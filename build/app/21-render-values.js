@@ -74,13 +74,31 @@
       tools: 'M14.6 3.8a4.6 4.6 0 0 0-4.3 6.2l-6.1 6.1a2 2 0 0 0 2.8 2.8l6.1-6.1a4.6 4.6 0 0 0 6.2-4.3l-2.6 2.6-2.6-.6-.6-2.6Z',
       // a speech bubble with two lines in it, its tail at the lower left: home's CHAT, and the menu's
       chat: 'M5.1 4.5h13.8a2.1 2.1 0 0 1 2.1 2.1v8.6a2.1 2.1 0 0 1-2.1 2.1H10.2l-4.7 3.7v-3.7h-.4A2.1 2.1 0 0 1 3 15.2V6.6a2.1 2.1 0 0 1 2.1-2.1ZM7.5 9.4h9M7.5 12.9h5.6',
+      // a head over a pair of shoulders: a person's own profile (MY CASHU ID)
+      profile: 'M12 12.2a4.1 4.1 0 1 0 0-8.2 4.1 4.1 0 0 0 0 8.2ZM4.5 20.5c0-3.9 3.4-6.4 7.5-6.4s7.5 2.5 7.5 6.4',
     };
-    const shut = (fn) => () => { this.setState({ open0: false }); if (fn) fn(); };
+    /* A row that opens something: the drawer shuts, and the screen it opens goes back to the menu when it is left
+     * (01-ui-basics.js, `menuReturnArm`). What the row starts may be an answer and not a screen (a PIN pad, the phone's own
+     * words): `fn` hands back its promise, and the menu opens again when that is over. */
+    const shut = (fn) => () => {
+      this.menuReturnArm();
+      const r = fn ? fn() : null;
+      if (r && typeof r.then === 'function') {
+        this.menuReturnWaits();
+        r.then(() => this.menuReturnSettle(), () => this.menuReturnSettle());
+        return;
+      }
+      // a toast, or nothing at all: nothing to come back from
+      setTimeout(() => this.menuReturnCheck(), 0);
+    };
+    // a row that only changes something on home: the drawer shuts, and there is nothing to come back from
+    const shutOnly = (fn) => () => { this.setState({ open0: false, menuReturn: null }); if (fn) fn(); };
     v.clearHistory = () => this.askClear('history');
     v.clearContacts = () => this.askClear('contacts');
     v.open0 = !!this.state.open0;
     v.rot0 = this.state.open0 ? 'rotate(90deg)' : 'rotate(0deg)';
-    v.toggleMenu = () => this.setState(p => ({ open0: !p.open0 }));
+    // opened or shut by hand: nothing is waiting to open it again
+    v.toggleMenu = () => this.setState(p => ({ open0: !p.open0, menuReturn: null }));
     /* SCAN and PASTE are the two ways money arrives at a phone, so they are on
      * home rather than a screen in. PASTE carries the marker
      * Apple's paste control is laid over (15-paid-wake-keyboard.js).
@@ -95,20 +113,18 @@
      * the person holding the phone and has nothing to arm, so a button here
      * would do nothing but take up a third of the row. Holding this phone
      * against a merchant's still works; it just never needed asking for. */
+    /* And CARD, third: the card's screen, which asks for the card to be tapped (26f-flashcard.js, `goFlashcard`); with no
+     * card yet, the same tap shows a new card's set-up. It was SWAP's place at a mint with two balances; SWAP is the
+     * menu's now, under MINTS. */
     v.homeButtons = [
       // the fur turned around on SCAN; its icon and label are turned back
       { label: 'SCAN', path: MENU_ICON.scan, tap: v.goScan, spin: 'rotate(180deg)' },
       { label: 'PASTE', path: MENU_ICON.paste, tap: v.pickPaste, pasteHere: '1' },
+      { label: 'CARD', path: MENU_ICON.card, tap: () => this.goFlashcard() },
     ].map(b => Object.assign({ pasteHere: '', spin: 'none' }, b));
-    /* At a mint with two balances the row has a third button, SWAP, when both
-     * pills are up; with one pill SWAP is a row in the menu instead. Dimmed
-     * offline, where a tap says it needs the mint. */
+    // the same row at a mint with two balances, one pill or two
     const twoHere = this.twoUnitsOn();
-    const twoPills = twoHere && this.homePills().length === 2;
-    v.homeButtonsTwo = !twoHere ? [] : v.homeButtons.map(b => Object.assign({ dim: '1' }, b)).concat(twoPills ? [
-      { label: 'SWAP', path: MENU_ICON.swap, tap: () => this.swapStart(), spin: 'none', pasteHere: '',
-        dim: this.offlineNow() ? '0.38' : '1' },
-    ] : []);
+    v.homeButtonsTwo = !twoHere ? [] : v.homeButtons.map(b => Object.assign({ dim: '1' }, b));
     /* The menu drawer, from the right: everything that is not RECEIVE, SEND,
      * SCAN, PASTE or CHAT, in its sections (below). */
     /* A balance with no verified backup: the menu button and BACKUP glow red,
@@ -215,17 +231,19 @@
      *
      *   BACKUP ACCOUNT, at the very top and only while the wallet holds a balance and its words have not been checked
      *     (`unbacked`), with the backup's red ring
-     *   WALLET:   FOXY CARD · MY CASHU ID · HISTORY · CHAT · CONTACTS · HIDE BALANCE · YOUR CHANGE
-     *   MINTS:    SWITCH/ADD MINTS · TRANSFER MONEY · and, at a mint with two balances, SWAP (one pill on home) and
-     *             WHAT YOU HOLD · OTHER MINTS (only while an answer is remembered)
+     *   WALLET:   MY CASHU ID · HISTORY · CHAT · CONTACTS · HIDE BALANCE
+     *   MINTS:    SWITCH/ADD MINTS · TRANSFER MONEY (money at two mints or more) · and, at a mint with two balances, SWAP
+     *             and CURRENCIES · OTHER MINTS (only while an answer is remembered)
      *   TOOLS:    POINT OF SALE · SPLIT A BILL   (WITHDRAW TO BANK left the menu 2026-11-05; the send screen's BANK ACCOUNT stays)
-     *   SETTINGS: AUTO TAP TO PAY · SET PIN · FACE ID LOCK · OFFLINE LIMITS (PER PERSON · TOTAL) · BACKUP · RESTORE ·
-     *             RESTORE LOST CARD · TEST LOGS
+     *   SETTINGS: SET PIN · FACE ID LOCK · BACKUP · RESTORE · RESTORE LOST CARD · TEST LOGS
+     *   OFFLINE LIMITS: PER PERSON · TOTAL (only while the wallet has limits to show, `tillCapRows`)
      *
-     * Every section is open until it is tapped shut (`menuShut`, which remembers the shut ones while Foxy is open), and so is
-     * OFFLINE LIMITS inside SETTINGS. FOXY CARD is the card's screen, which asks for the card to be tapped (26f-flashcard.js,
-     * `goFlashcard`); with no card yet, the same tap shows a new card's set-up. It was home's round button at the top left,
-     * which is CHAT now (26p-cashu-msg.js, `renderInbox`); CHAT here opens the same INBOX, and CONTACTS stays the full list.
+     * Every section is open until it is tapped shut (`menuShut`, which remembers the shut ones while Foxy is open). Each
+     * heading after the first has the gap over it that the eye sees between MENU and WALLET (`headTop`). The card is home's CARD button
+     * (`homeButtons`), not a row here; SWAP is a row here, not home's. CHAT opens INBOX, as home's round button at the top
+     * left does (26p-cashu-msg.js, `renderInbox`), and CONTACTS stays the full list. AUTO TAP TO PAY and YOUR CHANGE are
+     * not rows any more: the switch's setting (26d-tap.js, `tapAutoArms`) and the change screen (`goChange`) stay.
+     * A screen opened from a row goes back to the menu when it is left (01-ui-basics.js, `menuReturnArm`).
      * Rows inside a section are indented; a switch shows its state, so its label never has to. No balance is kept for a
      * receive or a send to start in: with two, each one asks (01-ui-basics.js, `walletNow`). */
     const W22 = window.FoxyWallet;
@@ -236,15 +254,17 @@
       } catch (e) { return 0; }
     })();
     const shutNow = this.state.menuShut || {};
-    const tapAuto = this.tapAutoArms();
     const faceOn = !!(W22 && W22.secureChoice && W22.secureChoice() === 'device');
     const inSection = (m) => Object.assign({ indent: '10px' }, m);
     const sw = (on) => ({ hasSwitch: true, swBg: on ? 'var(--acc)' : 'rgba(var(--ink-rgb),.22)', swX: on ? '18px' : '0px' });
     /* A section: its heading, which opens and closes it in place (the drawer stays), and its rows while it is open. A
      * heading's label and chevron are orange (the toast's amber), so what opens stands out from what acts. */
     const SECTION_INK = '#FFA24D';
+    /* The gap over a heading is the gap the eye sees under MENU: the word sits about 8px up in its 44px row, then the
+     * header's 6px and the list's 10px, so about 24px from the word to WALLET, and 14px more than the list's 10px over
+     * every later heading. WALLET has it too when BACKUP ACCOUNT is above it. */
     const section = (key, label, path, rows) => /** @type {any[]} */ ([{ label, path, hasChev: true, section: key,
-      labelInk: SECTION_INK, chevInk: SECTION_INK,
+      labelInk: SECTION_INK, chevInk: SECTION_INK, headTop: (key !== 'wallet' || unbacked) ? '14px' : '0px',
       chevRot: shutNow[key] ? 'rotate(0deg)' : 'rotate(90deg)',
       tap: () => this.setState(p => ({ menuShut: Object.assign({}, p.menuShut || {}, { [key]: !(p.menuShut || {})[key] }) })) }])
       .concat(shutNow[key] ? [] : rows.map(inSection));
@@ -252,28 +272,26 @@
       glow: 'alertGlow 10.4s ease-in-out infinite',
       ringInk: backupRing.ringInk, ringInk2: backupRing.ringInk2, ring: backupRing.ring };
     const walletRows = [
-      { label: 'FOXY CARD', path: MENU_ICON.card, tap: shut(() => this.goFlashcard()) },
       /* MY CASHU ID (26o-cashu-id.js): the code another Foxy adds this one by, with SHARE. */
-      { label: 'MY CASHU ID', path: MENU_ICON.qr, tap: shut(() => this.cidShow()) },
+      { label: 'MY CASHU ID', path: MENU_ICON.profile, tap: shut(() => this.cidShow()) },
       { label: 'HISTORY', path: MENU_ICON.history, tap: shut(() => this.go('history')),
         ringInk: v.histRingInk, ringInk2: v.histRingInk2, ring: v.histRing },
       { label: 'CHAT', path: MENU_ICON.chat, tap: shut(() => this.goInbox()) },
       { label: 'CONTACTS', path: MENU_ICON.contacts, tap: shut(v.goContacts) },
       /* The label says what the tap will do, so it reads the same whichever way round it is. */
-      { label: this.state.hidden ? 'SHOW BALANCE' : 'HIDE BALANCE', path: MENU_ICON.hide, tap: shut(v.toggleHide) },
-      /* What the pool actually holds, which decides whether this phone can pay an exact amount at all. */
-      { label: 'YOUR CHANGE', path: MENU_ICON.change, tap: shut(() => this.goChange()) },
+      { label: this.state.hidden ? 'SHOW BALANCE' : 'HIDE BALANCE', path: MENU_ICON.hide, tap: shutOnly(v.toggleHide) },
     ];
     const mintRows = [
       { label: 'SWITCH/ADD MINTS', path: MENU_ICON.switch, tap: shut(() => this.goSwitchMint()) },
     ].concat(mintsWithMoney > 1 ? [
       { label: 'TRANSFER MONEY', path: MENU_ICON.transfer, tap: shut(() => this.goTransfer()) },
-    ] : []).concat(twoHere && !twoPills ? [
-      /* SWAP, on a home with one pill at a mint with two balances: home's button does it when both pills are up. */
+    ] : []).concat(twoHere ? [
+      /* SWAP, at a mint with two balances, one pill or two: dollars into bitcoin or back (23-render-home-and-amount.js,
+       * `swapStart`, which says offline that it needs the mint). */
       { label: 'SWAP', path: MENU_ICON.swap, tap: shut(() => this.swapStart()) },
     ] : []).concat(!twoHere ? [] : [
       /* What to hold, asked again: the onboarding's last question, from here. */
-      { label: 'WHAT YOU HOLD', path: MENU_ICON.dollars,
+      { label: 'CURRENCIES', path: MENU_ICON.dollars,
         tap: shut(() => this.setState(p => ({ screen: 'holdChoice', stack: p.stack.concat([p.screen]),
           holdPick: this.walletChoiceNow().hold }))) },
     ]).concat(this.cidChoiceRows ? this.cidChoiceRows(MENU_ICON.switch, shut) : []);
@@ -311,7 +329,8 @@
             title: 'ENTER YOUR PIN',
             subtitle: 'To turn the lock off.',
             cta: 'TURN OFF',
-            onCancel: () => {},
+            // the pad gone, either way: the menu again (01-ui-basics.js `menuReturnSettle`)
+            onCancel: () => this.menuReturnSettle(),
             onSubmit: (pin, warn) => {
               // the lock's own attempt count and wait
               const r = this.pinTry(pin);
@@ -319,30 +338,21 @@
               W.pinClear();
               this.pinDismiss();
               this.toast('PIN removed');
+              this.menuReturnSettle();
             },
           });
           return;
         }
-        this.pinSetup(() => {});
+        this.pinSetup(() => this.menuReturnSettle());
       }),
     };
-    /* OFFLINE LIMITS: what this phone takes with no route (26j-till-caps.js), PER PERSON and TOTAL, each with its figure; it
-     * opens and closes as a section does, open to start with, its two rows a step further in. */
-    // (its own rows keep their deeper step: `inSection` leaves an indent that is set alone)
+    /* OFFLINE LIMITS, its own section after SETTINGS: what this phone takes with no route (26j-till-caps.js), PER PERSON
+     * and TOTAL, each with its figure. Only while the wallet has limits to show. */
     const capRows = this.tillCapRows ? this.tillCapRows(MENU_ICON.receive, shut) : [];
-    const limitRows = !capRows.length ? [] : /** @type {any[]} */ ([{ label: 'OFFLINE LIMITS', path: MENU_ICON.receive, hasChev: true, section: 'limits',
-      labelInk: SECTION_INK, chevInk: SECTION_INK,
-      chevRot: shutNow.limits ? 'rotate(0deg)' : 'rotate(90deg)',
-      tap: () => this.setState(p => ({ menuShut: Object.assign({}, p.menuShut || {}, { limits: !(p.menuShut || {}).limits }) })) }])
-      .concat(shutNow.limits ? [] : capRows.map((m) => Object.assign({}, m, { indent: '20px' })));
     const settingRows = /** @type {any[]} */ ([]).concat(
       // REMIND ME AFTER 15 DAYS, the first row of SETTINGS (26o-remind.js): only with a Cashu ID in use
       this.remindMenuRow ? this.remindMenuRow(sw) : [],
-      /* Whether an invoice goes on the air by itself. A switch, and the drawer stays open so it can be seen to move. */
-      [Object.assign({ label: 'AUTO TAP TO PAY', path: MENU_ICON.change,
-        tap: () => { this.tapAutoSet(!tapAuto); this.setState({ menuTick: (this.state.menuTick || 0) + 1 }); } }, sw(tapAuto))],
       [pinRow, faceRow],
-      limitRows,
       [
         { label: 'BACKUP', path: MENU_ICON.backup, tap: shut(() => this.showSeedOnPhone(false)) },
         /* The phone's own screens, straight over home: no Foxy screen before RESTORE A WALLET or after YOUR SEED PHRASE. */
@@ -360,7 +370,8 @@
       section('mints', 'MINTS', MENU_ICON.mint, mintRows),
       section('tools', 'TOOLS', MENU_ICON.tools, toolRows),
       section('settings', 'SETTINGS', MENU_ICON.settings, settingRows),
-    ).map(m => Object.assign({ glow: 'none', ringInk: 'transparent',
+      capRows.length ? section('limits', 'OFFLINE LIMITS', MENU_ICON.receive, capRows) : [],
+    ).map(m => Object.assign({ headTop: '0px', glow: 'none', ringInk: 'transparent',
       ringInk2: 'transparent', ring: 'none', indent: '0px', hasSwitch: false, swBg: 'transparent',
       swX: '0px', value: '', valueSub: '', hasChev: false, chevRot: 'rotate(0deg)', chevInk: 'rgba(var(--ink-rgb),.5)',
       labelInk: 'var(--ink)', section: '' }, m));

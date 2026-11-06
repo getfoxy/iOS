@@ -118,7 +118,9 @@
           + '<span style="font-weight:700;font-size:12px;letter-spacing:.1em;opacity:.7">' + esc(r.label) + '</span>'
           + '<span style="font-weight:800;font-size:19px;letter-spacing:-.01em;white-space:nowrap">' + esc(r.value) + '</span></div>').join('')
         + '</div>' : '';
-    const art = this.STAGE_ART[o.art] || '';
+    // (`still`: the picture without its breathing, for a screen that is read and not waited at)
+    let art = this.STAGE_ART[o.art] || '';
+    if (o.still) art = art.replace(/animation:[^;"]*;?/g, '');
     root.innerHTML =
       '<div style="position:absolute;left:50%;top:44%;width:420px;height:420px;border-radius:50%;'
       + 'background:radial-gradient(circle, rgba(255,255,255,.75) 0%, rgba(255,255,255,0) 65%);'
@@ -151,8 +153,8 @@
       u.addEventListener('click', () => { if (typeof o.aboveGo === 'function') o.aboveGo(); });
       wrap.appendChild(u);
     }
-    /* Two buttons side by side above the main one, neither ending the screen (`o.pair`, [{ label, go }, { label, go }]):
-     * COPY and SHARE under ANY WALLET's code (26o-cashu-id.js). */
+    /* Two buttons side by side above the main one, neither ending the screen (`o.pair`, [{ label, go }, { label, go }]).
+     * No screen uses it now; it stays for one that wants two buttons above the main one. */
     if (Array.isArray(o.pair) && o.pair.length) {
       const row = document.createElement('div');
       row.style.cssText = 'display:flex;gap:12px;margin-bottom:12px';
@@ -230,6 +232,8 @@
     if (this.syncPreview) this.syncPreview();
     // a card screen coming down may be the end of a card flow, and what waited for it is raised (26f-flashcard.js)
     if (was === 'card' || was === 'cardReady' || was === 'cardBack') this.cardFlowMayHaveEnded();
+    // a stage a menu row opened (MY CASHU ID): the menu again, unless another stage takes its place (01-ui-basics.js)
+    if (this.menuReturnSoon) this.menuReturnSoon();
     return true;
   }
 

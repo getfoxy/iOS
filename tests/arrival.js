@@ -94,7 +94,7 @@ async function firstRun(o) {
     r.custodyRead();
     ok(ask() === 'keep', 'the notice read, the question of what to hold still to come: kept');
     r.holdAsked();
-    ok(app.state.screen === 'holdChoice' && ask() === 'keep', 'WHAT DO YOU WANT TO HOLD? up: kept, and the question is asked exactly as without a card');
+    ok(app.state.screen === 'holdChoice' && ask() === 'keep', 'CURRENCIES up: kept, and the question is asked exactly as without a card');
     ok(r.screens.indexOf('flashcard') < 0 && ctx.sheet.length === 0, 'nothing of the card yet: no screen, no sheet');
     const before = r.screens.length;
     r.holdAnswered('usd');
@@ -120,7 +120,7 @@ async function firstRun(o) {
     r.ready();
     r.custodyRead();
     r.holdAsked();
-    ok(ask() === 'keep', 'a card tapped while WHAT DO YOU WANT TO HOLD? is up: kept');
+    ok(ask() === 'keep', 'a card tapped while CURRENCIES is up: kept');
     ok(app.state.screen === 'holdChoice', 'and the question stays where it is');
     r.holdAnswered('both');
     await sleep(60);

@@ -39,30 +39,77 @@
      * boolean. */
     unitKeysOffline: function (unit) { return unitKeysOffline(unit); },
 
-    /* What the person said they want to hold ('dollars', 'bitcoin', 'both',
-     * or '' when never asked), and the unit that makes the one balance their
-     * money goes into and comes from ('usd' for dollars, 'sat' for bitcoin, ''
-     * for both or never asked) as `recv` and `send`. Nothing else is kept:
-     * with both, every receive and send asks which (the CURRENCY screen). */
-    walletChoice: function () {
-      var v = load(K.hold, '');
-      var hold = typeof v === 'string' && ['dollars', 'bitcoin', 'both'].indexOf(v) >= 0 ? v : '';
+    /* What the person said they want to hold at `mint` (the connected mint when none is named): 'dollars', 'bitcoin',
+     * 'both', or '' when never asked there, and the unit that makes the one balance their money goes into and comes
+     * from ('usd' for dollars, 'sat' for bitcoin, '' for both or never asked) as `recv` and `send`. Nothing else is
+     * kept: with both, every receive and send asks which (the CURRENCY screen). Each mint has its own choice; a mint
+     * never asked reads what builds before kept for the whole wallet (`holdBook`). */
+    walletChoice: function (mint) {
+      var book = holdBook();
+      var m = mint ? canonicalMint(mint) : canonicalMint(String(mintUrl || ''));
+      var hold = (m && book.at[m]) || book.all;
       var one = holdUnit(hold);
       return { hold: hold, recv: one, send: one };
     },
 
-    /* The choice, written: `hold` only. A balance for receives or sends to
-     * start in (`recv`, `send`) is no longer kept, and asking to keep one is
-     * refused, as is anything else, before anything is written. Answers the
-     * choice as it now stands. */
-    setWalletChoice: function (patch) {
+    /* The choice, written for `mint` (the connected mint when none is named): `hold` only. A balance for receives or
+     * sends to start in (`recv`, `send`) is no longer kept, and asking to keep one is refused, as is anything else,
+     * before anything is written. With one currency chosen, what the other holds there as it is chosen is kept beside
+     * it (`holdKept`): what a swap of all of it left. `p.kept` 0 keeps nothing beside it (chosen with no swap: that
+     * money stays a balance of its own). Answers the choice as it now stands. */
+    setWalletChoice: function (patch, mint) {
       var p = patch || {};
       var bad = function () { return new Error('Foxy does not know that choice.'); };
       if (typeof p !== 'object') throw bad();
       if (p.hold !== undefined && ['dollars', 'bitcoin', 'both'].indexOf(p.hold) < 0) throw bad();
       if (p.recv !== undefined || p.send !== undefined) throw bad();
-      if (p.hold !== undefined) save(K.hold, p.hold);
-      return FoxyWallet.walletChoice();
+      if (p.kept !== undefined && p.kept !== 0) throw bad();
+      if (p.hold !== undefined) {
+        var book = holdBook();
+        var m = mint ? canonicalMint(mint) : canonicalMint(String(mintUrl || ''));
+        if (!m) {
+          book.all = p.hold;
+        } else {
+          book.at[m] = p.hold;
+          var other = p.hold === 'dollars' ? 'sat' : p.hold === 'bitcoin' ? 'usd' : '';
+          var kept = 0;
+          try { kept = (other && p.kept !== 0) ? Math.max(0, Math.round(Number(FoxyWallet.balanceOf(other, m)) || 0)) : 0; } catch (e) { kept = 0; }
+          if (kept > 0) book.kept[m] = kept; else delete book.kept[m];
+        }
+        save(K.hold, book);
+      }
+      return FoxyWallet.walletChoice(mint);
+    },
+
+    /* What the currency not chosen at `mint` held when one was chosen there after a swap of all of it: what the swap
+     * left, too little for the mint to take after its fee. Home shows the other currency up to this as a line under
+     * the chosen balance rather than a balance of its own; more than this is money that has come since, and shows as
+     * its own balance again. It only ever goes down: read below it (the leftover spent, or part of it), it is lowered
+     * to what is there, so money that comes later is a balance again and not taken for the leftover. 0 for none, for
+     * both, or never asked. */
+    holdKept: function (mint) {
+      var book = holdBook();
+      var m = mint ? canonicalMint(mint) : canonicalMint(String(mintUrl || ''));
+      var hold = m ? book.at[m] || '' : '';
+      if (!m || !holdUnit(hold)) return 0;
+      var kept = Math.max(0, Math.round(Number(book.kept[m]) || 0));
+      if (!kept) return 0;
+      var other = hold === 'dollars' ? 'sat' : 'usd';
+      var now = kept;
+      try { now = Math.max(0, Math.round(Number(FoxyWallet.balanceOf(other, m)) || 0)); } catch (e) { now = kept; }
+      if (now < kept) {
+        if (now > 0) book.kept[m] = now; else delete book.kept[m];
+        try { save(K.hold, book); } catch (e2) { /* lowered again on the next read */ }
+        return now;
+      }
+      return kept;
+    },
+
+    /* What became of a swap between units this page ran, once the wallet knows: 'paid' (its payment went; the claim
+     * follows), 'done' (both legs landed), 'failed' (the payment came back, nothing swapped), '' not yet or not known.
+     * This launch's only (`unitSwapLanded`). */
+    swapOutcome: function (id) {
+      return (id && unitSwapOutcomes[id]) || '';
     },
 
     /* One balance, in its own unit. Sats are what `balanceSats` says (the
@@ -672,6 +719,7 @@
       var coming = Math.max(0, Math.round(Number(opts && opts.coming) || 0));
       var have = sumProofs(proofs(at, f));
       var total = (opts && opts.all) ? have : Math.round(Number(amount));
+      var all = !!(opts && opts.all);
       have += coming;
       if (!(total > 0)) return Promise.reject(new Error('Ask for an amount above zero.'));
       if (total > have) {
@@ -734,6 +782,13 @@
       };
       return Promise.all([unitWalletOn(view, t), unitWalletOn(view, f)]).then(function (ws) {
         tw = ws[0]; fw = ws[1];
+        /* All of it, at a mint that charges for the pieces a payment spends: the payment needs its quote and that fee
+         * out of the same pile (`meltNeed`, as `pay` asks it), so the quote aims at what is left once the fee is
+         * taken off, or the swap would be refused every time for want of the fee. */
+        if (all) {
+          total = allFits(fw, proofs(at, f), total);
+          if (!(total > 0)) throw refuseLow();
+        }
         var first = fromSeen() || Math.floor(convert(total, guess) * 0.97);
         return pass(Math.max(1, first));
       }).then(function (one) {
@@ -997,9 +1052,11 @@
           + (last ? '; that was the last try, they stay ' + balanceWord(u.from) : '; tried again next launch'));
         return answer('failed');
       };
-      if (holdUnit(FoxyWallet.walletChoice().hold) !== u.to) {
+      // the choice at the mint the payment is at
+      var heldThere = FoxyWallet.walletChoice(String(rec.mint || '') || undefined).hold;
+      if (holdUnit(heldThere) !== u.to) {
         mark('kept', 'hold', { convert: 'kept', convertWhy: 'hold' });
-        console.log('[foxy] ' + what + ' are kept as ' + balanceWord(u.from) + ': the wallet holds ' + (FoxyWallet.walletChoice().hold || 'nothing chosen') + ' now');
+        console.log('[foxy] ' + what + ' are kept as ' + balanceWord(u.from) + ': the wallet holds ' + (heldThere || 'nothing chosen') + ' there now');
         return Promise.resolve(answer('kept'));
       }
       /* No yardstick, no swap. The mint's rate is judged against this

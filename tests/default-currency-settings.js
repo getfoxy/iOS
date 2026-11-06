@@ -17,7 +17,7 @@
  *     next receive asks again; the same for WALLET on a send
  *   - a receive or send balance an older build left in storage is not read
  *   - holding one: the receive is in it with no question (home shows one balance)
- *   - walletChoice's recv and send are what the hold makes them, nothing else; WHAT YOU HOLD writes the hold only
+ *   - walletChoice's recv and send are what the hold makes them, nothing else; CURRENCIES writes the hold only
  *   - the wallet refuses to keep a receive or send balance, and anything else it does not know, writing nothing */
 process.env.TZ = 'UTC';
 const { JSDOM, VirtualConsole } = require('jsdom');
@@ -212,8 +212,8 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     const W = twoWallet({ real: realChoice({ hold: 'both' }) });
     await fresh(W);
     const l = labels();
-    ok(l.indexOf('SET PIN') >= 0 && l.indexOf('SET PIN') + 1 === l.indexOf('FACE ID LOCK') && l.indexOf('SET PIN') === l.indexOf('AUTO TAP TO PAY') + 1,
-      'holding both: SET PIN and FACE ID LOCK follow AUTO TAP TO PAY straight away', l.join(', '));
+    ok(l.indexOf('SET PIN') >= 0 && l.indexOf('SET PIN') + 1 === l.indexOf('FACE ID LOCK') && l.indexOf('SET PIN') === l.indexOf('SETTINGS') + 1 && l.indexOf('AUTO TAP TO PAY') < 0,
+      'holding both: SET PIN and FACE ID LOCK open SETTINGS straight away, with no AUTO TAP TO PAY', l.join(', '));
   }
 
   // ---- 2. holding both: every receive asks, and nothing is kept ------------------------------
@@ -280,20 +280,21 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     await home();
   }
 
-  // ---- 6. WHAT YOU HOLD: the hold, and recv/send only as the hold makes them ------------------
+  // ---- 6. CURRENCIES: the hold, and recv/send only as the hold makes them ------------------
   {
+    // (nothing in dollars: Bitcoin leaves nothing behind to swap, so DONE writes it; two-balances-screens.js has the swap)
     const real = realChoice({ hold: 'both' });
-    const W = twoWallet({ real });
+    const W = twoWallet({ real, usd: 0 });
     await fresh(W);
     const before = store(real);
-    row('WHAT YOU HOLD').tap();
+    row('CURRENCIES').tap();
     await settle();
-    eq([A.state.screen, A.state.holdPick], ['holdChoice', 'both'], 'MENU › WHAT YOU HOLD opens on Both');
+    eq([A.state.screen, A.state.holdPick], ['holdChoice', 'both'], 'MENU › CURRENCIES opens on Both');
     A.holdDone();
     await settle();
     eq(changed(before, store(real)), [], 'Both again, DONE: nothing written');
     eq(real.W.walletChoice(), { hold: 'both', recv: '', send: '' }, 'Both: no one balance');
-    row('WHAT YOU HOLD').tap(); await settle();
+    row('CURRENCIES').tap(); await settle();
     const b2 = store(real);
     A.setState({ holdPick: 'bitcoin' }); await settle();
     A.holdDone(); await settle();

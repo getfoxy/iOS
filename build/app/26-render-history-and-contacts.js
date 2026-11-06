@@ -723,6 +723,7 @@
       ctQueryInput: (e) => this.setState({ ctQuery: e.target.value }),
       ctFocusRef: this._refCt || (this._refCt = (el) => this.autoFocus('ct', el)),
       ctEmpty: (s.ctQuery || '').trim().toLowerCase().length === 0,
+      contactsEmptyText: 'Ask another Foxy user to share their Cashu ID with you to add them as a contact.',
       contactsEmpty: s.walletLive ? this.contactRows().length === 0 : !!s.fresh,
       contactsAny: s.walletLive ? this.contactRows().length > 0 : !s.fresh,
       ctResults: (function (qq) {

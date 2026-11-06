@@ -11,8 +11,8 @@
    *                                ADD CONTACT in place of PAY (NAME THIS CONTACT?, with the ID string they sent).
    *   no ID in use ............... no messages, no counts, no field: the screen says to open MY CASHU ID first, and PAY
    *                                works as before.
-   *   CHAT ....................... home's round button at the top left (where CARD was; FOXY CARD is now the first row of
-   *                                the menu's WALLET), with the number of unread messages on its corner, "9+" past nine. It opens
+   *   CHAT ....................... home's round button at the top left (where CARD was; CARD is now beside SCAN and
+   *                                PASTE under the balance), with the number of unread messages on its corner, "9+" past nine. It opens
    *   INBOX ...................... everyone this phone has written to, heard from, paid or been paid by, newest first by
    *                                the latest of those, each with the last message's first line or the payment
    *                                ("Paid $1.25", "Received 500 sats"), its time, and its unread count; a row opens that
@@ -134,7 +134,16 @@
     const { sc } = c;
     const n = this.cmUnreadTotal();
     const badge = this.cmBadgeOf(n);
+    const W0 = window.FoxyWallet;
     const home = {
+      // ADD A CASHU ID and SCAN A CASHU ID, on the empty INBOX and the empty CONTACTS (26o-cashu-id.js); not offered where
+      // the wallet cannot read an ID
+      ibAddShown: !!(W0 && W0.cashuIdCheck),
+      ibAddGo: () => this.cidPasteAsk(),
+      ibScanShown: !!(W0 && W0.scan),
+      ibScanGo: () => this.cidScanAsk(),
+      ibFur: "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),"
+        + "linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),url('foxy-fur.webp')",
       goChat: () => this.goInbox(),
       chatBadge: badge,
       chatBadgeShown: !!badge,
@@ -147,12 +156,14 @@
     const rows = this.cmInboxRows();
     return Object.assign(home, {
       isInbox: true,
+      // the foot of the list: CONTACTS, with INBOX under it so back returns here
+      ibContactsGo: () => this.go('contacts'),
       ibRows: rows,
       ibAny: rows.length > 0,
       ibOffShown: !on,
       ibOffText: 'Messages go from your own Cashu ID. Open MY CASHU ID in the menu to start.',
       ibEmptyShown: on && rows.length === 0,
-      ibEmpty: 'No conversations yet. Share MY CASHU ID to be paid or messaged.',
+      ibEmpty: 'Ask another Foxy user for their Cashu ID to start chatting.',
     });
   }
 

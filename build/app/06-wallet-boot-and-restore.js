@@ -855,6 +855,8 @@
 
     // landing on the chosen mint is a switch like any other
     if (this.refuseSwitchWhileBusy()) return;
+    // nor in one restored over it (10-pin.js, `holdSwapWatchStop`)
+    if (this.holdSwapWatchStop) this.holdSwapWatchStop();
 
     this.setState({ rsBusy2: true, rsPickErr: '' });
     const total = keep.reduce((n, r) => n + r.sats, 0);

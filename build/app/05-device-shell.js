@@ -187,7 +187,8 @@
     }
     /* A link starts a flow afresh: at a mint with two balances, with no
      * balance picked, not the one a flow left on screen picked. */
-    const go = (patch) => this.setState(Object.assign({ stack: [], wallet: '', walletAuto: false, walletTapped: false, feeQ: null }, patch));
+    // (and a menu row's way back, `menuReturn`, is not this flow's: a link ends where it goes, 01-ui-basics.js)
+    const go = (patch) => this.setState(Object.assign({ stack: [], wallet: '', walletAuto: false, walletTapped: false, feeQ: null, menuReturn: null }, patch));
     const done = () => {
       try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
       return true;

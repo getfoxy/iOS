@@ -106,8 +106,9 @@
    *   walletPick  "Pay $ 10.00 from": the same cards from CONFIRM PAYMENT's
    *               WALLET button, a balance that cannot cover it greyed and
    *               saying so.
-   *   holdChoice  "WHAT DO YOU WANT TO HOLD?": Dollars, Bitcoin or Both, once,
-   *               after every other first step.
+   *   holdChoice  CURRENCIES, "At <the mint>": Dollars, Bitcoin or Both, once,
+   *               after every other first step, and from the menu; NEXT where
+   *               the one chosen leaves money in the other (10-pin.js).
    *   payFrom     "Pay ₿ 1,000 from": with enough at more than one mint, a
    *               row for each balance that could pay, cheapest first and
    *               chosen, with NEXT (26l-pay-from.js, `pfRows`).
@@ -207,6 +208,9 @@
     const pf = sc === 'payFrom';
     const pfOn = pf && !!(this.pfNextOn && this.pfNextOn());
     const holding = s.holdPick || '';
+    // a choice of one with money in the other: NEXT, to the swap of it (10-pin.js, `holdSwapFrom`)
+    const holdFrom = (sc === 'holdChoice' && this.holdNext && this.holdNext()) ? this.holdSwapFrom() : '';
+    const holdHost = sc === 'holdChoice' ? String(this.mintHost() || '') : '';
     const HOLD = [
       { key: 'dollars', name: 'DOLLARS', sub: 'Steady. For spending.', look: LOOK.usd },
       { key: 'bitcoin', name: 'BITCOIN', sub: 'For saving.', look: LOOK.sat },
@@ -254,7 +258,14 @@
       curBack: pf ? () => this.pfBack() : () => this.back(),
       curClose: pf ? () => this.pfClose() : () => this.setState({ screen: 'home', stack: [] }),
       isHoldChoice: sc === 'holdChoice',
-      holdSub: 'Your mint keeps both. You can change this any time from the menu.',
+      // the mint the choice is made at, by its address
+      holdMint: holdHost ? 'At ' + holdHost : '',
+      holdSub: 'What do you want to hold at this mint? You can change it any time from the menu.',
+      // the first time it is the last step of setting up; from the menu it is not
+      holdStep: (sc === 'holdChoice' && !this.walletChoiceNow().hold) ? 'LAST STEP' : '',
+      holdDoneLabel: holdFrom ? 'NEXT' : 'DONE',
+      holdNote: holdFrom ? 'Your ' + this.unitFigure(this.unitBalance(holdFrom), holdFrom) + ' in ' + this.unitWord(holdFrom).toLowerCase()
+        + ' is swapped into ' + this.unitWord(holdFrom === 'usd' ? 'sat' : 'usd').toLowerCase() + ' first. You see the fee before anything moves.' : '',
       holdRows: HOLD.map(h => Object.assign({}, h.look, {
         name: h.name, sub: h.sub,
         outline: holding === h.key ? '3px solid rgba(255,255,255,.9)' : 'none',

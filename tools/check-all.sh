@@ -146,6 +146,7 @@ check "flashcard one signature" 1 node tests/flashcard-sigall.js
 check "flashcard stale lift" 1 node tests/flashcard-stale-lift.js
 check "flashcard take back" 1 node tests/flashcard-takeback.js
 check "flashcard screens" 1 node tests/flashcard-screens.js
+check "card cancel" 1 node tests/card-cancel.js
 check "flashcard send" 1 node tests/flashcard-send.js
 check "flashcard on chain" 1 node tests/flashcard-onchain.js
 check "flashcard dollar receive" 1 node tests/flashcard-usd-receive.js

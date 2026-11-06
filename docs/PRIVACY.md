@@ -108,8 +108,7 @@ Three exceptions leave Foxy's Tor:
   together over Bluetooth Low Energy, encrypted between the two phones. It
   works between iPhones and Android phones running Foxy. A receiving phone
   advertises a random identifier made for that one payment while its invoice
-  screen is open, or only after you tap TAP TO PAY when AUTO TAP TO PAY is off
-  in settings. A paying phone only listens.
+  screen is open. A paying phone only listens.
 - **NFC.** Foxy talks to a Foxy Flashcard over NFC while you hold the card to
   the iPhone, and iOS lets it talk only to the Foxy card applet. A Flashcard's
   web address (getfoxy.io/card) opens Foxy; to allow that, iOS checks

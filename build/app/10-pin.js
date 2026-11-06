@@ -69,15 +69,32 @@
     });
   }
 
-  /* ---- WHAT DO YOU WANT TO HOLD? ------------------------------------------
+  /* ---- CURRENCIES ------------------------------------------------------------
    *
    * The last first step, at a mint that issues dollars and bitcoin: after the
    * Tor gate, after the custody and passcode cards, after SECURE FOXY, and
    * before the home is used. Dollars or Bitcoin gives a home with one pill, and
    * its flows use that balance with no question; Both gives two pills and every
    * receive and send asks (the CURRENCY screen). A mint with one balance never
-   * asks. Asked once: the answer is kept by the wallet (`setWalletChoice`), and
-   * MENU › WHAT YOU HOLD asks it again. */
+   * asks. Asked once at each mint: the answer is that mint's, kept by the
+   * wallet (`setWalletChoice`), and MENU › CURRENCIES asks it again, at the
+   * mint this phone is on, and says which.
+   *
+   * A choice of one currency changes what home shows:
+   *   the other at nought     DONE: kept, and home shows the one balance
+   *   the other holding some  NEXT: the swap's own confirmation for the whole of
+   *                           it into the one chosen, with its fee (26i-swap.js,
+   *                           `swapSpec`); the choice is kept only once the swap
+   *                           has landed (`holdSwapLanded`), and CANCEL, back, or
+   *                           a swap that fails leaves the choice as it was
+   *   what a swap leaves      (too little for the mint after its fee) a line
+   *                           under the chosen balance, not a balance of its own,
+   *                           and no question on a receive (`holdLeftover`)
+   *   no route, never asked   the first time only: kept, the other's money left
+   *                           where it is, a balance of its own until swapped
+   * Money that arrives later in the other currency (a request already shown, a
+   * card) is never hidden: past what was left, home shows its pill again, and
+   * the choice stays as it was set. */
   holdDue() {
     const W = window.FoxyWallet;
     if (!this.twoUnitsOn() || !W || !W.setWalletChoice) return false;
@@ -110,18 +127,150 @@
   }
 
   holdDone() {
-    const W = window.FoxyWallet;
     const hold = this.state.holdPick;
     if (!hold) { this.toast('Pick one first.', true); return; }
-    /* Both again, from MENU › WHAT YOU HOLD, is not written again: nothing changes. */
-    const again = hold === 'both' && this.walletChoiceNow().hold === 'both';
-    try { if (!again) W.setWalletChoice({ hold: hold }); } catch (e) {
+    /* Money in the other currency: NEXT, its swap first. The first time, with no route to swap by, the choice is
+     * kept and the money left where it is, so setting up is never stuck on a connection. */
+    if (this.holdNext()) { this.holdSwapStart(hold); return; }
+    /* Money left in the other currency with no swap (the first time, with no route) is not a leftover: it stays a
+     * balance of its own, a pill, until it is swapped. Only what a swap of all left is drawn as the line. */
+    this.holdKeep(hold, !!this.holdSwapFrom(hold));
+  }
+
+  /* Whether the pick on screen is NEXT (a swap first) rather than DONE: one currency with money in the other, except
+   * the first time with no route. */
+  holdNext() {
+    if (!this.holdSwapFrom()) return false;
+    return !(!this.walletChoiceNow().hold && this.offlineNow());
+  }
+
+  /* The choice written, and home. False where the wallet would not keep it (said in a toast). */
+  holdKeep(hold, noKept) {
+    if (!this.holdSave(hold, '', noKept)) return false;
+    // chosen: home, not the menu again (01-ui-basics.js `menuReturnWatch`)
+    if (this.menuReturnDrop) this.menuReturnDrop();
+    this.setState({ screen: 'home', stack: [], holdPick: '', holdSwap: '' });
+    this.refreshBalance();
+    return true;
+  }
+
+  /* The choice written at `mint` (this mint when none is named), and nothing else. `noKept`: nothing of the other
+   * currency is recorded as left beside it (`holdKept`). False where the wallet would not keep it (said in a toast). */
+  holdSave(hold, mint, noKept) {
+    const W = window.FoxyWallet;
+    /* Both again, from MENU › CURRENCIES, is not written again: nothing changes. */
+    const again = !mint && hold === 'both' && this.walletChoiceNow().hold === 'both';
+    const patch = noKept ? { hold: hold, kept: 0 } : { hold: hold };
+    try { if (!again) { if (mint) W.setWalletChoice(patch, mint); else W.setWalletChoice(patch); } } catch (e) {
       this.toast((W && W.reason) ? W.reason(e) : 'That could not be kept.', true);
-      return;
+      return false;
     }
     console.log('[foxy] two balances: holding ' + hold);
-    this.setState({ screen: 'home', stack: [], holdPick: '' });
-    this.refreshBalance();
+    return true;
+  }
+
+  /* The currency a choice of one would leave money in at this mint: 'usd' or 'sat' where it holds something, else ''.
+   * Both, or nothing picked, leaves nothing behind. */
+  holdSwapFrom(given) {
+    const hold = given != null ? given : this.state.holdPick;
+    const other = hold === 'dollars' ? 'sat' : hold === 'bitcoin' ? 'usd' : '';
+    return other && this.unitBalance(other) > 0 ? other : '';
+  }
+
+  /* NEXT: the swap's confirmation (26i-swap.js), for all of the other balance into the one chosen, its rate asked at
+   * once. SWAP there runs it and keeps the choice (`swapGo`, `holdSwapDone`). Nothing is written before. */
+  holdSwapStart(hold) {
+    if (this.offlineNow()) { this.toast('Swapping needs the mint.', true); return; }
+    const from = this.holdSwapFrom(hold);
+    if (!from) return;
+    const to = from === 'usd' ? 'sat' : 'usd';
+    const have = this.unitBalance(from);
+    console.log('[foxy] two balances: ' + hold + ' chosen with ' + this.unitWord(from).toLowerCase() + ' held, so all of it is swapped first');
+    // this phone's own swap, nothing asked ahead for another
+    this._swapCard = null;
+    this._swapAhead = null;
+    this._swapProbed = {};
+    this._swapProbeWanted = null;
+    clearTimeout(this._swapTypedT);
+    this._swapTypedT = null;
+    this.setState(p => ({
+      screen: 'swapConfirm', stack: p.stack.concat([p.screen]),
+      swapFrom: from, swapTo: to, swapAmount: have, swapAll: true,
+      swapQuote: null, swapNewRate: false, swapErr: '', swapErrAmount: false, swapQuoting: false, swapBusy: false,
+      swapResult: null, swapRequotes: 0, swapLapsed: false, swapProbing: false, holdSwap: hold,
+    }));
+    this.swapAsk(false, have, true);
+  }
+
+  /* The choice this swap confirmation was opened for (`holdSwapStart`), or '': only while it stands right over
+   * CURRENCIES, so no other swap is ever taken for it. */
+  holdSwapFor() {
+    const s = this.state;
+    const stk = s.stack || [];
+    return (!this._swapCard && s.holdSwap && s.screen === 'swapConfirm' && stk[stk.length - 1] === 'holdChoice') ? String(s.holdSwap) : '';
+  }
+
+  /* The swap moved it (done, or landed while the screen waited): the choice kept, and home with one balance. */
+  holdSwapDone(hold) {
+    if (!this.holdKeep(hold)) {
+      // the swap landed but the choice was not kept: still home, not the menu
+      if (this.menuReturnDrop) this.menuReturnDrop();
+      this.setState({ screen: 'home', stack: [], holdPick: '', holdSwap: '' });
+    }
+    if (this.settleAnimate) this.settleAnimate('both');
+  }
+
+  /* Whether a CURRENCIES swap that is no longer with the mint landed: the wallet's word where it has one (`swapOutcome`:
+   * 'paid' or 'done'), else the balance it left from, down by at least half of what it was to spend. `w` is what
+   * `holdSwapWatch` noted as it ran: { id, from, before, total }. */
+  holdSwapLanded(w) {
+    const W = window.FoxyWallet;
+    let said = '';
+    try { said = (W && W.swapOutcome) ? String(W.swapOutcome(w.id) || '') : ''; } catch (e) { said = ''; }
+    if (said) return said === 'paid' || said === 'done';
+    let now = 0;
+    try { now = (W && W.balanceOf) ? Number(w.mint ? W.balanceOf(w.from, w.mint) : W.balanceOf(w.from)) || 0 : this.unitBalance(w.from); } catch (e) { now = this.unitBalance(w.from); }
+    return w.before - now >= Math.max(1, Math.floor(w.total / 2));
+  }
+
+  /* A CURRENCIES swap the mint has not finished (SWAP STILL GOING THROUGH): the choice is kept when it lands, and not
+   * if its payment comes back. Looked at every HOLD_WATCH_MS while the wallet lists it as pending, HOLD_WATCH_TRIES times
+   * at most; the look stops as soon as the swap is no longer pending, and is not carried past a relaunch (the screen is
+   * asked again then, the money where the wallet finished it). One at a time: a new one replaces the last. The choice
+   * is written at the mint the swap was made at (`w.mint`), whatever mint is connected by then; a switch of mint, a
+   * wipe or a restore stops the look (`holdSwapWatchStop`), and the choice there stays as it was. */
+  HOLD_WATCH_MS = 5000;
+  HOLD_WATCH_TRIES = 120;
+
+  holdSwapWatch(w) {
+    this.holdSwapWatchStop();
+    const W = window.FoxyWallet;
+    let n = 0;
+    const look = () => {
+      this._holdWatchT = null;
+      let pending = true;
+      try { pending = (W.unitSwapsPending() || []).some(x => x && x.id === w.id); } catch (e) { pending = true; }
+      if (!pending) {
+        if (this.holdSwapLanded(w)) {
+          console.log('[foxy] two balances: the swap for ' + w.hold + ' landed, so the choice is kept');
+          if (this.holdSave(w.hold, w.mint || '')) this.refreshBalance();
+        } else {
+          console.log('[foxy] two balances: the swap for ' + w.hold + ' did not go, so the choice stays as it was');
+        }
+        return;
+      }
+      n += 1;
+      if (n >= this.HOLD_WATCH_TRIES) { console.log('[foxy] two balances: the swap for ' + w.hold + ' is still with the mint; the choice is left as it was'); return; }
+      this._holdWatchT = setTimeout(look, this.HOLD_WATCH_MS);
+    };
+    this._holdWatchT = setTimeout(look, this.HOLD_WATCH_MS);
+  }
+
+  /* The look stopped, where there is one: a switch of mint, a wipe, a restore. */
+  holdSwapWatchStop() {
+    if (this._holdWatchT) console.log('[foxy] two balances: no longer waiting on a swap to keep a choice');
+    clearTimeout(this._holdWatchT);
+    this._holdWatchT = null;
   }
 
   /* Never on one tap: this is the one choice that takes a guard off. */
@@ -152,8 +301,11 @@
       this.forceUpdate();
       // and then, at a mint with two balances, what to hold, if it has not been asked
       if (this.offerHoldChoice) this.offerHoldChoice();
+      // answered from the menu's FACE ID LOCK: the menu again, unless the hold question went up (01-ui-basics.js)
+      if (this.menuReturnSettle) this.menuReturnSettle();
     }, e => {
       this.toast(W.reason ? W.reason(e) : 'That could not be changed.', true);
+      if (this.menuReturnSettle) this.menuReturnSettle();
     });
   }
 
@@ -392,6 +544,8 @@
 
   pinDismiss() {
     if (this._pinEl) { this._pinEl.remove(); this._pinEl = null; }
+    // a pad a menu row raised: the menu again, once nothing else is over home (01-ui-basics.js `menuReturnSoon`)
+    if (this.menuReturnSoon) this.menuReturnSoon();
   }
 
   /* Setup: enter, repeat, then read what forgetting it costs. */

@@ -103,6 +103,8 @@
   }
 
   componentDidUpdate(prevProps, prevState) {
+    // a screen opened from the menu, and left: the menu again (01-ui-basics.js, `menuReturnWatch`)
+    if (this.state.menuReturn && this.menuReturnWatch) this.menuReturnWatch();
     // every screen the person is actually shown, in order
     if (prevState && prevState.screen !== this.state.screen) {
       this.noteScreen(prevState);
@@ -204,14 +206,14 @@
     this._wasHome = home;
   }
 
-  /* SETTINGS opened again in the drawer, after it was tapped shut: its rows unfold at the bottom, below the fold on most phones,
-   * so the drawer scrolls to its end as they open, and the person sees what they asked for. Nothing on close, nor for the
-   * other sections, nor as the drawer opens with every section open (21-render-values.js, `menuShut`). (Both drawers carry
-   * the mark, home's and the card screen's: whichever is up scrolls; the other is not drawn.) */
+  /* SETTINGS or OFFLINE LIMITS, the last two sections, opened again in the drawer after it was tapped shut: their rows unfold
+   * at the bottom, below the fold on most phones, so the drawer scrolls to its end as they open, and the person sees what they
+   * asked for. Nothing on close, nor for the other sections, nor as the drawer opens with every section open
+   * (21-render-values.js, `menuShut`). (Both drawers carry the mark, home's and the card screen's: whichever is up scrolls;
+   * the other is not drawn.) */
   syncMenuScroll(prevState) {
-    const shutNow = !!(this.state.menuShut || {}).settings;
-    const shutBefore = !!(prevState && (prevState.menuShut || {}).settings);
-    if (shutNow || !shutBefore) return;
+    const opened = (key) => !(this.state.menuShut || {})[key] && !!(prevState && (prevState.menuShut || {})[key]);
+    if (!opened('settings') && !opened('limits')) return;
     const els = (typeof document !== 'undefined') ? document.querySelectorAll('[data-menu-drawer]') : [];
     if (!els.length) return;
     const go = () => { els.forEach((el) => { try { el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); } catch (e) { el.scrollTop = el.scrollHeight; } }); };

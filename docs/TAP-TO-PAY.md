@@ -41,7 +41,8 @@ failed hand-over costs the time it took to try and nothing else.
    knew the shape; with every invoice advertising, a tap is one among many.
    The payer loses nothing; the receiver gives up that its phone is
    discoverable as a nondescript peripheral for the length of an invoice
-   instead of a tap. MENU › SETTINGS › AUTO TAP TO PAY, switched off, turns it back into a press.
+   instead of a tap. Every receive screen arms itself: the AUTO TAP TO PAY switch that turned it back
+   into a press has left the menu, and an "off" a phone kept from it is no longer read (`tapAutoArms`).
    `tests/tap-offer.js` checks the arming and smoke check 43 reads both sides.
 
    A phone that subscribes takes nothing by it: the receiver stays on the air
@@ -100,8 +101,7 @@ code function; the app uses none of them (only a test calls the code
 function). Its size limits are still in use.
 
 The receiver is a Bluetooth *peripheral* and advertises while its invoice
-screen is armed: by itself under AUTO TAP TO PAY, on a press of TAP with it
-off. The payer is a *central*: it scans, and never goes on the air.
+screen is armed, which it does by itself. The payer is a *central*: it scans, and never goes on the air.
 
 This has been both ways round. The receiver advertised first; the roles were
 swapped because a till that advertises all day is a beacon, and swapped back
@@ -220,7 +220,7 @@ which is the single largest caveat in this document and is recorded in
 ## What it gives away
 
 - **The receiver is the one on the air**, from the moment its invoice screen
-  arms (or TAP is pressed, with AUTO TAP TO PAY off) to the moment a payer
+  arms to the moment a payer
   subscribes. Anyone within Bluetooth range (tens of metres) sees
   one 128-bit service UUID, fresh for that payment, with no name and no amount.
   It says a payment is being taken, here, now.
@@ -386,10 +386,11 @@ A shake presses TAP on the receive invoice screen, for a receiver that has not
 armed itself. Only the receiver has it: the payer listens from home and from
 SEND with no button, so there is nothing for a shake to do on that side.
 
-**With AUTO TAP TO PAY on, the default, a shake does nothing.** The screen has
-already armed itself, and a shake while armed is ignored: a second press of the
-button would put the code card away, and a shake is not a way to dismiss
-anything. The shake presses TAP only when AUTO TAP TO PAY is off.
+**On a screen that has armed itself, a shake does nothing.** Every receive
+screen arms itself (the AUTO TAP TO PAY switch has left the menu), and a shake
+while armed is ignored: a second press of the button would put the code card
+away, and a shake is not a way to dismiss anything. The shake presses TAP only
+on a screen that is not already on the air.
 
 - **The system's shake.** `UIEvent.EventSubtype.motionShake`, heard by the
   host controller (`WebHostController.motionEnded`). What counts as a shake is

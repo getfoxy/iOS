@@ -458,13 +458,16 @@
     var rec = unitSwaps().filter(function (r) { return r.id === id; })[0];
     if (!rec) return;
     if (leg === 'melt' && how === 'back') {
+      unitSwapOutcomes[id] = 'failed';
       dropUnitSwap(id);
       console.log('[foxy] swap ' + id + ': the payment did not go, so nothing was swapped');
       return;
     }
     if (leg === 'melt') rec.meltLeg = 'paid';
     if (leg === 'mint') rec.mintLeg = 'claimed';
+    if (rec.meltLeg === 'paid') unitSwapOutcomes[id] = 'paid';
     if (rec.meltLeg === 'paid' && rec.mintLeg === 'claimed') {
+      unitSwapOutcomes[id] = 'done';
       dropUnitSwap(id);
       return;
     }
@@ -780,6 +783,40 @@
    * for bitcoin, and '' for both or nothing chosen, which converts nothing. */
   function holdUnit(hold) { return hold === 'dollars' ? 'usd' : hold === 'bitcoin' ? 'sat' : ''; }
 
+  /* The choice of what to hold, as kept (K.hold): { all, at: { mint: hold }, kept: { mint: n } }. A bare string is
+   * what builds before kept for the whole wallet: it is `all`, read for every mint never asked. Anything not a
+   * choice is left out. */
+  function holdBook() {
+    var ok = function (h) { return ['dollars', 'bitcoin', 'both'].indexOf(h) >= 0 ? h : ''; };
+    var v = load(K.hold, '');
+    var out = { all: '', at: {}, kept: {} };
+    if (typeof v === 'string') { out.all = ok(v); return out; }
+    if (!v || typeof v !== 'object') return out;
+    out.all = ok(v.all);
+    Object.keys(v.at || {}).forEach(function (m) { var h = ok(v.at[m]); if (h) out.at[m] = h; });
+    Object.keys(v.kept || {}).forEach(function (m) {
+      var n = Math.round(Number(v.kept[m]) || 0);
+      if (n > 0 && out.at[m]) out.kept[m] = n;
+    });
+    return out;
+  }
+
+  /* What became of each swap between units this launch (`swapOutcome`): 'paid', 'done' or 'failed', by swap id. */
+  var unitSwapOutcomes = {};
+
+  /* The largest quote total that all of `pile` can pay with the fee the payment's pieces cost (`meltNeed`, as `pay`
+   * asks it): `have` at a mint with no such fee. A few steps down, each by what the last one was short. */
+  function allFits(w, pile, have) {
+    var t = Math.max(0, Math.round(Number(have) || 0));
+    for (var i = 0; i < 8 && t > 0; i++) {
+      var mn = meltNeed(w, pile, t);
+      if (mn.ok) return t;
+      var short = Math.max(1, Math.round(Number(mn.need) || 0) - Math.round(Number(mn.have) || 0));
+      t = Math.max(0, t - short);
+    }
+    return t > 0 && meltNeed(w, pile, t).ok ? t : 0;
+  }
+
   /* The units of a record: { from, to }. A record written before they were
    * kept is sats into dollars, which is all there was then. */
   function convertUnits(rec) {
@@ -807,7 +844,8 @@
     if (!p) return false;
     var from = unitOf(p.unit) || 'sat';
     if (from !== 'sat' && from !== 'usd') return false;
-    var choice = FoxyWallet.walletChoice();
+    // the choice at the mint the payment came to, not another's
+    var choice = FoxyWallet.walletChoice(String(p.mint || '') || undefined);
     var to = holdUnit(choice.hold);
     if (!to || to === from) return false;
     if (claimAway) return false;
@@ -836,7 +874,7 @@
       var had = convertRec(p.id);
       if (had) return had.state === 'owed';
       var from = unitOf(p.unit) || 'sat';
-      var to = holdUnit(FoxyWallet.walletChoice().hold) || (from === 'usd' ? 'sat' : 'usd');
+      var to = holdUnit(FoxyWallet.walletChoice(String(p.mint || '') || undefined).hold) || (from === 'usd' ? 'sat' : 'usd');
       putConvert({ id: p.id, hash: 'req-' + p.id, mint: canonicalMint(String(p.mint || '')), at: Date.now(),
                    state: 'owed', from: from, to: to, sats: Math.max(0, Math.round(Number(kept) || 0)), got: 0,
                    usd: to === 'usd' ? convertAsked(p.terms, 'usd') : 0, asked: convertAsked(p.terms, to), ask: termsFields(p.terms, from),
@@ -879,7 +917,7 @@
         return true;
       }
       if (!p || canonicalMint(String(p.mint || '')) !== at) return false;
-      var to = holdUnit(FoxyWallet.walletChoice().hold) || (u === 'usd' ? 'sat' : 'usd');
+      var to = holdUnit(FoxyWallet.walletChoice(at).hold) || (u === 'usd' ? 'sat' : 'usd');
       putConvert({ id: id, hash: 'req-' + id, mint: at, at: Date.now(), state: 'claimed', from: u, to: to, sats: n, got: n,
                    usd: to === 'usd' ? convertAsked(p.terms, 'usd') : 0, asked: convertAsked(p.terms, to), ask: termsFields(p.terms, u),
                    pileAt: Math.max(pileAt, n), seq: seq, swap: '', tries: 0, triedAt: 0, gotUsd: 0, gotTo: 0, why: '' });

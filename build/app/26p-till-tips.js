@@ -169,15 +169,7 @@
   }
 
   // PASTE A CASHU ID: a card with a field to paste it into
-  tillIdPaste() {
-    this.blockedCard('tillIdPaste', {
-      tone: 'ask', title: 'PASTE A CASHU ID',
-      reason: 'The Cashu ID they shared from MY CASHU ID. It starts foxyid1.',
-      field: { value: '', placeholder: 'foxyid1…', max: 400 },
-      retry: 'NEXT', go: (text) => this.tillIdRead(text),
-      shut: { label: 'CANCEL' },
-    });
-  }
+  tillIdPaste() { this.cidPasteCard('tillIdPaste', (text) => this.tillIdRead(text)); }
 
   // SCAN A CASHU ID: the camera
   tillIdScan() {

@@ -1151,7 +1151,7 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         }
     }
 
-    /* The GET DOLLARS screen's four web addresses, and no others (SEND > BANK ACCOUNT's
+    /* Five web addresses and no others: the GET DOLLARS screen's four, and `foxycard`, Foxy's own page that the card's learn-more screen opens (SEND > BANK ACCOUNT's
      * OPEN STRIKE, OPEN RIVER and OPEN CASH APP are three of them). The page
      * says which by name; the address itself is here, so nothing the page
      * holds can become a URL this app opens. It opens in the phone's browser,
@@ -1161,6 +1161,7 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         "strike": "https://strike.me",
         "river": "https://river.com",
         "flash": "https://getflash.io",
+        "foxycard": "https://getfoxy.io/cashucard",
     ]
 
     private func handleOpenCompany(id: String, body: [String: Any]) {

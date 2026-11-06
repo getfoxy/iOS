@@ -137,7 +137,7 @@ answer for a third of them.
 | `share` | — | the iOS share sheet from the presenter, refused when something else is already up or the text is empty |
 | `exportText` | — | the text written to a file of its own in the app's temporary folder (complete file protection) and offered in the share sheet with Copy, Print, contacts, reading list and photos left out; the file deleted when the sheet closes; refused when the text is empty or over 16 M characters, or something else is up. Never the pasteboard |
 | `openSettings` | settings url | opens Foxy's own page in the Settings app (`UIApplication.openSettingsURLString`) and no other URL, for a Bluetooth or camera permission refused once, which iOS never asks about again |
-| `openCompany` | company sites | opens one of four fixed web addresses in the phone's browser, picked by name (`cashapp`, `strike`, `river`, `flash`); the page never supplies a URL. The browser is outside Foxy and outside Tor, so that company sees the phone's own address |
+| `openCompany` | company sites | opens one of five fixed web addresses in the phone's browser, picked by name (`cashapp`, `strike`, `river`, `flash`, and `foxycard`, Foxy's own page at getfoxy.io/cashucard that the learn-more screen of FOXY CARD opens); the page never supplies a URL. The browser is outside Foxy and outside Tor, so that site sees the phone's own address |
 | `inboxOpen` | onion inbox | an onion address with a key Tor makes and discards (`NEW:ED25519-V3`, `DiscardPK`), forwarding to a listener on 127.0.0.1 only; refused unless Tor is up. It accepts one thing: a POST to a path of 128 random bits, with a Content-Length of at most 256 kB, no chunked body, four connections at a time and 30 s to send |
 | `inboxClose` | — | ends the address (`DEL_ONION`) and the listener |
 | `inboxAnswer` | answer limits | answers a payment that arrived: status 200, 409 or 422 only, and 300 characters of text, to a payment still waiting |
@@ -1319,7 +1319,8 @@ and blinded refund key again. What each party learns:
   that is not Foxy's own could call the action without asking, which opens only
   ecash somebody has already locked to the ID unblinded, and nothing else (the
   page can already spend this phone's money).
-- **ANY WALLET**, MY CASHU ID's second button, is a standard NUT-18 request for a
+- **ANY WALLET**, once MY CASHU ID's second button (the screen is gone; the
+  wallet's request stays), is a standard NUT-18 request for a
   wallet that cannot blind: locked to a fresh key of the seed-derived lock pool
   (`p2pkReserve`, as a receive request's), never to the ID key, with a Nostr
   transport to the delivery key naming the three relays the inbox listens on. A
@@ -1666,8 +1667,8 @@ describe the superseded gate:
   find (`build/wallet/20-helpers.js`, `tests/p2pk-round-trip.js`).
 - **Tap to pay puts a radio on the air**, which the reviewed app did not have.
   The receiver advertises while an invoice with an amount is on its screen: it
-  arms itself by default (AUTO TAP TO PAY, which the person can turn off,
-  leaving a press of TAP or a shake), and the payer never advertises. §1 has
+  arms itself (a press of TAP or a shake acts only on a screen not already on
+  the air), and the payer never advertises. §1 has
   its bridge actions and `TAP-TO-PAY.md` has the handshake and what a listener
   nearby can learn. It was wrong once, in the way that matters: the page armed
   from the home screen as well, left over from when the payer was the listener,

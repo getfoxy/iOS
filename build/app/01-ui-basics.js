@@ -218,6 +218,101 @@ class Component extends DCLogic {
       return next;
     });
   }
+  /* A screen opened from the menu goes back to the menu when it is left (21-render-values.js, `shut`).
+   *
+   * A row's tap shuts the drawer and arms `menuReturn`. The first screen that is not home marks it as away, and home
+   * reached again after that, by back, CANCEL, DONE or the edge swipe, opens the drawer once and lets it go. A row whose
+   * tap puts something over home instead (a stage such as MY CASHU ID, a card, a PIN pad) opens the drawer again when
+   * that is closed (`menuReturnSoon`, from `hideStage`, a card's close and `pinDismiss`); one whose tap is an answer
+   * that takes its time (a face, the phone's own words) hands its promise back, and the drawer opens when that is over
+   * (`menuReturnSettle`). A tap that put nothing anywhere (a toast) leaves nothing armed (`menuReturnCheck`).
+   *
+   * What ends somewhere else lets it go without opening anything: a payment's PAID or SENT, a swap's SWAPPED, a token
+   * shown, a bill collected (`ENDS` below), a swap that ends at home while the mint finishes it (26i-swap.js), a mint
+   * switched to (09-melt-paste-switch.js `justSwitch`), what to hold chosen (10-pin.js `holdDone`), a link opened
+   * (05-device-shell.js), and an open till, which has no home and no menu. */
+  menuReturnArm() {
+    let top = 0;
+    try { const d = document.querySelector('[data-menu-drawer]'); top = d ? d.scrollTop : 0; } catch (e) { top = 0; }
+    this.setState({ open0: false, menuReturn: { away: false, waits: false, top: top } });
+  }
+
+  // something of the page's own over home: a stage, a card or a PIN pad
+  menuReturnUp() {
+    try {
+      if (document.getElementById('foxy-stage')) return true;
+    } catch (e) { /* no page */ }
+    return !!(this._blockedEl && this._blockedEl.parentNode) || !!(this._pinEl && this._pinEl.parentNode);
+  }
+
+  // the drawer again, scrolled to where it was left
+  menuReturnOpen(m) {
+    const top = (m && m.top) || 0;
+    return () => {
+      if (!top) return;
+      try { const d = document.querySelector('[data-menu-drawer]'); if (d) d.scrollTop = top; } catch (e) { /* no page */ }
+    };
+  }
+
+  // a row's answer is over: at home with nothing over it, the menu again; on a screen it led to, home will open it
+  menuReturnSettle() {
+    const m0 = this.state && this.state.menuReturn;
+    this.setState(p => {
+      const m = p.menuReturn;
+      if (!m || m.away) return null;
+      if (p.screen !== 'home') return { menuReturn: Object.assign({}, m, { away: true }) };
+      /* Something still over home (a card the answer raised, ACCEPT TIPS?, a PIN pad): the answer is in, so it no longer
+       * waits, and that card's close asks again (`menuReturnSoon`); a card shut with no answer leaves nothing armed. */
+      if (this.menuReturnUp()) return { menuReturn: Object.assign({}, m, { waits: false }) };
+      return { open0: true, menuReturn: null };
+    }, this.menuReturnOpen(m0));
+  }
+
+  // a stage, card or pad closed: once whatever replaces it (if anything) is up, the same question
+  menuReturnSoon() {
+    const m = this.state && this.state.menuReturn;
+    if (!m || m.away || m.waits) return;
+    setTimeout(() => this.menuReturnSettle(), 0);
+  }
+
+  // the tick after a row's tap: nothing opened, no screen and nothing over home, so nothing is waiting to come back from
+  menuReturnCheck() {
+    this.setState(p => {
+      const m = p.menuReturn;
+      if (!m || m.away || m.waits || p.screen !== 'home' || this.menuReturnUp()) return null;
+      return { menuReturn: null };
+    });
+  }
+
+  // a row whose answer is a promise: it may take any time (the phone's own words being typed)
+  menuReturnWaits() {
+    this.setState(p => (p.menuReturn && !p.menuReturn.away ? { menuReturn: Object.assign({}, p.menuReturn, { waits: true }) } : null));
+  }
+
+  // a flow that ends somewhere else: nothing opens the menu after it
+  menuReturnDrop() {
+    if (this.state && this.state.menuReturn) this.setState({ menuReturn: null });
+  }
+
+  // after every update (19-update-keypad-balance.js, `componentDidUpdate`)
+  menuReturnWatch() {
+    const st = this.state || {};
+    const m = st.menuReturn;
+    if (!m) return;
+    const ENDS = ['paid', 'sendDone', 'swapDone', 'tokenOut', 'spAllPaid'];
+    /* PAID raised over another screen is put back on that screen when dismissed (`announcePayment`): over a screen the
+     * menu opened it is not that screen's end, and the screen goes on waiting; over home it is a payment that came in, and
+     * nothing opens the menu after it. */
+    const back = this._returnTo;
+    const paidOver = st.screen === 'paid' && back && back.screen !== 'home';
+    if (st.till || (ENDS.indexOf(st.screen) >= 0 && !paidOver)) { this.setState({ menuReturn: null }); return; }
+    if (st.screen !== 'home') {
+      if (!m.away) this.setState({ menuReturn: Object.assign({}, m, { away: true }) });
+      return;
+    }
+    if (m.away) this.setState({ open0: true, menuReturn: null }, this.menuReturnOpen(m));
+  }
+
   toggle(k) { this.setState(s => ({ open: Object.assign({}, s.open, { [k]: !s.open[k] }) })); }
 
   // a row: label, value, and the optional extras the shell reserves space for
@@ -556,12 +651,28 @@ class Component extends DCLogic {
     try { return !!(this.fcOutMode && this.fcOutMode()); } catch (e) { return false; }
   }
 
-  /* What the person chose to hold: 'dollars', 'bitcoin', 'both', or '' never asked. */
+  /* What the person chose to hold at this mint: 'dollars', 'bitcoin', 'both', or '' never asked there. */
   walletChoiceNow() {
     const W = window.FoxyWallet;
     let c = null;
     try { c = (W && W.walletChoice) ? W.walletChoice() : null; } catch (e) { c = null; }
     return { hold: String((c && c.hold) || '') };
+  }
+
+  /* With one currency chosen here, what the other holds that is not a balance of its own: up to what it held as the
+   * choice was made (the wallet's `holdKept`: what a swap of all of it left, too little for the mint after its fee,
+   * lowered as it is spent). Home draws it as a line under the chosen balance, and a receive does not ask about it.
+   * More than that is money that came since: its own pill again. { unit, amount }, or null. */
+  holdLeftover() {
+    if (!this.twoUnitsOn()) return null;
+    const hold = this.walletChoiceNow().hold;
+    const unit = hold === 'dollars' ? 'sat' : hold === 'bitcoin' ? 'usd' : '';
+    if (!unit) return null;
+    const W = window.FoxyWallet;
+    let kept = 0;
+    try { kept = (W && W.holdKept) ? Math.max(0, Math.round(Number(W.holdKept()) || 0)) : 0; } catch (e) { kept = 0; }
+    const have = unit === 'usd' ? Math.round(Number(this.state.balUsdCents) || 0) : Math.round(Number(this.state.balSats) || 0);
+    return have > 0 && have <= kept ? { unit: unit, amount: have } : null;
   }
 
   /* The balance a flow uses: the one picked for this payment; else, where home shows one balance, that one; else ''
@@ -632,14 +743,17 @@ class Component extends DCLogic {
    * One at a mint with one balance. With two, what the person chose to hold
    * decides: Dollars or Bitcoin is one pill, Both (or not asked yet) is two,
    * and two stay even at nought so the screen never jumps. Money is never
-   * hidden: a balance with something in it keeps its pill whatever was chosen. */
+   * hidden: a balance with something in it keeps its pill whatever was chosen,
+   * under the one chosen, unless it is no more than was left there as the
+   * choice was made (`holdLeftover`), which is a line under the chosen pill. */
   homePills() {
     if (!this.twoUnitsOn()) return ['sat'];
     const hold = this.walletChoiceNow().hold;
-    const usd = (Number(this.state.balUsdCents) || 0) > 0;
-    const sat = (Number(this.state.balSats) || 0) > 0;
+    const left = this.holdLeftover();
+    const usd = (Number(this.state.balUsdCents) || 0) > 0 && !(left && left.unit === 'usd');
+    const sat = (Number(this.state.balSats) || 0) > 0 && !(left && left.unit === 'sat');
     if (hold === 'dollars') return sat ? ['usd', 'sat'] : ['usd'];
-    if (hold === 'bitcoin') return usd ? ['usd', 'sat'] : ['sat'];
+    if (hold === 'bitcoin') return usd ? ['sat', 'usd'] : ['sat'];
     return ['usd', 'sat'];
   }
 

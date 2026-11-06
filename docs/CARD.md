@@ -147,7 +147,7 @@ Whether it does that depends on what is on the screen, and one function says
 
 | on the screen | what happens |
 |---|---|
-| HOME; HISTORY, CONTACTS, a transaction, YOUR CHANGE, LOGS, SWITCH, or the Flashcard screen itself with no sheet up | the tap begins; a drawer or the list of apps that sell bitcoin is shut first, as the menu's row shuts it |
+| HOME; HISTORY, CONTACTS, a transaction, LOGS, SWITCH, or the Flashcard screen itself with no sheet up | the tap begins; a drawer or the list of apps that sell bitcoin is shut first |
 | Foxy is locked (its PIN pad or Face ID is up), or still starting (the launch screens, the first-run warning, the Tor gate's screens) | the request is kept, and acted on once the person is in, if that is within a minute; after that it lapses |
 | a send or receive, an amount being typed, a confirmation, a sending or paid screen, a split bill, a token, a restore or a backup, a card sheet or any of a card's flows, a notice, or anything else drawn over the screen | ignored: a card resting behind the phone must never pull a person out of a payment |
 | a second request while one waits or is being acted on | the same tap, ignored |

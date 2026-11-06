@@ -2,3 +2,16 @@
 # One entry per line:  <sha256 of the hit text> | reason     or     <path>:<text the hit contains> | reason
 # A line with no reason is an error. Lines starting with # are notes.
 tools/vendor/verify-secp256k1.sh:KEY_SHA256= | the SHA-256 digest of the vendored libsecp256k1 source archive, checked by the script; a digest, not a key
+# 2026-11-06: test vectors made from the public test words (abandon … about, legal winner … yellow, tests/harness.js PHONE_WORDS); no wallet holds them.
+tests/fixtures/cashu-id-vectors.json:6e3db8c847f6e35fbd239617022d9cf44d02f689a13b66066b90e3a0c3a5f014 | a test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-msg-vectors.json:5009135d83cc679b9701373dfd2dc331681e1a9c6918fd4f68731172594168a1 | a test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-msg-vectors.json:e17f2c2e8df1352627a14a074c362764d913f8438bd643d1ec2b2680617e24cd | a test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-msg-vectors.json:0dee1a7d1e8f2bf3b219655eb884b601b9b0296bec9b0812d1d5bf66d3d2a7c1 | a test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-msg-vectors.json:f672034c31e67dcc9de3a7c0d606952fad919b0b454306ea67610967123df695 | a test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-msg-vectors.json:a15cd89a5886f1d76089a1e68298fddf79bfb51c60ca4d127e5ec70e6932dac5 | a test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-msg-vectors.json:cd24c5ec166d3cb0ce152705498e0b2281d7c26f1119c74e31a59c774c1eafe6 | a test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-msg-vectors.json:41d408e161b9c5e9ee025e6476431164e486b73f65f52959a28f8a8b81c11b7b | a test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-msg-vectors.json:8aec325406c9abd84588922bff41be644103730c541c79e5d78fe5d00810b228 | a test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-msg-vectors.json:30f5c8eaaa429f44840d4726101c701241ada1d85e535bc96df2edde77335a74 | a test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-msg-vectors.json:f749cd0abcbc5360c2ed930c323cfde88526e40ba11684eb6e83e29cef23a51f | a test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-msg-vectors.json:7eb2e509dc97ffa0f05c009a2f4e13ef40edbd7110c30e2411d8bb08651c7576 | a test vector made from public test words, not a wallet's key

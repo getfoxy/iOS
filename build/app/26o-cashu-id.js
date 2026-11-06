@@ -13,8 +13,6 @@
    *                                who it is; a tick remembers the answer for that mint. Not answered, it is a row in HISTORY
    *                                (`cidWaitingRows`) that opens the card again; SETTINGS > OTHER MINTS lists and forgets the
    *                                remembered answers (`cidChoicesCard`).
-   *   ANY WALLET ................. MY CASHU ID's second button: a standard payment request (NUT-18) any Cashu wallet pays,
-   *                                locked to a fresh key of this phone's, with COPY and SHARE (`cidAnyShow`).
    *   paid to the ID key itself .. PAID TO YOUR ID KEY (`cidBareCard`): LEAVE IT, the default, or TAKE IT ANYWAY, which has
    *                                the ID key itself sign for that one delivery.
    *
@@ -50,51 +48,6 @@
       above: 'SHARE',
       aboveGo: () => { if (!W || !W.share || !W.share(String(text))) this.toast('Sharing is not available here.', true); },
       button: 'DONE',
-      // for a wallet that is not a Foxy: a standard request it can pay today
-      alt: W && W.cashuIdAnyRequest ? 'ANY WALLET' : '',
-      altGo: () => this.cidAnyShow(),
-    });
-  }
-
-  // the unit ANY WALLET's request asks in: the balance the phone is in, dollars first where it holds both
-  cidAnyUnit() {
-    const u = this.walletNow ? this.walletNow('receive') : '';
-    if (u === 'usd' || u === 'sat') return u;
-    return this.twoUnitsOn && this.twoUnitsOn() ? 'usd' : 'sat';
-  }
-
-  /* ANY WALLET: a new request every opening (a fresh key from the seed's pool: `cashuIdAnyRequest`), as a code with COPY
-   * and SHARE. Paid, it comes in by the ID's inbox like any payment to the ID. */
-  cidAnyShow() {
-    const W = window.FoxyWallet;
-    if (!W || !W.cashuIdAnyRequest) { this.toast('This Foxy cannot make that request.', true); return; }
-    const run = (this._cidAnyRun = (this._cidAnyRun || 0) + 1);
-    this.stageScreen('cashuIdAny', { art: '', title: 'ANY WALLET', body: 'Making a request for one payment', dots: true, button: 'CANCEL',
-      go: () => { if (this._cidAnyRun === run) this._cidAnyRun = 0; } });
-    Promise.resolve(W.cashuIdAnyRequest({ unit: this.cidAnyUnit() })).then((r) => {
-      if (this._cidAnyRun !== run) return;
-      if (!r || !r.text) throw new Error('No request was made.');
-      this.cidAnyShowCode(r.text);
-    }).catch((e) => {
-      if (this._cidAnyRun !== run) return;
-      this._cidAnyRun = 0;
-      this.hideStage('cashuIdAny');
-      this.blockedCard('cidAnyNone', { tone: 'warn', title: 'THAT WON\u2019T WORK', reason: (W.reason ? W.reason(e) : String((e && e.message) || e)) });
-    });
-  }
-
-  /* The screen itself, for a request in hand (and for tests/render-snapshots.js). */
-  cidAnyShowCode(text) {
-    const W = window.FoxyWallet;
-    const t = String(text);
-    this.stageScreen('cashuIdAny', {
-      art: '', title: 'ANY WALLET', qr: t,
-      body: 'Any Cashu wallet can pay this. It is good for one payment.',
-      pair: [
-        { label: 'COPY', go: () => { const done = !!(this.copyText && this.copyText(t)); this.toast(done ? 'Request copied' : 'Could not copy', !done); } },
-        { label: 'SHARE', go: () => { if (!W || !W.share || !W.share(t)) this.toast('Sharing is not available here.', true); } },
-      ],
-      button: 'DONE',
     });
   }
 
@@ -128,6 +81,28 @@
       retry: 'LEAVE IT', go: leave,
       shut: { label: 'TAKE IT ANYWAY', pill: true, tap: take },
     });
+  }
+
+  /* A card with a field to paste a Cashu ID into, NEXT handing the text to `read`; CANCEL shuts it. Shared with the till's
+   * (26p-till-tips.js, `tillIdPaste`) so the two stay the same card. */
+  cidPasteCard(kind, read) {
+    this.blockedCard(kind, {
+      tone: 'ask', title: 'PASTE A CASHU ID',
+      reason: 'The Cashu ID they shared from MY CASHU ID. It starts foxyid1.',
+      field: { value: '', placeholder: 'foxyid1…', max: 400 },
+      retry: 'NEXT', go: (text) => read(text),
+      shut: { label: 'CANCEL' },
+    });
+  }
+
+  /* ADD A CASHU ID and SCAN A CASHU ID, on the empty INBOX and the empty CONTACTS: the ID is read as a pasted or scanned one
+   * is (`cidAddAsk`), which goes on to NAME THIS CONTACT?. */
+  cidPasteAsk() { this.cidPasteCard('cidPaste', (text) => this.cidAddAsk(text)); }
+
+  cidScanAsk() {
+    const W = window.FoxyWallet;
+    if (!W || !W.scan) return;
+    Promise.resolve(W.scan('Scan a Cashu ID')).then((text) => { if (String(text || '').trim()) this.cidAddAsk(text); }).catch(() => {});
   }
 
   /* A Cashu ID scanned or pasted (`acceptTarget`): NAME THIS CONTACT?, or why not. */

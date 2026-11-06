@@ -251,7 +251,8 @@ function messageViews() {
   add('home, CHAT with unread messages', at('home', { contacts: INBOX_CONTACTS }, { wallet: INBOX_ON }));
   add('inbox, messages and payments', at('inbox', { contacts: INBOX_CONTACTS, stack: ['home'] }, { wallet: INBOX_ON }));
   add('inbox, nothing yet', at('inbox', { contacts: MSG_CONTACTS, stack: ['home'] },
-    { wallet: Object.assign({}, MSG_ON, { cashuMsgThreads: () => [], cashuMsgPayments: () => [] }) }));
+    { wallet: Object.assign({}, MSG_ON, { cashuMsgThreads: () => [], cashuMsgPayments: () => [], cashuIdCheck: () => Promise.resolve({}), scan: () => Promise.resolve('') }) }));
+  add('contacts, empty', at('contacts', { contacts: [], stack: ['home'] }, { wallet: Object.assign({}, MSG_ON, { cashuIdCheck: () => Promise.resolve({}), scan: () => Promise.resolve('') }) }));
   add('inbox, no Cashu ID in use', at('inbox', { contacts: MSG_CONTACTS, stack: ['home'] }, { wallet: { cashuMsgOn: () => false, cashuMsgPayments: () => [] } }));
   // the menu with BACKUP ACCOUNT at the very top: money in the wallet, the words not checked
   add('home, the menu with BACKUP ACCOUNT', at('home', { open0: true }, { wallet: { backedUp: () => false } }));
@@ -1218,11 +1219,9 @@ function cards() {
     { unit: 'usd', amount: 300, others: 1, total: 450, toUnit: 'sat', lands: 5800, fee: 6 })));
   add('card: other mints', (a) => a.cidChoicesCard(), { wallet: { cashuIdChoices: () => [{ host: 'forge.flashapp.me', choice: 'home' }, { host: 'home.example.com', choice: 'keep' }],
     cashuIdChoiceClear: () => [] } });
-  // ANY WALLET (MY CASHU ID's second button): a standard request with COPY and SHARE; and a payment to the ID key itself, unblinded
-  add('stage: MY CASHU ID, with ANY WALLET', (a) => a.cidShowCode(CID_TEXT), { wallet: { cashuIdAnyRequest: () => Promise.resolve({ text: 'creqA' }) } });
+  // a payment to the ID key itself, unblinded
   // the reminder after 15 days away (26o-remind.js): the card asked once
   add('card: remind you?', (a) => a.remindAskCard());
-  add('stage: ANY WALLET', (a) => a.cidAnyShowCode('creqA' + 'B'.repeat(200)));
   const CID_BARE = { key: 'cid:b1', name: '', mint: 'https://home.example.com', host: 'home.example.com', unit: 'sat', amount: 15, at: 0, refund: false };
   add('card: paid to your ID key', (a) => a.cidBareCard(CID_BARE));
   add('card: paid to your ID key, by a named payer', (a) => a.cidBareCard(Object.assign({}, CID_BARE, { name: 'Bob' })));

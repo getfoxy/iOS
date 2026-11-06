@@ -446,7 +446,7 @@ const STATES = [
       'and is headed by the name alone, with no MINT under it and no chevron', fcBlock);
   }
 
-  // ---- 8. CHAT at the top left of home (CARD was there), HOME at the top left of the card's screen, FOXY CARD then HISTORY in home's MENU; no pill, no snow ----
+  // ---- 8. CHAT at the top left of home (CARD was there), HOME at the top left of the card's screen, CARD in home's row of buttons, HISTORY in home's MENU; no pill, no snow ----
   {
     route = ROUTE();
     w.FoxyWallet = wallet(false);
@@ -463,11 +463,12 @@ const STATES = [
     const realGo = A.goFlashcard;
     A.goFlashcard = function () { went.push([...arguments]); };
     const v = V();
-    const fcRow = v.menuItems[1], histRow = v.menuItems.find((m) => m.label === 'HISTORY');
-    fcRow.tap();
+    const fcBtn = v.homeButtons.find((b) => b.label === 'CARD'), histRow = v.menuItems.find((m) => m.label === 'HISTORY');
+    fcBtn.tap();
     A.goFlashcard = realGo;
-    ok(v.menuItems[0].label === 'WALLET' && fcRow.label === 'FOXY CARD' && fcRow.path === CARD_ICON && went.length === 1 && went[0].length === 0,
-      'FOXY CARD, the first row of WALLET in home’s MENU with the card drawing, opens the card’s screen as a card’s address does (`goFlashcard`, which asks for the tap)', JSON.stringify(went));
+    ok(v.homeButtons.map((b) => b.label).join() === 'SCAN,PASTE,CARD' && fcBtn.path === CARD_ICON && went.length === 1 && went[0].length === 0
+       && !v.menuItems.some((m) => m.label === 'FOXY CARD'),
+      'CARD, the third of home’s buttons with the card drawing, opens the card’s screen as a card’s address does (`goFlashcard`, which asks for the tap); no FOXY CARD in the menu', JSON.stringify(went));
     ok(!!histRow && histRow.path === CLOCK && !v.menuItems.some((m) => m.label === 'FLASHCARD'),
       'HISTORY, with the clock, and no FLASHCARD row', v.menuItems.map((m) => m.label).join());
     ok(histRow.ringInk === v.histRingInk && histRow.ring === v.histRing && (v.menuRing === v.histRing || v.menuRing === 'foxyRing 1.15s linear infinite'),
@@ -487,8 +488,8 @@ const STATES = [
     await settle();
     const drawerRows = [...w.document.querySelectorAll('div')].filter((d) => d.style.height === '60px' && d.style.borderRadius === '18px');
     const firstRow = drawerRows.find((d) => d.textContent.trim() === 'HISTORY');
-    ok(/WALLET/.test((drawerRows[0] || {}).textContent || '') && /FOXY CARD/.test((drawerRows[1] || {}).textContent || '') && !!firstRow,
-      'drawn in the drawer under WALLET and FOXY CARD', firstRow ? firstRow.textContent : 'none');
+    ok(/WALLET/.test((drawerRows[0] || {}).textContent || '') && /MY CASHU ID/.test((drawerRows[1] || {}).textContent || '') && drawerRows.indexOf(firstRow) === 2,
+      'drawn in the drawer under WALLET and MY CASHU ID', firstRow ? firstRow.textContent : 'none');
     click(firstRow);
     await settle();
     ok(A.state.screen === 'history' && !A.state.open0, 'and it opens history, and closes the menu', A.state.screen);

@@ -285,7 +285,8 @@
    * otherwise. The screen names the till's own (26m-till.js, `tillUnitAt`). */
   function tillUnitNow(at) {
     var hold = '';
-    try { hold = String(load(K.hold, '') || ''); } catch (e) { hold = ''; }
+    // the choice at the till's mint (`walletChoice`, each mint's own)
+    try { hold = String(FoxyWallet.walletChoice(at).hold || ''); } catch (e) { hold = ''; }
     var units = [];
     try { units = unitsOf(at); } catch (e) { units = []; }
     if (units.indexOf('usd') < 0) return 'sat';

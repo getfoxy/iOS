@@ -248,6 +248,7 @@
     const crediting = s.animFrom ? s.animLane : null;
     const REST = '0 10px 24px rgba(0,0,0,.3)';
     const cents = bal.cents != null ? bal.cents : s.balUsdCents;
+    const left = two && this.holdLeftover ? this.holdLeftover() : null;
     const pill = (u) => (u === 'usd' ? {
       label: 'Dollars', ...this.USD_PILL,
       big: s.hidden ? '••••••' : cents == null ? '···' : this.usd(Math.max(0, cents) / 100),
@@ -279,6 +280,10 @@
       goMintHeading: () => this.goSwitchMint(),
       homePillRows: this.homePills().map(pill)
         .map((p, i) => Object.assign(p, { badge: !two && i === 0 && !!this.BK_BADGE })),
+      // what the currency not chosen still holds here, too little to be a balance of its own (`holdLeftover`)
+      homeLeftShown: !!left,
+      homeLeft: !left ? '' : s.hidden ? 'Also here: ••••••'
+        : 'Also here: ' + this.unitFigure(left.amount, left.unit) + ' in ' + this.unitWord(left.unit).toLowerCase(),
     };
   }
 

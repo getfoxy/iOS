@@ -430,6 +430,8 @@
     if (!waited && this.switchAfterSweep(url, () => this.justSwitch(url, true))) return;
     // a payment or claim in progress finishes at the mint it started on
     if (this.refuseSwitchWhileBusy()) return;
+    // a choice waiting on a swap at this mint is not carried to another (10-pin.js, `holdSwapWatchStop`)
+    if (this.holdSwapWatchStop) this.holdSwapWatchStop();
     // Connecting takes a second or two over Tor, and until now the row gave no
     // sign it had been tapped at all.
     this.setState({ switchBusy: true, mintBusy: String(url).replace(/\/+$/, '') });
@@ -444,6 +446,8 @@
     const waits = !lazy ? 'no switchTo in the wallet' : (typeof W.switchWaits === 'function' ? String(W.switchWaits(url) || '') : '');
     console.log('[foxy] switch: ' + host + (waits ? ' \u2014 waiting for the mint: ' + waits : ' \u2014 at once (switchTo)'));
     (lazy ? W.switchTo(url) : W.connect(url)).then(w => {
+      // a mint switched to is where the person wanted to go: home, not the menu again (01-ui-basics.js `menuReturnWatch`)
+      if (this.menuReturnDrop) this.menuReturnDrop();
       this.setState({ switchBusy: false, mintBusy: '', mintReturn: '' });
       this.walletReady({ name: (w && w.name) || host });
       // came from history, so go back to it — now showing this mint

@@ -145,7 +145,10 @@
      * to hold ('dollars', 'bitcoin', 'both'). A choice, not money: a wipe of
      * the seed removes it with every other foxy. key. `recv` and `send` are no
      * longer read or written (every receive and send asks which balance); they
-     * are named so that a wipe still removes what an older build kept there. */
+     * are named so that a wipe still removes what an older build kept there.
+     * The choice is each mint's: { all, at: { mint: hold }, kept: { mint: n } }
+     * (16b-two-balances.js, `holdBook`); a bare string, what builds before
+     * kept, is `all`, read for a mint never asked. */
     hold: 'foxy.wallet.hold',
     recv: 'foxy.wallet.recv',
     send: 'foxy.wallet.send',

@@ -147,6 +147,8 @@
       // the scan screen's camera, held back while the card was up, comes back
       if (this.syncPreview) setTimeout(() => this.syncPreview(), 0);
       if (spec.onClose) spec.onClose();
+      // a card a menu row raised: the menu again, once nothing else is over home (01-ui-basics.js `menuReturnSoon`)
+      if (this.menuReturnSoon) this.menuReturnSoon();
       // the next card that was waiting, once this one (and anything its close opened) is done
       setTimeout(() => {
         if (this._blockedEl || !(this._cardQueue || []).length) return;

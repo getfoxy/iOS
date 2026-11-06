@@ -486,8 +486,9 @@ async function part2() {
   A.setState({ walletLive: true, balSats: st.sat, balUsdCents: st.usd, livePrice: 80000, satUsd: 80000 / 1e8, screen: 'home', stack: [] });
   await settle();
   let v = A.renderVals();
-  const swapBtn = v.homeButtonsTwo.find((b) => b.label === 'SWAP');
-  ok(!!swapBtn && swapBtn.dim === '1', 'home has SWAP, lit');
+  ok(!v.homeButtonsTwo.some((b) => b.label === 'SWAP'), 'home has no SWAP: it is the menu’s, under MINTS');
+  const swapBtn = v.menuItems.find((m) => m.label === 'SWAP');
+  ok(!!swapBtn, 'the menu has SWAP');
   swapBtn.tap();
   await settle();
   ok(A.state.screen === 'swap' && /SWAP/.test(text()) && /FROM DOLLARS \$ 42\.05/.test(text()) && /TO BITCOIN ₿ 50,000/.test(text()),
@@ -532,8 +533,7 @@ async function part2() {
   st.online = false;
   A.setState({ routeAt: Date.now() });
   await settle();
-  const dim = A.renderVals().homeButtonsTwo.find((b) => b.label === 'SWAP');
-  ok(dim.dim === '0.38', 'offline: SWAP is dimmed');
+  const dim = A.renderVals().menuItems.find((m) => m.label === 'SWAP');
   dim.tap();
   ok(toasts.pop() === 'Swapping needs the mint.', 'and a tap says it needs the mint');
   st.online = true;

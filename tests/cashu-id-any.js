@@ -1,5 +1,5 @@
 'use strict';
-/* cashu-id-any.js — ANY WALLET, and a payment paid to the ID key itself (build/wallet/08e-cashu-id.js, docs/CASHU-ID.md).
+/* cashu-id-any.js — the one-time request for a wallet that cannot blind (once the ANY WALLET button; the wallet keeps it, no screen shows it), and a payment paid to the ID key itself (build/wallet/08e-cashu-id.js, docs/CASHU-ID.md).
  *
  *     node tests/cashu-id-any.js
  *

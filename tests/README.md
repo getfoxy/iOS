@@ -75,8 +75,7 @@ implementations that agree.
 **`tap-offer.js`** and **`tap-settle.js`** are the two halves of tap to pay that
 run without a radio. The first lifts `syncTap` out of the built app and asks
 what goes on the air and when: that nothing advertises from home, that a
-receive screen arms itself (or, with AUTO TAP TO PAY off, says nothing until TAP
-is pressed), that the payer listens from home and from SEND and nowhere else,
+receive screen arms itself, that the payer listens from home and from SEND and nowhere else,
 that a screen armed before its invoice exists goes on the air with nothing and
 sends the offer when it arrives, and that none of it tears down a link a
 payment is crossing.
@@ -250,8 +249,9 @@ It runs the page as it ships against the harness's mint with a usd keyset;
 `tools/live/two-balances.js` does the same at a real Nutshell with fake money.
 
 **`two-balances-screens.js`** mounts the real page on a stand-in wallet and
-drives the new screens as a person does: home with two pills or one, WHAT DO
-YOU WANT TO HOLD?, CURRENCY once per flow, the dollar keypad and invoice,
+drives the new screens as a person does: home with two pills or one,
+CURRENCIES (each mint's choice, and the swap of all of the other currency
+it asks for), CURRENCY once per flow, the dollar keypad and invoice,
 CONFIRM PAYMENT's WALLET button, the picker and the automatic switch, a
 dollar payment whose price moved (back to the confirmation, asked again),
 ADDED TO / FROM in each unit, UNCLAIMED ECASH per unit, history's DOLLARS /

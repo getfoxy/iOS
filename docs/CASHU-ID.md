@@ -73,7 +73,8 @@ as it is. Every payment from such a wallet would be locked to the ID key itself,
 which the mint then sees at every claim (every payment to one person linked),
 and the ID key would become a lock key, which this design never lets it be.
 Until NUT-18 can carry "blind the keys", the ID stays `foxyid1`, and a wallet
-that is not a Foxy pays by ANY WALLET (below), a request that names no ID key.
+that is not a Foxy has no way to pay a Cashu ID now: the one-time request that
+served it (below, "Any wallet") has no screen, so nothing shows it.
 
 ## Paying
 
@@ -270,11 +271,13 @@ use the two as they are.
 
 ## Any wallet
 
-MY CASHU ID has a second button, **ANY WALLET**, for a payer whose wallet
-cannot blind (Minibits, Cashu.me, any wallet that reads a NUT-18 request). It
-shows a standard payment request (`cashuIdAnyRequest`, `cidAnyRequest`) as a
-code with COPY and SHARE and the line "Any Cashu wallet can pay this. It is
-good for one payment." Its fields, as cashu-ts encodes them (`creqA…`):
+MY CASHU ID shows its code with SHARE and DONE; it has no ANY WALLET button, and
+the screen that button opened is gone, so a wallet that is not a Foxy has no way
+to pay a Cashu ID until something shows the request again. What stays is the wallet's half: for a
+payer whose wallet cannot blind (Minibits, Cashu.me, any wallet that reads a
+NUT-18 request), `cashuIdAnyRequest` (`cidAnyRequest`) makes a standard payment
+request, and a payment to it comes in by the ID's inbox as ever. Its fields, as
+cashu-ts encodes them (`creqA…`):
 
 | field | |
 |---|---|
@@ -601,7 +604,7 @@ has PAY and "NO MESSAGES YET: Messages go from your own Cashu ID. Open MY CASHU
 ID in the menu to start, then write to <name> here."
 
 CHAT, the round button at the top left of home (where CARD was: the card is
-FOXY CARD in the menu now), carries the number of unread messages across every
+home's CARD button now, beside SCAN and PASTE), carries the number of unread messages across every
 conversation on its corner, a filled circle in the accent colour ("1", "2" …
 "9+"), drawn again as a message arrives or is read. It opens INBOX, and so does
 CHAT in the menu's WALLET: everyone this phone has written to, heard from, paid
@@ -612,17 +615,30 @@ its time, and its unread count; a row opens that contact's screen. A payment is
 listed under a contact when this phone paid their ID (its outbox row, kept a
 week after it is collected or comes back) or when the payer proved who they are
 (`cidPeer` on the history row); a payer who did not is no one's. With nothing
-yet: "No conversations yet. Share MY CASHU ID to be paid or messaged." With no
-ID in use, the line the contact's screen has. CONTACTS stays the full list.
+yet: a graphic (the CHAT icon, large, in the accent), "Ask another Foxy user for
+their Cashu ID to start chatting." and ADD A CASHU ID, a card with a field to
+paste the ID into (PASTE A CASHU ID, NEXT reads it as a pasted one is), and SCAN
+A CASHU ID under it (the camera, then the same). Neither is offered where the
+wallet cannot read an ID, and SCAN is not where it cannot scan. With no
+ID in use, the line the contact's screen has. A CONTACTS button sits at the
+bottom of INBOX, in every state; it opens CONTACTS with INBOX under it, so back
+returns to INBOX, and a contact there opens that contact's screen. An empty
+CONTACTS says "Ask another Foxy user to share their Cashu ID with you to add
+them as a contact." with the same two buttons. CONTACTS stays the full list.
 
 The menu, in this order, every section open until it is tapped shut:
 
     BACKUP ACCOUNT    only while the wallet holds a balance and the words are not verified
-    WALLET            FOXY CARD · MY CASHU ID · HISTORY · CHAT · CONTACTS · HIDE BALANCE · YOUR CHANGE
-    MINTS             SWITCH/ADD MINTS · TRANSFER MONEY (money at two mints or more) · SWAP and WHAT YOU HOLD
+    WALLET            MY CASHU ID · HISTORY · CHAT · CONTACTS · HIDE BALANCE
+    MINTS             SWITCH/ADD MINTS · TRANSFER MONEY (money at two mints or more) · SWAP and CURRENCIES
                       (a mint with two balances) · OTHER MINTS (an answer remembered)
     TOOLS             POINT OF SALE · SPLIT A BILL
-    SETTINGS          AUTO TAP TO PAY · SET PIN · FACE ID LOCK · OFFLINE LIMITS (PER PERSON · TOTAL) · BACKUP · RESTORE · RESTORE LOST CARD · TEST LOGS
+    SETTINGS          SET PIN · FACE ID LOCK · BACKUP · RESTORE · RESTORE LOST CARD · TEST LOGS
+    OFFLINE LIMITS    PER PERSON · TOTAL (while the wallet has limits to show)
+
+A screen opened from the menu goes back to the menu when it is left; a flow
+that ends somewhere else (PAID, SENT, SWAPPED, a token shown, a mint switched
+to, an open till) ends at home with the menu shut.
 
 ### Kept
 
@@ -680,9 +696,9 @@ note still goes in its own envelope (above), not as a message.
   is on, in the balance the keypad is in.
 - Rotating the ID, and more than one ID.
 - A Cashu ID as a NUT-18 request: NUT-18 cannot yet ask a payer to blind the
-  key (above). A proposal to add that marker is drafted, not sent. ANY WALLET
-  is a one-time request instead.
-- ANY WALLET with an amount, or across mints this phone does not use; and a
+  key (above). A proposal to add that marker is drafted, not sent. The
+  one-time request (no screen shows it) was the stand-in.
+- The one-time request with an amount, or across mints this phone does not use; and a
   payment to the ID key itself at a mint this phone does not use (refused).
 - Messages: a payment's note sent as a message; read receipts; messages to more
   than one person at once; anything but text; notification of a message while

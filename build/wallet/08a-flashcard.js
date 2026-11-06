@@ -2114,6 +2114,7 @@
       /* Whether this phone is the owner, and a limit it lifted and did not put back */
       return cardGrant(t, card.key).then(function (yes) {
         card.mine = yes;
+        if (yes && load(CARD_TIED, 0) !== 1) save(CARD_TIED, 1);
         /* The quicker card says its limit on one payment to its owner only,
          * with the grant just given: asked again, now that it knows this
          * phone is that. To anybody else it says none (`cardTapOf`, `hidden`). */
@@ -2394,6 +2395,8 @@
    * the card might hold money, which is for ever. It is not in the lock-key
    * rows, which are capped and swept (07-request-delivery.js). */
   var CARDS = 'foxy.flashcard.cards';
+  // set once a card has answered that it belongs to this phone (`cardsTied`); it is only ever set
+  var CARD_TIED = 'foxy.flashcard.tied';
 
   /* A card top-up's token whose every piece is in its card's file (`cardRemember`), by the nonce in the piece's secret under the
    * card's key there: it has been on the card, which holds it, and the take-back reads the file, so the note's copy of the token
