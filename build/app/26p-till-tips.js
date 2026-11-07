@@ -516,10 +516,15 @@
         tap: () => (which === 'other' ? (on ? this.tillTipPick(0, 'other') : this.tillTipOther()) : this.tillTipPick(cents, which)),
       };
     };
+    /* Folded first: one outlined ADD A TIP in the row's place, which opens the row; a tip chosen keeps it open, and the next
+     * sale starts folded again (`tillTipSync`). */
+    const open = shown && (!!s.tillTipOpen || !!t);
     return {
-      tipRowShown: shown,
-      tipChips: shown ? this.TILL_TIP_PICKS.map((c) => chip('$' + c / 100, c, c)).concat([chip('OTHER', 'other', 0)]) : [],
-      tipLine: shown && t ? 'Includes a $' + (t.cents / 100).toFixed(2) + ' tip' : shown ? 'TIP' : '',
+      tipRowShown: open,
+      tipAddShown: shown && !open,
+      tipAdd: () => this.setState({ tillTipOpen: true }),
+      tipChips: open ? this.TILL_TIP_PICKS.map((c) => chip('$' + c / 100, c, c)).concat([chip('OTHER', 'other', 0)]) : [],
+      tipLine: open && t ? 'Includes a $' + (t.cents / 100).toFixed(2) + ' tip' : open ? 'TIP' : '',
     };
   }
 
@@ -530,6 +535,8 @@
     const s = this.state || {};
     const p = prev || {};
     if (!s.till) { this._tillTipDue = null; return; }
+    // the tip buttons fold again for the next sale: at the till's SET AMOUNT, or PAID
+    if (s.tillTipOpen && ((s.screen === 'amount' && s.flow === 'receive') || s.screen === 'paid')) this.setState({ tillTipOpen: false });
     if (s.screen === 'confirm') {
       const t = this.tillTipNow();
       this._tillTipDue = t ? { t: Object.assign({}, t), at: Date.now() } : null;

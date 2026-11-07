@@ -146,6 +146,12 @@ NAME label, the card's PIN pad, CARD LIMITS, RESTORE CARD, MAX PER SECOND, and t
 drew the title under the buttons); WELCOME TO YOUR FOXY CARD; and the welcome's card on its turntable,
 turning by itself, turned by a finger, and only by hand where less motion is asked for.
 
+**`card-spin.js`** holds the card's own screen on the welcome's turntable (one `fcSpinOn` for both): its
+picture in a stage with both faces at its old size and place, turning by itself, turned by a finger,
+only by hand where less motion is asked for; the loop stopped under the menu, a stage, a tap or with
+Foxy put away and going on from where it stood when that is gone; stopped for good, every listener
+off, when the screen is left; and the swipe home never starting on the card.
+
 **`flashcard-mend.js`** holds the change a till bound to a key that is not the mint's (card
 software 1.22), against the model taught LOAD_CHANGE and RESET_CARD's let-go: LOAD_CHANGE under the
 bound key from anyone, another key refused 6A80 with no PIN, 6982 with no grant or hold, 6985 in a

@@ -17410,20 +17410,35 @@ class Component extends DCLogic {
     const usdSats = usdPx > 0 ? Math.round(usdCents / 100 / usdPx * 1e8) : 0;
     // a till that takes both has no WALLET chip: it receives in its main, and a tap is offered either (26m-till.js, `tillMain`)
     const tillBoth = !!(this.tillBoth && this.tillBoth());
+    /* Not at a cashier's till: a card's pieces are swapped into the phone that reads them, and a cashier's phone holds
+     * nothing of the keeper's (26m-till.js). */
+    const cardOk = !(this.tillRole && this.tillRole() === 'cashier') && (!usdIn || (!!s.invoice && !s.invoiceIsAddress) || !this.offlineNow()
+      || !!(window.FoxyWallet && window.FoxyWallet.cardOffline && window.FoxyWallet.cardOffline()));
+    /* In the till the screen is for the payer in front of it: no NOTE, COPY, SCAN or CARD under the code, and the big button
+     * is PAY WITH FOXY CARD, which does what CARD does, greyed and doing nothing where CARD would not be there. */
+    const tillRecv = !!s.till;
+    const shareQr = () => {
+      if (tillRecv || !recvReady()) return;
+      const inv = onchain ? ocCode() : cashu ? creq() : s.invoice;
+      if (!inv) { this.toast('Nothing to share yet.', true); return; }
+      if (!window.FoxyWallet.share(inv)) this.toast('Sharing is only available in the app.', true);
+    };
     return Object.assign({
       isConfirm: sc === 'confirm',
       recvHeadOne: !two,
       recvHeadTwo: two,
       recvChipsOne: !two || tillBoth,
       recvChipsTwo: two && !tillBoth,
-      recvWalletWord: two ? this.walletLabel(this.walletNow('receive') || 'sat') : '',
+      // the chip says the money in full, DOLLARS or BITCOIN, with no WALLET label over it
+      recvWalletWord: two ? (this.walletNow('receive') === 'usd' ? 'DOLLARS' : 'BITCOIN') : '',
       // offline too: only the request changes, and that needs no mint
       pickRecvWallet: () => this.pickRecvWallet(),
       recvTapShown: true,
-      /* Not at a cashier's till: a card's pieces are swapped into the phone that reads them, and a cashier's phone holds
-       * nothing of the keeper's (26m-till.js). */
-      recvCardShown: !(this.tillRole && this.tillRole() === 'cashier') && (!usdIn || (!!s.invoice && !s.invoiceIsAddress) || !this.offlineNow()
-        || !!(window.FoxyWallet && window.FoxyWallet.cardOffline && window.FoxyWallet.cardOffline())),
+      recvCardShown: cardOk,
+      recvRoundShown: !tillRecv,
+      recvRoundGone: tillRecv,
+      recvBigLabel: tillRecv ? 'PAY WITH FOXY CARD' : 'SHARE',
+      recvBigTap: () => (tillRecv ? (cardOk ? this.payByCard() : undefined) : shareQr()),
       /* The code's life is not shown: the mint sets it (a dollar code at Forge lives a minute) and the screen asks for
        * a new one in place when it lapses (12-receive.js `recvRequote`), so there is nothing for the person to do about
        * it. `recvClock` stays for the tests and the log. */
@@ -17433,6 +17448,7 @@ class Component extends DCLogic {
        * something real behind its QR — the invoice, the request, the address —
        * there is nothing to copy or share, and they are greyed and do nothing. */
       recvReadyDim: recvReady() ? '1' : '0.35',
+      recvBigDim: tillRecv ? (cardOk ? '1' : '0.35') : (recvReady() ? '1' : '0.35'),
       invoiceCopy: () => {
         if (!recvReady()) return;
         const wire = s.recvVia === 'wire' || s.network === 'BANK WIRE';
@@ -17522,12 +17538,7 @@ class Component extends DCLogic {
       // the pill goes grey with it, so it does not look tappable
       networkPillDim: this.offlineNow() ? '0.45' : '1',
       openNote: () => this.editSendNote(),
-      shareQr: () => {
-        if (!recvReady()) return;
-        const inv = onchain ? ocCode() : cashu ? creq() : s.invoice;
-        if (!inv) { this.toast('Nothing to share yet.', true); return; }
-        if (!window.FoxyWallet.share(inv)) this.toast('Sharing is only available in the app.', true);
-      },
+      shareQr,
       closeToHome: () => this.closeReceive(),
       // tap to pay: a payer's phone connected, and this is the code it shows
       tapCodeShown: sc === 'confirm' && !!s.tapShownCode && !s.tapCardOff,
@@ -17578,7 +17589,7 @@ class Component extends DCLogic {
       cardPay: () => this.payByCard(),
       scanToReceive: () => this.scanTokenToReceive(),
     // and in the till, its tip buttons under the amount where it offers tips (26p-till-tips.js, `tillTipVals`)
-    }, this.tillTipVals ? this.tillTipVals(sc) : { tipRowShown: false, tipChips: [], tipLine: '' });
+    }, this.tillTipVals ? this.tillTipVals(sc) : { tipRowShown: false, tipAddShown: false, tipAdd: () => {}, tipChips: [], tipLine: '' });
   }
 
   /* paid: the confirmation after money moves. A Lightning send ends here. */
@@ -25529,7 +25540,8 @@ class Component extends DCLogic {
     if (!W) return Promise.reject(new Error('The wallet is not ready.'));
     // a tap is in progress from here until it settles, whatever is on the screen meanwhile (`cardFlowBusy`)
     this._fcTaps = (this._fcTaps || 0) + 1;
-    const free = () => { this._fcTaps = Math.max(0, (this._fcTaps || 1) - 1); };
+    // (the card's picture, which does not turn under a tap, goes on turning once the tap is over and nothing else is up: 26j-card-wheel.js)
+    const free = () => { this._fcTaps = Math.max(0, (this._fcTaps || 1) - 1); if (this.fcSpinOn) this.fcSpinOn(); };
     /* The tap that follows the PIN pad (the last sheet ended asking for it) asks for the card again (1a), on the screen
      * the last tap left up (26h-tap-screen.js). */
     const was = document.getElementById('foxy-stage');
@@ -31769,7 +31781,8 @@ class Component extends DCLogic {
   }
 
   /* whether a touch that starts on `target` may be this swipe: not in a field, not in anything that scrolls sideways, and not on the
-   * welcome's turning card, which a finger turns (26j-card-wheel.js, `fcSpinOn`): a quick turn to the right is not HOME */
+   * turning card, the welcome's or the card screen's own, which a finger turns (26j-card-wheel.js, `fcSpinOn`): a quick turn to the
+   * right is not HOME */
   fcSwipeFrom(target) {
     for (let n = /** @type {any} */ (target); n && n !== document.body && n.nodeType === 1; n = n.parentNode) {
       const tag = String(n.tagName || '');
@@ -32536,6 +32549,10 @@ class Component extends DCLogic {
       fcCardCap: check[0] ? '26px' : '0px',
       // which design the card on screen is drawn in (FC_DESIGNS)
       fcDesign: this.fcDesignOf(fc),
+      /* The picture stands on the welcome's turntable (26j-card-wheel.js, `fcSpinOn`, started by `renderCardScreens`): it turns by itself,
+       * a finger turns it, and its back shows when it faces away. Not while the welcome is drawn over it, which has its own. */
+      fcSpin: on && !(this.fcWelcomeCard && this.fcWelcomeCard(s)) ? '1' : '',
+      fcPersp: on ? '1100px' : 'none',
       // a card that has been read says what it is on its own face
       fcSub: fc ? '' : 'Ecash on a card, spent with a tap and a PIN.',
       fcNone: on && !fc,
@@ -35022,22 +35039,67 @@ class Component extends DCLogic {
     this.fcGoHome();
   }
 
-  /* ---- the welcome's card, turning -----------------------------------------------------------------------------------------
+  /* ---- the card's picture, turning ----------------------------------------------------------------------------------------
    *
-   * On WELCOME TO YOUR FOXY CARD the card's picture stands on a turntable (build/markup.html, `data-card-stage="1"`): it turns slowly
-   * about its upright axis by itself, a dark back with the Foxy mark coming round behind it, and a finger dragged across it turns it
-   * by hand, as the card's page on the site does (half a degree a point dragged, and the turn let go of carries on and slows). While
-   * it is held, and for a moment after, it does not turn by itself. Where the phone asks for less motion it never turns by itself,
-   * and a finger still turns it, with nothing carried on. One loop, started when the welcome is drawn and stopped once it has not
-   * been on screen for a second; the touches are heard on the document, since the screen's markup binds clicks only. */
+   * On WELCOME TO YOUR FOXY CARD and on the card's own screen (26f-flashcard.js, `renderFlashcard`) the card's picture stands on a
+   * turntable (build/markup.html, `data-card-stage="1"`): it turns slowly about its upright axis by itself, a dark back with the Foxy
+   * mark coming round behind it, and a finger dragged across it turns it by hand, as the card's page on the site does (half a degree
+   * a point dragged, and the turn let go of carries on and slows). While it is held, and for a moment after, it does not turn by
+   * itself. Where the phone asks for less motion it never turns by itself, and a finger still turns it, with nothing carried on.
+   * One turntable for both screens, and one stage drawn at a time (the welcome over a new card's screen has it, the screen under it
+   * not). One loop, started when either screen is drawn (`fcSpinSync`), and only while the card is free to be seen (`fcSpinLive`):
+   * the menu, a sheet, a stage or a pad over it, a tap under way or Foxy put away stops it, its touches let go, and it waits
+   * without a loop (`fcSpinPark`: what is put on the page or taken off it, and Foxy coming back) to go on from where it stood.
+   * Leaving the screen stops it and the wait for good, as does the picture gone from the page for a second. The touches are heard
+   * on the document, since the screens' markup binds clicks only. */
   FC_SPIN = { auto: 24, perPx: 0.57, keep: 0.94, rest: 1600, gone: 60 };
+
+  // whether the turning card is on screen with nothing over it: the welcome or the card's screen, no menu, no lock, no sheet or stage
+  fcSpinLive() {
+    const s = this.state || {};
+    if (s.screen !== 'fcWelcome' && s.screen !== 'flashcard') return false;
+    if (s.open0 || this._pinLocked || (this._fcTaps || 0) > 0) return false;
+    if (typeof document !== 'undefined' && document.hidden) return false;
+    return !(this.cardTapOver && this.cardTapOver()) && !(this.cardFlowBusy && this.cardFlowBusy());
+  }
+
+  // on every render: the turntable runs where its screen is drawn (`drawn`), and stops for good, the angle forgotten, where not
+  fcSpinSync(drawn) {
+    if (drawn) { this.fcSpinOn(); return; }
+    if (this._fcSpin && this._fcSpin.stop) this._fcSpin.stop();
+    this.fcSpinUnpark();
+    this._fcSpinA = 0;
+  }
+
+  /* Waiting while something is over the card: no loop, only what wakes it, the page's own top-level elements coming and going
+   * (every sheet, stage and pad is one) and Foxy coming back to the front; the menu closing and a tap ending draw the screen again. */
+  fcSpinPark() {
+    if (this._fcSpinWake || typeof document === 'undefined' || typeof window === 'undefined') return;
+    const doc = /** @type {any} */ (document);
+    const win = /** @type {any} */ (window);
+    const wake = () => this.fcSpinOn();
+    const mo = win.MutationObserver && doc.body ? new win.MutationObserver(wake) : null;
+    if (mo) mo.observe(doc.body, { childList: true });
+    doc.addEventListener('visibilitychange', wake);
+    this._fcSpinWake = () => { if (mo) mo.disconnect(); doc.removeEventListener('visibilitychange', wake); this._fcSpinWake = null; };
+  }
+
+  fcSpinUnpark() {
+    if (this._fcSpinWake) this._fcSpinWake();
+  }
+
   fcSpinOn() {
     // (a static preview, a review page, shows the card still, as such pages run no loops)
     if (this._fcSpin || typeof document === 'undefined' || typeof window === 'undefined' || (this.props && this.props.startStatic)) return;
+    const s0 = this.state || {};
+    if (s0.screen !== 'fcWelcome' && s0.screen !== 'flashcard') { this.fcSpinUnpark(); return; }
+    if (!this.fcSpinLive()) { this.fcSpinPark(); return; }
+    this.fcSpinUnpark();
     const doc = /** @type {any} */ (document);
     const win = /** @type {any} */ (window);
     const K = this.FC_SPIN;
-    const sp = /** @type {any} */ ({ a: 0, vel: 0, drag: null, held: 0, last: Date.now(), miss: 0, stop: null });
+    // (it goes on from where it stood when something came over it)
+    const sp = /** @type {any} */ ({ a: Number(this._fcSpinA) || 0, vel: 0, drag: null, held: 0, last: Date.now(), miss: 0, stop: null });
     this._fcSpin = sp;
     const still = () => { try { return !!(win.matchMedia && win.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; } };
     const spinEl = () => doc.querySelector('[data-card-stage="1"] [data-card-spin]');
@@ -35057,6 +35119,7 @@ class Component extends DCLogic {
       sp.a += d;
       sp.vel = d;
       sp.held = Date.now();
+      this._fcSpinA = sp.a;
       paint();
       if (e.cancelable && String(e.type) === 'touchmove') e.preventDefault();
     };
@@ -35072,10 +35135,12 @@ class Component extends DCLogic {
     sp.stop = stop;
     const tick = () => {
       if (this._fcSpin !== sp) return;
+      // (something came over the card, or Foxy was put away: the loop ends here, and the card waits where it stood)
+      if (!this.fcSpinLive()) { stop(); this.fcSpinOn(); return; }
       const now = Date.now();
       const dt = Math.min(0.05, Math.max(0, (now - sp.last) / 1000));
       sp.last = now;
-      if (!spinEl()) { sp.miss += 1; if (sp.miss > K.gone) { stop(); return; } next(tick); return; }
+      if (!spinEl()) { sp.miss += 1; if (sp.miss > K.gone) { stop(); this.fcSpinUnpark(); return; } next(tick); return; }
       sp.miss = 0;
       const was = sp.a;
       if (!sp.drag) {
@@ -35083,10 +35148,13 @@ class Component extends DCLogic {
         else { sp.vel = 0; if (!still() && now - sp.held > K.rest) sp.a += K.auto * dt; }
       }
       sp.a %= 360;
+      this._fcSpinA = sp.a;
       // (painted only when it has turned: under Reduce Motion a card at rest is not drawn again every frame)
       if (sp.a !== was) paint();
       next(tick);
     };
+    // (a card that went on from where it stood is drawn there at once)
+    if (sp.a) paint();
     next(tick);
   }
 
@@ -35106,8 +35174,8 @@ class Component extends DCLogic {
       : (fc && fc.pin === 'set' && !fc.hasRecord) ? 'Its set-up was cut short. Finish it to put money on it.' : '';
     const fs = sc === 'fcSpeed' ? (s.fcSpeed || null) : null;
     const r = fs ? Number(fs.r) || 0 : 0;
-    // (the welcome's card turns, by itself and by hand: `fcSpinOn`)
-    if (welcome) this.fcSpinOn();
+    // (the card turns, by itself and by hand, on the welcome and on the card's own screen: `fcSpinSync`)
+    this.fcSpinSync(sendWelcome || sc === 'flashcard');
     return {
       isFcPanel: welcome || limits,
       fpWelcome: welcome,
@@ -36311,7 +36379,7 @@ class Component extends DCLogic {
       asset: '', network: '', note: '', noteDraft: '', recipient: '', recipientKind: '',
       wallet: this.tillMain(t), walletAuto: false, walletTapped: false,
       // and no tip: each sale starts without one (26p-till-tips.js)
-      tillTip: null,
+      tillTip: null, tillTipOpen: false,
     };
   }
 
@@ -38392,10 +38460,15 @@ class Component extends DCLogic {
         tap: () => (which === 'other' ? (on ? this.tillTipPick(0, 'other') : this.tillTipOther()) : this.tillTipPick(cents, which)),
       };
     };
+    /* Folded first: one outlined ADD A TIP in the row's place, which opens the row; a tip chosen keeps it open, and the next
+     * sale starts folded again (`tillTipSync`). */
+    const open = shown && (!!s.tillTipOpen || !!t);
     return {
-      tipRowShown: shown,
-      tipChips: shown ? this.TILL_TIP_PICKS.map((c) => chip('$' + c / 100, c, c)).concat([chip('OTHER', 'other', 0)]) : [],
-      tipLine: shown && t ? 'Includes a $' + (t.cents / 100).toFixed(2) + ' tip' : shown ? 'TIP' : '',
+      tipRowShown: open,
+      tipAddShown: shown && !open,
+      tipAdd: () => this.setState({ tillTipOpen: true }),
+      tipChips: open ? this.TILL_TIP_PICKS.map((c) => chip('$' + c / 100, c, c)).concat([chip('OTHER', 'other', 0)]) : [],
+      tipLine: open && t ? 'Includes a $' + (t.cents / 100).toFixed(2) + ' tip' : open ? 'TIP' : '',
     };
   }
 
@@ -38406,6 +38479,8 @@ class Component extends DCLogic {
     const s = this.state || {};
     const p = prev || {};
     if (!s.till) { this._tillTipDue = null; return; }
+    // the tip buttons fold again for the next sale: at the till's SET AMOUNT, or PAID
+    if (s.tillTipOpen && ((s.screen === 'amount' && s.flow === 'receive') || s.screen === 'paid')) this.setState({ tillTipOpen: false });
     if (s.screen === 'confirm') {
       const t = this.tillTipNow();
       this._tillTipDue = t ? { t: Object.assign({}, t), at: Date.now() } : null;

@@ -44,20 +44,35 @@
     const usdSats = usdPx > 0 ? Math.round(usdCents / 100 / usdPx * 1e8) : 0;
     // a till that takes both has no WALLET chip: it receives in its main, and a tap is offered either (26m-till.js, `tillMain`)
     const tillBoth = !!(this.tillBoth && this.tillBoth());
+    /* Not at a cashier's till: a card's pieces are swapped into the phone that reads them, and a cashier's phone holds
+     * nothing of the keeper's (26m-till.js). */
+    const cardOk = !(this.tillRole && this.tillRole() === 'cashier') && (!usdIn || (!!s.invoice && !s.invoiceIsAddress) || !this.offlineNow()
+      || !!(window.FoxyWallet && window.FoxyWallet.cardOffline && window.FoxyWallet.cardOffline()));
+    /* In the till the screen is for the payer in front of it: no NOTE, COPY, SCAN or CARD under the code, and the big button
+     * is PAY WITH FOXY CARD, which does what CARD does, greyed and doing nothing where CARD would not be there. */
+    const tillRecv = !!s.till;
+    const shareQr = () => {
+      if (tillRecv || !recvReady()) return;
+      const inv = onchain ? ocCode() : cashu ? creq() : s.invoice;
+      if (!inv) { this.toast('Nothing to share yet.', true); return; }
+      if (!window.FoxyWallet.share(inv)) this.toast('Sharing is only available in the app.', true);
+    };
     return Object.assign({
       isConfirm: sc === 'confirm',
       recvHeadOne: !two,
       recvHeadTwo: two,
       recvChipsOne: !two || tillBoth,
       recvChipsTwo: two && !tillBoth,
-      recvWalletWord: two ? this.walletLabel(this.walletNow('receive') || 'sat') : '',
+      // the chip says the money in full, DOLLARS or BITCOIN, with no WALLET label over it
+      recvWalletWord: two ? (this.walletNow('receive') === 'usd' ? 'DOLLARS' : 'BITCOIN') : '',
       // offline too: only the request changes, and that needs no mint
       pickRecvWallet: () => this.pickRecvWallet(),
       recvTapShown: true,
-      /* Not at a cashier's till: a card's pieces are swapped into the phone that reads them, and a cashier's phone holds
-       * nothing of the keeper's (26m-till.js). */
-      recvCardShown: !(this.tillRole && this.tillRole() === 'cashier') && (!usdIn || (!!s.invoice && !s.invoiceIsAddress) || !this.offlineNow()
-        || !!(window.FoxyWallet && window.FoxyWallet.cardOffline && window.FoxyWallet.cardOffline())),
+      recvCardShown: cardOk,
+      recvRoundShown: !tillRecv,
+      recvRoundGone: tillRecv,
+      recvBigLabel: tillRecv ? 'PAY WITH FOXY CARD' : 'SHARE',
+      recvBigTap: () => (tillRecv ? (cardOk ? this.payByCard() : undefined) : shareQr()),
       /* The code's life is not shown: the mint sets it (a dollar code at Forge lives a minute) and the screen asks for
        * a new one in place when it lapses (12-receive.js `recvRequote`), so there is nothing for the person to do about
        * it. `recvClock` stays for the tests and the log. */
@@ -67,6 +82,7 @@
        * something real behind its QR — the invoice, the request, the address —
        * there is nothing to copy or share, and they are greyed and do nothing. */
       recvReadyDim: recvReady() ? '1' : '0.35',
+      recvBigDim: tillRecv ? (cardOk ? '1' : '0.35') : (recvReady() ? '1' : '0.35'),
       invoiceCopy: () => {
         if (!recvReady()) return;
         const wire = s.recvVia === 'wire' || s.network === 'BANK WIRE';
@@ -156,12 +172,7 @@
       // the pill goes grey with it, so it does not look tappable
       networkPillDim: this.offlineNow() ? '0.45' : '1',
       openNote: () => this.editSendNote(),
-      shareQr: () => {
-        if (!recvReady()) return;
-        const inv = onchain ? ocCode() : cashu ? creq() : s.invoice;
-        if (!inv) { this.toast('Nothing to share yet.', true); return; }
-        if (!window.FoxyWallet.share(inv)) this.toast('Sharing is only available in the app.', true);
-      },
+      shareQr,
       closeToHome: () => this.closeReceive(),
       // tap to pay: a payer's phone connected, and this is the code it shows
       tapCodeShown: sc === 'confirm' && !!s.tapShownCode && !s.tapCardOff,
@@ -212,7 +223,7 @@
       cardPay: () => this.payByCard(),
       scanToReceive: () => this.scanTokenToReceive(),
     // and in the till, its tip buttons under the amount where it offers tips (26p-till-tips.js, `tillTipVals`)
-    }, this.tillTipVals ? this.tillTipVals(sc) : { tipRowShown: false, tipChips: [], tipLine: '' });
+    }, this.tillTipVals ? this.tillTipVals(sc) : { tipRowShown: false, tipAddShown: false, tipAdd: () => {}, tipChips: [], tipLine: '' });
   }
 
   /* paid: the confirmation after money moves. A Lightning send ends here. */

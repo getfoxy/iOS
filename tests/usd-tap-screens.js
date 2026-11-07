@@ -377,7 +377,7 @@ function wire(Rw, Pw, R) {
     eq([R.A.state.screen, R.A.state.recvRail, R.A.state.recvUnit, Rw.rec.invoices.length], ['confirm', 'CASHU', 'usd', 0],
       'offline, RECEIVE in dollars opens on CASHU, and asks the mint for nothing');
     eq([v.confirmAmount, v.confirmNetwork, v.recvWalletWord, v.recvClockShown, v.recvTapShown, v.recvCardShown],
-      ['$ 5.00', 'CASHU', 'USD', false, true, false], 'the screen: $ 5.00, NETWORK CASHU, WALLET USD, no clock, TAP, no CARD');
+      ['$ 5.00', 'CASHU', 'DOLLARS', false, true, false], 'the screen: $ 5.00, CASHU, DOLLARS, no clock, TAP, no CARD');
     const made = Rw.rec.creqs.filter((c) => c.opts && c.opts.unit === 'usd');
     ok(made.length >= 1 && made.every((c) => c.amount === 500), 'its request is in dollars, for 500 cents', JSON.stringify(Rw.rec.creqs));
     ok(!Rw.rec.creqs.some((c) => c.opts && Number(c.opts.usd) > 0), 'and never the old sat request priced in dollars');

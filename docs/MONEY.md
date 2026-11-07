@@ -2127,8 +2127,10 @@ when the till closes) as
 `id` and `nostr` are the ID's two keys as its contact keeps them, so a contact
 removed later is still paid.
 
-**One payment.** Where the till offers tips, its receive screen shows $1, $2,
-$5 and OTHER under the amount. The request and invoice are live at the amount
+**One payment.** Where the till offers tips, its receive screen shows one
+outlined ADD A TIP under the amount; tapped, it gives way to $1, $2, $5 and
+OTHER (`tillTipOpen`). A tip chosen keeps them open, and the next sale (the
+till's SET AMOUNT, or PAID) starts folded again. The request and invoice are live at the amount
 typed; a tip makes them again for the total, the same tip again takes it off,
 and OTHER asks the tip on SET AMOUNT. The payer pays one payment, the total.
 The screen remembers what part of it is tip as a fraction in the keypad's own

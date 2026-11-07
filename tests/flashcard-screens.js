@@ -131,6 +131,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   v = vals(holder);
   ok(v.fcHas && v.fcNew && !v.fcUsable && v.fcCheck === 'No PIN yet' && v.fcBalance === '₿ 0' && v.fcSub === '' && !stage(H),
      'a card out of its packet reads as new, with one thing to do', v.fcCheck);
+  ok(holder.fcWelcomeCard(holder.state) && v.fcSpin === '',
+     'a new card is met by the welcome over its screen, whose own card turns: the screen’s picture under it is not a second turntable', JSON.stringify(v.fcSpin));
   ok(H.sheet.join(' / ').indexOf('begin: Tap behind the phone.') >= 0 && H.sheet.indexOf('say: Reading the card') >= 0 && H.sheet.indexOf('end: Done.') >= 0,
      'and the phone’s own sheet was told what was happening', H.sheet.slice(-3).join(' / '));
 
@@ -177,6 +179,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(v.fcButtons === undefined && !v.fcMenuItems.some((k) => k.label === 'SWAP'),
      'no SWAP on a card of one currency, and no row at all: the room is the card’s picture’s', menuOf(v));
   ok(v.fcFaceLines === false && v.fcCardCap === '0px', 'and nothing is drawn under the card: no badge, and its limit is in its HISTORY');
+  ok(!holder.fcWelcomeCard(holder.state) && v.fcSpin === '1' && v.fcPersp === '1100px',
+     'the card’s picture on its own screen stands on the welcome’s turntable (26j-card-wheel.js, `fcSpinOn`)', JSON.stringify([v.fcSpin, v.fcPersp]));
   ok(v.fcDesign === 'FX1' && holder.fcDesignOf({ design: 'zz9' }) === 'FL1' && holder.fcDesignOf({ design: 'EL1' }) === 'EL1' && holder.fcDesignOf({}) === 'FL1' && holder.fcDesignOf({ design: 'fl1' }) === 'FL1'
      && Object.keys(holder.FC_DESIGNS).every((k) => /^[A-Z0-9]{3}$/.test(k)),
      'a card this phone set up is drawn in Foxy’s design FX1; one that names no design, or one this build cannot draw, is drawn in FL1; every design has a code of three characters', v.fcDesign);
@@ -2842,7 +2846,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const at = markup.indexOf('<div data-card-portrait data-card-design="{{ fcDesign }}"');
     const lines = markup.indexOf('<div data-card-lines', at);
     const face = markup.indexOf('<div data-card-face', at);
-    ok(face > at && lines > face && markup.indexOf('</div></div></div><sc-if value="{{ fcFaceLines }}"><div data-card-lines', at) > 0
+    // (after the card's turntable closes: its picture, its back drawn where it turns, 26j-card-wheel.js `fcSpinOn`)
+    ok(face > at && lines > face && markup.indexOf('</div></div></sc-if></div></div><sc-if value="{{ fcFaceLines }}"><div data-card-lines', at) > 0
        && markup.indexOf('{{ fcLimitLine }}') < 0 && markup.indexOf('data-card-limit') < 0,
        'the badge line is under the card, and there is no limit line: the limit is in the card’s HISTORY');
     const badge = /<div data-card-badge style="([^"]*)">\{\{ fcCheck \}\}/.exec(markup);

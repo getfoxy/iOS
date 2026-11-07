@@ -94,7 +94,7 @@
       asset: '', network: '', note: '', noteDraft: '', recipient: '', recipientKind: '',
       wallet: this.tillMain(t), walletAuto: false, walletTapped: false,
       // and no tip: each sale starts without one (26p-till-tips.js)
-      tillTip: null,
+      tillTip: null, tillTipOpen: false,
     };
   }
 

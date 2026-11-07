@@ -767,7 +767,7 @@ On Minibits, with test tokens from another mint (WesternBTC or testnut).
 
 Two wallets on Minibits (Foxy and another Foxy, cashu.me or Minibits).
 
-1. RECEIVE 21 sats. Tap NETWORK (it has a chevron): LIGHTNING and CASHU. Pick
+1. RECEIVE 21 sats. Tap the network chip (LIGHTNING, with a chevron): LIGHTNING and CASHU. Pick
    CASHU. **Pass:** the QR changes; COPY copies a `creqA…` request.
 2. The other wallet scans it and shows a token for 21 sats. On the receive
    screen tap SCAN and scan it. **Pass:** the animation, then the payment
@@ -2354,6 +2354,22 @@ claimed on it (a fresh install); step 2 a phone that has.*
 4. **Not that press.** On home swipe left to the card and cancel the sheet; and
    start a payment by card and cancel its sheet. **Pass:** neither shows the
    learn screen.
+
+
+#### 22p. The till's receive screen
+
+*A keeper's till with tips on (POINT OF SALE, ACCEPT TIPS? YES, MYSELF), at a mint with a card.*
+
+1. Type $1.00, NEXT. **Pass:** RECEIVE INVOICE shows the amount, one outlined ADD A TIP, the network chip (LIGHTNING with
+   its chevron, no NETWORK label over it), the QR with the tap emblem, and the big button PAY WITH FOXY CARD. No NOTE, COPY,
+   SCAN or CARD round buttons, no SHARE.
+2. Tap ADD A TIP. **Pass:** $1, $2, $5 and OTHER in its place. Tap $2. **Pass:** $3.00, `Includes a $2.00 tip`, the row
+   stays open.
+3. Tap PAY WITH FOXY CARD and pay with the card. **Pass:** the card pays the $3.00 as CARD did; PAID.
+4. Back on SET AMOUNT, type another amount, NEXT. **Pass:** ADD A TIP is folded again.
+5. On a cashier's till (a CASHIER CODE scanned on a second phone): **Pass:** PAY WITH FOXY CARD is greyed and does nothing.
+6. Off the till, RECEIVE on a mint with two balances. **Pass:** NOTE, COPY, SCAN, CARD and SHARE as ever; the two chips read
+   DOLLARS (or BITCOIN) and LIGHTNING with their chevrons, no WALLET or NETWORK label, the same height, words centred.
 
 ## Getting a log off somebody else's phone
 

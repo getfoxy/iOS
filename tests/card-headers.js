@@ -164,7 +164,7 @@ for (const [cond, title, sub] of SCREENS) {
 
   // the values: a turntable on the welcome only
   const wheel = part('26j-card-wheel.js');
-  const sigs = ['renderCardScreens(c) {', 'fcWelcomeCard(s) {', 'fcSpinOn() {'];
+  const sigs = ['renderCardScreens(c) {', 'fcWelcomeCard(s) {', 'fcSpinOn() {', 'fcSpinLive() {', 'fcSpinSync(drawn) {', 'fcSpinPark() {', 'fcSpinUnpark() {'];
   const src = sigs.map((sig) => lift(wheel, sig)).filter(Boolean).join(',\n');
   const dom = new JSDOM('<body></body>', { pretendToBeVisual: true });
   global.window = dom.window;
@@ -201,6 +201,8 @@ for (const [cond, title, sub] of SCREENS) {
       ok(false, 'where less motion is asked for it never turns by itself, and a finger still turns it');
     } else {
       app.FC_SPIN.rest = 0;
+      // (the welcome is the screen: the turntable runs only while its screen is up, 26j-card-wheel.js `fcSpinLive`)
+      app.state = { screen: 'fcWelcome' };
       app.fcSpinOn();
       await wait(80);
       const a0 = angle();
@@ -217,7 +219,8 @@ for (const [cond, title, sub] of SCREENS) {
       await wait(80);
       ok(Math.abs(angle() - a2) < 1e-9, 'and while it is held it does not turn by itself', JSON.stringify([a2, angle()]));
       fire(document, 'pointerup', 200);
-      app._fcSpin.stop();
+      // (the screen left: the loop stops and the angle is forgotten, so the next start is face on)
+      app.fcSpinSync(false);
       // less motion
       reduce = true;
       spin.style.transform = '';

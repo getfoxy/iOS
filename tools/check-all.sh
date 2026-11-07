@@ -151,6 +151,7 @@ check "flashcard under the keeper's yes" 1 node tests/flashcard-gate.js
 check "flashcard take back" 1 node tests/flashcard-takeback.js
 check "flashcard screens" 1 node tests/flashcard-screens.js
 check "card headers"    1 node tests/card-headers.js
+check "card spin"       1 node tests/card-spin.js
 check "card cancel" 1 node tests/card-cancel.js
 check "flashcard send" 1 node tests/flashcard-send.js
 check "flashcard on chain" 1 node tests/flashcard-onchain.js

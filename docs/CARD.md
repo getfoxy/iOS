@@ -584,6 +584,11 @@ bill's ledger names the payment's entry from the moment the card has signed, so 
 first) ticks its share when it lands, as a share paid by its invoice late does; one a card paid while this phone was offline is
 received at once, and its share is ticked then.
 
+In the till (POINT OF SALE) the receive screen is for the payer in front of it: no NOTE, COPY, SCAN or CARD under the
+code, and the big button in SHARE's place reads **PAY WITH FOXY CARD** and does what CARD does, the dollar-card path
+included. It is greyed and does nothing exactly where CARD would not be offered: a cashier's till, and a dollar receive
+offline with no invoice where cards are not taken offline.
+
 **The tap comes first, and the PIN is asked only if the card wants it.** CARD brings up the sheet and the tap at once, with
 no pad before it. The card is read; a card with no PIN, or one whose no-PIN allowance covers the payment, signs in that tap
 and the payment goes on from step 3 as below. Otherwise the sheet ends with `Enter the card's PIN` (a note, not red;

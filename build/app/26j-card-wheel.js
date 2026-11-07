@@ -719,22 +719,67 @@
     this.fcGoHome();
   }
 
-  /* ---- the welcome's card, turning -----------------------------------------------------------------------------------------
+  /* ---- the card's picture, turning ----------------------------------------------------------------------------------------
    *
-   * On WELCOME TO YOUR FOXY CARD the card's picture stands on a turntable (build/markup.html, `data-card-stage="1"`): it turns slowly
-   * about its upright axis by itself, a dark back with the Foxy mark coming round behind it, and a finger dragged across it turns it
-   * by hand, as the card's page on the site does (half a degree a point dragged, and the turn let go of carries on and slows). While
-   * it is held, and for a moment after, it does not turn by itself. Where the phone asks for less motion it never turns by itself,
-   * and a finger still turns it, with nothing carried on. One loop, started when the welcome is drawn and stopped once it has not
-   * been on screen for a second; the touches are heard on the document, since the screen's markup binds clicks only. */
+   * On WELCOME TO YOUR FOXY CARD and on the card's own screen (26f-flashcard.js, `renderFlashcard`) the card's picture stands on a
+   * turntable (build/markup.html, `data-card-stage="1"`): it turns slowly about its upright axis by itself, a dark back with the Foxy
+   * mark coming round behind it, and a finger dragged across it turns it by hand, as the card's page on the site does (half a degree
+   * a point dragged, and the turn let go of carries on and slows). While it is held, and for a moment after, it does not turn by
+   * itself. Where the phone asks for less motion it never turns by itself, and a finger still turns it, with nothing carried on.
+   * One turntable for both screens, and one stage drawn at a time (the welcome over a new card's screen has it, the screen under it
+   * not). One loop, started when either screen is drawn (`fcSpinSync`), and only while the card is free to be seen (`fcSpinLive`):
+   * the menu, a sheet, a stage or a pad over it, a tap under way or Foxy put away stops it, its touches let go, and it waits
+   * without a loop (`fcSpinPark`: what is put on the page or taken off it, and Foxy coming back) to go on from where it stood.
+   * Leaving the screen stops it and the wait for good, as does the picture gone from the page for a second. The touches are heard
+   * on the document, since the screens' markup binds clicks only. */
   FC_SPIN = { auto: 24, perPx: 0.57, keep: 0.94, rest: 1600, gone: 60 };
+
+  // whether the turning card is on screen with nothing over it: the welcome or the card's screen, no menu, no lock, no sheet or stage
+  fcSpinLive() {
+    const s = this.state || {};
+    if (s.screen !== 'fcWelcome' && s.screen !== 'flashcard') return false;
+    if (s.open0 || this._pinLocked || (this._fcTaps || 0) > 0) return false;
+    if (typeof document !== 'undefined' && document.hidden) return false;
+    return !(this.cardTapOver && this.cardTapOver()) && !(this.cardFlowBusy && this.cardFlowBusy());
+  }
+
+  // on every render: the turntable runs where its screen is drawn (`drawn`), and stops for good, the angle forgotten, where not
+  fcSpinSync(drawn) {
+    if (drawn) { this.fcSpinOn(); return; }
+    if (this._fcSpin && this._fcSpin.stop) this._fcSpin.stop();
+    this.fcSpinUnpark();
+    this._fcSpinA = 0;
+  }
+
+  /* Waiting while something is over the card: no loop, only what wakes it, the page's own top-level elements coming and going
+   * (every sheet, stage and pad is one) and Foxy coming back to the front; the menu closing and a tap ending draw the screen again. */
+  fcSpinPark() {
+    if (this._fcSpinWake || typeof document === 'undefined' || typeof window === 'undefined') return;
+    const doc = /** @type {any} */ (document);
+    const win = /** @type {any} */ (window);
+    const wake = () => this.fcSpinOn();
+    const mo = win.MutationObserver && doc.body ? new win.MutationObserver(wake) : null;
+    if (mo) mo.observe(doc.body, { childList: true });
+    doc.addEventListener('visibilitychange', wake);
+    this._fcSpinWake = () => { if (mo) mo.disconnect(); doc.removeEventListener('visibilitychange', wake); this._fcSpinWake = null; };
+  }
+
+  fcSpinUnpark() {
+    if (this._fcSpinWake) this._fcSpinWake();
+  }
+
   fcSpinOn() {
     // (a static preview, a review page, shows the card still, as such pages run no loops)
     if (this._fcSpin || typeof document === 'undefined' || typeof window === 'undefined' || (this.props && this.props.startStatic)) return;
+    const s0 = this.state || {};
+    if (s0.screen !== 'fcWelcome' && s0.screen !== 'flashcard') { this.fcSpinUnpark(); return; }
+    if (!this.fcSpinLive()) { this.fcSpinPark(); return; }
+    this.fcSpinUnpark();
     const doc = /** @type {any} */ (document);
     const win = /** @type {any} */ (window);
     const K = this.FC_SPIN;
-    const sp = /** @type {any} */ ({ a: 0, vel: 0, drag: null, held: 0, last: Date.now(), miss: 0, stop: null });
+    // (it goes on from where it stood when something came over it)
+    const sp = /** @type {any} */ ({ a: Number(this._fcSpinA) || 0, vel: 0, drag: null, held: 0, last: Date.now(), miss: 0, stop: null });
     this._fcSpin = sp;
     const still = () => { try { return !!(win.matchMedia && win.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; } };
     const spinEl = () => doc.querySelector('[data-card-stage="1"] [data-card-spin]');
@@ -754,6 +799,7 @@
       sp.a += d;
       sp.vel = d;
       sp.held = Date.now();
+      this._fcSpinA = sp.a;
       paint();
       if (e.cancelable && String(e.type) === 'touchmove') e.preventDefault();
     };
@@ -769,10 +815,12 @@
     sp.stop = stop;
     const tick = () => {
       if (this._fcSpin !== sp) return;
+      // (something came over the card, or Foxy was put away: the loop ends here, and the card waits where it stood)
+      if (!this.fcSpinLive()) { stop(); this.fcSpinOn(); return; }
       const now = Date.now();
       const dt = Math.min(0.05, Math.max(0, (now - sp.last) / 1000));
       sp.last = now;
-      if (!spinEl()) { sp.miss += 1; if (sp.miss > K.gone) { stop(); return; } next(tick); return; }
+      if (!spinEl()) { sp.miss += 1; if (sp.miss > K.gone) { stop(); this.fcSpinUnpark(); return; } next(tick); return; }
       sp.miss = 0;
       const was = sp.a;
       if (!sp.drag) {
@@ -780,10 +828,13 @@
         else { sp.vel = 0; if (!still() && now - sp.held > K.rest) sp.a += K.auto * dt; }
       }
       sp.a %= 360;
+      this._fcSpinA = sp.a;
       // (painted only when it has turned: under Reduce Motion a card at rest is not drawn again every frame)
       if (sp.a !== was) paint();
       next(tick);
     };
+    // (a card that went on from where it stood is drawn there at once)
+    if (sp.a) paint();
     next(tick);
   }
 
@@ -803,8 +854,8 @@
       : (fc && fc.pin === 'set' && !fc.hasRecord) ? 'Its set-up was cut short. Finish it to put money on it.' : '';
     const fs = sc === 'fcSpeed' ? (s.fcSpeed || null) : null;
     const r = fs ? Number(fs.r) || 0 : 0;
-    // (the welcome's card turns, by itself and by hand: `fcSpinOn`)
-    if (welcome) this.fcSpinOn();
+    // (the card turns, by itself and by hand, on the welcome and on the card's own screen: `fcSpinSync`)
+    this.fcSpinSync(sendWelcome || sc === 'flashcard');
     return {
       isFcPanel: welcome || limits,
       fpWelcome: welcome,

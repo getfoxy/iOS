@@ -542,7 +542,16 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq([inv.amount, inv.opts], [500, { unit: 'usd' }], 'the invoice is a mint quote in dollars, for 500 cents');
     const v = V();
     ok(v.recvHeadTwo && v.recvChipsTwo && !v.recvChipsOne, 'the title between the round buttons; WALLET and NETWORK chips');
-    eq([v.recvWalletWord, v.confirmNetwork], ['USD', 'LIGHTNING'], 'WALLET USD, NETWORK LIGHTNING');
+    eq([v.recvWalletWord, v.confirmNetwork], ['DOLLARS', 'LIGHTNING'], 'the chips read DOLLARS and LIGHTNING');
+    {
+      // the chips carry only their word and the chevron: no small WALLET or NETWORK label over it
+      const mk = require('fs').readFileSync(require('path').join(__dirname, '..', 'build', 'markup.html'), 'utf8');
+      const block = (k) => { const i = mk.indexOf('<sc-if value="{{ ' + k + ' }}">'); return i < 0 ? '' : mk.slice(i, mk.indexOf('</sc-if>', i)); };
+      const one = block('recvChipsOne'), two = block('recvChipsTwo');
+      ok(!!one && !!two && !/>\s*NETWORK\s*</.test(one + two) && !/>\s*WALLET\s*</.test(two) && /\{\{ confirmNetwork \}\}/.test(one) && /\{\{ recvWalletWord \}\}/.test(two)
+        && /height:56px/.test(one) && (two.match(/height:56px/g) || []).length === 2,
+        'the receive chips: no NETWORK or WALLET label, only the word and its chevron, each chip the same height');
+    }
     eq([v.confirmAmount, v.showSats, v.confirmAlt], ['$ 5.00', true, '₿ 6,250'], 'the amount in both: the cents asked, their sats under at the phone’s price');
     ok(v.recvTapShown === true && v.recvCardShown === true, 'TAP and CARD on a dollar invoice (the card pays the invoice’s sats: tests/flashcard-usd-receive.js)');
     {
@@ -557,7 +566,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
       'the dollar invoice goes on the air (its request in dollars beside it is tests/usd-tap-screens.js)');
     ok(!v.recvClockShown && /^NEW CODE IN 0:0\d$/.test(v.recvClock), 'the code’s minute counted but not shown: a new code comes in place by itself (' + v.recvClock + ')');
     const t = textOf(w);
-    ok(/RECEIVE INVOICE/.test(t) && /WALLET/.test(t) && /USD/.test(t) && />CARD</.test(w.document.getElementById('dc-root').innerHTML), 'the page draws it, CARD with it');
+    ok(/RECEIVE INVOICE/.test(t) && !/WALLET/.test(t) && !/NETWORK/.test(t) && /DOLLARS/.test(t) && /LIGHTNING/.test(t) && />CARD</.test(w.document.getElementById('dc-root').innerHTML), 'the page draws it: DOLLARS and LIGHTNING with no label over either, CARD with it');
     // the networks a dollar invoice cannot use are greyed
     A.ocCan = () => true;
     V().pickNetwork();
@@ -597,7 +606,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     await settle(); await wait(40);
     eq([W.rec.invoices[0].amount, W.rec.invoices[0].opts], [80, { unit: 'usd' }], '1,000 sats typed for dollars: a dollar quote for 80 cents');
     const v = V();
-    eq([v.recvWalletWord, v.confirmAmount, v.confirmAlt], ['USD', '$ 0.80', '₿ 1,000'], 'the screen says it in both');
+    eq([v.recvWalletWord, v.confirmAmount, v.confirmAlt], ['DOLLARS', '$ 0.80', '₿ 1,000'], 'the screen says it in both');
     A.stopReceive(); clearInterval(A._recvClockT);
     A.setState({ screen: 'home', stack: [] }); await settle();
     // bitcoin asked for with dollars typed: a sat invoice for what they are worth, as before
@@ -632,7 +641,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq(W.rec.sets.length, 0, 'the chip’s change is this receive’s only: nothing kept');
     const last = W.rec.invoices[W.rec.invoices.length - 1];
     eq([last.amount, last.opts], [500, { unit: 'usd' }], 'and a new code in dollars for the same $ 5.00');
-    eq(V().recvWalletWord, 'USD', 'the chip reads USD');
+    eq(V().recvWalletWord, 'DOLLARS', 'the chip reads DOLLARS');
     A.setState({ screen: 'home', stack: [] }); await settle();
   }
 

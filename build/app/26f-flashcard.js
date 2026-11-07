@@ -587,7 +587,8 @@
     if (!W) return Promise.reject(new Error('The wallet is not ready.'));
     // a tap is in progress from here until it settles, whatever is on the screen meanwhile (`cardFlowBusy`)
     this._fcTaps = (this._fcTaps || 0) + 1;
-    const free = () => { this._fcTaps = Math.max(0, (this._fcTaps || 1) - 1); };
+    // (the card's picture, which does not turn under a tap, goes on turning once the tap is over and nothing else is up: 26j-card-wheel.js)
+    const free = () => { this._fcTaps = Math.max(0, (this._fcTaps || 1) - 1); if (this.fcSpinOn) this.fcSpinOn(); };
     /* The tap that follows the PIN pad (the last sheet ended asking for it) asks for the card again (1a), on the screen
      * the last tap left up (26h-tap-screen.js). */
     const was = document.getElementById('foxy-stage');
@@ -6827,7 +6828,8 @@
   }
 
   /* whether a touch that starts on `target` may be this swipe: not in a field, not in anything that scrolls sideways, and not on the
-   * welcome's turning card, which a finger turns (26j-card-wheel.js, `fcSpinOn`): a quick turn to the right is not HOME */
+   * turning card, the welcome's or the card screen's own, which a finger turns (26j-card-wheel.js, `fcSpinOn`): a quick turn to the
+   * right is not HOME */
   fcSwipeFrom(target) {
     for (let n = /** @type {any} */ (target); n && n !== document.body && n.nodeType === 1; n = n.parentNode) {
       const tag = String(n.tagName || '');
@@ -7594,6 +7596,10 @@
       fcCardCap: check[0] ? '26px' : '0px',
       // which design the card on screen is drawn in (FC_DESIGNS)
       fcDesign: this.fcDesignOf(fc),
+      /* The picture stands on the welcome's turntable (26j-card-wheel.js, `fcSpinOn`, started by `renderCardScreens`): it turns by itself,
+       * a finger turns it, and its back shows when it faces away. Not while the welcome is drawn over it, which has its own. */
+      fcSpin: on && !(this.fcWelcomeCard && this.fcWelcomeCard(s)) ? '1' : '',
+      fcPersp: on ? '1100px' : 'none',
       // a card that has been read says what it is on its own face
       fcSub: fc ? '' : 'Ecash on a card, spent with a tap and a PIN.',
       fcNone: on && !fc,

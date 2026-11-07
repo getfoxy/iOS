@@ -42,6 +42,8 @@
  *      where; a cashier on a code for both receives in its main (sats for a code from before codes said one), its pair locked
  *      to the keeper; 18d the payer of a pair pays the request it holds (`tapPickOfTwo`); 18e a card at a till in both is asked
  *      in either currency, and one at another mint of the till is taken there
+ *   21 the till's receive screen: no NOTE, COPY, SCAN or CARD; PAY WITH FOXY CARD in SHARE's place, doing what CARD did and
+ *      greyed where CARD was not offered; the ordinary receive unchanged
  *   19 the road to the mint opened ahead (the wallet's `warm`): as the till opens, at each PAID back to SET AMOUNT, at SEND's
  *      keypad reaching an amount (once), at a receive's amount screen and at a card's screen
  *
@@ -1781,6 +1783,11 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     A.tillStart({ unit: 'sat', tips: { on: true, to: 'one', ids: [{ id: ID(1), nostr: NO(1), name: 'Ana', pct: 100 }] } }); await settle();
     A.setState({ amount: '10', unit: 'USD', screen: 'confirm', stack: ['amount'] }); await settle();
     let v = V();
+    ok(v.tipRowShown === false && v.tipAddShown === true && v.tipChips.length === 0 && /ADD A TIP/.test(textOf(w)) && !/\$1\$2\$5OTHER/.test(textOf(w).replace(/\s/g, '')),
+      '20b the till’s receive: the tips folded into one ADD A TIP, the buttons not drawn', JSON.stringify([v.tipRowShown, v.tipAddShown, v.tipChips.length]));
+    v.tipAdd(); await settle();
+    v = V();
+    ok(v.tipAddShown === false && !/ADD A TIP/.test(textOf(w)), 'ADD A TIP tapped: it gives way to the row');
     ok(v.tipRowShown === true && v.tipChips.map((c) => c.label).join() === '$1,$2,$5,OTHER' && v.tipLine === 'TIP', '20b the till’s receive: $1, $2, $5, OTHER under the amount, no NO',
       JSON.stringify(v.tipChips.map((c) => c.label)));
     ok(/\$1\$2\$5OTHER/.test(textOf(w).replace(/\s/g, '')), 'and drawn');
@@ -1812,7 +1819,10 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     ok(tillAmount() && A.state.amount === '10' && !A.state.tillTip, 'back to SET AMOUNT: $10 again, no tip', JSON.stringify([A.state.screen, A.state.amount]));
     // PAID with a tip: the tip part to the wallet
     A.setState({ amount: '10', unit: 'USD', screen: 'confirm', stack: ['amount'] }); await settle();
+    ok(V().tipAddShown === true && V().tipRowShown === false, 'the next invoice: ADD A TIP folded again');
+    V().tipAdd(); await settle();
     V().tipChips[1].tap(); await settle();
+    ok(V().tipRowShown === true && V().tipAddShown === false, 'a tip chosen: the row stays open, its line said', V().tipLine);
     W.tips = A.state.till.tips;
     A.setState({ screen: 'paid', stack: ['amount', 'confirm'], paidUnit: 'sat', paidAmount: 15000, paidHash: 'sale-1' }); await settle(); await settle();
     ok(W.calls.tipTaken.length === 1 && W.calls.tipTaken[0].amount === 2500 && W.calls.tipTaken[0].unit === 'sat' && W.calls.tipTaken[0].hash === 'sale-1',
@@ -1823,6 +1833,8 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     // a request paid: the receive closes before PAID, and the tip still goes
     A.setState(Object.assign({}, A.homeState())); await settle();
     A.setState({ amount: '10', unit: 'USD', screen: 'confirm', stack: ['amount'] }); await settle();
+    ok(V().tipAddShown === true, 'after PAID, the next sale’s receive starts folded');
+    V().tipAdd(); await settle();
     V().tipChips[0].tap(); await settle();
     A.setState({ screen: 'home', stack: [] }); await settle(); await settle();
     ok(tillAmount() && A.state.amount === '', '(a request paid closes the receive: the till’s SET AMOUNT)');
@@ -1833,12 +1845,13 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     await fresh(W);
     A.tillStart({ unit: 'sat' }); await settle();
     A.setState({ amount: '10', unit: 'USD', screen: 'confirm', stack: ['amount'] }); await settle();
-    ok(V().tipRowShown === false && !/OTHER/.test(textOf(w)), 'a till with tips off: no tip buttons');
+    ok(V().tipRowShown === false && V().tipAddShown === false && !/OTHER/.test(textOf(w)) && !/ADD A TIP/.test(textOf(w)), 'a till with tips off: no tip buttons, no ADD A TIP');
     A.tillEnd(); await settle();
     // in sats typed: the tip in sats at the price
     await fresh(W);
     A.tillStart({ unit: 'sat', tips: { on: true, to: 'self', ids: [] } }); await settle();
     A.setState({ amount: '10000', unit: 'SATS', screen: 'confirm', stack: ['amount'] }); await settle();
+    V().tipAdd(); await settle();
     V().tipChips[0].tap(); await settle();
     ok(A.state.amount === '11250' && A.state.tillTip.num === 1250 && A.state.tillTip.den === 11250, 'sats typed: $1 is 1,250 sats more, the tip 1,250 of 11,250', JSON.stringify(A.state.tillTip));
     A.tillEnd(); await settle();
@@ -1847,7 +1860,9 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     W = stubWallet({});
     await cashierTill(W, passOf({ tips: true }));
     A.setState({ amount: '10', unit: 'USD', screen: 'confirm', stack: ['amount'] }); await settle();
-    ok(V().tipRowShown === true, '20c a cashier on a code with tips: the buttons');
+    ok(V().tipAddShown === true && V().tipRowShown === false, '20c a cashier on a code with tips: ADD A TIP');
+    V().tipAdd(); await settle();
+    ok(V().tipRowShown === true, 'and tapped, the buttons');
     V().tipChips[2].tap(); await settle();
     A._creqs = {};
     A.railRequest(18750); await settle();
@@ -1866,7 +1881,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     W = stubWallet({});
     await cashierTill(W, passOf());
     A.setState({ amount: '10', unit: 'USD', screen: 'confirm', stack: ['amount'] }); await settle();
-    ok(V().tipRowShown === false, 'a cashier on a code without tips: none');
+    ok(V().tipRowShown === false && V().tipAddShown === false, 'a cashier on a code without tips: none');
     A.railRequest(12500); await settle();
     rq = W.calls.requests.slice(-1)[0];
     ok(rq && !('tillTip' in rq.opts), 'and no tip on its requests');
@@ -1915,6 +1930,52 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     ok(rm.mintRows.length === 0 && rm.tillPastRows.map((r) => r.name + ':' + r.text).sort().join() === 'Front:ENDED,Patio:EXPIRED', 'run out: EXPIRED under PAST too');
     A.back(); await settle();
     ok(tillAmount(), 'back off the list: the till');
+    A.tillEnd(); await settle();
+  }
+
+  // ---- 21. the till's receive screen: no NOTE, COPY, SCAN or CARD; PAY WITH FOXY CARD in SHARE's place ----------------------
+  {
+    const W = stubWallet({});
+    await fresh(W);
+    const rounds = () => ['NOTE', 'COPY', 'SCAN', 'CARD'].filter((l) => Array.prototype.slice.call(w.document.querySelectorAll('div'))
+      .some((d) => d.textContent === l && d.children.length === 0));
+    // outside the till: as ever
+    A.setState({ amount: '1000', unit: 'SATS', screen: 'confirm', stack: ['home'], invoice: 'lnbc-plain', recvRail: 'LIGHTNING' }); await settle();
+    let v = V();
+    eq(rounds(), ['NOTE', 'COPY', 'SCAN', 'CARD'], '21 the ordinary receive: NOTE, COPY, SCAN and CARD drawn');
+    ok(v.recvRoundShown === true && v.recvBigLabel === 'SHARE' && /SHARE/.test(textOf(w)) && !/PAY WITH FOXY CARD/.test(textOf(w)), 'and SHARE, no PAY WITH FOXY CARD');
+    let paid = 0;
+    const wasPay = A.payByCard;
+    A.payByCard = () => { paid += 1; };
+    let shared = 0;
+    const wasShare = W.share;
+    W.share = () => { shared += 1; return true; };
+    V().recvBigTap(); await settle();
+    ok(shared === 1 && paid === 0, 'SHARE there shares the code', JSON.stringify([shared, paid]));
+    A.setState(A.homeState()); await settle();
+    // the keeper's till
+    A.tillStart({ unit: 'sat' }); await settle();
+    A.setState({ amount: '1000', unit: 'SATS', screen: 'confirm', stack: ['amount'], invoice: 'lnbc-till', recvRail: 'LIGHTNING' }); await settle();
+    v = V();
+    eq(rounds(), [], 'the till’s receive: none of NOTE, COPY, SCAN, CARD drawn');
+    ok(v.recvRoundShown === false && v.recvBigLabel === 'PAY WITH FOXY CARD' && /PAY WITH FOXY CARD/.test(textOf(w)) && !/SHARE/.test(textOf(w)),
+      'the big button reads PAY WITH FOXY CARD, no SHARE', v.recvBigLabel);
+    ok(v.recvBigDim === '1' && v.recvCardShown === true, 'not greyed where CARD would be there');
+    v.recvBigTap(); await settle();
+    ok(paid === 1 && shared === 1, 'PAY WITH FOXY CARD does what CARD did: the card paying this invoice, nothing shared', JSON.stringify([paid, shared]));
+    v.shareQr(); await settle();
+    ok(shared === 1, 'and SHARE’s own way in shares nothing in the till');
+    ok(/LIGHTNING/.test(textOf(w)) && !/NETWORK/.test(textOf(w)) && !!w.document.querySelector('img[data-req-qr]'), 'the network chip (LIGHTNING, no NETWORK label over it) and the QR stay');
+    // a cashier's: CARD was not there, so the button is greyed and does nothing
+    await cashierTill(W);
+    A.setState({ amount: '1000', unit: 'SATS', screen: 'confirm', stack: ['amount'], recvUnit: 'sat', invoice: 'lnbc-cashier', recvRail: 'LIGHTNING' }); await settle();
+    v = V();
+    ok(v.recvCardShown === false && v.recvBigDim === '0.35' && v.recvBigLabel === 'PAY WITH FOXY CARD', 'a cashier’s: PAY WITH FOXY CARD greyed, as CARD was absent', JSON.stringify([v.recvBigDim, v.recvCardShown]));
+    v.recvBigTap(); await settle();
+    ok(paid === 1 && shared === 1, 'and tapped, it begins nothing', JSON.stringify([paid, shared]));
+    eq(rounds(), [], 'nor any round button');
+    A.payByCard = wasPay; W.share = wasShare;
+    A.setState(A.homeState()); await settle();
     A.tillEnd(); await settle();
   }
 
