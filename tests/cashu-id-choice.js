@@ -86,6 +86,8 @@ function page(words) {
     },
   });
   ctx.W._nodeProbeDelay = [86400000, 86400000];
+  // a payment's second wrap (to tomorrow's keys, 08e-cashu-id.js `cidAheadAll`) held an hour, so each case reads its own first
+  ctx.W._cashuIdAheadMs = 3600000;
   ctx.W._cashuIdRetryMs = 40;
   ctx.said = said;
   ctx.store = (k, d) => { try { const v = JSON.parse(ctx.storage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } };

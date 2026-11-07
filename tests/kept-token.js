@@ -156,7 +156,7 @@ ok(/goMintHeading: \(\) => this\.goSwitchMint\(\),/.test(read('build/app/23-rend
      && /var NATIVE_RESTORE_WINDOW = 1000;/.test(read('build/wallet/03-seed-counters-logs.js'))
      && /if \(empty \* size >= RESTORE_GAP\)/.test(read('build/wallet/13-restore.js')),
      'a restore walks a thousand empty counters before it stops, on the phone and on the page alike');
-  ok(/recoveringSats: function \(\) \{/.test(read('build/wallet/22-screen-lock.js'))
+  ok(/recoveringSats: function \((mint)?\) \{/.test(read('build/wallet/22-screen-lock.js'))
      && /is being recovered from the mint/.test(read('build/app/26-render-history-and-contacts.js'))
      && /being recovered from the mint/.test(read('build/app/16-history-lists.js')),
      'what a swap took after Foxy was put away is named on the audit and the home screen');
@@ -269,8 +269,8 @@ ok(/keepSentToken\(\{ token: token, sats: sumProofs\(split\.send\), unit: 'sat',
 {
   const move = read('build/wallet/14-moving-between-mints.js');
   const route = read('build/wallet/11-routing.js');
-  ok(/if \(!opts \|\| opts\.remember !== false\) save\(K\.mint, u\);/.test(route)
-     && /var how = visit \? \{ remember: false \} : undefined;/.test(move)
+  ok(/if \(!opts \|\| opts\.remember !== false\) \{ save\(K\.mint, u\); chooseMint\(u\); \}/.test(route)
+     && /var how = \(visit \|\| !FoxyWallet\.mintChosen\(plan\.to\)\) \? \{ remember: false \} : undefined;/.test(move)
      && /return FoxyWallet\.connect\(terms\.from, null, null, \{ remember: false \}\)/.test(move)
      && /W\.moveRun\(plan, (fox \? this\.foxHears\('crossMove'\) : )?\(\) => \{\}, \{ visit: true(, quoted: true, warm: true)? \}\)/.test(read('build/app/26d-tap.js')),
      'a crossing and a carry visit the other mint without saving it as the phone\u2019s own');
@@ -341,7 +341,7 @@ ok(/var owed = Math\.max\(0, paid - asked - \(Number\(p\.inFee\) \|\| 0\)\);\n  
    && /inFee: inFee, purpose: open\.purpose/.test(read('build/wallet/07-request-delivery.js')),
    'the fee a payer adds for the receiver is fee, not change');
 ok(/topUpFees: 'foxy\.cashu\.topupfees'/.test(read('build/wallet/00-header-and-mint-errors.js'))
-   && /topUpFeeSats: function \(\) \{/.test(read('build/wallet/22-screen-lock.js'))
+   && /topUpFeeSats: function \((mint)?\) \{/.test(read('build/wallet/22-screen-lock.js'))
    && /const off = whole \? Math\.round\(run\) \+ held \+ back \+ fees \+ melting : 0;/.test(read('build/app/16-history-lists.js')),
    'the fees top-ups cost are written down and the audit counts them');
 ok(/if \(!this\._lockedOnce && this\.pinLock\) this\.pinLock\(\);/.test(read('build/app/06-wallet-boot-and-restore.js')),

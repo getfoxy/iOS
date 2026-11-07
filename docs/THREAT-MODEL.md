@@ -150,7 +150,7 @@ answer for a third of them.
 | `cashuIdSignUnblinded` | seed queue | NUT-11 Schnorr signatures by the ID key d itself over 1 to 100 P2PK secrets whose `data` is the ID as it is (its x, either parity), not asking for SIG_ALL: a payment a payer locked to the ID without blinding it, for the one delivery its receiver answered TAKE IT ANYWAY on the card PAID TO YOUR ID KEY; the shape of every secret is checked before the seed is read, one locked anywhere else (a blinded key among them) signs nothing, every signing is logged, and the key is never answered. The page asks first and nothing else calls it; LEAVE IT is the card's default |
 | `cashuIdTag` | seed queue | SHA-256("foxy-cashu-id-from-v1" ‖ x(d·peer) ‖ E) for two points the page names: the tag by which a payer proves its ID to a receiver, the same on both sides; nothing private is answered |
 | `cashuIdEphemeral` | seed queue | HMAC-SHA256 keyed by the paying key `m/129373'/20'/2'/0'/0'` over "foxy-cashu-id-e-v1" ‖ the receiver's ID ‖ an index (below 2^32) ‖ a locktime: the base one payment's throwaway keys are made from (`to` names the ID, `id` being the request's own); the paying key is never answered |
-| `cashuIdInboxOpen` | seed queue + cashu id window | listens for NIP-17 gift wraps (kind 1059) addressed to the delivery key, over Tor, from the `since` the page names when it is inside the last thirty-two days (the thirty a payment waits and NIP-59's two of backdating), else thirty-two days back, page by page (500 a page, eight at most, each up to the oldest wrap of the last, `until`), closing the one before first; the key's private half is read on the seed queue and handed to the inbox, never to the page; each wrap is opened once and handed to the page as `_cashuIdArrived(body)` |
+| `cashuIdInboxOpen` | seed queue + cashu id days | listens for NIP-17 gift wraps (kind 1059), over Tor, at one relay picked at random (the next on a failure or a CLOSED), on the sixteen keys of each UTC day the page names (`cashuIdDays`: whole days from 32 back to today, today when none is), always in eleven REQs of exactly 48 keys covering the window three days each, the days not asked filled with keys made for the REQ, each REQ from two days (NIP-59's backdating) before its oldest day, answering "1" only once the relay has ended every REQ (EOSE); and a random 3 to 30 s later, in REQs of 48 of their own at every relay, on the keys of the ANY WALLET ids in `any` (8 hex each, 960 at most), from thirty-two days back, handing the ids back to the page (`_cashuIdAnyHeard`) once every relay opened has ended those REQs or failed, one having ended them; a relay that sends a NOTICE before ending the day keys' REQs, or leaves 30 s (from the first REQ having gone) without ending the next or sending a wrap, is let go for the next; never on the delivery key itself; page by page (500 a page, eight at most, each up to the oldest wrap of the last, `until`), closing the one before first; the delivery key is read on the seed queue and the day keys' secrets worked out there and handed to the inboxes, never to the page; each wrap is opened once, with the key its `p` tag names, and handed to the page as `_cashuIdArrived(body)` |
 | `cashuIdInboxClose` | — | closes every inbox of the ID's, the delivery key's and the recovery key's; the keys are the seed's and nothing is thrown away |
 | `cashuIdCopiesOpen` | seed queue + cashu id window | the same, on the recovery key `m/129373'/20'/3'/0'/0'`: NIP-17 gift wraps addressed to it, from the same window, each opened once and handed to the page as `_cashuIdCopy(body)`; the page asks only after its words were restored, and believes a copy only where this seed made its every E (CASHU-ID.md, Restoring); the key's private half never reaches the page |
 | `onionPost` | onion only | only `http://` to a version 3 `.onion` host, with no user, query or fragment, through Tor's SOCKS port and never the open connection; a body of at most 256 kB, an answer cut off at 64 kB |
@@ -1199,6 +1199,24 @@ That is about the phone in a hand, not about an attacker with the file.
 
 **POS mode** has been removed: nothing in the shipped page opened it.
 
+**Adding a mint** asks the same lock where one is set: Face ID where FACE ID
+LOCK is on, else the PIN (`mintGate`). Someone holding the unlocked phone with
+Foxy open cannot point it at a mint of their choosing (ADD A MINT, a tile of a
+mint the phone only visited, TRANSFER TO one, a token's or a Cashu ID
+payment's KEEP IT THERE, a request's USE, a restore, a cashier code) without
+it. Free are the shipped mints, which the app chose, and the mints the person
+chose: the phone's own, every one it was saved on, every one passed through
+the lock. A visit made for one payment (a crossing, PAY FROM, MOVE TO YOUR
+MINT) puts the mint on the list so its money shows, and does not make it free:
+a token from a mint of their choosing, moved home, leaves that mint's tile
+asking the lock. Nor does the session stay there: a flow that visited another
+mint (a RECLAIM or take-back, TRANSFER backed out, a move that failed, a
+crossing) comes back to the phone's own mint when it ends, money moved home
+goes to the saved mint whatever mint the session is on, and a move landing at
+a mint nobody chose is a visit too, so no later step saves the phone on a
+visited mint with nothing asked. With no lock set nothing is asked, as before.
+MONEY.md §16.
+
 **The PIN wait is not yet tested on a real phone.** The tests cover it in
 jsdom.
 
@@ -1285,9 +1303,21 @@ and blinded refund key again. What each party learns:
   refund key, keys never seen before and unlinkable to the ID, to the refund key
   or to each other; the locktime, a day thirty days on at a random second of it;
   and at a refund, the blinded refund key signing;
-- **a relay** sees gift wraps addressed to the delivery key, which is the same
-  for every payment to one ID: it can count them and see when the receiver's
-  phone listens (over Tor), and reads none of them;
+- **a relay** sees each payment as two gift wraps to keys of two days, never
+  to the delivery key itself (the drop boxes, CASHU-ID.md): sixteen keys a UTC
+  day, worked out from the ID string, asked by the receiver in REQs of 48 keys
+  at one relay picked at random, and no key asked on two days. So a relay that
+  does not hold the ID string can tie one day's listens together and see when
+  the phone is online (over Tor), but not tie one day to another by what is
+  asked; it reads none of the wraps. Left: a relay that holds the ID string
+  works every key out and ties everything, as any payer can; the delivery key
+  itself is never asked, but an ID shown before this build was asked for by it
+  at every listen, so a relay that kept those logs holds it; a payment's two
+  wraps, seconds apart (filler blurs their size bucket, often not apart), can tie a paid day
+  to the next by time; an ANY WALLET code's key, heard for a year in REQs of
+  its own at every relay, ties the days it is asked and can be guessed by
+  timing to go with the day's; and timing on few phones ties much whatever is
+  asked;
 - **the payer** knows the ID, E and the blinded keys of its own payments, and
   cannot open them before the locktime, when its refund key can;
 - **anyone holding the ID string** can send the receiver deliveries. Each must
@@ -1321,9 +1351,10 @@ and blinded refund key again. What each party learns:
   wallet's request stays), is a standard NUT-18 request for a
   wallet that cannot blind: locked to a fresh key of the seed-derived lock pool
   (`p2pkReserve`, as a receive request's), never to the ID key, with a Nostr
-  transport to the delivery key naming the three relays the inbox listens on. A
-  relay or anyone holding the code learns the delivery key and those relays; the
-  mint sees a lock key used for that code alone. The key is a new one at every
+  transport to a key of the code's own (the delivery key moved by the code's
+  id, listened for a year, after which money paid to it is lost) naming the three relays the inbox listens on. A
+  relay or anyone holding the code learns that key and those relays, not the
+  delivery key; the mint sees a lock key used for that code alone. The key is a new one at every
   opening; a code paid twice is taken twice (once per delivery), and a key no row
   names (after a restore) is found by walking the seed, at most five walks an hour.
 

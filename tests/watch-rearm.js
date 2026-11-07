@@ -49,7 +49,7 @@ function field(name) {
 }
 const methods = new Function('return {' + [
   'resumeSplit(force) {', 'resumeSplitNow(force) {', 'splitWatchLater() {', 'spStopWatch() {',
-  'nextPaidScreen() {', 'queueLater() {', 'paidDismissed() {',
+  'nextPaidScreen() {', 'queuedEv(next) {', 'queueLater() {', 'paidDismissed() {',
   // whether a card is being read or written, and what waits for it to be over (26f-flashcard.js)
   'cardFlowBusy() {', 'cardFlowHolds(ev) {', 'fcPadUp() {', 'fcAskingForCard() {', 'cardFlowMayHaveEnded() {',
   'walletReady(w) {',

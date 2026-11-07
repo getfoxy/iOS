@@ -29,8 +29,15 @@ final class CashuIDTests: XCTestCase {
             let baseIndex: UInt32
             let baseLocktime: UInt64
         }
+        struct Drop: Decodable {
+            struct Slot: Decodable { let slot: UInt8; let tweak, key, secret: String }
+            let day: UInt32
+            let slots: [Slot]
+            let nextDayKey0, anyId, anyKey, anySecret: String
+        }
         let nut28: NUT28
         let foxy: Foxy
+        let drop: Drop
     }
 
     private func vectors() throws -> Vectors {
@@ -120,6 +127,48 @@ final class CashuIDTests: XCTestCase {
         // the page's piece keys from it (08e-cashu-id.js cidPieceKey): SHA-256(base ‖ j as two bytes)
         XCTAssertEqual(NUT13.hex(Array(SHA256.hash(data: try b(v.base) + [0, 0]))), v.piece0)
         XCTAssertEqual(NUT13.hex(Array(SHA256.hash(data: try b(v.base) + [0, 1]))), v.piece1)
+    }
+
+    /// The drop boxes (`CashuID.dropTweak`): the payer's key from the delivery key alone, the receiver's secret
+    /// from q, both the vectors' (harness.js's BigInt arithmetic, and the page's noble curve in tests/cashu-id.js);
+    /// each secret's key is its key; the delivery key's point is odd, so the secrets are n − q + t.
+    func testDropBoxVectors() throws {
+        let v = try vectors().drop
+        let nostr = try b(try vectors().foxy.nostr)
+        let base = try b(q)
+        try NUT13.withContext { ctx in
+            XCTAssertEqual(try NUT13.publicKey(base, ctx)[0], 3, "the vectors' delivery key has the odd point")
+            for slot in v.slots {
+                XCTAssertEqual(NUT13.hex(try CashuID.dropTweak(nostr: nostr, day: v.day, slot: slot.slot, ctx)), slot.tweak)
+            }
+        }
+        for slot in v.slots {
+            XCTAssertEqual(NUT13.hex(try CashuID.dropKey(nostr: nostr, day: v.day, slot: slot.slot)), slot.key)
+        }
+        XCTAssertEqual(NUT13.hex(try CashuID.dropKey(nostr: nostr, day: v.day + 1, slot: 0)), v.nextDayKey0)
+        let secrets = try CashuID.dropSecrets(base: base, days: [v.day])
+        XCTAssertEqual(secrets.count, CashuID.dropSlots)
+        for slot in v.slots { XCTAssertEqual(NUT13.hex(secrets[Int(slot.slot)]), slot.secret) }
+        // every secret opens its own key, and a day's sixteen keys are sixteen, none the delivery key, none the next day's
+        // (NUT13.xOnlyKey, the BIP-340 key NostrCrypto.publicKey also makes: this file builds in tools/nativetests, which has no Nostr)
+        let keys = try secrets.map { s in NUT13.hex(try NUT13.withContext { try NUT13.xOnlyKey(s, $0) }) }
+        let next = try (0..<UInt8(CashuID.dropSlots)).map { NUT13.hex(try CashuID.dropKey(nostr: nostr, day: v.day + 1, slot: $0)) }
+        for (j, key) in keys.enumerated() {
+            XCTAssertEqual(key, NUT13.hex(try CashuID.dropKey(nostr: nostr, day: v.day, slot: UInt8(j))))
+        }
+        XCTAssertEqual(Set(keys).count, CashuID.dropSlots)
+        XCTAssertFalse(keys.contains(NUT13.hex(nostr)))
+        XCTAssertTrue(Set(keys).isDisjoint(with: next))
+        // an ANY WALLET request's key
+        let id = try b(v.anyId)
+        XCTAssertEqual(NUT13.hex(try CashuID.anyKey(nostr: nostr, id: id)), v.anyKey)
+        let any = try CashuID.anySecrets(base: base, ids: [id])
+        XCTAssertEqual(any.map { NUT13.hex($0) }, [v.anySecret])
+        XCTAssertEqual(NUT13.hex(try NUT13.withContext { try NUT13.xOnlyKey(any[0], $0) }), v.anyKey)
+        // refused: a slot past fifteen, a key of the wrong length, an id of the wrong length
+        XCTAssertThrowsError(try CashuID.dropKey(nostr: nostr, day: v.day, slot: 16))
+        XCTAssertThrowsError(try CashuID.dropKey(nostr: Array(nostr.prefix(31)), day: v.day, slot: 0))
+        XCTAssertThrowsError(try CashuID.anyKey(nostr: nostr, id: [1, 2, 3]))
     }
 
     private func secret(_ key: String, refund: String) -> String {

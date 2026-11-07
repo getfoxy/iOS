@@ -20,7 +20,7 @@
     this._trWas = window.FoxyWallet.mintUrl || '';
     this.setState(p => ({
       screen: 'switchMint', stack: p.stack.concat([p.screen]),
-      trStep: 'from', trFrom: '', trTo: '', trUnit: 'sat', trSats: 0, trPlan: null, trFee: null, trErr: '', fcPick: false, wdPick: false, bankPick: false, tillPick: false,
+      trStep: 'from', trFrom: '', trTo: '', trUnit: 'sat', trSats: 0, trPlan: null, trFee: null, trErr: '', fcPick: false, wdPick: false, bankPick: false, tillPick: false, histPick: false,
     }));
   }
 
@@ -57,6 +57,15 @@
       this.setState({ trFrom: mint, trUnit: held.usd > 0 && !(held.sat > 0) ? 'usd' : 'sat', trStep: 'to' });
       return;
     }
+    /* The mint it lands at is where the phone ends up (`moveRun` saves it as the phone's own): a mint only visited asks the
+     * lock first, as adding any mint does (09-melt-paste-switch.js `mintGate`). Passing it does not choose the mint; the
+     * transfer landing does, so a quote dropped leaves it as it was. */
+    if (this.mintGate) { this.mintGate(mint, () => this.trPickTo(mint), 'To add this mint.', { choose: false }); return; }
+    this.trPickTo(mint);
+  }
+
+  /* TRANSFER TO's mint, past the lock: the keypad. */
+  trPickTo(mint) {
     const dollars = this.state.trUnit === 'usd';
     this.setState(p => ({
       trTo: mint, trStep: '',
@@ -120,13 +129,26 @@
       return;
     }
     this.setState({ trQuoting: true, trErr: '', trFits: 0 });
-    Promise.resolve()
-      .then(() => (W.mintUrl === trTo ? null : W.connect(trTo)))
-      .then(() => W.transferQuote(trFrom, trSats, this.state.trUnit === 'usd' ? { unit: 'usd' } : undefined))
+    /* A visit: a quote is not a choice, and one dropped leaves the mint as it was; the transfer landing saves the phone
+     * there. Its connect is counted while it is out (`_trQuoteGoing`, `moneyBusy`), and a way home started meanwhile
+     * (the back arrow, `homeAgain`) waits for it, so its late landing never takes the phone back to this mint. */
+    let going = null;
+    try { going = W.mintUrl === trTo ? null : W.connect(trTo, null, null, { remember: false }); } catch (e0) { going = Promise.reject(e0); }
+    const out = () => { if (this._trQuoteGoing === going) this._trQuoteGoing = null; };
+    if (going) { this._trQuoteGoing = going; going.then(out, out); }
+    const still = () => this.state.trTo === trTo && this.state.trFrom === trFrom && this.state.trSats === trSats
+      && this.state.screen === 'trConfirm';
+    Promise.resolve(going)
+      .then(() => {
+        // left meanwhile (the back arrow): no quote, and the way home is already on its way
+        if (going && !still()) { const e = new Error('left'); /** @type {any} */ (e).left = true; throw e; }
+        return W.transferQuote(trFrom, trSats, this.state.trUnit === 'usd' ? { unit: 'usd' } : undefined);
+      })
       .then(plan => {
         this.setState({ trQuoting: false, trPlan: plan, trFee: plan.feeSats });
       })
       .catch(e => {
+        if (e && e.left) { this.setState({ trQuoting: false }); return; }
         // what would have fitted, when the fee is the only thing in the way
         this.setState({ trQuoting: false, trErr: W.reason(e),
                         trFits: (e && e.foxyFits) || 0 });
@@ -154,6 +176,9 @@
     // and once more before anything moves, for the same reason
     if (this.refuseSwitchWhileBusy()) return;
     const to = this.mintNameOf(this.state.trTo);
+    /* Pressed: the person chose the mint it lands at, past the gate at TRANSFER TO (`trPick`); the landing saves the phone
+     * there (`moveRun` saves only a chosen mint). */
+    if (W.chooseMint && this.state.trTo) W.chooseMint(this.state.trTo);
     this.setState({ trBusy: true });
     // the fox, the figure following the move's own stages (26r-fox-wait.js); the melt loader where it cannot be drawn
     const fox = !!(this.foxUp && this.foxUp('trMove', 'move', { forMs: this.MELT_PATIENCE_MS }));
@@ -162,7 +187,8 @@
      * the destination, and moveRun pays from whichever wallet is connected —
      * run from the destination it found nothing to spend (seen in the
      * simulator). */
-    W.connect(this.state.trFrom).then(() => W.moveRun(plan, fox ? this.foxHears('trMove') : () => {})).then(done => {
+    // a visit too: what is left at the mint it leaves is not a choice of it; `moveRun` saves the phone where it lands
+    W.connect(this.state.trFrom, null, null, { remember: false }).then(() => W.moveRun(plan, fox ? this.foxHears('trMove') : () => {})).then(done => {
       if (fox) this.foxEnd('trMove', true); else this.hideMelt();
       this.setState({ trBusy: false, trPlan: null, trStep: '', trErr: '' });
       this.refreshBalance();
@@ -176,6 +202,8 @@
       if (fox) this.foxEnd('trMove', false); else this.hideMelt();
       this.setState({ trBusy: false, trErr: W.reason(e) });
       this.toast(W.reason(e), true);
+      // not left on the mint it was leaving, or the one it was quoted at
+      if (this.homeAgain) this.homeAgain();
     });
   }
 
@@ -184,7 +212,10 @@
     const W = window.FoxyWallet;
     const back = this._trWas;
     this.setState({ screen: 'home', stack: [], trPlan: null, trStep: '', trErr: '', trBusy: false });
-    if (W && back && W.mintUrl !== back) W.connect(back).then(() => this.refreshBalance(), () => {});
+    /* Home as every other exit goes (09-melt-paste-switch.js `homeAgain`): after the quote's connect where it is still out,
+     * and counted as the way home until it lands. */
+    if (this.homeAgain) { this.homeAgain(); return; }
+    if (W && back && W.mintUrl !== back) (this.connectBack ? this.connectBack(back) : W.connect(back)).then(() => this.refreshBalance(), () => {});
   }
 
   /* The keeper's 1k (2026-11-06): MOVING, FEE and RECEIVING stacked, RECEIVING in the accent, and MORE DETAILS, which opens

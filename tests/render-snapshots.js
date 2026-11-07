@@ -231,6 +231,21 @@ function cashuIdViews() {
   return v;
 }
 
+/* HISTORY at a mint picked by the chevron beside its title, the wallet still at MINT (16-history-lists.js, `histShown`): its name for
+ * the title, its rows, and its books at the end when they add up and at the top when they do not; and the list it is picked from.
+ * Last, so that the views before keep their numbers. */
+function histMintViews() {
+  const v = [];
+  const add = (label, view) => v.push([label, view]);
+  const other = (sats) => ({ wallet: { balanceOf: (u, m) => (u === 'usd' ? 0 : m ? sats : 250000), twoUnits: () => false } });
+  const shown = { histMint: OTHER, histOther: { mint: OTHER, history: [{ label: 'TODAY', items: [Object.assign({}, TX_IN, { mint: OTHER })] }] },
+    historyComplete: true, histFilter: 'all', stack: ['home'] };
+  add('history, another mint shown, its books adding up at the end', at('history', shown, other(2100)));
+  add('history, another mint shown, its books off, at the top', at('history', shown, other(2500)));
+  add('switchMint, WHICH MINT\u2019S HISTORY?, another mint shown', at('switchMint', { histPick: true, histMint: OTHER, stack: ['home', 'history'] }));
+  return v;
+}
+
 function representative(logic) {
   const v = [];
   const add = (label, view) => v.push([label, view]);
@@ -600,6 +615,17 @@ function representative(logic) {
   add('confirm, no wallet', { state: { screen: 'confirm', stack: [], invoice: 'lnbc2100n1stub', amount: '21', unit: 'SATS' } });
   add('paid, received, live', at('paid', { amount: '2100', unit: 'SATS', asset: 'BITCOIN', recv: { live: 'in' }, recvResolved: true }));
   add('paid, received, cash', at('paid', { amount: '2100', unit: 'SATS', asset: 'DOLLARS', recv: { live: 'gone' } }));
+  /* The bulk RECEIVED: three payments in one opening of Foxy, each row with its own time, mint, and name or note
+   * (15-paid-wake-keyboard.js `paidBulk`). The times are today's and yesterday's at fixed hours, built from the clock the
+   * view is drawn by, so the rows say "2:14 PM", "1:10 PM" and "Yesterday 9:03 AM" in any year. */
+  const BULK_T = new Date(); BULK_T.setHours(14, 14, 0, 0);
+  const BULK_E = new Date(BULK_T.getTime()); BULK_E.setHours(13, 10, 0, 0);
+  const BULK_Y = new Date(BULK_T.getTime() - 86400000); BULK_Y.setHours(9, 3, 0, 0);
+  add('paid, three received at once', at('paid', { amount: '2100', unit: 'SATS', asset: 'BITCOIN', recv: { live: 'in' }, recvResolved: true,
+    paidUnit: 'sat', paidAmount: 2100, paidHash: 'b1', paidBulk: [
+      { hash: 'b3', unit: 'usd', amount: 592, atMs: BULK_T.getTime(), mint: 'NOW AT Minibits', who: 'for lunch' },
+      { hash: 'b2', unit: 'sat', amount: 1000, atMs: BULK_E.getTime(), mint: 'Forge', who: '' },
+      { hash: 'b1', unit: 'sat', amount: 2100, atMs: BULK_Y.getTime(), mint: 'Forge', who: 'From Alice' }] }));
   add('paid, sent with a fee', at('paid', { amount: '2100', unit: 'SATS', payOut: true, recipient: 'lnbc2100n1stub', recipientKind: 'invoice', flow: 'send', recv: { live: 'out' } }, {
     before: (a) => { a._lastFee = 12; },
   }));
@@ -1486,7 +1512,7 @@ const INSTANCE = ['_lastFee', '_returnTo', '_blockedEl', '_blockedKind', '_cardQ
   const views = [['home (first render)', {}]]
     .concat(screens.map((s) => ['screen ' + s, { state: { screen: s, stack: [] } }]))
     .concat(popups.map((p) => ['popup ' + p, { state: { screen: 'home', stack: [], [p]: true } }]))
-    .concat(representative(logic), cards(), cashuIdViews());
+    .concat(representative(logic), cards(), cashuIdViews(), histMintViews());
 
   const recorded = fs.existsSync(path.join(DIR, 'index.json'))
     ? JSON.parse(fs.readFileSync(path.join(DIR, 'index.json'), 'utf8')) : {};

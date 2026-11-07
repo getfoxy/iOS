@@ -124,7 +124,9 @@
       var moveLock = null;   // NUT-20 key for the quote at the destination, if it takes one
       assertRoute();
       var from = String(fromUrl || '').replace(/\/+$/, '');
-      var to = String(mintUrl || '').replace(/\/+$/, '');
+      /* To the phone's own mint (`homeMint`: an open till's, else the one it is saved on), not the live one, which a visit
+       * can have left elsewhere (a take-back, a quote dropped). Moved to a mint only visited, the money would go there. */
+      var to = String((FoxyWallet.homeMint && FoxyWallet.homeMint()) || mintUrl || '').replace(/\/+$/, '');
       var gross = Math.round(Number(sats) || 0);
       if (!to) return Promise.reject(new Error('No mint is connected to send it to.'));
       if (from === to) return Promise.reject(new Error('That token is already from this mint.'));
@@ -482,12 +484,24 @@
        * and not saved as the phone's own, so an app killed there opens at
        * home. */
       var visit = !!(opts && opts.visit);
-      var how = visit ? { remember: false } : undefined;
+      /* Nor saved at a mint the person did not choose (`mintsChosen`): landing there is not choosing it. A TRANSFER
+       * chooses its mint when it is pressed, past the gate (26a-transfer.js `runTransfer`). */
+      var how = (visit || !FoxyWallet.mintChosen(plan.to)) ? { remember: false } : undefined;
 
       if (plan.empty) {
         return FoxyWallet.connect(plan.to, null, null, how).then(function (w) {
           return { sats: 0, feeSats: 0, mint: plan.to, name: w && w.name };
         });
+      }
+
+      /* Paid from the mint the plan leaves, or not at all: `pay` spends from the live wallet, and a connect that landed
+       * meanwhile (a trip home, a switch) would have paid this invoice from another mint's money, with what was to move
+       * left where it was and the move written down as made. Refused before anything leaves, so nothing was sent. */
+      if (plan.from && canonicalMint(String(mintUrl || '')) !== canonicalMint(String(plan.from))) {
+        var elsewhere = /** @type {any} */ (new Error('The wallet is on ' + hostOf(mintUrl || '') + ', not on '
+          + hostOf(plan.from) + ', the mint this move pays from. Nothing was sent. Try again.'));
+        elsewhere.unsent = true;
+        return Promise.reject(elsewhere);
       }
 
       /* mustSave, and `unsent`: nothing has left yet, so a refused write must

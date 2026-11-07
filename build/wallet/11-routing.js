@@ -347,7 +347,7 @@
         var nameOf = function () { return u.replace(/^https?:\/\//, ''); };
         // already here and answered for real: nothing to switch, and nothing to ask again
         if (wallet && !wallet.foxyFromCache && canonicalMint(mintUrl || '') === u && !mintPendingNow()) {
-          if (plain.remember !== false) save(K.mint, u);
+          if (plain.remember !== false) { save(K.mint, u); chooseMint(u); }
           return Promise.resolve({ id: u, name: nameOf(), balanceSats: sumProofs(proofs()), pending: false });
         }
         var gen = ++mintPendingGen;
@@ -510,7 +510,8 @@
         }
         migrateProofs();
         var firstTimeHere = rememberMint(u);
-        if (!opts || opts.remember !== false) save(K.mint, u);
+        // the phone's own mint from now, and so one the person chose (`mintsChosen`); a visit is neither
+        if (!opts || opts.remember !== false) { save(K.mint, u); chooseMint(u); }
         /* Offline, everything below is a request. The wallet is built, the
          * balance is readable and locked ecash can be taken; nothing is swept
          * and nothing is probed until there is a route to do it over. */

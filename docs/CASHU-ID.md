@@ -29,7 +29,7 @@ every level hardened:
 | key | path | what it is for |
 |---|---|---|
 | ID key `d` | `m/129373'/20'/0'/0'/0'` | the ID: payments are locked to its public half `ID = d·G` (33 bytes, compressed), blinded |
-| delivery key `q` | `m/129373'/20'/1'/0'/0'` | receiving NIP-17 messages for this wallet, and nothing else on Nostr; its x-only public half (32 bytes) is the Nostr key |
+| delivery key `q` | `m/129373'/20'/1'/0'/0'` | receiving NIP-17 messages for this wallet, and nothing else on Nostr; its x-only public half `Q` (32 bytes) is in the ID string, and payments go to the keys it moves to each day (the drop boxes, below), not to `Q` itself |
 | paying key | `m/129373'/20'/2'/0'/0'` | this phone's own throwaway keys for what it pays to other IDs (below); never public |
 | recovery key | `m/129373'/20'/3'/0'/0'` | the copies this phone sends itself of what it pays (Restoring, below); its x-only public half is the only address they go to, in no string, never shown, and used for nothing else |
 
@@ -105,9 +105,12 @@ The payer, holding the contact's `ID` and delivery key:
 5. **The name, proved** (only once this phone's own ID is in use: shown, or its
    words restored): `tag = SHA-256("foxy-cashu-id-from-v1" ‖ x(d_payer·ID) ‖ E)`,
    worked out natively (`cashuIdTag`), `E` one of the pieces' E.
-6. **Deliver**, NIP-17 gift-wrapped to the delivery key over Tor (`nostrSend`,
-   the road a NUT-18 payment and a till's cashier take), to the three relays the
-   receiver's inbox listens on. The message:
+6. **Deliver**, NIP-17 gift-wrapped over Tor (`nostrSend`, the road a NUT-18
+   payment and a till's cashier take) to one of the sixteen keys the delivery
+   key moves to on the UTC day it is posted, picked at random, and one to five
+   seconds later the same message to one of the next day's (the drop boxes,
+   below), each to the three relays the receiver's inbox may listen on. The
+   message:
 
        { "v": 2, "type": "foxy-cashu-id", "token": "cashuB…", "E": "<66 hex>",
          "from": "<the payer's ID, 66 hex>"?, "tag": "<64 hex>"?, "note": "<at most 140 characters>"? }
@@ -126,13 +129,101 @@ the ID's key and blinds as cashu-ts does can pay it, by Foxy's envelope or by a
 NUT-18 `PaymentRequestPayload` (`{ id?, memo?, mint, unit, proofs }`) wrapped to
 the delivery key, with `E` on each proof and no locktime or refund needed.
 
+## The drop boxes
+
+A payment is never wrapped to the delivery key `Q` itself, but to one of
+sixteen keys of the UTC day it is posted on, each `Q` moved by a number anyone
+holding the ID string can work out (`CashuID.dropTweak`, 08e-cashu-id.js
+`cidDropKey`):
+
+    t = SHA-256("foxy-cashu-id-drop-v1" ‖ Q ‖ day (4 bytes, big-endian) ‖ j)    (once more with 0xFF appended if not 0 < t < n)
+    key(day, j) = x(lift_x(Q) + t·G)
+
+`day` is the unix time divided by 86,400, `j` from 0 to 15. The receiver opens
+`key(day, j)` with `q′ + t`, `q′` being `q` or `n − q`, whichever has the even
+point. The ID string does not change: `Q` is all a payer needs, and the
+derivation's version is its tag (`-v1`). tests/fixtures/cashu-id-vectors.json
+(`drop`) holds the page, harness.js and libsecp256k1 to the same keys.
+
+**Posting.** The payer picks `j` at random for the day it posts, and one to
+five seconds later, on a circuit of its own, sends the same message once more,
+to a random key of the next day (`aheadDay`, `cidAheadAll`): seconds, so the
+page is surely still awake to send it. The two wraps share no bytes (each has a
+fresh seal and wrap key) and each envelope carries filler of its own random
+length (`pad`, `cidPad`: none to half the token, at least 256 bytes, never
+past the 32,767 bytes a send may carry, and no `pad` at all where none fits), so each
+wrap's NIP-44 size bucket is drawn afresh. That blurs the size, it does not hide
+it: by the NIP-44 padding rule, a wrap of a token of about 1.2 kB lands in one of
+three buckets (about 4.2, 4.9 or 5.6 kB) and two wraps of it share one about a
+third of the time; a small token of about 400 bytes has two buckets (about 2.5
+and 3.5 kB) and its wraps share one four times in five. What pairs the two wraps
+is their size and that they are seconds apart. A second wrap sent on any day
+but the one before its own (the page slept between the two, even only into the
+wrap's own day, when the receiver may have finished that day's listen) goes to
+today's keys instead, and a new next-day wrap is set behind it. One no relay
+takes is tried again as the first wrap is: once a minute, once a quarter hour
+after thirty tries. The daily resend of a
+payment not yet collected goes to the day it goes on, with fresh filler, and its
+second wrap to the day after.
+
+**Listening.** Every listen is the same eleven REQs of exactly 48 keys each,
+covering the window (today and thirty-two days back) three days to a REQ, each
+from two days (NIP-59's backdating) before its oldest day. A REQ holds the
+sixteen keys of each of its days that is asked, and keys made for that REQ and
+held by nobody for the rest, shuffled. The days asked are today and every day
+since the last listen that finished (`foxy.cid.heard`); the whole window when
+the phone has never finished one (a first listen, a restore). So neither a REQ's
+size nor the number of REQs says how long the phone was away. A listen is
+finished when the relay has answered every REQ to its end (EOSE, and no page
+left to ask); one cut short (Foxy put away, the relay refusing a REQ or dropping
+the socket with no other relay to go to) marks nothing, and the next asks the
+same days. A day finished is not asked again: what was posted after the
+phone's last listen of a day is found by its second wrap among the next day's
+keys. A listen open across midnight (UTC) is closed at a random moment in the
+new day's first hour and opened again on the new day's keys a random 0 to 60
+seconds later, so one listen's end and the next one's start are not one
+instant. A payer whose clock is a day behind posts to
+yesterday's and today's keys, and is still heard; one a day ahead is heard a
+day late.
+
+**One relay a listen.** The REQs go to one relay of the three, picked at random,
+on a circuit of its own; one that fails, drops the socket, refuses a REQ
+(CLOSED), sends a NOTICE before ending them, or leaves thirty seconds without
+ending the next of them or sending a wrap (`relayDeadline`, counted from the
+first REQ having gone, so a slow circuit is not counted) is let go and the next
+is tried. A payment is still posted to all
+three, so the one asked holds it.
+
+**`Q` itself is never asked for.** It is all a relay needs to work out every
+day's keys, past and future, so a single REQ naming it would undo the drop
+boxes for good at that relay. A Foxy from before this build wrapped payments to
+`Q`; this build does not hear such a payment, and it comes back to its payer
+(`cidWatch`) at its locktime. An ID shown before this build was asked for by `Q` at
+every listen: a relay that kept those logs can tie that ID's earlier listens,
+and, holding `Q`, works out its day keys too. For it, the drop boxes protect
+nothing; a relay that kept no logs learns nothing from what is asked now.
+
+**ANY WALLET keys.** Each request's key (below) is heard for a year: at every
+listen in its first day, once a UTC day in its first month, once a week after
+(`foxy.cid.any`: each id, when it was made and the day it was last asked). Its
+keys are asked in REQs of their own, 48 to a REQ padded as above (one REQ per 48
+codes due), at all three relays as a request's inbox is (another wallet may post
+to only one of a code's relays, and the key is the same at each, so asking all
+three tells them nothing more), a random three to thirty seconds after the day
+keys. A code is marked asked only once every relay asked has ended every one of
+those REQs or failed, and one has ended them (`_cashuIdAnyHeard`); Foxy put away before then asks it again at the next
+listen. At most 960 codes are kept: the 961st drops the oldest, which is no
+longer heard. Money paid to a code more than a year old, or one dropped so, is
+not heard and is lost: it is locked to this phone's key, and the payer's wallet
+has no refund unless it added one. A restore forgets every code (What a
+restore loses, below).
+
 ## Receiving
 
-The receiver's phone listens on the delivery key, NIP-17 gift wraps (kind
-1059) from thirty-two days back (the thirty a payment waits, and NIP-59's two
-of backdating), page by page (500 to a page, up to eight, each reaching back
-from the oldest of the last with `until`), while Foxy is in front, and only
-once the ID is in use on it: MY CASHU ID shown, or its words restored. For each
+The receiver's phone listens on the drop boxes (above), NIP-17 gift wraps
+(kind 1059), page by page (500 to a page, up to eight, each reaching back from
+the oldest of the last with `until`), while Foxy is in front, and only once the
+ID is in use on it: MY CASHU ID shown, or its words restored. For each
 delivery:
 
 1. **Read and bounded**: at most 64 kB and 100 pieces, a token in sats or
@@ -287,7 +378,7 @@ cashu-ts encodes them (`creqA…`):
 | `m` (mints) | this phone's mints that issue the unit and honour a lock (NUT-11), the default first, then the one it is on and the others it has connected to; five at most |
 | `s` (single use) | true |
 | `nut10` | `{ k: "P2PK", d: <key>, t: [] }`: a **fresh key from the seed-derived lock pool** (`takeLockKey`, account 10', as a receive request's), filed as `cid-any-<id>`; never the ID key |
-| `t` (transport) | one: Nostr, `[["n", "17"]]`, to the nprofile of the ID's **delivery key** naming the three relays its inbox listens on (`NostrDelivery.fallbackRelays`) |
+| `t` (transport) | one: Nostr, `[["n", "17"]]`, to the nprofile of a **key of the request's own**, the delivery key moved by the request's id (`SHA-256("foxy-cashu-id-any-v1" ‖ Q ‖ id)`, `cidAnyKey`), naming the three relays its inbox listens on (`NostrDelivery.fallbackRelays`); the phone listens on it for a year |
 
 Each opening takes a new key, so no two codes lock to the same one and the mint
 sees each key at one claim. Opening it puts the ID in use (the phone listens).
@@ -304,9 +395,14 @@ payment at a mint this phone does not use is refused: the request names only
 its own. With no route it is not kept: the relays still hold it, and it is read
 again on the next listen.
 
-What it costs beside the ID: the code names the delivery key and the relays, so
-anyone holding it can tell a payment to it reaches the same inbox as a payment
-to the ID; and the payer sees an ordinary lock key, as for any request.
+What it costs beside the ID: the code names a key of its own and the relays,
+not the delivery key, so holding it does not say which ID it belongs to; but
+the key is asked for over a year (ANY WALLET keys, above), so the relays can
+tie the days its REQs are asked to each other; and the payer sees an ordinary
+lock key, as for any request. A code is good for a year; money paid to a code
+more than a year old is not heard and is lost. No screen of the app shows an
+ANY WALLET code today (MY CASHU ID shows the ID alone); a screen that shows one
+again must say the code is good for a year.
 
 ## Paid to the ID key itself
 
@@ -382,24 +478,65 @@ or brought back by the refund key after its locktime ("Came back: <name> did
 not collect it"). What is lost with the phone is only a payment whose copy had
 not gone yet: one no relay took, or one paid in the last half hour.
 
+**What a restore loses.** Beside an outbox row whose copy had not gone, a
+restore loses the ANY WALLET codes this phone showed (`foxy.cid.any`: their ids
+are random, not from the words, and are not in a backup). A restored phone
+listens for none of them, so money paid to an old code after the restore is not
+heard and is lost, as for a code past its year. Which days were finished
+(`foxy.cid.heard`) is lost too, which costs nothing: the first listen asks the
+whole window.
+
 ## What each party learns
 
 | who | learns | does not learn |
 |---|---|---|
 | a mint | at each claim, every piece's blinded lock key and blinded refund key (`P′`, `R′`), the locktime to the day and a random second, the amounts; for a refund, `R′` signing | the ID, the refund key, the delivery key, who paid whom, or that two payments went to one ID or came from one payer: no key is seen twice |
 | a mint this phone does not use, paid at | nothing until the receiver answers; then what any mint learns at a claim, and as the payment is brought home, an invoice of this phone's default mint for what lands: so which mint that is (its Lightning node), and when this phone came to collect. Sent back, a fresh payment locked as any to a contact; kept there, this phone as one of its users | the ID, or anything of other payments |
-| a relay | a gift wrap for the delivery key, its size and time; when the receiver's phone listens (over Tor); how many arrive for one ID. And a wrap for the payer's recovery key for each payment not collected by then, at a random moment one to thirty minutes after a relay took the payment, and when a restored phone listens on that key | what it holds, who sent it (the wrap and seal are signed by keys made for the one message), or which payment a copy is of |
+| a relay | two gift wraps for each payment, to keys of two days, their size and time; for the one picked to listen, when the receiver's phone listens (over Tor) and the 48 keys asked, among them a day's sixteen; within one UTC day, that the listens asking the same keys are one ID's. And a wrap for the payer's recovery key for each payment not collected by then, at a random moment one to thirty minutes after a relay took the payment, and when a restored phone listens on that key | what it holds, who sent it (the wrap and seal are signed by keys made for the one message), which payment a copy is of; and, from what is asked, that two days' listens are one ID's (no key is asked on two days), unless it holds the ID string (below) |
 | the payer | the ID, the delivery key, the E, the blinded keys and the amounts of its own payments | anything of the receiver's other payments; it cannot open what it sent before the locktime |
 | the receiver | the token, the E, the amount, the note, and the payer's ID where it proved it | the payer's other payments, or its refund key |
-| anyone with the ID string | the ID and delivery keys, and that they belong together | anything paid to it |
+| anyone with the ID string | the ID and delivery keys, and that they belong together; every day's sixteen keys, so a relay handed the string ties every listen and every payment to the ID as before the drop boxes | anything paid to it |
 
 The relays Foxy uses are its own three (`NostrDelivery.fallbackRelays`); the
 nprofile the payer builds names none, so a payer sends to those three. Were the
 ID a NUT-18 request, its transport would carry the relay list, telling every
 holder of the ID which relays to watch for it.
 
-**No rotation.** The ID and the delivery key last for as long as the words do;
-that is the point of them, and the cost. Anyone who has the ID can send the
+### What the relays see
+
+Before the drop boxes, every listen named the delivery key: the relays could
+tie every time the phone opened, every day, to one name, the ID's whole daily
+rhythm. Now, measured (`tests/attack-dropbox-2026-11-06.js`, a receive-only
+phone opening about four times a day for three weeks): no key is asked on two
+days, and no two days of one ID's listens share a key. What is left, plainly:
+
+- **Within a UTC day** the listens ask the same keys: a day is one profile.
+- **Anybody with the ID string** works out every day's keys. A payer can, as
+  it must; a relay that is handed the string (it was shared in a chat, posted
+  on a page) ties everything as before. The drop boxes keep the ID's rhythm
+  from relays that do not know the ID, not from those that do.
+- **A payment's two wraps**, one to a day and one to the next, go seconds
+  apart; filler draws each one's NIP-44 size bucket afresh, but often into the
+  same bucket (Posting, above), so size and timing together still pair them. A
+  relay that pairs them can tie a paid day to the next. A day with no payment
+  cannot be tied that way. A payment's daily resends carry fresh filler too, so
+  their sizes vary as much, and no more.
+- **An ANY WALLET key** is the same each day it is asked (a year): those REQs
+  tie their days together, and relays comparing notes and watching the time can
+  guess they go with the day keys' REQs a few seconds before them, so for a
+  code's first month, when it is asked daily, a phone that showed one is tied
+  day to day through it. A phone that never showed a code has none. (A payer
+  who pays an ID daily ties its days the same way, through the wraps.)
+- **IDs from before this build** were asked for by `Q` itself at every listen
+  (above): for a relay that kept those logs, nothing here helps that ID.
+- **Timing and Tor.** Each listen is on a fresh circuit at a random relay; the
+  relays that compare notes still see when the phone is online, and with few
+  Foxy phones, timing alone can tie much (THREAT-MODEL.md).
+- **A payment to a day's key** tells a relay that holds no string nothing about
+  which ID it is for, until that day's listen asks for the key.
+
+**The ID does not rotate.** The ID and the delivery key last for as long as
+the words do; that is the point of them, and the cost. Anyone who has the ID can send the
 receiver as many deliveries as they like (each must look like money to be read
 further, and those at mints this phone does not use make it ask such a mint
 anything at most five times an hour), and the relays can count them. A delivery key that leaked would let its holder read
@@ -440,7 +577,8 @@ The menu, in this order, every section open until it is tapped shut:
   one.
 - **PAY FROM** across mints: a payment to an ID is made at the mint the phone
   is on, in the balance the keypad is in.
-- Rotating the ID, and more than one ID.
+- Rotating the ID itself, and more than one ID. (What rotates is the drop box a
+  payment is left in, above.)
 - A Cashu ID as a NUT-18 request: NUT-18 cannot yet ask a payer to blind the
   key (above). A proposal to add that marker is drafted, not sent. The
   one-time request (no screen shows it) was the stand-in.

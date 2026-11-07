@@ -46,7 +46,7 @@ function page(words) {
         return reply(w, m.id, at.handle(m));
       }
       if (m.action === 'nostrSend') { relay.push({ target: m.target, body: m.body }); return reply(w, m.id, '3'); }
-      if (m.action === 'cashuIdInboxOpen') { said.open += 1; return reply(w, m.id, '1'); }
+      if (m.action === 'cashuIdInboxOpen') { said.open += 1; said.asks = (said.asks || []).concat([{ days: m.days, any: m.any, legacy: m.legacy }]); return reply(w, m.id, '1'); }
       if (m.action === 'cashuIdCopiesOpen') return reply(w, m.id, '1');
       if (m.action === 'cashuIdInboxClose') return reply(w, m.id, 'ok');
       if (m.action === 'cashuIdSign') said.sign += 1;
@@ -62,6 +62,8 @@ function page(words) {
     },
   });
   ctx.W._nodeProbeDelay = [86400000, 86400000];
+  // a payment's second wrap (to tomorrow's keys, 08e-cashu-id.js `cidAheadAll`) held an hour, so each case reads its own first
+  ctx.W._cashuIdAheadMs = 3600000;
   ctx.said = said;
   ctx.phone = phone;
   ctx.store = (k, d) => { try { const v = JSON.parse(ctx.storage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } };
@@ -131,14 +133,44 @@ async function run() {
   ok(d1.transport.length === 1 && tr.type === 'nostr' && /^nprofile1/.test(tr.target) && JSON.stringify(tr.tags) === JSON.stringify([['n', '17']]),
     'one transport: Nostr, NIP-17', JSON.stringify(d1.transport).slice(0, 120));
   const np = nprofileRead(tr.target);
-  ok(np.key === mine.nostr, 'to the ID’s delivery key', np.key);
+  ok(np.key !== mine.nostr && np.key === H.cashuIdAnyKey(mine.nostr, r1.id) && np.key === A.W._cashuIdAnyKey(mine.nostr, r1.id),
+    'DROP: to a key of the request’s own (the delivery key moved by the request’s id), never the delivery key itself', np.key);
   const swift = fs.readFileSync(path.join(__dirname, '..', 'Foxy', 'Nostr', 'NostrDelivery.swift'), 'utf8');
   const fallback = (/static let fallbackRelays = \[([^\]]*)\]/.exec(swift) || [])[1] || '';
   const relaysSwift = (fallback.match(/"(wss:[^"]+)"/g) || []).map((x) => x.slice(1, -1));
   ok(relaysSwift.length === 3 && JSON.stringify(np.relays) === JSON.stringify(relaysSwift),
     'naming the three relays the ID’s inbox listens on (NostrDelivery.fallbackRelays)', JSON.stringify(np.relays));
-  ok(A.said.open >= 1, 'and the phone listens on the delivery key from then on');
+  ok(A.said.open >= 1, 'and the phone listens from then on');
+  {
+    const last = (A.said.asks || [])[A.said.asks.length - 1] || {};
+    const kept = A.store('foxy.cid.any', []);
+    ok(Array.isArray(last.any) && last.any.indexOf(r1.id) >= 0 && kept.some((x) => x.id === r1.id && x.at > Date.now() - 60000 && x.at <= Date.now()),
+      'DROP: and on that key, kept a year (foxy.cid.any: the id and when, no key)', JSON.stringify({ last, kept }).slice(0, 200));
+    const n0 = A.said.asks.length;
+    for (let i = 0; i < 100 && !A.store('foxy.cid.heard', 0); i++) await new Promise((r) => setTimeout(r, 20));
+    await A.W.cashuIdListen();
+    const again = A.said.asks[A.said.asks.length - 1] || {};
+    ok(A.said.asks.length === n0 + 1 && again.any.indexOf(r1.id) >= 0 && again.legacy === undefined && again.days.length === 1,
+      'DROP: in its first day it is asked at every listen, and the delivery key itself never', JSON.stringify(again));
+    // L-c: a day listen that finished does not mark the codes asked; only the bridge's word that their own REQs ended does
+    const row1 = () => A.store('foxy.cid.any', []).find((x) => x.id === r1.id) || {};
+    ok(!row1().asked, 'L-c: a code is not marked asked when the day keys’ listen finishes', JSON.stringify(row1()));
+    const today = Math.floor(Date.now() / 86400000);
+    ok(A.W._cashuIdAnyHeard(r1.id + ',zz,') === 1 && row1().asked === today,
+      'L-c: and is once a relay has ended its REQs (_cashuIdAnyHeard)', JSON.stringify(row1()));
+  }
   const r2 = await A.W.cashuIdAnyRequest({ unit: 'sat' });
+  {
+    // L-c: 960 codes kept at most; one more drops the oldest (the bridge asks for no more than 960)
+    const keepAny = A.store('foxy.cid.any', []);
+    const full = Array.from({ length: 960 }, (_, i) => ({ id: (0x30000000 + i).toString(16), at: Date.now() - 1000 * (960 - i), asked: 0 }));
+    A.put('foxy.cid.any', full);
+    const r3 = await A.W.cashuIdAnyRequest({ unit: 'sat' });
+    const after = A.store('foxy.cid.any', []);
+    ok(after.length === 960 && after[after.length - 1].id === r3.id && after[0].id === full[1].id,
+      'L-c: the 961st code drops the oldest', after.length + ' ' + (after[0] || {}).id);
+    A.put('foxy.cid.any', keepAny.concat(after.filter((x) => x.id === r3.id)));
+  }
   ok(r2.pub !== r1.pub && r2.id !== r1.id && CT.decodePaymentRequest(r2.text).nut10.data === r2.pub, 'a second opening: a new key', r2.pub.slice(0, 12));
   let usdNo = '';
   try { await A.W.cashuIdAnyRequest({ unit: 'eur' }); } catch (e) { usdNo = e.message; }

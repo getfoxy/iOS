@@ -851,7 +851,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq(usdRows[0].amtSub, '₿ 12,230', 'a swap row has the other leg under it');
     eq(usdRows[0].name, 'Swap', 'named Swap');
     eq(usdRows.map((r) => r.balText), ['BAL $ 42.05', 'BAL $ 52.05', 'BAL $ 40.05'], 'the running balance in dollars');
-    eq([v.histAuditTitle, v.histAuditBody], ['ADDS UP', 'Every cent of your $ 42.05 is accounted for by the payments below.'], 'the dollars add up on their own tab');
+    eq([v.histAuditTitle, v.histAuditBody], ['ADDS UP', 'Every cent of your $ 42.05 is accounted for by the payments above.'], 'the dollars add up on their own tab');
     v.histTabs[1].tap();
     await settle();
     v = V();

@@ -148,6 +148,9 @@
               * (`cardSeal`), and this phone then sends it no other way. */
              sealed: (b(6) & 128) !== 0,
              tapKnown: tapKnown, tapLimit: tapKnown ? cardU32(h, 30) : 0,
+             /* `tapSaid`: the limit on one payment above is the card's own. A quick card says it to its owner's grant alone (0 to
+              * anyone else), so read without the grant it is not said; `cardLook` sets this where the grant's read says it. */
+             tapSaid: tapKnown && (b(6) & 16) === 0,
              tapStart: (tapKnown && !noPinKnown) ? cardU32(h, 34) : 0, tapSpent: (tapKnown && !noPinKnown) ? cardU32(h, 38) : 0,
              /* `noPinKnown`: the card's software is 1.16 or later, whose PIN is optional: a card may have none and pay without
               * it, and one with a PIN may let a day's worth be signed for without it (`noPin`, the allowance and what is spent
@@ -478,6 +481,7 @@
       // as the card has them now: a figure that changed begins its window or its count again, as the card's own rules say
       if (day !== (Number(info.limit) || 0)) { info.limit = day; info.windowStart = info.now; info.spentToday = 0; if (card.record) card.record.limit = day; }
       info.tapLimit = tap;
+      info.tapSaid = true;
       if (np !== (Number(info.noPin && info.noPin.limit) || 0)) info.noPin = { limit: np, spent: 0 };
       info.rate = rate;
       info.rateSaid = true;
@@ -697,6 +701,20 @@
    * new SELECT, a reset), only time. `left` is null where there is no such
    * limit; `turns` is when this tap ends, 0 where none is in hand. */
   var CARD_TAP = 10;
+  /* Whether this phone's own taking-off lifts the card's limits for its tap (`cardTake`'s `lift`, `cardUnderPin`): the one rule, which
+   * the screens ask too (FoxyWallet.cardLiftWanted) before the card is held up, for the keeper's yes. 'yes' where the card said a daily
+   * limit or a limit on one payment (a per-second one is that limit: `paced`), on a card of any software; 'no' where it said neither;
+   * 'unknown' where it did not say the second (a quick card read without its owner's grant says 0 for it whatever it holds,
+   * `tapSaid`), or the card was not read. The no-PIN allowance is no reason: a taking-off is made under the PIN, or on a card that
+   * has none, which has no allowance. A screen asks wherever this is not 'no'. */
+  function cardLiftWanted(card) {
+    var info = card && card.info;
+    if (!info) return 'unknown';
+    if ((Number(info.limit) || 0) > 0 || (Number(info.tapLimit) || 0) > 0) return 'yes';
+    if (info.tapKnown && !info.tapSaid) return 'unknown';
+    return 'no';
+  }
+
   function cardTapOf(info) {
     var limit = Number(info && info.tapLimit) || 0;
     var known = !!(info && info.tapKnown);
@@ -1870,6 +1888,7 @@
     }).then(function (d) {
       var again = cardInfoOf(d);
       card.info.tapLimit = again.tapLimit;
+      card.info.tapSaid = true;
       // (1.23: and the rate, said to the PIN in a tap that read the history)
       if (again.units && again.book) { card.info.rate = again.rate; card.info.rateSaid = true; }
       card.tap = cardTapOf(card.info);
@@ -2223,6 +2242,7 @@
         return t.want(cardCommand(CARD_INS.info, cardInfoP1(card), '', 0), 'to say its limit').then(function (d) {
           var again = cardInfoOf(d);
           card.info.tapLimit = again.tapLimit;
+          card.info.tapSaid = true;
           // (1.23: and the rate, which the grant opens as it opens the limit)
           if (again.units && again.book) { card.info.rate = again.rate; card.info.rateSaid = true; card.info.book = again.book; }
           card.tap = cardTapOf(card.info);
@@ -7916,7 +7936,7 @@
       var day = card.day;
       var tap = card.tap || cardTapOf(card.info);
       var turns = day.turns;
-      lift = !!(o.lift && (day.limited || tap.limited) && card.mine);
+      lift = !!(o.lift && card.mine && cardLiftWanted(card) === 'yes');
       /* (1.23: the day and the tap are counted in cents; the pieces are chosen, and a payment refused, in the card's unit as it pays, so
        * what is left of each is turned back into it at the rate, rounded down, which is exactly what fits (`cardCeilBack`). A sats card
        * with no rate known here has no figure to be held to by this phone: the card's own word decides.) */

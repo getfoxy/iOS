@@ -85,7 +85,7 @@ async function run() {
       transferQuote: (from, sats, o) => { quoted.push({ from, sats, o }); return Promise.resolve({ unit: o && o.unit, gross: 512, feeUnit: 7, amountUnit: 505, moving: sats, net: sats, feeSats: 0 }); },
       reason: (e) => String((e && e.message) || e),
     } };
-    const a = new Function('return {' + ['trHeldAt(url) {', 'trPick(url) {', 'trFromSats() {', 'trFromText() {', 'trNext() {', 'quoteTransfer() {',
+    const a = new Function('return {' + ['trHeldAt(url) {', 'trPick(url) {', 'trPickTo(mint) {', 'trFromSats() {', 'trFromText() {', 'trNext() {', 'quoteTransfer() {',
       'transferSpec() {', 'transferSpecUsd() {', 'fcUnitAsk(then, card, both) {', 'fcPickUnit(o, then) {', 'currencyPick(unit) {'].map(method).join(',\n') + '}')();
     Object.assign(a, {
       quoted, toasts: [],

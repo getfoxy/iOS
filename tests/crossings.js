@@ -167,6 +167,9 @@ async function run() {
        W.balanceAt(THEIR) + ' at their mint for ' + (plan1.moving + plan2.moving) + '; ' + notes(p).length + ' note(s) left');
     ok(claims === 2 && a === b, 'two callers share one walk: each quote is claimed once', claims + ' claims');
     ok(canon(W.mintUrl) === HOME, 'and the phone is still on its own mint', W.mintUrl);
+    // the crossing's end: the live mint is the saved one, and the far mint, only visited, is not chosen
+    ok(canon(W.mintUrl) === canon(JSON.parse(p.storage.getItem('foxy.cashu.mint'))) && !W.mintChosen(THEIR),
+       'after the crossings, the live mint is the saved one and the far mint is not chosen', W.mintUrl);
     const landed = history(p).filter((e) => e.dir === 'in' && e.memo === 'mint switch');
     ok(landed.length === 2 && landed.every((e) => canon(e.mint) === THEIR), 'their entries name the mint the sats landed at, not the one the phone was on',
        JSON.stringify(landed.map((e) => e.mint)));
@@ -294,6 +297,8 @@ async function run() {
     ok(r.state === 'home' && t.rx.W.balanceAt(HOME) >= t.sats && canon(t.rx.W.mintUrl) === HOME && !jobs(t.rx).length && !notes(t.rx).length,
        'it is brought home: the figure asked for lands, the phone is on its own mint, and nothing is left written down',
        r.state + ': ' + t.rx.W.balanceAt(HOME) + ' at home; ' + (r.why || ''));
+    ok(canon(t.rx.W.mintUrl) === canon(JSON.parse(t.rx.storage.getItem('foxy.cashu.mint'))) && !t.rx.W.mintChosen(THEIR),
+       'after the carry home, the live mint is the saved one and the payer’s mint is not chosen', t.rx.W.mintUrl);
   }
   /* killed at the payer's mint with the payment taken: opened again, it opens at home and brings it home itself */
   {

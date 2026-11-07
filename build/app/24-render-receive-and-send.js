@@ -320,7 +320,71 @@
       // (dark as it goes, as the screen it replaced did)
       paidRestBg: (s.recv && s.recv.live) === 'out' ? '#050505' : 'linear-gradient(180deg,#5FD58C 0%,#1FAF5A 55%,#138A44 100%)',
       paidRestDone: (s.paidPlace && s.paidPlace.dismiss) || 'DONE',
+    }, this.paidBulkVals ? this.paidBulkVals(s) : {});
+  }
+
+  /* The bulk RECEIVED (the keeper's 2026-11-06 design): two or more receives in one opening of Foxy (`paidBulk`, 15-paid-wake-keyboard.js)
+   * on the same green screen, its flash played once: RECEIVED, their total, a row each, DISMISS and SEE HISTORY. */
+  /** @param {any} s */
+  paidBulkVals(s) {
+    /* Only the screen's own list: one whose rows hold the payment it shows (`paidHash`), on a RECEIVED with no words or button of
+     * its own. A RECEIVED raised over it by another way (the receive screen's own invoice, a card's CARD MOVED) is that one. */
+    const own = String(s.paidHash || '');
+    const rows = !s.payOut && !s.paidSays && !(s.paidPlace && s.paidPlace.dismiss) && Array.isArray(s.paidBulk) && s.paidBulk.length >= 2
+      && s.paidBulk.some((r) => !!r && String(r.hash || '') === own) ? s.paidBulk : null;
+    if (!rows) return { isPaidBulk: false, paidSingle: true, paidBulkRows: [] };
+    const total = this.paidBulkTotal(rows);
+    const fig = String(total.main);
+    return {
+      isPaidBulk: true, paidSingle: false,
+      paidHeadline: total.main,
+      paidRestTitle: 'RECEIVED',
+      paidRestLines: total.sub ? [{ text: total.sub }] : [],
+      paidRestSize: fig.length <= 7 ? '76px' : Math.max(36, Math.floor(76 * 7 / fig.length)) + 'px',
+      paidRestDone: 'DISMISS',
+      paidBulkRows: this.paidBulkRows(rows),
+    };
+  }
+
+  /* Their total: in the one unit they share, or in dollars at this phone's price where both came; both figures with no price. */
+  /** @param {any[]} rows */
+  paidBulkTotal(rows) {
+    let sats = 0, cents = 0;
+    rows.forEach((r) => { if (r.unit === 'usd') cents += Number(r.amount) || 0; else sats += Number(r.amount) || 0; });
+    if (!cents) { const m = this.money(sats); return { main: m.main, sub: m.sub }; }
+    if (!sats) return { main: this.unitFigure(cents, 'usd'), sub: '' };
+    const m = this.money(sats);
+    if (m.usd != null && isFinite(m.usd)) return { main: '$ ' + this.usd(m.usd + cents / 100), sub: this.unitFigure(cents, 'usd') + ' + ' + m.sub };
+    return { main: this.unitFigure(cents, 'usd') + ' + ' + this.unitFigure(sats, 'sat'), sub: '' };
+  }
+
+  /* The rows, newest first: the amount in its unit (bitcoin with its dollars first and the sats under, as the single screen
+   * shows it), when, the mint, and the payer's name or the note. */
+  /** @param {any[]} rows */
+  paidBulkRows(rows) {
+    const now = new Date();
+    return rows.slice().sort((x, y) => (Number(y.atMs) || 0) - (Number(x.atMs) || 0)).map((r, i) => {
+      const m = r.unit === 'usd' ? { main: this.unitFigure(r.amount, 'usd'), sub: '' } : this.money(r.amount);
+      // and, for one to be swapped into the other unit, where it goes next (`paidRowOf`)
+      const sub = [m.sub || '', r.then || ''].filter(Boolean).join(' \u00b7 ');
+      return {
+        key: String(r.hash || i), amt: m.main, sub: sub, subOn: !!sub,
+        time: this.paidBulkWhen(Number(r.atMs) || Date.now(), now),
+        mint: String(r.mint || ''), who: String(r.who || ''), whoOn: !!r.who,
+      };
     });
+  }
+
+  /* When, as history says it: "2:14 PM" today, "Yesterday 9:03 AM", and the date before that (16-history-lists.js `txClock`, `txDay`). */
+  /**
+   * @param {number} at
+   * @param {Date} now
+   */
+  paidBulkWhen(at, now) {
+    const d = new Date(at);
+    if (d.toDateString() === now.toDateString()) return this.txClock(d);
+    if (d.toDateString() === new Date(now.getTime() - 86400000).toDateString()) return 'Yesterday ' + this.txClock(d);
+    return this.txDay(d, now) + ' ' + this.txClock(d);
   }
 
   /** @param {RenderContext} c */
@@ -359,37 +423,61 @@
       paidDismissLabel: (s.paidPlace && s.paidPlace.dismiss) || 'DISMISS',
       paidBadgeTick: s.recvResolved ? 'var(--acc)' : CTA_INK(s),
       paidLive: (s.recv && s.recv.live) !== 'gone',
-      dismissPaid: () => {
-        this.setState(p => ({ recv: Object.assign({}, p.recv, { live: 'out' }) }));
-        const lane = this.state.paidUnit === 'usd' ? 'usd' : 'btc';
-        setTimeout(() => {
-          // counts to whatever the wallet holds now, in either direction, on the pill it landed on
-          this.settleAnimate(lane);
-          // back to whatever the confirmation interrupted, when it interrupted
-          // something. Cleared either way so it cannot leak into the next one.
-          const back = this._returnTo;
-          this._returnTo = null;
-          if (back) {
-            setTimeout(() => this.setState({ screen: back.screen, stack: back.stack }), 0);
-          }
-          this.paidDismissed();
-          /* A payment begun on the card's screen (the stack under the confirmation holds it) ends back on the card's screen, not
-           * home: the design's rule. The card is not read again for it, so what came off it for the payment (26f-flashcard.js,
-           * `fcOutPay` keeps `_fcPaidOff`) is stepped off the figure shown; the change the card is owed is its own flow's. */
-          const fc = this.state.fc;
-          const off = this._fcPaidOff;
-          this._fcPaidOff = null;
-          const toCard = !!fc && (this.state.stack || []).indexOf('flashcard') >= 0 && (!off || off.key === fc.key);
-          const fcNext = (toCard && off && off.off > 0) ? Object.assign({}, fc, {
-            balance: fc.unit === off.unit ? Math.max(0, (Number(fc.balance) || 0) - off.off) : fc.balance,
-            bal: fc.bal ? Object.assign({}, fc.bal, { [off.unit]: Math.max(0, (Number(fc.bal[off.unit]) || 0) - off.off) }) : fc.bal,
-          }) : fc;
-          this.setState(Object.assign({ screen: toCard ? 'flashcard' : 'home', fc: fcNext, stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidPlace: null, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidAskAgeMs: 0, paidConvert: false, recv: Object.assign({}, this.state.recv, { live: 'gone' }) },
-            // in the till, its SET AMOUNT for the next customer (26m-till.js, `homeState`)
-            toCard || !this.state.till ? {} : this.homeState()));
-        }, 450);
-      },
+      dismissPaid: () => this.paidDismiss(false),
+      // the bulk RECEIVED's SEE HISTORY: DISMISS, and HISTORY over where it went, so back from HISTORY is there
+      paidSeeHistory: () => this.paidDismiss(true),
     };
+  }
+
+  /* DONE / DISMISS on PAID; `history`: then HISTORY over the screen it went to (the bulk RECEIVED's SEE HISTORY). */
+  /** @param {boolean} history */
+  paidDismiss(history) {
+    // a second tap while the first is on its way is the same dismissal (the button is drawn until the screen goes)
+    if (this.paidDismissingNow()) return;
+    // nothing more joins a screen on its way out, and nothing new is raised to be swept off with it (`announcePayment`)
+    this._paidOpenAt = 0;
+    this._paidDismissing = Date.now();
+    this.setState(p => ({ recv: Object.assign({}, p.recv, { live: 'out' }) }));
+    const lane = this.state.paidUnit === 'usd' ? 'usd' : 'btc';
+    setTimeout(() => {
+      try {
+        // counts to whatever the wallet holds now, in either direction, on the pill it landed on
+        this.settleAnimate(lane);
+        // back to whatever the confirmation interrupted, when it interrupted
+        // something. Cleared either way so it cannot leak into the next one.
+        const back = this._returnTo;
+        this._returnTo = null;
+        if (back) {
+          setTimeout(() => this.setState({ screen: back.screen, stack: back.stack }), 0);
+        }
+        this.paidDismissed();
+        /* A payment begun on the card's screen (the stack under the confirmation holds it) ends back on the card's screen, not
+         * home: the design's rule. The card is not read again for it, so what came off it for the payment (26f-flashcard.js,
+         * `fcOutPay` keeps `_fcPaidOff`) is stepped off the figure shown; the change the card is owed is its own flow's. */
+        const fc = this.state.fc;
+        const off = this._fcPaidOff;
+        this._fcPaidOff = null;
+        const toCard = !!fc && (this.state.stack || []).indexOf('flashcard') >= 0 && (!off || off.key === fc.key);
+        const fcNext = (toCard && off && off.off > 0) ? Object.assign({}, fc, {
+          balance: fc.unit === off.unit ? Math.max(0, (Number(fc.balance) || 0) - off.off) : fc.balance,
+          bal: fc.bal ? Object.assign({}, fc.bal, { [off.unit]: Math.max(0, (Number(fc.bal[off.unit]) || 0) - off.off) }) : fc.bal,
+        }) : fc;
+        this.setState(Object.assign({ screen: toCard ? 'flashcard' : 'home', fc: fcNext, stack: [], amount: '', asset: '', network: '', unit: 'USD', payOut: false, paidPlace: null, paidUnit: '', paidAmount: null, paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidAskAgeMs: 0, paidConvert: false, paidRow: null, paidBulk: null, recv: Object.assign({}, this.state.recv, { live: 'gone' }) },
+          // in the till, its SET AMOUNT for the next customer (26m-till.js, `homeState`)
+          toCard || !this.state.till ? {} : this.homeState()));
+        // (after the screen it interrupted is put back, above)
+        if (history) setTimeout(() => this.setState(p => ({ screen: 'history', stack: p.stack.concat([p.screen]) })), 0);
+      } finally {
+        // (after the screens above are set: an arrival from now on is raised over where DISMISS went; and whatever failed above)
+        setTimeout(() => { this._paidDismissing = 0; }, 0);
+      }
+    }, 450);
+  }
+
+  /* Whether a DISMISS is on its way (`paidDismiss`). Honoured for 2 s at most, so a dismissal that never finished does not hold
+   * every later arrival back. */
+  paidDismissingNow() {
+    return !!this._paidDismissing && Date.now() - Number(this._paidDismissing) < 2000;
   }
 
   /* sendHow, sendType, sendScan: the ways to pay someone.

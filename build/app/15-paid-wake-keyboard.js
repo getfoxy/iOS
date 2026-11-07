@@ -41,7 +41,8 @@
   nextPaidScreen() {
     const queue = this._paidQueue || [];
     if (!queue.length) return;
-    if (this.state.screen === 'paid') { this.queueLater(); return; }   // one at a time
+    // one at a time; but receives waiting join a RECEIVED that is up (`paidJoinQueued`)
+    if (this.state.screen === 'paid') { if (this.paidJoinQueued) this.paidJoinQueued(); this.queueLater(); return; }
     // a split has its own running tally and its own all-paid screen; a
     // confirmation per payer would talk over it. They wait in the queue.
     if (this.SPLIT_SCREENS.indexOf(this.state.screen) >= 0) { this.queueLater(); return; }
@@ -92,16 +93,116 @@
     }
     next.said = Date.now();
 
+    this.announcePayment(this.queuedEv(next));
+    // the other receives waiting with it are on the same screen, not one after another (the keeper's bulk RECEIVED)
+    if (this.paidJoinQueued) this.paidJoinQueued();
+    // the confirmation may not have landed; this is what notices
+    this.queueLater();
+  }
+
+  /* A queued confirmation as `announcePayment` is asked it. */
+  /** @param {any} next */
+  queuedEv(next) {
     // a confirmation that was kept for a card flow is raised as it was asked, with all it carried
-    this.announcePayment(Object.assign({}, next.ev || {}, {
+    return Object.assign({}, next.ev || {}, {
       dir: next.dir || 'in', sats: next.sats, hash: next.hash, to: next.party || '', cardDone: next.cardDone || undefined,
     }, next.unit && next.unit !== 'sat' ? { unit: next.unit, amount: next.amount } : {},
     // sats paid for dollars asked for, to be swapped into dollars: the dollars asked, and how old the payer's price was
     Number(next.usdAsked) > 0 && next.convert ? { usdAsked: next.usdAsked, askAgeMs: next.askAgeMs, askConvert: true, askOwn: !!next.askOwn } : {},
     // and dollars a dollar card paid for sats asked: the sats asked, how old this phone's price was, and whether they are to be swapped
-    Number(next.satsAsked) > 0 ? { satsAsked: next.satsAsked, askAgeMs: next.askAgeMs, askOwn: !!next.askOwn, askConvert: !!next.convert } : {}));
-    // the confirmation may not have landed; this is what notices
-    this.queueLater();
+    Number(next.satsAsked) > 0 ? { satsAsked: next.satsAsked, askAgeMs: next.askAgeMs, askOwn: !!next.askOwn, askConvert: !!next.convert } : {},
+    // its history row's when, mint and words, for its row on a bulk RECEIVED (`paidRowOf`)
+    next.at ? { at: next.at } : {}, next.mint ? { mint: next.mint } : {}, next.memo ? { memo: next.memo } : {},
+    // and what history names its payer by (`txWho`): an address in its details, the card it came from
+    next.extra ? { extra: next.extra } : {}, next.card ? { card: next.card } : {}, next.fromCard ? { fromCard: next.fromCard } : {});
+  }
+
+  /* ---- the bulk RECEIVED (the keeper's 2026-11-06 design) --------------------------------------------------------------
+   *
+   * Two or more payments arriving in one opening of Foxy (the history pass on a return to the front, or one after another
+   * while home is up) are one screen: RECEIVED, the total, and a row each, newest first, with DISMISS and SEE HISTORY
+   * (24-render-receive-and-send.js `renderPaidRest`). The first is raised as ever (`announcePayment`); each one after it,
+   * while that screen is up, joins its list (`paidBulk`) instead of raising its own. A single payment keeps the single
+   * screen. A till is never bulked: a till shows each sale. Payments out keep their own screens. */
+
+  /* Whether a receive `ev` joins the RECEIVED up now. The one just raised counts as up for a moment before it is drawn
+   * (`_paidOpenAt`, set by `announcePayment`). */
+  /** @param {any} ev */
+  paidJoinable(ev) {
+    const s = this.state || {};
+    if (!ev || ev.dir !== 'in' || ev.says || s.till) return false;
+    // held while change for a card payment is made (`_holdConfirmUntil`), or a card's deposit on its way to the card (`_fcDep`)
+    if (Date.now() < (this._holdConfirmUntil || 0) || this._fcDep) return false;
+    // a screen with its own words or its own button over it (a card's CARD MOVED) is not a RECEIVED to join, drawn or not
+    const own = s.screen === 'paid' && (s.payOut || s.paidSays || (s.paidPlace && s.paidPlace.dismiss));
+    if (this._paidOpenAt && Date.now() - this._paidOpenAt < 1500) return !own;
+    return s.screen === 'paid' && !own
+      && !!s.recv && s.recv.live === 'in'
+      && (!!s.paidRow || (s.paidAmount !== null && s.paidAmount !== undefined && s.paidAmount !== ''));
+  }
+
+  /* Receives in the queue joining the RECEIVED up, each marked (`bulked`) so its dismissal lets it go (`paidDismissed`). */
+  paidJoinQueued() {
+    const queue = this._paidQueue || [];
+    queue.slice().forEach((q) => {
+      if (!q || q.said || q.bulked || q.noJoin || (q.dir || 'in') !== 'in') return;
+      if (/^(req-)?(tap-)?change-/.test(String(q.hash || ''))) return;
+      if (this.cardFlowHolds && this.cardFlowHolds(q)) return;
+      const ev = this.queuedEv(q);
+      if (!this.paidJoinable(ev)) return;
+      if (this.announcePayment(ev) === 'joined') { q.said = Date.now(); q.bulked = true; return; }
+      // declined (held back, said already, not a payment): not asked again every retry; it has its own turn after the screen
+      q.noJoin = true;
+    });
+  }
+
+  /* One payment's row: its amount in its unit, when (ms), the mint it went into (NOW AT another, where it landed elsewhere),
+   * and the payer's name (a Cashu ID's "From …", as history names it) or the note. */
+  /** @param {any} ev */
+  paidRowOf(ev) {
+    const W = window.FoxyWallet;
+    const unit = ev.unit && ev.unit !== 'sat' ? String(ev.unit) : 'sat';
+    const amount = Math.max(0, Math.round(Number(ev.amount != null ? ev.amount : ev.sats) || 0));
+    const atMs = ev.at ? (this.txWhen ? this.txWhen({ at: ev.at }).getTime() : Number(ev.at)) : Date.now();
+    const canon = (u) => (W && W.canonicalMint ? W.canonicalMint(u) : String(u || '').replace(/\/+$/, ''));
+    const name = (u) => (this.mintNameOf && this.mintNameOf(u)) || String(u || '').replace(/^https?:\/\//, '');
+    const away = !!(ev.awayAt && W && W.mintUrl && canon(ev.awayAt) !== canon(W.mintUrl));
+    let tags = {};
+    try { tags = (W && W.tagsFor && ev.hash && W.tagsFor(ev.hash)) || {}; } catch (e) { tags = {}; }
+    // named as its history row names it (16-history-lists.js): an exchange, its tag, or `txWho`
+    let who = '';
+    try {
+      who = tags.bank && this.bankName ? 'To ' + this.bankName(tags.bank)
+        : (tags.to && tags.to !== 'card' ? String(tags.to)
+          : (this.txWho ? this.txWho({ memo: ev.memo || '', extra: ev.extra, dir: 'in', card: ev.card, fromCard: ev.fromCard }) : ''));
+    } catch (e) { who = ''; }
+    if (who === 'Received' || who === 'Sent') who = '';
+    const note = String(tags.note || '').trim();
+    /* To be swapped into the other unit, as the single screen says it (`renderPaid`): bitcoin paid for dollars asked, at a mint
+     * with both; dollars a dollar card paid for sats asked. */
+    const then = !ev.askConvert ? ''
+      : unit === 'usd' ? (Number(ev.satsAsked) > 0 ? 'THEN BITCOIN' : '')
+        : (Number(ev.usdAsked) > 0 && this.twoUnitsOn && this.twoUnitsOn() ? 'THEN DOLLARS' : '');
+    return {
+      hash: String(ev.hash || ev.tokenHash || ''), unit: unit, amount: amount, atMs: atMs,
+      mint: away ? 'NOW AT ' + name(ev.awayAt) : name(ev.mint || (W && W.mintUrl) || ''),
+      who: who || note, then: then,
+    };
+  }
+
+  /* The row of a RECEIVED raised by another way than `announcePayment` (a receive screen's own invoice paid): from what the
+   * screen shows. */
+  /** @param {any} p */
+  paidRowFromState(p) {
+    const W = window.FoxyWallet;
+    const place = p.paidPlace && p.paidPlace.label === 'NOW AT' ? 'NOW AT ' + p.paidPlace.to : '';
+    return {
+      hash: String(p.paidHash || ''), unit: p.paidUnit === 'usd' ? 'usd' : 'sat',
+      amount: Math.max(0, Math.round(Number(p.paidAmount) || 0)), atMs: Date.now(),
+      mint: place || ((this.mintNameOf && W && this.mintNameOf(W.mintUrl)) || ''), who: '',
+      then: !p.paidConvert ? '' : p.paidUnit === 'usd' ? (Number(p.paidAskedSats) > 0 ? 'THEN BITCOIN' : '')
+        : (Number(p.paidAsked) > 0 && this.twoUnitsOn && this.twoUnitsOn() ? 'THEN DOLLARS' : ''),
+    };
   }
 
   // called when a confirmation is dismissed
@@ -121,7 +222,18 @@
   PASTE_SETTLE_MS = 700;
 
   paidDismissed() {
-    if (this._paidQueue && this._paidQueue.length) this._paidQueue.shift();
+    /* The head, when it is the one that was said (`nextPaidScreen`): a confirmation raised straight by the wallet left the head
+     * where it was, perhaps one a card flow is still holding, never shown. */
+    if (this._paidQueue && this._paidQueue.length && this._paidQueue[0] && this._paidQueue[0].said) this._paidQueue.shift();
+    // and every receive that joined the screen, once each (the bulk RECEIVED, `paidJoinQueued`), and any waiting under a hash it showed
+    const s = this.state || {};
+    const shown = {};
+    if (s.screen === 'paid') {
+      if (s.paidHash) shown[s.paidHash] = true;
+      (Array.isArray(s.paidBulk) ? s.paidBulk : []).forEach((r) => { if (r && r.hash) shown[r.hash] = true; });
+    }
+    if (this._paidQueue) this._paidQueue = this._paidQueue.filter((q) => !(q && (q.bulked || (q.hash && shown[q.hash]))));
+    this._paidOpenAt = 0;
     /* Nothing measures or places a native view over the page until this is
      * past (syncPreview waits on it and comes back by itself). */
     this._slideUntil = Math.max(this._slideUntil || 0, Date.now() + this.PASTE_SETTLE_MS);
@@ -276,7 +388,11 @@
             return told;
           };
           if (!this.offlineNow()) {
-            W.receiveToken(token, { hash: changeHash })
+            /* Change at a mint the person did not choose (a crossing's far mint) is taken there as a visit: taking it is
+             * not choosing that mint (09-melt-paste-switch.js `mintOnPhone`). */
+            const changeAt = (W.tokenInfo && W.tokenInfo(token)) || null;
+            const away = !!(changeAt && changeAt.mint && this.mintOnPhone && !this.mintOnPhone(changeAt.mint));
+            W.receiveToken(token, away ? { hash: changeHash, visit: true } : { hash: changeHash })
               .then(() => kept(''), e => {
                 /* The swap failed but the ecash is still locked to this phone, so
                  * it is kept rather than dropped and claimed on the next try. */
@@ -288,7 +404,10 @@
                 }
                 try { W.keepChange(token, sats); return kept(', waiting to settle'); }
                 catch (x) { return W.tapChangeKept(false); }
-              }).catch(() => {});
+              })
+              // taken at a mint the person did not choose, as a visit: home again after it (09-melt-paste-switch.js `homeAgain`)
+              .then(() => { if (away && this.homeAgain) this.homeAgain(); })
+              .catch(() => {});
             return;
           }
           // offline there is no swap to settle it, so the signature has to verify here

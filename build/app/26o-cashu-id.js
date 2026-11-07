@@ -317,7 +317,11 @@
       tick: { label: 'Always do this for ' + at },
       retry: 'BRING IT HOME', go: (words, always) => this.cidDecideGo(v, 'home', !!always),
       retryOff: off, retryNote: off ? (v.why || 'It cannot be brought home now.') : 'fee about ' + this.cidMoney(v.fee, unit) + lands,
-      shut: { label: 'KEEP IT THERE', pill: true, tap: answer('keep') },
+      /* KEEP IT THERE makes that mint one of this phone's: past the lock first, as a token's KEEP IT THERE is
+       * (09-melt-paste-switch.js `mintGate`). Given up, the payment still waits in HISTORY. */
+      shut: { label: 'KEEP IT THERE', pill: true, tap: (always) => (this.mintGate
+        ? this.mintGate(v.mint, () => this.cidDecideGo(v, 'keep', !!always), 'To keep it at a new mint.')
+        : this.cidDecideGo(v, 'keep', !!always)) },
       pills: v.back ? [{ label: 'SEND IT BACK', tap: answer('back') }] : [],
       also: { label: 'DECIDE LATER' },
     });

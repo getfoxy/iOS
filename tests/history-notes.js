@@ -208,7 +208,7 @@ console.log('\n6. a card’s business is in the card’s list, and not in home�
    * in the card's list; the swap's own legs name no card and are in home's, as any swap is. The take-back of a lost card
    * (`lost`) is in home's list too: that card's own list cannot be opened. The books (`histAudit`, lifted for real here) still
    * walk every row, so home still ADDS UP with the card's rows not shown. */
-  const a = lift(['renderHistory(c) {', 'histAudit() {']);
+  const a = lift(['renderHistory(c) {', 'histAudit(src) {']);
   global.CTA_INK = () => '#fff';
   const KEY = '02mine', OTHER = '02someone';
   global.window = { FoxyWallet: { cardKnownHere: (k) => k === KEY, heldSats: () => 0 } };

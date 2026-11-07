@@ -1612,7 +1612,8 @@
     var to = home && typeof home.mint === 'string' ? canonicalMint(home.mint) : '';
     if (!to || to === canonicalMint(mintUrl || '')) return Promise.resolve({ mint: canonicalMint(mintUrl || ''), moved: false });
     // home at once from the keys on file, and its mint asked behind it (`lazy`)
-    return FoxyWallet.connect(to, null, null, { lazy: true }).then(function () {
+    // saved as the phone's own again only where the person chose it (`mintsChosen`): the home is the mint the phone was on
+    return FoxyWallet.connect(to, null, null, FoxyWallet.mintChosen(to) ? { lazy: true } : { lazy: true, remember: false }).then(function () {
       console.log('[foxy] till: closed; back at ' + hostOf(to));
       return { mint: to, moved: true };
     }, function (e) {
@@ -1628,7 +1629,8 @@
     if (tillOutboxRows().some(tillUnsent)) tillDeliverAll().then(null, function () {});
     var to = home && typeof home.mint === 'string' ? canonicalMint(home.mint) : '';
     if (!to || to === canonicalMint(mintUrl || '')) return Promise.resolve({ left: true, mint: canonicalMint(mintUrl || ''), home: true });
-    return FoxyWallet.connect(to, null, null, { lazy: true }).then(function () {
+    // saved as the phone's own again only where the person chose it (`mintsChosen`): the home is the mint the phone was on
+    return FoxyWallet.connect(to, null, null, FoxyWallet.mintChosen(to) ? { lazy: true } : { lazy: true, remember: false }).then(function () {
       console.log('[foxy] till: left the till; back at ' + hostOf(to));
       return { left: true, mint: to, home: true };
     }, function (e) {

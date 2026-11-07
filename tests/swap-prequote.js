@@ -61,7 +61,7 @@ const LIFTED = ['goSwap() {', 'swapFlip() {', 'swapUnits() {', 'swapHave(u) {', 
   'swapDoneClose() {', 'swapRateOf(r) {', 'swapRateText(n) {', 'swapRateWho() {', 'swapInk(unit) {', 'swapEstimate() {', 'swapSpec() {',
   'swapExact() {', 'swapForget() {', 'swapRateHead() {', 'swapClockText(sec) {', 'swapWorth(n, unit, rate) {', 'swapCents(cents, sats) {',
   'cfRow(label, value, opt) {', 'unitFigure(amount, unit) {', 'unitWord(unit) {', 'unitBalance(unit) {',
-  'centsTyped() {', 'usd(v) {', 'group(n) {', 'twoUnitsOn() {', 'moneyBusy() {', 'satUsd() {', 'recoveringSats() {', 'swapPx() {',
+  'centsTyped() {', 'usd(v) {', 'group(n) {', 'twoUnitsOn() {', 'moneyBusy() {', 'satUsd() {', 'recoveringSats(mint) {', 'swapPx() {',
   'centsOfSats(sats, px) {', 'swapProbe(fromGiven) {', 'swapAheadLater() {', 'swapAheadAsk() {', 'swapAheadLeft(a) {',
   'swapAheadFor(a) {', 'swapAheadTake(a, from, to) {', 'swapRateLine() {', 'swapKeypad() {', 'swapMintHere() {',
   'swapAheadMine() {'];

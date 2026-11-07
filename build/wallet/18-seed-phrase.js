@@ -217,7 +217,10 @@
 
       var here = String(mintUrl || '').replace(/\/+$/, '');
       var from = String(tok.mint || '').replace(/\/+$/, '');
-      var ready = (from && from !== here) ? FoxyWallet.connect(from) : Promise.resolve(null);
+      // at a mint the person did not choose (`mintsChosen`), a visit: taking back is not choosing it
+      var ready = (from && from !== here)
+        ? FoxyWallet.connect(from, null, null, FoxyWallet.mintChosen(from) ? undefined : { remember: false })
+        : Promise.resolve(null);
 
       var intoMint, intoWallet, guard;
       return ready.then(function () {

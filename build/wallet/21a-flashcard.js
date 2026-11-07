@@ -101,6 +101,8 @@
         .map(function (u) { return { unit: u, balance: card.units[u].balance, pieces: card.units[u].pieces.length }; });
     },
     cardBoth: function (card) { return cardBoth(card); },
+    // whether a taking-off by this phone lifts the card's limits: 'yes', 'no' or 'unknown' (08a-flashcard.js, `cardLiftWanted`)
+    cardLiftWanted: function (card) { return cardLiftWanted(card); },
     /* What this phone promised a card of 1.23 to hold when it set it up (`cardHoldOf`): 'usd' or 'sat' (offer only that one when adding
      * to it), 'both' (ask which), or '' (no promise: ask, as for both). */
     cardHold: function (card) { return cardHoldOf(card); },

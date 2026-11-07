@@ -150,7 +150,8 @@ class Component extends DCLogic {
     this._toastT = setTimeout(() => this.setState({ toastMsg: '', toastAmber: false }), 2000);
   }
 
-  go(s) { this.setState(p => ({ screen: s, stack: p.stack.concat([p.screen]) })); }
+  // (HISTORY opens at the connected mint's, whichever it showed last: `histShown`, 16-history-lists.js)
+  go(s) { this.setState(p => Object.assign({ screen: s, stack: p.stack.concat([p.screen]) }, s === 'history' ? { histMint: '' } : {})); }
 
   /* The mint list, opened to switch mints.
    *
@@ -179,8 +180,8 @@ class Component extends DCLogic {
       fcPick: false, tillPick: false, tillSet: [],
       // nor a card's WITHDRAW TO (26n-card-withdraw-to.js), nor the till's lists of people and codes (26p-till-tips.js)
       wdPick: false, tillList: false, tillListBackTo: false,
-      // nor SEND's BANK ACCOUNT (26q-bank.js)
-      bankPick: false,
+      // nor SEND's BANK ACCOUNT (26q-bank.js), nor HISTORY's question of whose history to show (16-history-lists.js, `goHistMints`)
+      bankPick: false, histPick: false,
       // nor a mint picked on an earlier card's WITHDRAW TO or TRANSFER TO (26n-card-withdraw-to.js, `fcListNext`)
       mintSel: '',
     }, extra || {}));
@@ -201,6 +202,9 @@ class Component extends DCLogic {
     const st = this.state || {};
     const stk = st.stack || [];
     const to = stk.length ? stk[stk.length - 1] : 'home';
+    /* Back off TRANSFER's confirmation or its keypad: the quote visited the mint it lands at, and the arrow goes home to
+     * the saved mint as `trCancel` does (09-melt-paste-switch.js `homeAgain`). Not while it runs. */
+    if ((st.screen === 'trConfirm' || (st.screen === 'amount' && st.flow === 'transfer')) && !st.trBusy && this.homeAgain) this.homeAgain();
     if (st.screen === 'flashcard' && to !== 'flashcard' && stk.slice(0, -1).indexOf('flashcard') < 0) this._fcCard = null;
     /* Back off a request's offer, the edge swipe's way among them, is the X's way out (24-render-receive-and-send.js,
      * `requestSpec` `close`): the request goes with the offer, and a tap's other phone is told. It stayed in state, and

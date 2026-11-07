@@ -1128,7 +1128,9 @@
      * connecting as the deliberate action. One already on the list goes
      * through — it has been accepted before. */
     if (want && !here && !this._reqMintOk && !again) {
-      const known = (W.mints ? W.mints() : []).some(m => canon(m.id || m) === want);
+      /* On the list and chosen (09-melt-paste-switch.js `mintOnPhone`): a mint on the list from a visit only is asked
+       * about here too, or a request with no delivery would save the phone on it with nothing asked. */
+      const known = (W.mints ? W.mints() : []).some(m => canon(m.id || m) === want) && (!this.mintOnPhone || this.mintOnPhone(want));
       if (!known) {
         const host = want.replace(/^https?:\/\//, '');
         const mine = W.mintHost ? W.mintHost() : 'none';
@@ -1139,7 +1141,12 @@
             + '. Ecash from a mint you do not know may not be worth anything, '
             + 'and only that mint can redeem it.',
           retry: 'USE ' + host.toUpperCase().slice(0, 22),
-          go: () => { this._reqMintOk = want; this.makeTokenForRequest(go); },
+          // a mint new to this phone, past the lock first (09-melt-paste-switch.js `mintGate`); the connect after asks nothing more
+          go: () => {
+            const use = () => { this._reqMintOk = want; this.makeTokenForRequest(go); };
+            if (this.mintGate) this.mintGate(want, use, 'To use this mint.');
+            else use();
+          },
         });
         return;
       }
@@ -1846,7 +1853,8 @@
       let trip = null;
       const landed = () => { if (this._homeGoing === trip) this._homeGoing = null; };
       let connecting;
-      try { connecting = W.connect(back); } catch (e0) { connecting = Promise.reject(e0); }
+      // saved there again only where the person chose it (09-melt-paste-switch.js `connectBack`)
+      try { connecting = this.connectBack ? this.connectBack(back) : W.connect(back); } catch (e0) { connecting = Promise.reject(e0); }
       trip = connecting.then(() => {
         landed();
         if (this._crossCameFrom === back) this._crossCameFrom = null;
@@ -2211,6 +2219,10 @@
     if (!info) { this.toast('That token could not be read.', true); return false; }
     const mint = String(info.mint || '').replace(/\/+$/, '');
     const unit = info.unit || 'sat';
+    /* The mint this phone belongs on (the wallet's `homeMint`) is its own too: a token from it is taken there, a plain
+     * claim at a chosen mint, not moved anywhere. */
+    const home = W.homeMint ? W.homeMint() : '';
+    if (home && mint === String(home).replace(/\/+$/, '')) return false;
     /* Your mint is the one you are on. A token from any other goes through
      * MOVE TO YOUR MINT, whatever is held there: it used to be offered only
      * where nothing was, so the change a first move left at WesternBTC made
@@ -2247,12 +2259,15 @@
   /* Another unit's token from a mint with nothing filed: it cannot be moved
    * home (a move is a Lightning payment in sats), so redeeming keeps it at its
    * own mint, in its own unit. */
-  newMintKeep() {
+  newMintKeep(passed) {
     const W = window.FoxyWallet;
     const info = this.state.nmInfo;
     if (!info || this.state.nmBusy) return;
     // claiming at the token's mint switches there
     if (this.refuseSwitchWhileBusy()) return;
+    /* Keeping it there adds that mint to this phone: past the lock first, where one is set and the mint is new to it
+     * (09-melt-paste-switch.js `mintGate`). Given up, the token is still theirs and this screen stays. */
+    if (!passed && this.mintGate) { this.mintGate(info.mint, () => this.newMintKeep(true), 'To keep it at a new mint.'); return; }
     const name = this.mintNameOf(info.mint);
     /* Kept at its own mint, and the wallet back on yours afterwards: keeping a
      * token there is not choosing that mint to use. */
@@ -2260,7 +2275,7 @@
     this.setState({ nmBusy: true, nmErr: '', nmStage: 'Keeping it at ' + name + '\u2026' });
     this.showMelt('Keeping it at ' + name + '\u2026');
     W.receiveToken(this.state.nmToken).then(r => {
-      const back = (r.switched && home) ? W.connect(home).then(() => true, () => false) : Promise.resolve(false);
+      const back = (r.switched && home) ? (this.connectBack ? this.connectBack(home) : W.connect(home)).then(() => true, () => false) : Promise.resolve(false);
       return back.then(returned => {
         this.hideMelt();
         this.setState({ nmBusy: false, nmStage: '', nmInfo: null, nmPlan: null, nmToken: '', nmTooSmall: false, screen: 'home', stack: [] });
@@ -2407,7 +2422,10 @@
       this._sweepBefore = new Set(list.map(x => x.hash));
     }).catch(() => { this._sweepBefore = null; });
 
-    W.receiveToken(this.state.nmToken).then(r => {
+    /* Claimed at their mint as a visit: the phone is not saved there, and the mint is not one the person chose (the
+     * wallet's `mintsChosen`). The money there shows on the list, and adding that mint asks the lock (`mintGate`). Saved
+     * there, a token from a stranger's mint, moved home, left that mint free to switch to with nothing asked. */
+    W.receiveToken(this.state.nmToken, { visit: true }).then(r => {
       // claimed at their mint: the first mint has answered
       if (fox) this.foxStep('nmMove', 'answered');
       return W.moveRun(plan, fox ? this.foxHears('nmMove') : () => {}).then(done => this.hushSweepEntries().then(() => done)).then(done => {
@@ -2454,7 +2472,15 @@
           nmBusy: false, nmStage: '',
           nmErr: W.reason(e) + ' The sats are safe at ' + r.host + '.',
         });
-        this.walletReady({ name: r.host });
+        /* Back home: the claim was a visit, and the session stays on no mint the person did not choose. The sats stay
+         * at the token's mint and show on its tile. */
+        const home = String(plan.to || '');
+        if (home && W.mintUrl !== home) {
+          (this.connectBack ? this.connectBack(home) : W.connect(home))
+            .then(w => this.walletReady(w || { name: home.replace(/^https?:\/\//, '') }), () => this.walletReady({ name: r.host }));
+        } else {
+          this.walletReady({ name: r.host });
+        }
       });
     }).catch(e => {
       down(false);
@@ -2523,6 +2549,8 @@
    */
   sweepChange(from, left, already) {
     const W = window.FoxyWallet;
+    // the mint the change is moved to, where the phone is now; gone back to if the move fails over there
+    const dest = String(W.mintUrl || '');
     this.expectOwnSpend();
     // one extra pass only: the second move leaves its own change, and chasing
     // that forever would spend more on quotes than it recovers
@@ -2572,13 +2600,16 @@
     // as both ends and refuse with "already from this mint" — and left the app
     // sitting on the source mint's balance afterwards.
     W.sweepQuote(from, left)
-      .then(plan => W.connect(from).then(() => W.moveRun(plan, fox ? this.foxHears('nmMove') : () => {})))
+      // the change's mint as a visit: the person did not choose it (the wallet's `mintChosen`); `moveRun` saves home
+      .then(plan => W.connect(from, null, null, { remember: false }).then(() => W.moveRun(plan, fox ? this.foxHears('nmMove') : () => {})))
       .then(r => this.hushSweepEntries()
         .then(() => done(r.sats, 'moved ' + r.sats + ', ' + (r.leftBehind || 0) + ' still left')))
       .catch(e => {
         // the quote refused, which means the fee is more than the change
         // no banner: dust staying put is not news, and the log has it
         console.log('[foxy] change left where it is:', (e && e.message) || e);
+        // a move that failed after the visit to the change's mint: home again, not left on that mint
+        if (dest && W.mintUrl !== dest) (this.connectBack ? this.connectBack(dest) : W.connect(dest)).then(() => this.refreshBalance(), () => {});
         done(0, 'not worth moving');
       });
   }
@@ -2710,12 +2741,16 @@
     (W.takeBackToken ? W.takeBackToken(token) : W.reclaimToken(token)).then(r => {
       this.hideMelt();
       this.setState({ txReclaiming: false, screen: 'home', stack: [] });
-      this.walletReady({ name: r.host });
+      // taken back at another mint as a visit: home again, the session never left on it (`homeAgain`)
+      const home = this.homeAgain ? this.homeAgain() : null;
+      if (home) home.then(() => this.walletReady({ name: this.mintHost ? this.mintHost() : r.host }));
+      else this.walletReady({ name: r.host });
       this.toast('Took back ' + this.group(r.sats) + ' sats');
       this.loadHistory();
     }).catch(e => {
       this.hideMelt();
       this.setState({ txReclaiming: false });
       this.toast(W.reason(e), true);
+      if (this.homeAgain) this.homeAgain();
     });
   }

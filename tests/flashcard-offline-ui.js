@@ -40,12 +40,12 @@ const lift = (src, sig) => {
   }
   return src.slice(at + 3, i + 1);
 };
-const HISTORY_SIGS = ['loadHistory() {', 'histAudit() {', 'histAuditUsd() {', 'histAuditIn(unit) {', 'arrivingNow() {', 'arrivingBucket(unit) {',
-                      'topUpFeeSats() {', 'recoveringSats() {', 'txTotalOut(t) {', 'txTotalUnit(t) {', 'txWhen(t) {', 'txLabel(d, now) {', 'txStamp(d, now) {',
+const HISTORY_SIGS = ['loadHistory() {', 'histAudit(src) {', 'histAuditUsd(src) {', 'histAuditIn(unit, src) {', 'arrivingNow() {', 'arrivingBucket(unit, mint) {',
+                      'topUpFeeSats(mint) {', 'recoveringSats(mint) {', 'txTotalOut(t) {', 'txTotalUnit(t) {', 'txWhen(t) {', 'txLabel(d, now) {', 'txStamp(d, now) {',
                       'txDay(d, now) {', 'txClock(d) {', 'txWho(t) {', 'txCardName(t) {'];
 const RENDER_SIGS = ['renderHistory(c) {', 'renderTxDetail(c) {', 'histRowTwo('];
 const QUEUE = [[appFile('12-receive.js'), 'announcePayment(ev) {'], [appFile('15-paid-wake-keyboard.js'), 'nextPaidScreen() {'],
-               [appFile('15-paid-wake-keyboard.js'), 'queueLater() {'], [appFile('15-paid-wake-keyboard.js'), 'paidDismissed() {']];
+               [appFile('15-paid-wake-keyboard.js'), 'queueLater() {'], [appFile('15-paid-wake-keyboard.js'), 'queuedEv(next) {'], [appFile('15-paid-wake-keyboard.js'), 'paidDismissed() {']];
 /* The amber and red of the HISTORY ring, out of renderVals (21-render-values.js): from the wallet it reads to the colours it
  * picks between, run as written against a page's wallet. */
 const RING = (() => {

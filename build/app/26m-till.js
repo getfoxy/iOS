@@ -114,14 +114,24 @@
       });
       return;
     }
+    // given up from the menu's POINT OF SALE: the menu again (01-ui-basics.js `menuReturnSettle`)
+    return this.lockAsk(go, why, () => { if (this.menuReturnSettle) this.menuReturnSettle(); });
+  }
+
+  /* The lock asked in front of one step (`tillGate`, and adding a mint, 09-melt-paste-switch.js `mintGate`): Face ID where FACE
+   * ID LOCK is on, else the PIN pad, as the launch's lock asks (10-pin.js, `pinLock`). `go` runs once it is passed; `cancelled`
+   * when the pad is given up. The caller has checked there is a lock. */
+  lockAsk(go, why, cancelled) {
+    const W = window.FoxyWallet;
+    const pinSet = !!(W && W.pinIsSet && W.pinIsSet());
+    const face = !!(W && W.faceLock && W.faceLock() && W.biometric);
     const pad = () => {
       if (!pinSet) return;
       this.pinOverlay({
         title: 'ENTER YOUR PIN',
         subtitle: why || 'To go on.',
         cta: 'CONTINUE',
-        // given up from the menu's POINT OF SALE: the menu again (01-ui-basics.js `menuReturnSettle`)
-        onCancel: () => { if (this.menuReturnSettle) this.menuReturnSettle(); },
+        onCancel: () => { if (cancelled) cancelled(); },
         onSubmit: (pin, warn) => {
           // the lock's own count of tries and its wait, as every PIN this app asks
           const r = this.pinTry(pin);
@@ -533,11 +543,14 @@
 
   /* START: onto the keeper's mint (the wallet remembers this phone's own to come back to), then the till. The connecting
    * screen is the one a payment's connection shows; a cancel there leaves the till again once the mint has answered. */
-  tillJoinGo(pass) {
+  tillJoinGo(pass, passed) {
     const W = window.FoxyWallet;
     if (!W || !W.tillJoin) { this.toast('This Foxy cannot work a till.', true); return; }
     // a payment or a claim under way finishes at the mint it started on (`refuseSwitchWhileBusy`)
     if (!this.onMint(pass.mint) && this.refuseSwitchWhileBusy && this.refuseSwitchWhileBusy()) return;
+    /* Working the till puts the keeper's mint on this phone's list: where it is new here, past this phone's own lock first
+     * (09-melt-paste-switch.js `mintGate`). Given up, nothing is joined. */
+    if (!passed && this.mintGate) { this.mintGate(pass.mint, () => this.tillJoinGo(pass, true), 'To work a till at a new mint.'); return; }
     let cancelled = false;
     this.stageScreen('tillJoin', {
       art: '', title: 'CONNECTING', body: String(pass.mint || '').replace(/^https?:\/\//, '').replace(/\/+$/, ''),
@@ -846,6 +859,10 @@
       historyEmptySub: 'Payments taken in this session show up here.',
       isHistory: sc === 'history',
       histTitle: 'THIS SESSION',
+      // a session is the till's own, at every mint it takes: no chevron to another mint's (26-render-history-and-contacts.js)
+      histMintPick: false,
+      histTitlePlain: true,
+      histMintGo: none,
       histClearVis: 'hidden',
       historyMint: (window.FoxyWallet && window.FoxyWallet.mintHost && window.FoxyWallet.mintHost()) || 'MINT',
       goSwitchFromHistory: none,
@@ -861,6 +878,8 @@
       histTabs: [],
       historyEmpty: groups.length === 0,
       histAuditShown: false,
+      histAuditTop: false,
+      histAuditEnd: false,
       histAuditTitle: '',
       histAuditBody: '',
       histAuditAction: false,

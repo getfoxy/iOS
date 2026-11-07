@@ -70,7 +70,7 @@ function page(words, opts) {
         relay.push({ target: m.target, body: m.body });
         return reply(w, m.id, '3');
       }
-      if (m.action === 'cashuIdInboxOpen') { said.open.push(m.since); return reply(w, m.id, '1'); }
+      if (m.action === 'cashuIdInboxOpen') { said.open.push({ days: m.days, any: m.any, since: m.since, fields: Object.keys(m).sort().join(',') }); return reply(w, m.id, said.answer || '1'); }
       if (m.action === 'cashuIdCopiesOpen') { said.copies.push(m.since); return reply(w, m.id, '1'); }
       if (m.action === 'cashuIdInboxClose') { said.close += 1; return reply(w, m.id, 'ok'); }
       if (m.action === 'cashuIdSign') said.sign += 1;
@@ -88,6 +88,8 @@ function page(words, opts) {
   });
   ctx.W._nodeProbeDelay = [86400000, 86400000];
   ctx.W._cashuIdRetryMs = 40;
+  // a payment's second wrap (to tomorrow's keys) goes seconds after the first; here an hour on, unless a case asks for it
+  ctx.W._cashuIdAheadMs = 3600000;
   ctx.said = said;
   ctx.phone = phone;
   ctx.store = (k, d) => { try { const v = JSON.parse(ctx.storage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } };
@@ -106,6 +108,18 @@ const balance = async (ctx) => Number(await ctx.W.balanceSats()) || 0;
 const logRow = (ctx, hash) => (ctx.store('foxy.cashu.log', []) || []).find((e) => e.hash === hash) || null;
 const logRows = (ctx) => ctx.store('foxy.cashu.log', []) || [];
 const envelope = (body, change) => JSON.stringify(Object.assign(JSON.parse(body), change || {}));
+// the key an nprofile names (NIP-19 TLV 0)
+function nprofileKey(text) {
+  const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+  const data = String(text).slice(String(text).lastIndexOf('1') + 1, -6).split('').map((c) => CHARSET.indexOf(c));
+  let acc = 0, bits = 0;
+  const bytes = [];
+  for (const v of data) { acc = (acc << 5) | v; bits += 5; while (bits >= 8) { bits -= 8; bytes.push((acc >> bits) & 255); } }
+  for (let i = 0; i + 2 <= bytes.length;) { if (bytes[i] === 0) return Buffer.from(bytes.slice(i + 2, i + 2 + bytes[i + 1])).toString('hex'); i += 2 + bytes[i + 1]; }
+  return '';
+}
+const utcDay = (ms) => Math.floor((ms == null ? Date.now() : ms) / (DAY * 1000));
+const dayKeys = (nostr, day) => Array.from({ length: 16 }, (_, j) => H.cashuIdDropKey(nostr, day, j));
 const reToken = (ctx, mint, unit, proofs) => ctx.window.CashuTS.getEncodedToken({ mint, unit, proofs: proofs.map((p) => Object.assign({}, p)) });
 
 async function run() {
@@ -242,7 +256,9 @@ async function run() {
   const t1 = Math.floor(Date.now() / 1000);
   ok(paid.sent === true && paid.name === 'Alice', 'paid, and sent once a relay took it', JSON.stringify(paid).slice(0, 120));
   ok((await balance(B)) === before - 100, 'the payer’s balance is 100 less', String(await balance(B)));
-  ok(relay.length === 1 && relay[0].target === B.W._cashuIdNprofile(V.nostr) && /^nprofile1/.test(relay[0].target), 'one message, to the nprofile of the contact’s delivery key');
+  ok(relay.length === 1 && /^nprofile1/.test(relay[0].target) && relay[0].target !== B.W._cashuIdNprofile(V.nostr)
+    && dayKeys(V.nostr, utcDay()).indexOf(nprofileKey(relay[0].target)) >= 0,
+    'DROP: one message, to one of the sixteen keys the contact’s delivery key moves to today (UTC), never to the delivery key itself', nprofileKey(relay[0].target));
   const msg1 = JSON.parse(relay[0].body);
   ok(msg1.v === 2 && msg1.type === 'foxy-cashu-id' && /^0[23][0-9a-f]{64}$/.test(msg1.E) && msg1.note === 'lunch' && /^cashuB/.test(msg1.token),
     'the message: { v: 2, type, token, E, note }', JSON.stringify(Object.keys(msg1)));
@@ -453,14 +469,113 @@ async function run() {
   await A.W.cashuIdListen();
   ok(A.said.open.length === A2opens, 'before MY CASHU ID was ever shown the phone is not asked to listen');
   await A.W.cashuIdShown();
-  ok(A.said.open.length === A2opens + 1 && Math.abs(A.said.open[A.said.open.length - 1] - (Math.floor(Date.now() / 1000) - 32 * DAY)) < 600,
-    'M2: once shown, the phone listens from thirty-two days back (thirty to collect, two of NIP-59 backdating)', String(A.said.open[A.said.open.length - 1]));
+  {
+    const o = A.said.open[A.said.open.length - 1] || {};
+    const today = utcDay();
+    ok(A.said.open.length === A2opens + 1 && Array.isArray(o.days) && o.days.length === 33 && o.days[0] === today && o.days[32] === today - 32
+      && Array.isArray(o.any) && o.any.length === 0 && o.since === undefined && o.fields === 'action,any,days,id',
+      'M2 + DROP: once shown, a phone that never listened asks the keys of every day of the window (thirty to collect, two of NIP-59 backdating), and never the delivery key itself',
+      JSON.stringify(o).slice(0, 200));
+  }
   ok(await until(async () => (await balance(A)) === aMid + 25 + 4), 'and what was kept is taken', String(await balance(A)));
   ok(A.store('foxy.cid.inbox', []).length === 0, 'and leaves the inbox');
   // H2: a kept row whose day-before-locktime has passed goes unread
   A.put('foxy.cid.inbox', [{ key: 'cid:old', body: '{}', at: 1, mint: MINT, drop: Date.now() - 1000 }]);
   await A.W.cashuIdListen();
   ok(A.store('foxy.cid.inbox', []).length === 0, 'H2: a kept row is let go a day before its locktime');
+  {
+    const o = A.said.open[A.said.open.length - 1] || {};
+    ok(JSON.stringify(o.days) === JSON.stringify([utcDay()]) && o.any.length === 0 && A.store('foxy.cid.heard', 0) === utcDay(),
+      'DROP: a second listen the same day asks today’s keys alone', JSON.stringify(o));
+  }
+
+  /* ---- DROP: the drop boxes, the delivery key's rotating children ---------------- */
+  {
+    const DV = VEC.drop;
+    const CTA = A.window.CashuTS;
+    const xOf = (hex) => Buffer.from(CTA.getPubKeyFromPrivKey(new A.window.Uint8Array(Buffer.from(hex, 'hex')))).toString('hex').slice(2);
+    ok(DV.slots.every((x) => A.W._cashuIdDropKey(V.nostr, DV.day, x.slot) === x.key && H.cashuIdDropKey(V.nostr, DV.day, x.slot) === x.key)
+      && A.W._cashuIdDropKey(V.nostr, DV.day + 1, 0) === DV.nextDayKey0 && A.W._cashuIdAnyKey(V.nostr, DV.anyId) === DV.anyKey
+      && H.cashuIdAnyKey(V.nostr, DV.anyId) === DV.anyKey,
+      'DROP: key(day, j) and an ANY WALLET request’s key: the page (noble), harness.js (BigInt) and the vectors agree');
+    ok(DV.slots.every((x) => xOf(x.secret) === x.key) && xOf(DV.anySecret) === DV.anyKey,
+      'DROP: each secret the phone derives (n − q + t: the delivery key’s point is odd) opens its key');
+    const k0 = dayKeys(V.nostr, DV.day), k1 = dayKeys(V.nostr, DV.day + 1);
+    ok(new Set(k0).size === 16 && k0.every((k) => k1.indexOf(k) < 0 && k !== V.nostr), 'DROP: a day’s sixteen keys are distinct, and share none with the next day’s or with the delivery key');
+    let refused = 0;
+    for (const bad of [[V.nostr, 1, 16], [V.nostr, -1, 0], ['00' + V.nostr.slice(2, 62), 1, 0]]) { try { A.W._cashuIdDropKey(bad[0], bad[1], bad[2]); } catch (e) { refused += 1; } }
+    ok(refused === 3, 'DROP: a slot past fifteen, a day before 1970 and a delivery key of the wrong length are refused', String(refused));
+
+    /* The relay's view of a receive-only phone that opens Foxy three times a day for ten days, through the page's own
+     * plan (`cidListenPlan`): before, every REQ named the delivery key, so the relay tied every day to one name; now no
+     * key is asked on two days. */
+    const start = (utcDay() + 3) * DAY * 1000;
+    const keep = { heard: A.store('foxy.cid.heard', 0), any: A.store('foxy.cid.any', []) };
+    A.put('foxy.cid.heard', utcDay() + 2);
+    const byDay = new Map();
+    let shapes = true;
+    for (let d = 0; d < 10; d++) {
+      for (const hour of [8, 13, 21]) {
+        const now = start + d * DAY * 1000 + hour * 3600 * 1000;
+        const plan = A.W._cashuIdListenPlan(now);
+        if (plan.days.length !== 1 || plan.days[0] !== utcDay(now)) shapes = false;
+        const asked = new Set(plan.days.flatMap((x) => dayKeys(V.nostr, x)));
+        const was = byDay.get(utcDay(now));
+        if (was && JSON.stringify([...was].sort()) !== JSON.stringify([...asked].sort())) shapes = false;
+        byDay.set(utcDay(now), asked);
+        A.put('foxy.cid.heard', plan.today);
+      }
+    }
+    const days = [...byDay.keys()];
+    let shared = 0;
+    for (let i = 0; i < days.length; i++) for (let j = i + 1; j < days.length; j++) for (const k of byDay.get(days[i])) if (byDay.get(days[j]).has(k)) shared += 1;
+    ok(shapes && days.length === 10 && shared === 0 && [...byDay.values()].every((x) => !x.has(V.nostr)),
+      'DROP: a phone opening three times a day for ten days asks each day’s sixteen keys and no key on two days (before: the delivery key on all ten)', 'shared ' + shared);
+    // away four days: the next listen asks the four it missed and today, and still none asked before
+    const back = start + 14 * DAY * 1000 + 9 * 3600 * 1000;
+    const away = A.W._cashuIdListenPlan(back);
+    ok(JSON.stringify(away.days) === JSON.stringify([utcDay(back), utcDay(back) - 1, utcDay(back) - 2, utcDay(back) - 3, utcDay(back) - 4])
+      && away.days.every((x) => !byDay.has(x)),
+      'DROP: back after four days away, the days missed and today are asked, none of them asked before', JSON.stringify(away.days));
+    ok(!('legacy' in away) && JSON.stringify(Object.keys(away).sort()) === JSON.stringify(['any', 'days', 'today']),
+      'DROP (H1): a plan has no way to ask for the delivery key itself', JSON.stringify(Object.keys(away)));
+    // ANY WALLET requests: every listen in the first day, once a day in the first month, once a week after, gone after a year
+    {
+      const now = back;
+      const D = DAY * 1000;
+      A.put('foxy.cid.any', [
+        { id: 'a0000001', at: now - 3600 * 1000, asked: utcDay(now) },
+        { id: 'a0000002', at: now - 10 * D, asked: utcDay(now) },
+        { id: 'a0000003', at: now - 10 * D, asked: utcDay(now) - 1 },
+        { id: 'a0000004', at: now - 100 * D, asked: utcDay(now) - 6 },
+        { id: 'a0000005', at: now - 100 * D, asked: utcDay(now) - 7 },
+        { id: 'a0000006', at: now - 364 * D, asked: 0 },
+        { id: 'a0000007', at: now - 366 * D, asked: 0 },
+      ]);
+      const plan = A.W._cashuIdListenPlan(now);
+      ok(JSON.stringify(plan.any) === JSON.stringify(['a0000001', 'a0000003', 'a0000005', 'a0000006']) && A.store('foxy.cid.any', []).length === 6,
+        'DROP (M3): an ANY WALLET code is asked at every listen in its first day, daily in its first month, weekly after, and dropped after a year', JSON.stringify(plan.any));
+      A.put('foxy.cid.any', Array.from({ length: 300 }, (_, i) => ({ id: (0x10000000 + i).toString(16), at: now - 3600 * 1000, asked: 0 })));
+      ok(A.W._cashuIdListenPlan(now).any.length === 300, 'DROP (M3): no cap of 47: three hundred codes in their first day are all asked');
+    }
+    // a clock gone back: today alone
+    A.put('foxy.cid.heard', utcDay() + 400);
+    ok(JSON.stringify(A.W._cashuIdListenPlan(Date.now()).days) === JSON.stringify([utcDay()]), 'DROP: a phone whose last listen is dated ahead of its clock asks today alone');
+    A.put('foxy.cid.any', keep.any);
+    // M1: a listen the phone did not finish (answered "0": ended before every REQ's end) asks the same days next time
+    A.put('foxy.cid.heard', utcDay() - 3);
+    A.said.answer = '0';
+    await A.W.cashuIdListen();
+    const cut = A.said.open[A.said.open.length - 1] || {};
+    A.said.answer = '';
+    ok(A.store('foxy.cid.heard', 0) === utcDay() - 3 && JSON.stringify(cut.days) === JSON.stringify([utcDay(), utcDay() - 1, utcDay() - 2]),
+      'DROP (M1): a listen cut short marks no day heard', String(A.store('foxy.cid.heard', 0)));
+    await A.W.cashuIdListen();
+    const again = A.said.open[A.said.open.length - 1] || {};
+    ok(JSON.stringify(again.days) === JSON.stringify(cut.days) && A.store('foxy.cid.heard', 0) === utcDay(),
+      'DROP (M1): the next listen asks the same days again, and only a finished one marks them', JSON.stringify(again.days));
+    A.put('foxy.cid.heard', keep.heard || utcDay());
+  }
 
   /* ---- at a mint the receiver does not use: brought home to its default mint ----
    * With BRING IT HOME remembered for that mint (the card's tick, `foxy.cid.choice.<host>`), which runs as every one ran
@@ -721,8 +836,11 @@ async function run() {
       ok(!r0.sentAt && !r0.copyAt && !r0.copiedAt && relay.length === 0, 'R1: no relay took the payment: no copy is due or sent');
       relayDown = false;
       relay = [];
+      // a retry already running from while the relay was down may be the one that sends it: wait for the send
       await B.W.cashuIdDeliver();
-      ok(relay.length === 1 && relay[0].target !== toRecovery, 'R1: the payment goes first, alone');
+      await until(() => relay.length >= 1, 3000);
+      ok(relay.length >= 1 && relay[0].target !== toRecovery && relay.filter((x) => x.target === toRecovery).length <= relay.length - 1,
+        'R1: the payment goes first, alone', relay.map((x) => (x.target === toRecovery ? 'copy' : 'payment')).join(','));
       ok(await until(() => relay.some((x) => x.target === toRecovery), 3000), 'R1: and its copy after its delay');
       // the relay stub sees the copy a moment before the wallet marks the row (copiedAt is written once the
       // delivery's promise settles); read the row only once it is marked, or copiedAt is still undefined here
@@ -871,6 +989,108 @@ async function run() {
     const legacy = envelope(relay[0].body, { i: 0, wi: 0 });
     ok((await Q.W._cashuIdArrived(legacy)) === 'taken' && (await balance(Q)) === qLegacy + 11,
       'a payment from an earlier build that still names a chain index is taken', JSON.stringify(JSON.parse(legacy).from ? 'proved' : 'unnamed'));
+
+    // DROP: the next day's wrap: the same envelope, a while later, to one of tomorrow's keys; taken once
+    relay = [];
+    B.W._cashuIdAheadMs = 60;
+    await B.W.cashuIdPay(mine.text, 9);
+    const today = utcDay();
+    const toDay = (r) => (dayKeys(V.nostr, today).indexOf(nprofileKey(r.target)) >= 0 ? 'today' : dayKeys(V.nostr, today + 1).indexOf(nprofileKey(r.target)) >= 0 ? 'tomorrow' : 'other');
+    ok(await until(() => relay.filter((r) => toDay(r) !== 'other').length >= 2, 3000) && relay.filter((r) => toDay(r) !== 'other').length === 2,
+      'DROP: a payment goes twice: once to one of today’s keys, once to one of tomorrow’s', relay.map(toDay).join(','));
+    const two = relay.filter((r) => toDay(r) !== 'other');
+    const bare = (b) => { const j = JSON.parse(b); delete j.pad; return JSON.stringify(j); };
+    ok(toDay(two[0]) === 'today' && toDay(two[1]) === 'tomorrow' && bare(two[0].body) === bare(two[1].body) && two[0].target !== two[1].target,
+      'DROP: the first to today’s, the second, the same envelope, to tomorrow’s', two.map(toDay).join(','));
+    {
+      ok(typeof JSON.parse(two[0].body).pad === 'string' && JSON.parse(two[0].body).pad !== JSON.parse(two[1].body).pad,
+        'DROP (L4): each wrap carries filler of its own random length (their NIP-44 size buckets often still match: CASHU-ID.md, Posting)',
+        [JSON.parse(two[0].body).pad.length, JSON.parse(two[1].body).pad.length].join(' '));
+    }
+    B.W._cashuIdAheadMs = 3600000;
+    const qAhead = await balance(Q);
+    ok((await Q.W._cashuIdArrived(two[1].body)) === 'taken' && (await Q.W._cashuIdArrived(two[0].body)) === 'seen' && (await balance(Q)) === qAhead + 9,
+      'DROP: read by either wrap, it is taken once', String((await balance(Q)) - qAhead));
+
+    /* M2: the page slept between the two wraps, for days: the second's day has gone, so it goes to today's keys and a
+     * new next-day wrap is set, not dropped. */
+    await B.W.cashuIdPay(mine.text, 5);
+    relay = [];
+    const outRows = B.store('foxy.cid.outbox', []);
+    const lastRow = outRows[outRows.length - 1];
+    lastRow.aheadDay = today - 2;
+    lastRow.aheadAt = Date.now() - 1000;
+    B.put('foxy.cid.outbox', outRows);
+    B.W._cashuIdAheadMs = 60;
+    await B.W.cashuIdCopies();
+    B.W._resumed(40);
+    ok(await until(() => relay.filter((r) => toDay(r) === 'today').length >= 1 && relay.filter((r) => toDay(r) === 'tomorrow').length >= 1, 3000),
+      'DROP (M2): a second wrap whose day has passed goes to today’s keys, and a new one to tomorrow’s', relay.map(toDay).join(','));
+    B.W._cashuIdAheadMs = 3600000;
+    ok(relay.length >= 2 && bare(relay[0].body) === bare(relay[1].body) && JSON.parse(relay[0].body).token === lastRow.token,
+      'DROP (M2): the same envelope, both times');
+  }
+
+  /* N1, N2, L-b: a payment's second wrap, on a page with the app's own waits (no suite switch for the retry) */
+  {
+    const aheadPage = (answer) => {
+      const sent = [];
+      const ctx = loadReal({ bridge: (w, m) => {
+        if (m.action === 'nostrSend') { sent.push({ target: m.target, body: m.body, at: Date.now() }); return setTimeout(() => w.FoxyWallet._scanResult(m.id, answer ? '3' : null, answer ? null : 'No relay took the payment: rate-limited'), 0); }
+        setTimeout(() => w.FoxyWallet._scanResult(m.id, null, 'not here'), 0);
+      } });
+      return { ctx, sent };
+    };
+    const QK = cashuIdKeys(Buffer.alloc(64, 7)).nostr;
+    const now = Date.now();
+    const today = Math.floor(now / (DAY * 1000));
+    const row = (id, extra) => Object.assign({ id, state: 'out', token: 'cashuBo2F0gaJhaUgA', E: '02' + 'ab'.repeat(32), to: QK,
+      sentAt: now - 3600e3, lastSentAt: now - 3600e3, copiedAt: now, lockUntil: Math.floor(now / 1000) + 30 * DAY }, extra);
+
+    // N1: the payer put Foxy away before the second wrap went, and opens it on that wrap's own day
+    const n1 = aheadPage(true);
+    n1.ctx.storage.setItem('foxy.cid.outbox', JSON.stringify([row('r1', { aheadDay: today, aheadAt: now - 3600e3 + 3000 })]));
+    // the new next-day wrap is held an hour, so the row is read before it goes (it would go one to five seconds on)
+    n1.ctx.W._cashuIdAheadMs = 3600000;
+    n1.ctx.W._resumed(40);
+    for (let i = 0; i < 60 && !n1.sent.length; i++) await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 200));
+    const r1 = JSON.parse(n1.ctx.storage.getItem('foxy.cid.outbox'))[0];
+    ok(n1.sent.length === 1 && r1.aheadDay === today + 1 && Number(r1.aheadAt) > Date.now(),
+      'N1: a second wrap sent on its own day counts as late: it goes to today’s keys and a new next-day wrap is set',
+      JSON.stringify({ sends: n1.sent.length, aheadDay: r1.aheadDay - today, aheadAt: r1.aheadAt }));
+
+    // N2: no relay takes the second wrap: tried again on the first wrap's schedule, not every few seconds
+    const n2 = aheadPage(false);
+    n2.ctx.storage.setItem('foxy.cid.outbox', JSON.stringify([row('r2', { sentAt: now - 5000, lastSentAt: now - 5000, aheadDay: today + 1, aheadAt: now - 1 })]));
+    n2.ctx.W._resumed(40);
+    await new Promise((r) => setTimeout(r, 8000));
+    const r2 = JSON.parse(n2.ctx.storage.getItem('foxy.cid.outbox'))[0];
+    ok(n2.sent.length === 1 && r2.aheadTries === 1 && Number(r2.aheadAt) - Date.now() > 50000,
+      'N2: a second wrap no relay takes is tried once in eight seconds, counted, and next a minute on',
+      JSON.stringify({ sends: n2.sent.length, tries: r2.aheadTries, dueIn: Math.round((r2.aheadAt - Date.now()) / 1000) }));
+
+    // L-b: a payment near the send limit still goes: its filler never takes the body past 32,767 bytes
+    const lb = aheadPage(true);
+    const big = 'cashuB' + 'A'.repeat(30000);
+    lb.ctx.storage.setItem('foxy.cid.outbox', JSON.stringify(Array.from({ length: 24 }, (_, i) => row('b' + i, { token: big, aheadDay: today + 1, aheadAt: now - 1 }))));
+    lb.ctx.W._resumed(40);
+    for (let i = 0; i < 100 && lb.sent.length < 24; i++) await new Promise((r) => setTimeout(r, 50));
+    const sizes = lb.sent.map((x) => Buffer.byteLength(x.body, 'utf8'));
+    ok(lb.sent.length === 24 && sizes.every((n) => n <= 32767) && new Set(sizes).size > 1,
+      'L-b: 24 wraps of a 30 kB token all fit the 32,767-byte send limit, their filler still random', sizes.slice(0, 6).join(' '));
+
+    // and an envelope at the limit without filler goes with no `pad` at all (an empty one would take it nine bytes over)
+    const edge = aheadPage(true);
+    const E0 = '02' + 'ab'.repeat(32);
+    const shell = JSON.stringify({ v: 2, type: 'foxy-cashu-id', token: '', E: E0 });
+    const atLimit = 'cashuB' + 'x'.repeat(32767 - Buffer.byteLength(shell) - 6);
+    edge.ctx.storage.setItem('foxy.cid.outbox', JSON.stringify([row('e1', { token: atLimit, E: E0, aheadDay: today + 1, aheadAt: now - 1 })]));
+    edge.ctx.W._resumed(40);
+    for (let i = 0; i < 60 && !edge.sent.length; i++) await new Promise((r) => setTimeout(r, 50));
+    const eb = (edge.sent[0] || {}).body || '';
+    ok(Buffer.byteLength(eb) === 32767 && !('pad' in JSON.parse(eb || '{}')),
+      'pad: an envelope of exactly 32,767 bytes without filler goes as it is, with no empty pad', String(Buffer.byteLength(eb)));
   }
 
   /* L6: the suites' switches do nothing on a page that is not a test's */

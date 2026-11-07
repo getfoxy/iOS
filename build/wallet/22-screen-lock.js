@@ -186,9 +186,9 @@
      * the moment it happens (07-request-delivery.js, `changeBack`). */
     /* Sats held back at this mint for swaps whose answer was lost, until the
      * mint says whether it made them (04-lost-answers.js, holdInputs). Not in
-     * the balance, and the history screen's audit says so. */
-    heldSats: function () {
-      var here = wallet ? mintOf(wallet) : '';
+     * the balance, and the history screen's audit says so. At `mint` when one is named (the history of another mint). */
+    heldSats: function (mint) {
+      var here = mint ? canonicalMint(String(mint)) : (wallet ? mintOf(wallet) : '');
       var all = load(K.held, {});
       var sum = 0;
       Object.keys(all).forEach(function (id) {
@@ -205,14 +205,14 @@
      * outputs with. Out of the pile, not held, and nothing on screen said
      * where it was. Named here so the audit and the home screen can. */
     /// Input fees this mint's top-up swaps have cost, which no history row shows (tidyChange).
-    topUpFeeSats: function () {
-      var here = wallet ? mintOf(wallet) : '';
+    topUpFeeSats: function (mint) {
+      var here = mint ? canonicalMint(String(mint)) : (wallet ? mintOf(wallet) : '');
       var fees = load(K.topUpFees, {});
       return Math.max(0, Math.round(Number(fees[here]) || 0));
     },
 
-    recoveringSats: function () {
-      var here = wallet ? mintOf(wallet) : '';
+    recoveringSats: function (mint) {
+      var here = mint ? canonicalMint(String(mint)) : (wallet ? mintOf(wallet) : '');
       var pile = {};
       proofs(here).forEach(function (p) { if (p && p.secret) pile[p.secret] = true; });
       var held = {};

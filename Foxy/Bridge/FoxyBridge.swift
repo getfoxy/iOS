@@ -59,6 +59,8 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
     /// The open being made, so a close while the seed is read ends it; and its answer.
     var cashuIdTicket: UUID?
     var cashuIdAnswer: ((Int) -> Void)?
+    /// The ANY WALLET requests' keys, asked in REQs of their own at every relay, a random few seconds after the day keys.
+    var cashuIdLasting: NostrInbox?
     /// The recovery key's inbox, read only after a restore, its open being made, and its answer.
     var cashuIdCopies: NostrInbox?
     var cashuIdCopiesTicket: UUID?

@@ -62,7 +62,7 @@ const LIFTED = ['goSwap() {', 'swapFlip() {', 'swapUnits() {', 'swapHave(u) {', 
   'swapExact() {', 'swapForget() {', 'swapRateHead() {', 'swapClockText(sec) {', 'swapWorth(n, unit, rate) {', 'swapCents(cents, sats) {',
   'renderSwap(c) {', 'cfRow(label, value, opt) {', 'unitFigure(amount, unit) {', 'unitWord(unit) {', 'unitBalance(unit) {',
   'centsTyped() {', 'usd(v) {', 'group(n) {', 'twoUnitsOn() {', 'offlineNow() {', 'moneyBusy() {', 'heldPill() {',
-  'satUsd() {', 'recoveringSats() {', 'swapPx() {', 'centsOfSats(sats, px) {',
+  'satUsd() {', 'recoveringSats(mint) {', 'swapPx() {', 'centsOfSats(sats, px) {',
   'swapProbe(fromGiven) {', 'swapAheadLater() {', 'swapAheadAsk() {', 'swapAheadLeft(a) {', 'swapAheadFor(a) {',
   'swapAheadTake(a, from, to) {', 'swapRateLine() {', 'swapKeypad() {', 'swapMintHere() {', 'swapAheadMine() {'];
 

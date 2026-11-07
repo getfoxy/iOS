@@ -244,7 +244,7 @@ check('with a route every mint is reachable, cache or no cache',
 check('and nothing is labelled', mintUi.mintDownText('https://other.test') === '');
 
 check('the row is dimmed by what the render decided, not by a guess',
-  /dim: reach \? '1' : '0.4'/.test(app));
+  /dim: \(reach \|\| histPick\) \? '1' : '0.4'/.test(app));
 check('and the markup really binds it',
   /opacity:\{\{ m\.dim \}\}/.test(markup),
   'a computed dim nothing reads is a dim nobody sees');

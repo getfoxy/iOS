@@ -40,7 +40,7 @@ const withConfirmations = (app) => {
     return src.slice(from, src.indexOf('\n  }\n', from) + 5);
   };
   const receive = read('12-receive.js'), wake = read('15-paid-wake-keyboard.js');
-  const body = [lift(receive, 'announcePayment(ev) {'), lift(wake, 'nextPaidScreen() {'), lift(wake, 'queueLater() {'), lift(wake, 'paidDismissed() {')].join(',');
+  const body = [lift(receive, 'announcePayment(ev) {'), lift(wake, 'nextPaidScreen() {'), lift(wake, 'queueLater() {'), lift(wake, 'queuedEv(next) {'), lift(wake, 'paidDismissed() {')].join(',');
   const lifted = new Function('window', 'document', 'CONFIRM_SCREENS', 'return {' + body + '}')(
     { FoxyWallet: { notify: () => {} } }, { visibilityState: 'visible' }, []);
   Object.assign(app, lifted);

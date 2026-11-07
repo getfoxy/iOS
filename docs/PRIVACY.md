@@ -56,7 +56,11 @@ User-Agent and no cookies.
   request, Foxy delivers to the onion address or the relays the request names.
   Over Nostr the payment is encrypted to the receiver (NIP-44 inside NIP-59
   gift wraps), so a relay sees an encrypted message. Over an onion address it
-  travels inside Tor from end to end.
+  travels inside Tor from end to end. A payment to your Cashu ID is left at
+  keys that change every day, and Foxy asks one relay, picked at random, for
+  only that day's keys, so a relay that does not know your ID cannot tie one
+  day you opened Foxy to another by what was asked (anyone who has your ID can
+  work the keys out).
 - **The Tor network.** Tor relays and directory authorities, and when a direct
   connection to Tor fails, Tor's built-in obfs4 bridges or Snowflake. These
   carry everything above. Snowflake reaches Tor through a content delivery

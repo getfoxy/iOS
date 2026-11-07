@@ -2541,7 +2541,7 @@
         if (sf && sf.short) {
           // not enough there once its fee is counted: home, and the ordinary crossing
           console.log('[foxy] tap: what is at their mint does not cover it with the fee; moving the rest instead');
-          return W.connect(mine).then(() => { this.setState({ crossBusy: false, crossQ: null }); this.back(); this.tapCrossQuote(offer, want, theirs, mine); });
+          return (this.connectBack ? this.connectBack(mine) : W.connect(mine)).then(() => { this.setState({ crossBusy: false, crossQ: null }); this.back(); this.tapCrossQuote(offer, want, theirs, mine); });
         }
         this._crossMovedTo = null;
         // never over a home already set: that trip's home is this one's too
@@ -2740,7 +2740,7 @@
     this._quiet = false;
     this.hideMelt();
     if (this.hideStage) this.hideStage('crossMove');
-    if (W.mintUrl !== mine) W.connect(mine).then(() => this.refreshBalance(), () => {});
+    if (W.mintUrl !== mine) (this.connectBack ? this.connectBack(mine) : W.connect(mine)).then(() => this.refreshBalance(), () => {});
     const why = W.reason ? W.reason(e) : String((e && e.message) || e);
     console.warn('[foxy] tap: could not pay across mints:', why);
     this.setState({ crossBusy: false, crossQ: null });
@@ -2971,7 +2971,7 @@
        * mint, with the payment sitting at it and nothing to say it was to
        * come home. */
       const going = W.carryBegin ? W.carryBegin(terms).then(id => { visit.id = id; })
-                                 : W.connect(terms.from);
+                                 : W.connect(terms.from, null, null, { remember: false });
       return going.then(() => {
         mine();
         // waited for, for the reason the price leg above gives
@@ -2999,7 +2999,7 @@
           if (this._carryAsk === ask) this._carryAsk = null;
           console.log('[foxy] tap: nothing came of the cross-mint offer; going home to ' + home);
           if (W.carryEnd && gone.id) W.carryEnd(gone.id).then(() => this.refreshBalance(), () => {});
-          else if (W.mintUrl !== home && home) W.connect(home).then(() => this.refreshBalance(), () => {});
+          else if (W.mintUrl !== home && home) (this.connectBack ? this.connectBack(home) : W.connect(home)).then(() => this.refreshBalance(), () => {});
         }, 120000);
         // kept, to be said again to a payer who lost the link and came back (above)
         ask.sent = JSON.stringify({ req: req, sats: terms.ask,
@@ -3021,7 +3021,7 @@
        * never left it and a connect that half-worked may have. */
       const failed = visit;
       if (W.carryEnd && failed && failed.id) W.carryEnd(failed.id).then(() => this.refreshBalance(), () => {});
-      else if (W.mintUrl !== home && home) W.connect(home).then(() => this.refreshBalance(), () => {});
+      else if (W.mintUrl !== home && home) (this.connectBack ? this.connectBack(home) : W.connect(home)).then(() => this.refreshBalance(), () => {});
       this._carryHome = null;
       this._carryAsk = null;
       clearTimeout(this._carryHomeT);

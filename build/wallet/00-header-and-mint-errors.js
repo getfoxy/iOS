@@ -123,6 +123,7 @@
     taken: 'foxy.cashu.taken',       // fingerprints of ecash this phone has swapped in, to say so when it is offered again
     mints: 'foxy.cashu.mints',       // every mint this device has connected to
     mintsUsed: 'foxy.cashu.mints.used', // the same, never pruned: a switch back to one is not scanned
+    mintsChosen: 'foxy.cashu.mints.chosen', // the mints the person chose (a switch, a pass of the lock), not a visit's
     mintNodes: 'foxy.cashu.mint.nodes', // each mint's Lightning node, from invoices it made
     tokenWatch: 'foxy.cashu.token.watch', // tokens being watched until redeemed: Ys, amount, mint
     outtok: 'foxy.cashu.outtoken',   // a token made but not yet handed over

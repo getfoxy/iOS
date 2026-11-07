@@ -320,10 +320,11 @@ or the seed.
   so no public key and chain code of these paths reaches any other key. A
   restore from the words gives the same keys, and so the same ID string.
 
-  No private key reaches the page. The delivery key is read on the seed queue
-  and handed to the inbox that listens on it (`cashuIdInboxOpen`,
-  `Foxy/Bridge/FoxyBridge+CashuID.swift`) and to nothing else; it is used for
-  nothing on Nostr but receiving. The recovery key is the same on its own path:
+  No private key reaches the page. The delivery key is read on the seed queue,
+  the secrets of the day keys it moves to are worked out there from it
+  (`CashuID.dropSecrets`, `anySecrets`, nothing stored), and they are handed
+  to the inboxes that listen on them (the delivery key itself never is) (`cashuIdInboxOpen`, `Foxy/Bridge/FoxyBridge+CashuID.swift`) and to
+  nothing else; they are used for nothing on Nostr but receiving. The recovery key is the same on its own path:
   read on the seed queue only for the inbox that reads this phone's copies back
   after a restore (`cashuIdCopiesOpen`, `SeedActions.cashuIdRecoverySecret`). It
   is never the delivery key, never in the ID string, never shown, and nothing

@@ -134,10 +134,10 @@
      * whose answer was lost (`holdInputs`), and, for dollars, the pieces of a
      * swap between units whose payment is still with the mint. Sats are what
      * they always were (`heldSats`). */
-    heldIn: function (unit) {
+    heldIn: function (unit, mint) {
       var u = unitOf(unit) || 'sat';
-      if (u === 'sat') return FoxyWallet.heldSats();
-      var here = wallet ? mintOf(wallet) : '';
+      if (u === 'sat') return FoxyWallet.heldSats(mint);
+      var here = mint ? canonicalMint(String(mint)) : (wallet ? mintOf(wallet) : '');
       var sum = 0;
       var all = load(K.held, {});
       Object.keys(all || {}).forEach(function (id) {
@@ -154,9 +154,9 @@
      * took: seconds for a payment, a swap's first leg, a card's payment, and for as long as the mint says PENDING, across
      * a relaunch too. A swap's leg that `heldIn` already names (`unitSwapHeld`) is left out, so nothing is counted twice.
      * Not the balance, and not what home says is pending: those are as they were. */
-    meltingIn: function (unit) {
+    meltingIn: function (unit, mint) {
       var u = unitOf(unit) || 'sat';
-      var here = wallet ? mintOf(wallet) : '';
+      var here = mint ? canonicalMint(String(mint)) : (wallet ? mintOf(wallet) : '');
       if (!here) return 0;
       var named = {};
       if (u !== 'sat') {
@@ -174,11 +174,12 @@
       return sum;
     },
 
-    /* What a swap took after Foxy was put away, on its way back (`recoveringSats`). */
-    recoveringIn: function (unit) {
+    /* What a swap took after Foxy was put away, on its way back (`recoveringSats`). Each of these is at the connected mint,
+     * or at `mint` when one is named: the history screen shows one mint's books at a time, not always the connected one's. */
+    recoveringIn: function (unit, mint) {
       var u = unitOf(unit) || 'sat';
-      if (u === 'sat') return FoxyWallet.recoveringSats();
-      var here = wallet ? mintOf(wallet) : '';
+      if (u === 'sat') return FoxyWallet.recoveringSats(mint);
+      var here = mint ? canonicalMint(String(mint)) : (wallet ? mintOf(wallet) : '');
       var pile = {};
       proofs(here, u).forEach(function (p) { if (p && p.secret) pile[p.secret] = true; });
       var held = {};

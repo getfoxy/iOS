@@ -102,6 +102,15 @@
      * 'rebuilt', 'seen', 'collected' or 'refused'; never rejects. */
     _cashuIdCopy: function (body) { return cidCopyArrived(body); },
 
+    /* The ANY WALLET requests (ids, comma-separated) whose REQs every relay asked has answered to their end, or
+     * failed, from the bridge (FoxyBridge+CashuID.swift): marked asked today, so the next is due by their schedule
+     * (`cidAnyDue`). */
+    _cashuIdAnyHeard: function (ids) {
+      var list = String(ids || '').split(',').filter(function (x) { return /^[0-9a-f]{8}$/.test(x); });
+      cidAnyAsked(list, cidDay());
+      return list.length;
+    },
+
     /* Payments at mints this phone does not use waiting for their receiver, newest last: { key, name, mint, host, unit,
      * amount, at, drop, back, lands, toUnit, fee, why, small, others, total, choice } (`cidOfferView`), `name` a contact's
      * only where the payer proved it, `back` whether SEND IT BACK can be offered, `lands`/`toUnit`/`fee` the way home as
@@ -161,8 +170,12 @@
     _cashuIdPieceKey: function (baseHex, j) { return CID_TESTS ? cidPieceKey(baseHex, j) : null; },
     _cashuIdEncode: function (idHex, nostrHex, sigHex) { return CID_TESTS ? cidEncode(idHex, nostrHex, sigHex) : null; },
     _cashuIdNprofile: function (xonlyHex, relays) { return CID_TESTS ? cidNprofile(xonlyHex, relays) : null; },
+    _cashuIdDropKey: function (nostrHex, day, j) { return CID_TESTS ? cidDropKey(nostrHex, day, j) : null; },
+    _cashuIdAnyKey: function (nostrHex, idHex) { return CID_TESTS ? cidAnyKey(nostrHex, idHex) : null; },
+    _cashuIdListenPlan: function (nowMs) { return CID_TESTS ? cidListenPlan(nowMs) : null; },
     _cashuIdLockS: 0,
     _cashuIdRetryMs: 0,
     _cashuIdFreshMs: 0,
     _cashuIdCopyMs: 0,
+    _cashuIdAheadMs: 0,
 

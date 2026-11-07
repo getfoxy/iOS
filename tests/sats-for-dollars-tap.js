@@ -82,7 +82,7 @@ const COMMON = ['agoWords(ms) {', 'priceAgeWords(ms) {', 'cfRow(label, value, op
   'unitFigure(amount, unit) {', 'moneyIn(n, unit) {', 'shortForReceiver() {', 'walletChoiceNow() {'];
 
 /* The history card's audits (16-history-lists.js), as tests/usd-tap.js lifts them. */
-const auditMethods = new Function('return {' + ['histAudit() {', 'histAuditUsd() {', 'txTotalOut(t) {', 'txTotalUnit(t) {', 'arrivingBucket(unit) {',
+const auditMethods = new Function('return {' + ['histAudit(src) {', 'histAuditUsd(src) {', 'txTotalOut(t) {', 'txTotalUnit(t) {', 'arrivingBucket(unit, mint) {',
   'arrivingNow() {', 'heldPill() {'].map(method).join(',') + '}')();
 async function appAudit(c) {
   const W = c.W;
@@ -720,7 +720,7 @@ async function run() {
   {
     // `nextPaidScreen` passes the dollars asked only for a payment that is to be swapped into them
     const raised = [];
-    const q = Object.assign(lift({}, ['nextPaidScreen() {']), {
+    const q = Object.assign(lift({}, ['nextPaidScreen() {', 'queuedEv(next) {']), {
       state: { screen: 'home' }, SPLIT_SCREENS: [], queueLater() {}, cardFlowHolds: () => false,
       announcePayment(ev) { raised.push(ev); },
     });

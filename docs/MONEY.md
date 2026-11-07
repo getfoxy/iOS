@@ -1728,6 +1728,73 @@ mint answers can include pieces spent elsewhere since the last connect there;
 the payment that picks them, or the reconcile, finds them and takes them out
 (`onSpentElsewhere`). `tests/switch-instant.js`.
 
+**HISTORY is one mint's, and can show another's without moving.** The screen is
+titled with the name of the mint whose history it shows, as the mint list names
+it, with a chevron after it. It opens at the connected mint every time it is
+opened. The chevron opens the mint list (WHICH MINT'S HISTORY?), the mint shown
+ticked; a tap shows that mint's rows (`histOther`, read from the same log by
+`loadHistory`), its tabs where it issues both units, and its books, and nothing
+else changes: `mintUrl`, the balance, home's ring and the arrivals are still
+the connected mint's. Another mint's books are added up as the connected one's
+are (`histAudit(src)`, `histAuditUsd(src)`), from that mint's balance
+(`balanceOf(unit, mint)`) and with what is held back, melting, recovering and
+spent in top-up fees read at that mint (`heldSats`, `heldIn`, `meltingIn`,
+`recoveringSats`, `recoveringIn` and `topUpFeeSats` take an optional mint; none
+named is the connected mint, as before). Where the books sit follows what they
+say: when they add up (ADDS UP, or LAST 500 PAYMENTS when they cannot be checked
+to the start) they come after the last row, quiet; when they do not add up, or
+change waits to be collected or handed over, they come above the first row in
+red with the figure and the button to act. A card's own HISTORY is the card's
+list and is unchanged. `tests/history-mint.js`.
+
+**Adding a mint asks the lock.** A mint new to this phone is added only past
+the lock it has (`mintGate`, `09-melt-paste-switch.js`): Face ID where FACE ID
+LOCK is on, else the PIN pad where SET PIN is on, the same ask POINT OF SALE
+makes (`lockAsk`, `26m-till.js`). With no lock nothing is asked. A mint on
+this phone is never asked about, so switching between its mints stays free:
+one of the shipped mints, or one the person chose (`mintOnPhone`). The wallet
+keeps the chosen ones (`foxy.cashu.mints.chosen`, `mintsChosen`): the phone's
+own mint, every mint a connect saved it on, and every mint passed through the
+gate. It was seeded once, from the list and the saved mint a phone had before
+it, so no mint already there started to ask: a mint a phone only visited
+before this record existed stays free, the price of no tile starting to ask.
+The same holds if the record is ever lost while the list is kept: it is seeded
+again from the list, and every mint on it, visited ones too, counts as chosen.
+A visit made for one payment (a crossing, PAY FROM, MOVE TO YOUR MINT, whose
+claim at the token's mint is a visit, a card at another mint) still puts the
+mint on the list, so the money left there shows, and does not choose it. So
+does any claim at a mint not chosen (a take-back or RECLAIM of a token sent
+there, change, a card's row): the wallet takes the money there without saving
+the phone on it (`receiveToken`, `reclaimToken`). The flow then returns the
+session to the saved mint (an open till's mint while one runs, `homeMint`): a
+RECLAIM or take-back when it ends, as do TRANSFER's back arrow off its
+confirmation or keypad, a TRANSFER that fails, and a move that fails
+(`homeAgain`, `connectBack`, `crossComeHome`). Money moved home (MOVE TO YOUR
+MINT, its change) goes to the saved mint, not the live one (`sweepQuote`), and
+a move landing at a mint not chosen is a visit (`moveRun`); TRANSFER chooses
+the mint it lands at when it is pressed, past the gate at TRANSFER TO. A
+visited mint's tile asks the lock before it switches (`mintTileTap`), and
+passed, the mint is chosen. Going back to a mint after a step that left it (a
+crossing, a transfer dropped, a move that failed, the connect for real behind
+the home screen) saves the phone there only where that mint was chosen
+(`connectBack`); a MOVE TO YOUR MINT whose move fails after the claim goes
+home, the sats safe at the token's mint. A mint dropped from the list
+(`forgetMintFromList`) is no longer chosen. The entries: ADD A MINT's tile
+(asked before the address sheet opens, since nothing is typed yet), its scan
+button (after the scan and a busy phone's refusal, before the connect), a tile
+of a mint only visited, TRANSFER TO a mint only visited (asked before the
+keypad; the quote and the run connect as visits, and the transfer landing is
+what chooses it, so one dropped leaves it unchosen), KEEP IT THERE for a token
+from a new mint and for a Cashu ID payment at another mint, USE on a request
+that names a mint new to this phone or only visited, a restore that keeps a
+mint only visited (the scan looks at every mint on the list; asked once, for
+them all), and a cashier code at a mint new to this phone. The ask is made
+once; the connect, claim or join that follows asks nothing more. Given up,
+nothing is added and the screen stays. A link names no mint (`applyDeepLink`
+takes home, send, receive, token, split and nfc; the card's address names
+none), and a bare mint address scanned or pasted at home is not read as
+anything, so neither adds one. `tests/mint-gate.js`.
+
 **One payment, one entry, whichever door it came by.** A token this phone
 already holds, or has already swapped in, is turned away at a scan and over
 the tap alike (`heldAlready`, `takenBefore`, `txSeen`); a request already paid
@@ -2186,6 +2253,46 @@ took.
 The suites: `tests/till-tips.js` (the wallet: the answer's checks, the split,
 the jobs, the cashier's fields, the list) and `tests/till-ui.js` §20 (the
 screens).
+
+## 20. Saying what arrived — one RECEIVED for several
+
+No money moves here; this is how arrivals are told, which decides what a person
+is shown about money that has already landed. Every arrival (a claim on return,
+a Cashu ID payment collected, a tap, a card, a request paid) goes through
+`announcePayment` (`12-receive.js`); the history pass queues the ones it finds
+(`_paidQueue`, oldest first) and `nextPaidScreen` (`15-paid-wake-keyboard.js`)
+raises them.
+
+- One receive is the single RECEIVED screen, as before.
+- A receive arriving while another receive's RECEIVED is up joins it
+  (`paidJoinable`, `paidRowOf`): the screen becomes the bulk RECEIVED, with the
+  total and a row each, newest first (amount in its unit, the time as history
+  says it, the mint it went into or NOW AT the mint it landed at, the payer's
+  name or the note), DISMISS and SEE HISTORY. The history pass's queued receives
+  join in the same turn the first is raised (`paidJoinQueued`), so a return to
+  several payments is one screen. Nothing is moved or counted by it: the rows
+  are copies of what each announcement said.
+- Not joined: a payment out, a screen with its own words (CARD MOVED,
+  RESTORED), a confirmation held for change being made, a card's deposit on its
+  way to the card, and anything in the till, which shows each sale.
+- Each queued receive on the screen is marked (`bulked`) and let go of the
+  queue once, when the screen is dismissed (`paidDismissed`); the same payment
+  said twice is one row. DISMISS goes where DONE went (home, or the screen the
+  first one interrupted); SEE HISTORY does that and opens HISTORY over it.
+- The list is the screen's own: it is drawn only while it holds the payment the
+  screen shows (`paidHash`) and the screen has no words or button of its own. A
+  RECEIVED raised by another way over it (the receive screen's own invoice) or
+  a CARD MOVED is shown as itself, and the next receive joins that one.
+- A payment arriving while DISMISS is on its way waits in the queue and is
+  raised after home lands, still marked to be swapped where it was. A second tap
+  of DISMISS is the same dismissal, and the wait is honoured for 2 s at most and
+  ends even when the dismissal fails, so it never holds arrivals back. DISMISS lets go of the queue's head only when that
+  head was the one said, so one a card flow is still holding is not lost. A
+  queued receive the screen declines (held back, said already) is not asked
+  again on every retry; it has its own turn after the screen.
+- A row names the payer as its history row does (an exchange, its tag, an
+  address in its details, the memo), and a payment to be swapped into the other
+  unit says THEN DOLLARS or THEN BITCOIN under its amount.
 
 ## Paths that move proofs and have no section above
 

@@ -21,7 +21,7 @@
  *
  * Pages on harness.js's fake mints; the phone's till and Cashu ID sides are harness.js's, the relays stubbed. */
 const crypto = require('crypto');
-const { loadReal, fakeMint, nativePhone, cashuIdKeys } = require('./harness');
+const { loadReal, fakeMint, nativePhone, cashuIdKeys, cashuIdDropKey } = require('./harness');
 
 const MINT = 'https://m.test';
 const HOME = 'https://home.test';
@@ -79,6 +79,8 @@ function page(words) {
     },
   });
   ctx.W._nodeProbeDelay = [86400000, 86400000];
+  // a payment's second wrap (to tomorrow's keys, 08e-cashu-id.js `cidAheadAll`) held an hour, so each case reads its own first
+  ctx.W._cashuIdAheadMs = 3600000;
   ctx.W._tillRetryMs = 40;
   ctx.W._cashuIdRetryMs = 40;
   ctx.W._tillTipRetryMs = 40;
@@ -98,11 +100,19 @@ async function contact(ctx, name) {
   const k = cashuIdKeys(crypto.randomBytes(64));
   const text = ctx.W._cashuIdEncode(k.id, k.nostr, k.sig);
   await ctx.W.cashuIdAdd(text, name);
-  return { id: k.id, nostr: k.nostr, name, text, to: ctx.W._cashuIdNprofile(k.nostr) };
+  const to = ctx.W._cashuIdNprofile(k.nostr);
+  dropTargets[to] = toDrop(ctx, k.nostr);
+  return { id: k.id, nostr: k.nostr, name, text, to };
 }
 const errOf = (fn) => { try { fn(); return ''; } catch (e) { return e.message; } };
 // a delivery to `nprofile` among what went over the relays: the Cashu ID envelope, read
-const deliveredTo = (to) => relay.filter((r) => r.target === to).map((r) => { try { return JSON.parse(r.body); } catch (e) { return {}; } });
+/* A payment to a Cashu ID is wrapped to one of the sixteen keys its delivery key moves to on the UTC day it goes
+ * (08e-cashu-id.js `cidDropKey`), never to the delivery key: `to` is the nprofile of the delivery key, as before, and
+ * a message counts as to it when it is to one of today's keys. */
+const dropKeysOf = (nostr) => { const d = Math.floor(Date.now() / 86400000); return Array.from({ length: 16 }, (_, j) => cashuIdDropKey(nostr, d, j)); };
+const toDrop = (ctx, nostr) => dropKeysOf(nostr).map((k) => ctx.W._cashuIdNprofile(k));
+const deliveredTo = (to) => relay.filter((r) => r.target === to || (dropTargets[to] || []).indexOf(r.target) >= 0).map((r) => { try { return JSON.parse(r.body); } catch (e) { return {}; } });
+const dropTargets = {};
 
 async function run() {
   const K = page(KEEPER_WORDS);

@@ -56,7 +56,7 @@ const method = (sig) => {
   }
   return appSrc.slice(start + 3, i + 1);
 };
-const LIFTED = ['histAudit() {', 'histAuditUsd() {', 'txTotalOut(t) {', 'arrivingBucket(unit) {', 'recoveringSats() {', 'topUpFeeSats() {', 'meltingIn(unit) {'];
+const LIFTED = ['histAudit(src) {', 'histAuditUsd(src) {', 'txTotalOut(t) {', 'arrivingBucket(unit, mint) {', 'recoveringSats(mint) {', 'topUpFeeSats(mint) {', 'meltingIn(unit, mint) {'];
 
 /* The rows as the history screen keeps them (16-history-lists.js `loadHistory`), with the fields the audit reads. */
 function historyOf(c) {

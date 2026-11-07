@@ -75,11 +75,28 @@
         .some(function (u) { return canonicalMint(u) === c; });
     },
 
-    /* Drop one from the list. The proofs under it are left alone. */
+    /* Did the person choose this mint (`mintsChosen`): the phone's own mint, one it was saved on, or one passed through
+     * the lock's gate for adding a mint? A mint only visited is not. For the page's gate (09-melt-paste-switch.js,
+     * `mintOnPhone`). */
+    mintChosen: function (url) {
+      var c = canonicalMint(String(url || ''));
+      if (!c) return false;
+      if (canonicalMint(String(load(K.mint, '') || '')) === c) return true;
+      return mintsChosen().indexOf(c) >= 0;
+    },
+
+    /* The person passed the gate for adding this mint: chosen from now (`mintsChosen`). */
+    chooseMint: function (url) { chooseMint(url); },
+
+    /* Drop one from the list. The proofs under it are left alone. It is no longer chosen either: adding it again asks the
+     * lock, as any new mint does (`mintsChosen`). */
     forgetMintFromList: function (url) {
       var seen = load(K.mints, []);
       if (!Array.isArray(seen)) return;
+      mintsChosen();
       save(K.mints, seen.filter(function (u) { return u !== url; }));
+      var c = canonicalMint(String(url || ''));
+      if (c) save(K.mintsChosen, mintsChosen().filter(function (u) { return u !== c; }));
     },
 
     saved: function () {

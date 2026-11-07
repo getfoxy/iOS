@@ -4,3 +4,10 @@
 tools/vendor/verify-secp256k1.sh:KEY_SHA256= | the SHA-256 digest of the vendored libsecp256k1 source archive, checked by the script; a digest, not a key
 # 2026-11-06: test vectors made from the public test words (abandon … about, legal winner … yellow, tests/harness.js PHONE_WORDS); no wallet holds them.
 tests/fixtures/cashu-id-vectors.json:6e3db8c847f6e35fbd239617022d9cf44d02f689a13b66066b90e3a0c3a5f014 | a test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-id-vectors.json:2306e5c901c2d114e665c298c706447e9ba15b9dc423a26c19975648f4dd3ce8 | a drop-box test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-id-vectors.json:08d4aac5614b1bc181354449784fbb57f01a6ef32a87933b5b77f554f0678b04 | a drop-box test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-id-vectors.json:8fbb0594cc32b3208c738678193d4948ab05101d9949f702d86480432aab639f | a drop-box test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-id-vectors.json:95edcd9e7bbb1e33def6787d1fb576a1e8322da0a5449d36c2094e5303d6a836 | a drop-box test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-id-vectors.json:c20815d5de53b43aee88fd79498b039b7a6c32ea2193d4924d377504599f9ba6 | a drop-box test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-id-vectors.json:c3721f652c0943ca918eb3e50c8ecbd9638b86e1aace7fb26b75b879b9e2b2de | a drop-box test vector made from public test words, not a wallet's key
+tests/fixtures/cashu-id-vectors.json:252df67537b6d26db4c4766c1a8c989661c59adba0b92254f842666ee1c461ee | a drop-box test vector made from public test words, not a wallet's key

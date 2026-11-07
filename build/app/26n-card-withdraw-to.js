@@ -278,7 +278,8 @@
         return W.moveRun(plan, fox ? this.foxHears('wdMove') : () => {}, { visit: true });
       })
       .then((done) => {
-        const back = String(W.mintUrl || '').replace(/\/+$/, '') !== from ? W.connect(from).then(null, () => null) : Promise.resolve();
+        // saved there again only where the person chose it (09-melt-paste-switch.js `connectBack`)
+        const back = String(W.mintUrl || '').replace(/\/+$/, '') !== from ? (this.connectBack ? this.connectBack(from) : W.connect(from)).then(null, () => null) : Promise.resolve();
         return back.then(() => done);
       })
       .then((done) => {
@@ -291,7 +292,7 @@
         if (fox) this.foxEnd('wdMove', false); else this.hideMelt();
         this.refreshBalance();
         // back at the card's mint, unless the crossing was paid and its claim is still being made where the phone is
-        if (String(W.mintUrl || '').replace(/\/+$/, '') !== from && !(e && e.movePaid)) W.connect(from).then(null, () => null);
+        if (String(W.mintUrl || '').replace(/\/+$/, '') !== from && !(e && e.movePaid)) (this.connectBack ? this.connectBack(from) : W.connect(from)).then(null, () => null);
         const why = W.reason ? W.reason(e) : String((e && e.message) || e);
         this.toast(e && e.movePaid
           ? 'It was paid to ' + name + ' and is still being collected there: ' + why

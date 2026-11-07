@@ -12,7 +12,7 @@
  * replay through the Swift itself (CardGateReplayTests). */
 const fs = require('fs');
 const path = require('path');
-const { funded, newCard, MINT2 } = require('./flashcard-kit');
+const { funded, newCard, MINT, MINT2 } = require('./flashcard-kit');
 const { cardGate } = require('./harness');
 const { appOn, until, pad, settle, keyIn } = require('./flashcard-ui-kit');
 
@@ -53,7 +53,8 @@ const flows = [];
     await settle();
   };
   /* One flow under a fresh model of the rule: `run` starts it, `done` says when it has ended. */
-  const flow = async (name, c, run, done) => {
+  const flow = async (name, c, run, done, o) => {
+    const lifting = !(o && o.noLift);
     const gate = cardGate();
     H.phone.gate = gate;
     H.phone.cardApprovals = [];
@@ -66,12 +67,14 @@ const flows = [];
     }
     await settle();
     const lifts = H.phone.cardApprovals.filter((m) => m.lift === true);
-    ok(lifts.length === 1, name + ': one yes asked before the tap, naming the lift', JSON.stringify(H.phone.cardApprovals.map((m) => [m.label, m.lift])));
+    if (lifting) ok(lifts.length === 1, name + ': one yes asked before the tap, naming the lift', JSON.stringify(H.phone.cardApprovals.map((m) => [m.label, m.lift])));
+    else ok(H.phone.cardApprovals.length === 0, name + ': nothing asked: the card has no limit to lift', JSON.stringify(H.phone.cardApprovals.map((m) => [m.label, m.lift])));
     ok(gate.declined.length === 0, name + ': nothing it asked the phone to sign was refused', gate.declined.join(' / '));
     ok(!gate.unwatched, name + ': every signature was asked inside a session the phone carried', String(gate.unwatched || 0));
     const lifted = gate.trace.some((x) => x.step === 'sign' && x.allowed && x.body.label === 'set-limit' && /^00000000/.test(x.body.value));
-    ok(lifted, name + ': the card’s limit was lifted under that yes');
-    flows.push({ flow: name, lifts: true, steps: gate.trace });
+    if (lifting) ok(lifted, name + ': the card’s limit was lifted under that yes');
+    else ok(!gate.trace.some((x) => x.step === 'sign' && x.body.label === 'set-limit'), name + ': and no limit was signed');
+    flows.push({ flow: name, lifts: lifting, steps: gate.trace });
     return { gate, tapWas };
   };
 
@@ -201,6 +204,8 @@ const flows = [];
     ok(gate.declined.length === 0, 'SWITCH TO: nothing it asked the phone to sign was refused', gate.declined.join(' / '));
     ok(/n\.test/.test(f.state.record.mint || '') && f.balance() === 500, 'SWITCH TO: the card is at the new mint with the funds', f.state.record.mint + ' / ' + f.balance());
     flows.push({ flow: 'SWITCH TO', lifts: false, steps: gate.trace });
+    // (what follows is no part of SWITCH TO's trace: a gate of its own, kept nowhere)
+    H.phone.gate = cardGate();
   }
 
 
@@ -286,6 +291,57 @@ const flows = [];
     if (x.step === 'sign') return 'sign ' + x.body.label + ':' + (x.body.label === 'set-limit' ? x.body.value : x.body.value.slice(0, 2) + x.body.value.slice(198)) + ':' + x.allowed;
     return x.step;
   }).join(' ');
+  /* A withdraw from a card with a per-second limit alone (a card of 1.25, no daily limit), its screen last drawn from the read after
+   * a load, which a quick card answers without its owner's grant: 0 for its limit on one payment. The screen took that 0 for no limit
+   * and asked nothing; the tap's own read, with the owner's grant, said the limit, lifted it, and the phone refused the lift. The rule the screen asks by is the wallet's own (`cardLiftWanted`), and a figure not said is asked about. */
+  await H.W.connect(MINT, null, null, { remember: false });
+  await H.W.claim((await H.W.invoice(20000, '')).hash);
+  await a.refreshBalance();
+  {
+    const w = newCard(H, undefined, { format: 4, software: 25 });
+    await setUp(w, 3000);
+    // read on its own screen with the owner's grant first, then drawn again from the read after a load
+    await read(w);
+    H.nfc = w;
+    w.tap();
+    const afterLoad = await H.W.cardLook(w);
+    a.setState({ screen: 'flashcard', stack: ['home'] });
+    a.fcShow(afterLoad);
+    ok(!(a.state.fc.tap && a.state.fc.tap.limited) && !(Number(a.state.fc.limit) > 0) && H.W.cardLiftWanted(afterLoad) === 'unknown',
+       'the screen drawn from a read without the grant shows no limit on one payment, and the wallet says that is not known', JSON.stringify(a.state.fc.tap));
+    const was = w.balance();
+    await flow('WITHDRAW AFTER A LOAD', w, () => a.fcWithdrawRun(300, '1234'), () => w.balance() < was);
+    ok(w.state.tapLimit > 0, 'and the card’s per-second limit is back', String(w.state.tapLimit));
+  }
+  // a card with the no-PIN allowance alone: a taking-off is under the PIN, so nothing is lifted and nothing is asked
+  {
+    const np = newCard(H, undefined, { format: 4, software: 25 });
+    H.nfc = np;
+    np.tap();
+    await H.W.cardSetUp(np, { pin: '1234' });
+    np.tap();
+    await H.W.cardAdd(np, { amount: 2000, unit: 'sat', pin: '1234', price: PRICE });
+    np.tap();
+    await H.W.cardSetLimit(np, { sats: 500, noPin: true, price: PRICE });
+    await read(np);
+    ok(H.W.cardLiftWanted(a._fcCard) === 'no' && a._fcCard.info.noPin && a._fcCard.info.noPin.limit > 0, 'a card with a no-PIN allowance and no other limit: nothing to lift', JSON.stringify(a._fcCard.info.noPin));
+    const was = np.balance();
+    await flow('WITHDRAW, NO-PIN ALLOWANCE ONLY', np, () => a.fcWithdrawRun(300, '1234'), () => np.balance() < was, { noLift: true });
+  }
+  // a card with no limit at all
+  {
+    const free = newCard(H, undefined, { format: 4, software: 25 });
+    H.nfc = free;
+    free.tap();
+    await H.W.cardSetUp(free, { pin: '1234' });
+    free.tap();
+    await H.W.cardAdd(free, { amount: 2000, unit: 'sat', pin: '1234', price: PRICE });
+    await read(free);
+    ok(H.W.cardLiftWanted(a._fcCard) === 'no', 'a card with no limit: nothing to lift');
+    const was = free.balance();
+    await flow('WITHDRAW, NO LIMIT', free, () => a.fcWithdrawRun(300, '1234'), () => free.balance() < was, { noLift: true });
+  }
+
   if (process.argv.includes('--record')) {
     const out = path.join(__dirname, 'fixtures', 'card-gate-flows.json');
     fs.writeFileSync(out, JSON.stringify(flows, null, 0).replace(/\},\{"step"/g, '},\n{"step"') + '\n');

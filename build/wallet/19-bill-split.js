@@ -887,8 +887,11 @@
         return opened.then(function (key) {
           unlockWith = key;
           /* `opts.visit`: taken at its own mint and the phone left where it
-           * banks (`claimUnclaimed` goes home afterwards). */
-          var how = (opts && opts.visit) ? { remember: false } : undefined;
+           * banks (`claimUnclaimed` goes home afterwards). A mint the person
+           * did not choose (`mintsChosen`: a take-back or change at a mint
+           * only visited) is a visit too: taking money there is not choosing
+           * it, and saving the phone there would add it with no lock asked. */
+          var how = ((opts && opts.visit) || (switched && !FoxyWallet.mintChosen(tok.mint))) ? { remember: false } : undefined;
           return FoxyWallet.openSeedForVisit({ arriving: true }).then(function () {
             return switched ? FoxyWallet.connect(tok.mint, null, null, how) : null;
           }, function () {

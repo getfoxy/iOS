@@ -25,10 +25,23 @@
     /* A dollar card's own list is in dollars: its entries are dollar rows, and its books are the dollar books. A card of one kind
      * has no tabs; a card of software 1.23 that holds both has them, DOLLARS or BITCOIN, each line in its own unit (`cardTwo`). */
     const cardTwo = !!ofCard && !!(s.fc && s.fc.key === ofCard && s.fc.v123 && s.fc.bal && this.fcTwoUnits && this.fcTwoUnits(s.fc));
-    const two = (!!(this.twoUnitsOn && this.twoUnitsOn()) && !ofCard) || cardTwo;
+    /* Whose history: the connected mint's, or another the chevron by the title picked (`histShown`, 16-history-lists.js). Another
+     * mint's rows, tabs and books are its own (`src`); a card's own list is the card's, as it was. */
+    const H = (!ofCard && this.histShown) ? this.histShown() : null;
+    const other = !!(H && H.other);
+    const src = other ? H : undefined;
+    const W1 = window.FoxyWallet;
+    const atMint = other ? H.mint : undefined;
+    const rowsAll = s.fresh ? [] : other ? H.history : (s.history || []);
+    const two = ((other ? !!H.two : !!(this.twoUnitsOn && this.twoUnitsOn())) && !ofCard) || cardTwo;
     const usdCard = !!ofCard && !cardTwo && !!(s.fc && s.fc.key === ofCard && s.fc.unit === 'usd');
-    const tab = two ? (s.histUnit === 'usd' || s.histUnit === 'sat' ? s.histUnit : this.homePills()[0]) : usdCard ? 'usd' : 'sat';
-    const A = ((two || usdCard) && this.histAuditIn) ? this.histAuditIn(tab) : usdCard && this.histAuditUsd ? this.histAuditUsd() : this.histAudit();
+    // another mint's first tab: what was chosen to be held there, dollars unless that is bitcoin
+    const firstTab = () => {
+      if (!other) return this.homePills()[0];
+      try { return (W1 && W1.walletChoice && W1.walletChoice(H.mint) || {}).hold === 'bitcoin' ? 'sat' : 'usd'; } catch (e) { return 'usd'; }
+    };
+    const tab = two ? (s.histUnit === 'usd' || s.histUnit === 'sat' ? s.histUnit : firstTab()) : usdCard ? 'usd' : 'sat';
+    const A = ((two || usdCard) && this.histAuditIn) ? this.histAuditIn(tab, src) : usdCard && this.histAuditUsd ? this.histAuditUsd() : this.histAudit(src);
     const balOf = A.balOf, balNow = A.balNow, run = A.run;
     const dueChange = A.dueChange, dueCount = A.dueCount;
     /* The audit. Walked back through every entry, the balance before the
@@ -39,9 +52,8 @@
      * the list is the whole ledger; five hundred of more cannot be checked
      * to the start. Sats held back for a lost swap are outside the balance and are
      * named too. */
-    const W1 = window.FoxyWallet;
-    const held = Math.round(Number(W1 && W1.heldSats && W1.heldSats()) || 0);
-    const whole = !!s.historyComplete && !s.fresh && (s.history || []).length > 0;
+    const held = Math.round(Number(W1 && W1.heldSats && W1.heldSats(atMint)) || 0);
+    const whole = !!s.historyComplete && !s.fresh && rowsAll.length > 0;
     const off = A.off;
     const money = (n) => (tab === 'usd' ? this.unitFigure(Math.abs(n), 'usd') : this.stageMoney(Math.abs(n)));
     let auditTitle = '', auditBody = '';
@@ -52,8 +64,9 @@
         + ' they explain. A restore from your words, or a swap whose record was lost, can do this.';
     } else if (whole) {
       auditTitle = 'ADDS UP';
-      auditBody = 'Every ' + (tab === 'usd' ? 'cent' : 'sat') + ' of your ' + money(balNow) + ' is accounted for by the payments below.';
-    } else if (!s.fresh && (s.history || []).length) {
+      // (said after the last row: `histAuditEnd`)
+      auditBody = 'Every ' + (tab === 'usd' ? 'cent' : 'sat') + ' of your ' + money(balNow) + ' is accounted for by the payments above.';
+    } else if (!s.fresh && rowsAll.length) {
       auditTitle = 'LAST 500 PAYMENTS';
       auditBody = 'Only the latest five hundred are kept, so the balance cannot be checked back to the start.';
     }
@@ -63,12 +76,12 @@
       auditBody += (auditBody ? ' ' : '') + money(heldHere)
         + ' is held back for a swap the mint has not answered; it is not in the balance until it does.';
     }
-    const fees = tab === 'usd' ? 0 : (this.topUpFeeSats ? this.topUpFeeSats() : 0);
+    const fees = tab === 'usd' ? 0 : (this.topUpFeeSats ? this.topUpFeeSats(atMint) : 0);
     if (fees > 0 && whole) {
       auditBody += (auditBody ? ' ' : '') + money(fees)
         + ' went to the mint in fees for making small change, or for a payment that did not go through.';
     }
-    const back = tab === 'usd' ? Math.round(Number(A.back) || 0) : (this.recoveringSats ? this.recoveringSats() : 0);
+    const back = tab === 'usd' ? Math.round(Number(A.back) || 0) : (this.recoveringSats ? this.recoveringSats(atMint) : 0);
     if (back > 0) {
       auditBody += (auditBody ? ' ' : '') + money(back)
         + ' is being recovered from the mint: it took that piece for a swap after Foxy was put away, and the new pieces are collected the next time Foxy is online.';
@@ -121,7 +134,7 @@
     // the other leg of a swap, by the swap they share: its figure goes under this one
     const unitOf = (t) => (t.unit === 'usd' ? 'usd' : 'sat');
     const legOf = new Map();
-    if (two) (s.history || []).forEach(g => g.items.forEach(t => { if (t.kind === 'swap' && t.swap) legOf.set(t.swap + '|' + unitOf(t), t); }));
+    if (two) rowsAll.forEach(g => g.items.forEach(t => { if (t.kind === 'swap' && t.swap) legOf.set(t.swap + '|' + unitOf(t), t); }));
     const legFigure = (t) => {
       const u = unitOf(t) === 'usd' ? 'sat' : 'usd';
       const o = legOf.get(t.swap + '|' + u);
@@ -143,7 +156,7 @@
     const known = (k) => !!(k && W1 && typeof W1.cardKnownHere === 'function' && W1.cardKnownHere(k));
     const inList = (t) => (ofCard ? !swapLeg(t) && (t.card === ofCard || t.fromCard === ofCard)
       : swapLeg(t) || t.lost || !(t.fromCard || known(t.card)));
-    const histGroups = (s.fresh ? [] : (s.history || [])).map(g => ({
+    const histGroups = (ofCard ? (s.fresh ? [] : (s.history || [])) : rowsAll).map(g => ({
       label: g.label,
       items: g.items.filter(t => inTab(t) && (hf === 'all' || dirOf(t) === hf) && inList(t)).map(t => Object.assign({
         // HIDE only masks balances on the home screen — history stays readable
@@ -239,7 +252,11 @@
       historyEmptySub: ofCard ? 'Nothing has been done with this card on this phone yet.'
         : s.fresh ? 'Your transactions will show up here.' : 'No transactions match this filter.',
       isHistory: sc === 'history',
-      histTitle: ofCard ? 'CARD HISTORY' : 'HISTORY',
+      // the mint's name, as the mint list names it, in the place of HISTORY; a chevron after it to change mints (`goHistMints`)
+      histTitle: ofCard ? 'CARD HISTORY' : ((H && this.histMintName && this.histMintName(H.mint)) || 'HISTORY'),
+      histMintPick: !ofCard && !!(H && H.mint),
+      histTitlePlain: !(!ofCard && !!(H && H.mint)),
+      histMintGo: () => (this.goHistMints ? this.goHistMints() : null),
       // ALL, RECEIVED and SENT; the till's list has none (26m-till.js)
       histFilterShown: true,
       // clearing history is the whole wallet's, not one card's
@@ -267,8 +284,15 @@
         tap: () => this.setState({ histUnit: u }),
       })) : [],
       // (a card's list with rows of its own at the top is not empty: NOTHING TO SEE YET! is not said under them)
-      historyEmpty: histGroups.length === 0 && notes.length === 0,
+      // (and another mint's rows still being read are not nothing)
+      historyEmpty: histGroups.length === 0 && notes.length === 0 && !(H && H.loading),
       histAuditShown: !!auditTitle && hf === 'all' && !ofCard,
+      /* Where the books sit (the keeper, 2026-11-06: "If audit adds up put it at the end of the history screen. If it doesn't
+       * then it's above."): above the first row when they do not add up, or ask for something to be done (change to collect
+       * or to hand over), in their warning look with the figure; after the last row otherwise, quiet. Per mint and per tab,
+       * as the books are. */
+      histAuditTop: !!auditTitle && hf === 'all' && !ofCard && (auditTitle === 'DOES NOT ADD UP' || auditAction),
+      histAuditEnd: !!auditTitle && hf === 'all' && !ofCard && !(auditTitle === 'DOES NOT ADD UP' || auditAction),
       histAuditTitle: auditTitle,
       histAuditBody: auditBody,
       histAuditAction: auditAction && !!auditTitle && hf === 'all' && !ofCard,

@@ -1143,6 +1143,27 @@ function cashuIdPieceKey(baseHex, j) {
   if (e === 0n || e >= SECP_ORDER) throw new Error('no throwaway key');
   return e;
 }
+/* The drop boxes (CashuID.swift `dropTweak`): t = SHA-256("foxy-cashu-id-drop-v1" ‖ Q ‖ day (4) ‖ j), once more with
+ * 0xFF; key(day, j) = x(lift_x(Q) + t·G); its secret q′ + t, q′ the delivery secret of the even point. An ANY WALLET
+ * request's key is the same move by SHA-256("foxy-cashu-id-any-v1" ‖ Q ‖ its 4-byte id). */
+function cashuIdMoveTweak(msg) {
+  let t = big(sha(msg));
+  if (t === 0n || t >= SECP_ORDER) t = big(sha(msg, Buffer.from([0xff])));
+  if (t === 0n || t >= SECP_ORDER) throw new Error('no drop-box tweak');
+  return t;
+}
+function cashuIdDropTweak(nostrHex, day, slot) {
+  const d4 = Buffer.alloc(4); d4.writeUInt32BE(day >>> 0, 0);
+  return cashuIdMoveTweak(Buffer.concat([Buffer.from('foxy-cashu-id-drop-v1'), Buffer.from(nostrHex, 'hex'), d4, Buffer.from([slot])]));
+}
+const cashuIdAnyTweak = (nostrHex, idHex) => cashuIdMoveTweak(Buffer.concat([Buffer.from('foxy-cashu-id-any-v1'), Buffer.from(nostrHex, 'hex'), Buffer.from(idHex, 'hex')]));
+const cashuIdMoved = (nostrHex, t) => n32(ptAdd(ptParse(Buffer.from('02' + nostrHex, 'hex')), ptMul(t, SECP_G))[0]).toString('hex');
+function cashuIdMovedSecret(q, t) {
+  const even = ptMul(q, SECP_G)[1] & 1n ? SECP_ORDER - q : q;
+  return fmod(even + t, SECP_ORDER);
+}
+const cashuIdDropKey = (nostrHex, day, slot) => cashuIdMoved(nostrHex, cashuIdDropTweak(nostrHex, day, slot));
+const cashuIdAnyKey = (nostrHex, idHex) => cashuIdMoved(nostrHex, cashuIdAnyTweak(nostrHex, idHex));
 // BIP-340 signing, auxiliary randomness all zero (a test model's)
 function schnorrSign(k, msg) {
   const P = ptMul(k, SECP_G);
@@ -1923,4 +1944,4 @@ function nativePhone(opts) {
 module.exports = { cardGate, load, proof, stubCashu, connected, loadReal, fakeMint, books, booksWrong, rebook, noBooks, nativePhone, NATIVE_RULES, NATIVE_SAYS, counterSlot, PHONE_WORDS,
                    p2pkParent, p2pkAt, cardOwnerScalar, p256Public, p256Sign, p256Verify, CARD_LABELS,
                    cashuIdKeys, cashuIdOneTime, cashuIdBlind, cashuIdTag, cashuIdPayBase, cashuIdPieceKey, cashuIdBindDigest,
-                   p2bkTweak, sharedX, schnorrSign };
+                   p2bkTweak, sharedX, schnorrSign, cashuIdDropTweak, cashuIdAnyTweak, cashuIdDropKey, cashuIdAnyKey, cashuIdMovedSecret };

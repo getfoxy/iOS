@@ -301,4 +301,123 @@ enum CashuID {
 
     /// `cashuIdEphemeral`: {"base": <64 hex>}.
     static func baseReply(_ base: [UInt8]) -> String { "{\"base\":\"\(NUT13.hex(base))\"}" }
+
+    // MARK: The drop boxes: the delivery key's rotating children
+
+    /// A payment is never wrapped to the delivery key Q itself (docs/CASHU-ID.md, "The drop boxes"), but to one
+    /// of sixteen keys of the UTC day it is posted on, each Q moved by a tweak anybody holding the ID string can
+    /// work out:
+    ///
+    ///     tⱼ = SHA-256("foxy-cashu-id-drop-v1" ‖ Q ‖ day (4, big-endian) ‖ j)   (once more with 0xFF appended if not 0 < t < n)
+    ///     key(day, j) = x(lift_x(Q) + tⱼ·G)
+    ///
+    /// with `day` the unix time divided by 86,400 and j from 0 to 15. The payer picks j at random; the receiver,
+    /// who holds q, opens key(day, j) with q′ + tⱼ, q′ being q or n − q, whichever has the even point
+    /// (BIP-340's lift_x). So the relays are asked for a day's sixteen keys, never for Q, and one day's keys
+    /// share nothing a relay can see with another day's. Anybody with the ID string can work every key out:
+    /// a payer, and a relay that was handed the string.
+    static let dropPrefix = Array("foxy-cashu-id-drop-v1".utf8)
+    /// An ANY WALLET request's own key: the same move of Q by SHA-256("foxy-cashu-id-any-v1" ‖ Q ‖ the request's
+    /// id (4 bytes)), so a wallet that cannot work out a day's keys pays a key no other request names, and the
+    /// request does not show Q.
+    static let anyPrefix = Array("foxy-cashu-id-any-v1".utf8)
+    /// The keys of one day.
+    static let dropSlots = 16
+
+    /// SHA-256(message), or SHA-256(message ‖ 0xFF) when that is 0 or not below n, as NUT-28's rᵢ.
+    private static func hashedTweak(_ message: [UInt8], _ ctx: OpaquePointer) throws -> [UInt8] {
+        var t = Array(SHA256.hash(data: message))
+        if NUT13.isScalar(t, ctx) { return t }
+        NUT13.wipe(&t)
+        t = Array(SHA256.hash(data: message + [0xFF]))
+        if NUT13.isScalar(t, ctx) { return t }
+        NUT13.wipe(&t)
+        throw Failure.badTweak
+    }
+
+    /// tⱼ for the delivery key's x-only half, a UTC day and a slot.
+    static func dropTweak(nostr: [UInt8], day: UInt32, slot: UInt8, _ ctx: OpaquePointer) throws -> [UInt8] {
+        guard nostr.count == 32, slot < dropSlots else { throw Failure.badPoint }
+        let day4 = (0..<4).reversed().map { UInt8(truncatingIfNeeded: day >> (UInt32($0) * 8)) }
+        return try hashedTweak(dropPrefix + nostr + day4 + [slot], ctx)
+    }
+
+    /// An ANY WALLET request's tweak, by its 4-byte id.
+    static func anyTweak(nostr: [UInt8], id: [UInt8], _ ctx: OpaquePointer) throws -> [UInt8] {
+        guard nostr.count == 32, id.count == 4 else { throw Failure.badPoint }
+        return try hashedTweak(anyPrefix + nostr + id, ctx)
+    }
+
+    /// x(lift_x(Q) + t·G): what a payer wraps to.
+    static func moved(nostr: [UInt8], tweak: [UInt8], _ ctx: OpaquePointer) throws -> [UInt8] {
+        guard nostr.count == 32, NUT13.isPoint([2] + nostr, ctx) else { throw Failure.badPoint }
+        let point = try NUT13.addTweak(point: [2] + nostr, tweak, ctx)
+        return Array(point[1..<33])
+    }
+
+    /// q′ + t, the secret of x(lift_x(Q) + t·G) for the delivery key's secret q. The caller wipes it.
+    static func movedSecret(base q: [UInt8], tweak: [UInt8], _ ctx: OpaquePointer) throws -> [UInt8] {
+        let point = try NUT13.publicKey(q, ctx)
+        var even = point[0] == 3 ? try NUT13.negated(scalar: q, ctx) : q
+        defer { NUT13.wipe(&even) }
+        do { return try NUT13.addScalar(even, tweak, ctx) } catch { throw Failure.badTweak }
+    }
+
+    /// key(day, j), x-only: the payer's half, which the page works out itself (08e-cashu-id.js `cidDropKey`).
+    static func dropKey(nostr: [UInt8], day: UInt32, slot: UInt8) throws -> [UInt8] {
+        try NUT13.withContext { ctx in
+            var t = try dropTweak(nostr: nostr, day: day, slot: slot, ctx)
+            defer { NUT13.wipe(&t) }
+            return try moved(nostr: nostr, tweak: t, ctx)
+        }
+    }
+
+    /// An ANY WALLET request's key, x-only.
+    static func anyKey(nostr: [UInt8], id: [UInt8]) throws -> [UInt8] {
+        try NUT13.withContext { ctx in
+            var t = try anyTweak(nostr: nostr, id: id, ctx)
+            defer { NUT13.wipe(&t) }
+            return try moved(nostr: nostr, tweak: t, ctx)
+        }
+    }
+
+    /// The secrets of every slot of every day named, day by day in the order given, slot 0 first. The caller wipes them.
+    static func dropSecrets(base q: [UInt8], days: [UInt32]) throws -> [[UInt8]] {
+        try NUT13.withContext { ctx in
+            let nostr = try NUT13.xOnlyKey(q, ctx)
+            var out = [[UInt8]]()
+            do {
+                for day in days {
+                    for slot in 0..<UInt8(dropSlots) {
+                        var t = try dropTweak(nostr: nostr, day: day, slot: slot, ctx)
+                        defer { NUT13.wipe(&t) }
+                        out.append(try movedSecret(base: q, tweak: t, ctx))
+                    }
+                }
+            } catch {
+                for i in out.indices { NUT13.wipe(&out[i]) }
+                throw error
+            }
+            return out
+        }
+    }
+
+    /// The secret of each ANY WALLET request's key, in the order given. The caller wipes them.
+    static func anySecrets(base q: [UInt8], ids: [[UInt8]]) throws -> [[UInt8]] {
+        try NUT13.withContext { ctx in
+            let nostr = try NUT13.xOnlyKey(q, ctx)
+            var out = [[UInt8]]()
+            do {
+                for id in ids {
+                    var t = try anyTweak(nostr: nostr, id: id, ctx)
+                    defer { NUT13.wipe(&t) }
+                    out.append(try movedSecret(base: q, tweak: t, ctx))
+                }
+            } catch {
+                for i in out.indices { NUT13.wipe(&out[i]) }
+                throw error
+            }
+            return out
+        }
+    }
 }

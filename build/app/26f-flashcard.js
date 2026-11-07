@@ -4572,15 +4572,18 @@
     return W.cardApprove(Object.assign(card ? { card } : {}, o));
   }
 
-  /* Whether this phone may lift the card's limits for money it takes off (the wallet lifts them where the card is this phone's
-   * and has a limit). Where the screen does not know that card, yes: the keeper is asked rather than the tap refused. */
+  /* Whether this phone may lift the card's limits for money it takes off: the wallet's own rule (`cardLiftWanted`, the one `cardTake`
+   * lifts by), on the card as it was last read, and never a guess from what the screen shows. Only a card known to have no limit, or
+   * known to be another phone's, is asked nothing; anything not known is asked about, rather than the tap refused. */
   fcMayLift(key) {
-    const fc = this.state.fc;
-    if (!fc || (key && fc.key !== key)) return true;
-    if (fc.ownedHere === false) return false;
-    const tap = fc.tap;
-    if (!tap) return true;
-    return Number(fc.limit) > 0 || !!(fc.day && fc.day.limited) || !!tap.limited || !!tap.hidden;
+    const W = this.fcW();
+    const card = this._fcCard;
+    // (no card named: asked, whatever card the screen last read)
+    if (!key) return true;
+    if (!card || !card.info || card.key !== key || !W || !W.cardLiftWanted) return true;
+    // (another phone's, as the card said to this phone's grant: `mine` false; a read that asked no grant says nothing of it)
+    if (card.mine === false) return false;
+    return W.cardLiftWanted(card) !== 'no';
   }
 
   fcChangePin() {
@@ -5706,7 +5709,7 @@
     const visit = Promise.all([this._fcVisit || Promise.resolve(), after || Promise.resolve()]);
     this._fcVisit = null;
     const put = () => {
-      if (W && was && String(W.mintUrl || '').replace(/\/+$/, '') !== was) W.connect(was).then(home, home);
+      if (W && was && String(W.mintUrl || '').replace(/\/+$/, '') !== was) (this.connectBack ? this.connectBack(was) : W.connect(was)).then(home, home);
       else home();
     };
     visit.then(put, put);

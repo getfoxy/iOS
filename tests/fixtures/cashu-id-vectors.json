@@ -60,5 +60,27 @@
     "base": "f8fa24bdb278a5caacb97207ca4c94a2bed30f4d46c45335d19763ec0c540339",
     "piece0": "4abc43d7991e72938971bf52ae90fb34aa76fb094d8381bf78bd9f51ab7bddfc",
     "piece1": "1df19012ac5c6b542a4fadf525d7b1dd438683191ba1e18f9105f0c50961909e"
+  },
+  "drop": {
+    "about": "The drop boxes (CashuID.swift dropTweak, 08e-cashu-id.js cidDropKey): the phone words' delivery key moved to day 20398's slots 0 and 15, day 20399's slot 0, and ANY WALLET request 8c0e1f22's key, by tests/harness.js's BigInt arithmetic. The delivery key's point has odd y, so the secrets are n - q + t.",
+    "day": 20398,
+    "slots": [
+      {
+        "slot": 0,
+        "tweak": "2ec90359852b90002cc91db42acd393a3ff57cd262ab992225f47e7812211bfb",
+        "key": "2306e5c901c2d114e665c298c706447e9ba15b9dc423a26c19975648f4dd3ce8",
+        "secret": "08d4aac5614b1bc181354449784fbb57f01a6ef32a87933b5b77f554f0678b04"
+      },
+      {
+        "slot": 15,
+        "tweak": "bbe226329f9b92728a8a51e7d232f484380d3b7fdd68a31d8c85d7762590392d",
+        "key": "8fbb0594cc32b3208c738678193d4948ab05101d9949f702d86480432aab639f",
+        "secret": "95edcd9e7bbb1e33def6787d1fb576a1e8322da0a5449d36c2094e5303d6a836"
+      }
+    ],
+    "nextDayKey0": "c20815d5de53b43aee88fd79498b039b7a6c32ea2193d4924d377504599f9ba6",
+    "anyId": "8c0e1f22",
+    "anyKey": "c3721f652c0943ca918eb3e50c8ecbd9638b86e1aace7fb26b75b879b9e2b2de",
+    "anySecret": "252df67537b6d26db4c4766c1a8c989661c59adba0b92254f842666ee1c461ee"
   }
 }

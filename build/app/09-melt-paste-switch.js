@@ -300,7 +300,7 @@
     const W = window.FoxyWallet;
     return !!((W && W.proofLockDepth && W.proofLockDepth() > 0)
       || this._sendRun || this._watching || this._chasingChange
-      || this.state.nmBusy || this.state.reqBusy || this.state.reqSwapping || this._swapRun || this._homeGoing);
+      || this.state.nmBusy || this.state.reqBusy || this.state.reqSwapping || this._swapRun || this._homeGoing || this._trQuoteGoing);
   }
 
   /* Every mint switch a person starts asks here first. The wallet's own
@@ -341,6 +341,7 @@
     if (this.state.reqBusy) why.push('a request is being paid');
     if (this._swapRun) why.push('a swap between balances is running');
     if (this._homeGoing) why.push('the phone is on its way home');
+    if (this._trQuoteGoing) why.push('a transfer is being quoted at its mint');
     return why.join('; ') || 'nothing';
   }
 
@@ -355,7 +356,8 @@
     // what a person starts holds it under these names (99-proof-lock-and-export.js): not a sweep
     const own = ['pay', 'sendToken', 'receiveToken', 'reclaimToken', 'onchainPay', 'importProofs', 'adoptScan'];
     if (own.indexOf(String(held.what)) >= 0) return false;
-    return !(this._sendRun || this._chasingChange || this.state.nmBusy || this.state.reqBusy || this._swapRun || this._homeGoing);
+    return !(this._sendRun || this._chasingChange || this.state.nmBusy || this.state.reqBusy || this._swapRun || this._homeGoing
+      || this._trQuoteGoing);
   }
 
   /* Waits up to five seconds for such a sweep, the row showing it was tapped, then goes on (`go`), which refuses as
@@ -452,7 +454,7 @@
       this.walletReady({ name: (w && w.name) || host });
       // came from history, so go back to it — now showing this mint
       if (back === 'history') {
-        this.setState({ screen: 'history', stack: ['home'] });
+        this.setState({ screen: 'history', stack: ['home'], histMint: '' });
         this.loadHistory();
       }
       /* Still being asked: what waits for its answer is said when it comes (`mintConnected`), this switch's own
@@ -578,9 +580,106 @@
         const u = String(url || '').trim();
         const bad = W.mintProblem && W.mintProblem(u);
         if (bad) { this.toast(bad, true); return; }
-        this.justSwitch(u);
+        // a payment or claim in progress refuses the switch: said before the lock is asked, not after it is passed
+        if (this.refuseSwitchWhileBusy()) return;
+        // a mint new to this phone past the lock first; one the person chose is a switch, and free (`mintGate`)
+        if (this.mintGate) this.mintGate(u, () => this.justSwitch(u), 'To add this mint.');
+        else this.justSwitch(u);
       })
       .catch(e => this.toast(W.reason(e), true));
+  }
+
+  /* ADD A MINT's tile: the address sheet (08-mint-entry-and-notes.js, `typeMint`), past the lock first (`mintGate`). Nothing
+   * is typed yet, so the tile always asks where a lock is set; the connect the sheet's ADD starts asks nothing more. */
+  typeMintGated() {
+    if (this.mintGate) this.mintGate('', () => this.typeMint(), 'To add a mint.');
+    else this.typeMint();
+  }
+
+  /* A tile on the mint list: a switch. A mint the person chose is free; one only visited (a crossing, PAY FROM, MOVE TO
+   * YOUR MINT put it on the list, so the money there shows) is added by this tap, and asks the lock first (`mintGate`). */
+  mintTileTap(url) {
+    if (this.mintGate) this.mintGate(url, () => this.justSwitch(url), 'To add this mint.');
+    else this.justSwitch(url);
+  }
+
+  /* Back to a mint the phone was on, after a step that took it elsewhere (a crossing, a transfer dropped, a move that
+   * failed): saved as the phone's own again only where the person chose it (the wallet's `mintChosen`). A mint only
+   * visited is gone back to as a visit, so going back never chooses it with nothing asked. */
+  connectBack(url) {
+    const W = window.FoxyWallet;
+    const chosen = !W.mintChosen || W.mintChosen(url);
+    return chosen ? W.connect(url) : W.connect(url, null, null, { remember: false });
+  }
+
+  /* Home again after a flow that visited another mint: the live mint back to the one this phone belongs on (the wallet's
+   * `homeMint`: an open till's, else the saved one), through `connectBack`, where the two differ. Nothing to do where they
+   * agree, nor while a crossing's own way home is owed (`_crossCameFrom`, `crossComeHome`). Returns the trip, or null.
+   *
+   * The trip is the phone's way home (`_homeGoing`) until it lands, so a switch or a move asked meanwhile waits for it
+   * (`moneyBusy`): a connect home landing under a claim at another mint made the move after it pay from home. A TRANSFER
+   * quote's connect still out (`_trQuoteGoing`) is waited for first, so its late landing does not take the phone back. */
+  homeAgain() {
+    const W = window.FoxyWallet;
+    if (!W || this._crossCameFrom || this._homeGoing) return null;
+    const bare = (u) => String(u || '').replace(/\/+$/, '');
+    const homeNow = () => (W.homeMint ? W.homeMint() : ((W.saved && W.saved()) || {}).url);
+    const quoting = this._trQuoteGoing;
+    if (!quoting) {
+      const home0 = homeNow();
+      if (!home0 || bare(W.mintUrl) === bare(home0)) return null;
+    }
+    let trip = null;
+    const landed = () => { if (this._homeGoing === trip) this._homeGoing = null; };
+    trip = Promise.resolve(quoting).then(null, () => null).then(() => {
+      const home = homeNow();
+      if (!home || bare(W.mintUrl) === bare(home)) return null;
+      return this.connectBack ? this.connectBack(home) : W.connect(home);
+    }).then(() => { landed(); if (this.refreshBalance) this.refreshBalance(); }, () => { landed(); });
+    this._homeGoing = trip;
+    return trip;
+  }
+
+  /* A mint on this phone, never asked about: one of the shipped mints (`DEFAULT_MINTS`, chosen by the app and not by
+   * whoever holds the phone), or one the person chose, which the wallet keeps (`mintChosen`: the phone's own mint, every
+   * mint it was saved on, every one passed through this gate). A mint only visited is not on it, though its tile shows.
+   * Compared as the wallet writes a mint (`canonicalMint`). */
+  mintOnPhone(url) {
+    const W = window.FoxyWallet;
+    const canon = (u) => ((W && W.canonicalMint) ? String(W.canonicalMint(u) || '')
+      : String(u || '').trim().replace(/\/+$/, ''));
+    const want = canon(url);
+    if (!want) return false;
+    if ((this.DEFAULT_MINTS || []).some(m => canon(m.url) === want)) return true;
+    return !!(W && W.mintChosen && W.mintChosen(url));
+  }
+
+  /* Adding a mint to this phone asks the lock it has: Face ID where FACE ID LOCK is on, else the PIN pad where SET PIN is on,
+   * as the till's own gate asks (26m-till.js, `lockAsk`). With no lock nothing is asked. A mint already on this phone is
+   * never asked about: switching between its mints stays free. `url` is the mint, or '' where it is not known yet (ADD A
+   * MINT's address sheet, which is asked before it opens). Asked once per add: what `then` starts (the connect, the claim)
+   * asks nothing more. Given up, nothing is added and the person stays where they were. */
+  mintGate(url, then, why, o) {
+    const W = window.FoxyWallet;
+    const then1 = typeof then === 'function' ? then : () => {};
+    /* Passed (or no lock to pass, or a mint on the phone already): the person chose this mint, and it is free from now
+     * (`mintChosen`); a shipped mint never used is recorded too, so the claim or connect that follows saves the phone
+     * there (the wallet takes money at a mint not chosen as a visit). Not where the step still has a way back (`o.choose`
+     * false: a TRANSFER TO, whose quote can be dropped): there the step's own end chooses it, the connect that saves the
+     * phone there. */
+    const choose = !(o && o.choose === false);
+    const go = () => { if (choose && url && W && W.chooseMint) W.chooseMint(url); then1(); };
+    if (url && this.mintOnPhone(url)) { go(); return; }
+    const pinSet = !!(W && W.pinIsSet && W.pinIsSet());
+    const face = !!(W && W.faceLock && W.faceLock() && W.biometric);
+    if (!W || !W.screenLocked || !W.screenLocked() || (!pinSet && !face) || !this.lockAsk) { go(); return; }
+    const host = String(url || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    console.log('[foxy] adding a mint' + (host ? ' (' + host + ')' : '') + ': the lock first');
+    return this.lockAsk(go, why || 'To add a mint.', () => {
+      console.log('[foxy] adding a mint: the lock was given up; nothing added');
+      // a pad over a screen a menu row opened: that row's way back, as the till's gate does (01-ui-basics.js `menuReturnSettle`)
+      if (this.menuReturnSettle) this.menuReturnSettle();
+    });
   }
 
   /* Tell them who holds the bitcoin, once per mint.

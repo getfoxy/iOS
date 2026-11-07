@@ -543,6 +543,39 @@ final class CardApprovalTests: XCTestCase {
         bridge.cardSessionEnded()
     }
 
+    /// A withdraw from a card with a per-second limit alone: a card of 1.25 with no daily limit (a quick card: the limit on one
+    /// payment said only after the grant). With no yes the lift is refused, as on the phone; with the yes asked before the tap it is
+    /// signed and put back. A card with the no-PIN allowance alone, or no limit at all, has nothing to lift: no lift signs there.
+    func testAWithdrawalFromACardWithAPerSecondLimitAlone() throws {
+        SeedStore.deleteIfPresent(key: CardLifts.key)
+        defer { SeedStore.deleteIfPresent(key: CardLifts.key) }
+        let bridge = FoxyBridge()
+        let read = { (tap: UInt32, noPin: UInt32) in
+            self.sawKey(bridge)
+            self.sawInfo(bridge, day: 0, tap: 0, noPin: noPin, quick: true, length: 55)
+            self.sawGrant(bridge)
+            self.sawInfo(bridge, day: 0, tap: tap, noPin: noPin, quick: true, length: 55)
+        }
+        bridge.cardSessionBegan()
+        read(3000, 0)
+        XCTAssertFalse(bridge.cardOwnerAllows(limit(0, 0, 0, 1000)), "the log: a lift nobody said yes to")
+        bridge.cardSessionEnded()
+        try given(bridge, ["label": "set-limit", "lift": true])
+        bridge.cardSessionBegan()
+        read(3000, 0)
+        XCTAssertTrue(bridge.cardOwnerAllows(limit(0, 0, 0, 1000)), "the per-second limit lifted under the yes")
+        XCTAssertTrue(bridge.cardOwnerAllows(limit(0, 3000, 0, 1000)), "and put back")
+        bridge.cardSessionEnded()
+        for (name, noPin) in [("the no-PIN allowance alone", UInt32(500)), ("no limit at all", UInt32(0))] {
+            try given(bridge, ["label": "set-limit", "lift": true])
+            bridge.cardSessionBegan()
+            read(0, noPin)
+            // (a sixteen-byte write of the figures the card holds is a rate, which signs unasked and changes nothing; a lift is not that)
+            XCTAssertFalse(bridge.cardOwnerAllows(limit(0, 0)), "\(name): no lift, even with a yes")
+            bridge.cardSessionEnded()
+        }
+    }
+
     /// A limit the keeper chose is not undone by a lift kept from before it.
     func testALimitTheKeeperChoseDropsALiftFromBeforeIt() throws {
         SeedStore.deleteIfPresent(key: CardLifts.key)

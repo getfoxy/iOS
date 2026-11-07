@@ -124,6 +124,7 @@
     taken: 'foxy.cashu.taken',       // fingerprints of ecash this phone has swapped in, to say so when it is offered again
     mints: 'foxy.cashu.mints',       // every mint this device has connected to
     mintsUsed: 'foxy.cashu.mints.used', // the same, never pruned: a switch back to one is not scanned
+    mintsChosen: 'foxy.cashu.mints.chosen', // the mints the person chose (a switch, a pass of the lock), not a visit's
     mintNodes: 'foxy.cashu.mint.nodes', // each mint's Lightning node, from invoices it made
     tokenWatch: 'foxy.cashu.token.watch', // tokens being watched until redeemed: Ys, amount, mint
     outtok: 'foxy.cashu.outtoken',   // a token made but not yet handed over
@@ -2803,7 +2804,33 @@
     return 'That mint address is not secure. Foxy needs https:// (or a .onion address over Tor).';
   }
 
+  /* The mints the person chose, as `canonicalMint` writes them: every mint the phone was saved on (a connect with
+   * `remember` not false, which is where `K.mint` is written) and every one passed through the lock's gate for adding a
+   * mint (the page's `mintGate`). A visit (a crossing, PAY FROM, MOVE TO YOUR MINT, a card's load at another mint) puts a
+   * mint on the list (`rememberMint`) so the money left there shows, and does not choose it: adding it is asked. Seeded
+   * once, from the list and the saved mint as they were before this record existed, so no mint already there starts to ask;
+   * seeded before any write to the list (`rememberMint`), so a visit made after the upgrade is not seeded as chosen. */
+  function mintsChosen() {
+    var l = load(K.mintsChosen, null);
+    if (Array.isArray(l)) return l;
+    var seed = [];
+    var seen = load(K.mints, []);
+    (Array.isArray(seen) ? seen : []).concat([load(K.mint, '')]).forEach(function (u) {
+      var c = canonicalMint(String(u || ''));
+      if (c && seed.indexOf(c) < 0) seed.push(c);
+    });
+    save(K.mintsChosen, seed);
+    return seed;
+  }
+  function chooseMint(url) {
+    var c = canonicalMint(String(url || ''));
+    if (!c) return;
+    var l = mintsChosen();
+    if (l.indexOf(c) < 0) save(K.mintsChosen, l.concat([c]));
+  }
+
   function rememberMint(url) {
+    mintsChosen();
     var used = load(K.mintsUsed, []);
     if (!Array.isArray(used)) used = [];
     // whether this wallet has ever been on it, which is what the answer says
@@ -11045,10 +11072,20 @@
     };
     var changeHash = 'tap-change-' + Date.now();
     if (routeOpen()) {
+      /* Change at a mint the person did not choose is taken there as a visit (`receiveToken`), and the phone comes back
+       * to the mint it was on after, the session never left there. */
+      var changeFrom = canonicalMint(mintUrl || '');
+      var changeHome = function () {
+        if (!changeFrom || canonicalMint(mintUrl || '') === changeFrom) return;
+        FoxyWallet.connect(changeFrom, null, null, FoxyWallet.mintChosen(changeFrom) ? undefined : { remember: false })
+          .then(null, function (e) { console.warn('[foxy] change: could not get back to ' + hostOf(changeFrom) + ':', (e && e.message) || e); });
+      };
       FoxyWallet.receiveToken(text, { hash: changeHash }).then(function () {
         try { FoxyWallet.tag(changeHash, { change: true }); } catch (x) {}
         kept('');
+        changeHome();
       }, function (e) {
+        changeHome();
         // locked to this phone and signed by the mint: kept as it is, and claimed on the next try
         if (!chk.signed) return no('the mint would not swap it and its signatures do not verify');
         try { keepChange(text, chk.amount); kept(', written down to settle later'); } catch (x) { no(String((x && x.message) || x)); }
@@ -12483,6 +12520,9 @@
               * (`cardSeal`), and this phone then sends it no other way. */
              sealed: (b(6) & 128) !== 0,
              tapKnown: tapKnown, tapLimit: tapKnown ? cardU32(h, 30) : 0,
+             /* `tapSaid`: the limit on one payment above is the card's own. A quick card says it to its owner's grant alone (0 to
+              * anyone else), so read without the grant it is not said; `cardLook` sets this where the grant's read says it. */
+             tapSaid: tapKnown && (b(6) & 16) === 0,
              tapStart: (tapKnown && !noPinKnown) ? cardU32(h, 34) : 0, tapSpent: (tapKnown && !noPinKnown) ? cardU32(h, 38) : 0,
              /* `noPinKnown`: the card's software is 1.16 or later, whose PIN is optional: a card may have none and pay without
               * it, and one with a PIN may let a day's worth be signed for without it (`noPin`, the allowance and what is spent
@@ -12813,6 +12853,7 @@
       // as the card has them now: a figure that changed begins its window or its count again, as the card's own rules say
       if (day !== (Number(info.limit) || 0)) { info.limit = day; info.windowStart = info.now; info.spentToday = 0; if (card.record) card.record.limit = day; }
       info.tapLimit = tap;
+      info.tapSaid = true;
       if (np !== (Number(info.noPin && info.noPin.limit) || 0)) info.noPin = { limit: np, spent: 0 };
       info.rate = rate;
       info.rateSaid = true;
@@ -13032,6 +13073,20 @@
    * new SELECT, a reset), only time. `left` is null where there is no such
    * limit; `turns` is when this tap ends, 0 where none is in hand. */
   var CARD_TAP = 10;
+  /* Whether this phone's own taking-off lifts the card's limits for its tap (`cardTake`'s `lift`, `cardUnderPin`): the one rule, which
+   * the screens ask too (FoxyWallet.cardLiftWanted) before the card is held up, for the keeper's yes. 'yes' where the card said a daily
+   * limit or a limit on one payment (a per-second one is that limit: `paced`), on a card of any software; 'no' where it said neither;
+   * 'unknown' where it did not say the second (a quick card read without its owner's grant says 0 for it whatever it holds,
+   * `tapSaid`), or the card was not read. The no-PIN allowance is no reason: a taking-off is made under the PIN, or on a card that
+   * has none, which has no allowance. A screen asks wherever this is not 'no'. */
+  function cardLiftWanted(card) {
+    var info = card && card.info;
+    if (!info) return 'unknown';
+    if ((Number(info.limit) || 0) > 0 || (Number(info.tapLimit) || 0) > 0) return 'yes';
+    if (info.tapKnown && !info.tapSaid) return 'unknown';
+    return 'no';
+  }
+
   function cardTapOf(info) {
     var limit = Number(info && info.tapLimit) || 0;
     var known = !!(info && info.tapKnown);
@@ -14205,6 +14260,7 @@
     }).then(function (d) {
       var again = cardInfoOf(d);
       card.info.tapLimit = again.tapLimit;
+      card.info.tapSaid = true;
       // (1.23: and the rate, said to the PIN in a tap that read the history)
       if (again.units && again.book) { card.info.rate = again.rate; card.info.rateSaid = true; }
       card.tap = cardTapOf(card.info);
@@ -14558,6 +14614,7 @@
         return t.want(cardCommand(CARD_INS.info, cardInfoP1(card), '', 0), 'to say its limit').then(function (d) {
           var again = cardInfoOf(d);
           card.info.tapLimit = again.tapLimit;
+          card.info.tapSaid = true;
           // (1.23: and the rate, which the grant opens as it opens the limit)
           if (again.units && again.book) { card.info.rate = again.rate; card.info.rateSaid = true; card.info.book = again.book; }
           card.tap = cardTapOf(card.info);
@@ -20251,7 +20308,7 @@
       var day = card.day;
       var tap = card.tap || cardTapOf(card.info);
       var turns = day.turns;
-      lift = !!(o.lift && (day.limited || tap.limited) && card.mine);
+      lift = !!(o.lift && card.mine && cardLiftWanted(card) === 'yes');
       /* (1.23: the day and the tap are counted in cents; the pieces are chosen, and a payment refused, in the card's unit as it pays, so
        * what is left of each is turned back into it at the rate, rounded down, which is exactly what fits (`cardCeilBack`). A sats card
        * with no rate known here has no figure to be held to by this phone: the card's own word decides.) */
@@ -24766,7 +24823,8 @@
     var to = home && typeof home.mint === 'string' ? canonicalMint(home.mint) : '';
     if (!to || to === canonicalMint(mintUrl || '')) return Promise.resolve({ mint: canonicalMint(mintUrl || ''), moved: false });
     // home at once from the keys on file, and its mint asked behind it (`lazy`)
-    return FoxyWallet.connect(to, null, null, { lazy: true }).then(function () {
+    // saved as the phone's own again only where the person chose it (`mintsChosen`): the home is the mint the phone was on
+    return FoxyWallet.connect(to, null, null, FoxyWallet.mintChosen(to) ? { lazy: true } : { lazy: true, remember: false }).then(function () {
       console.log('[foxy] till: closed; back at ' + hostOf(to));
       return { mint: to, moved: true };
     }, function (e) {
@@ -24782,7 +24840,8 @@
     if (tillOutboxRows().some(tillUnsent)) tillDeliverAll().then(null, function () {});
     var to = home && typeof home.mint === 'string' ? canonicalMint(home.mint) : '';
     if (!to || to === canonicalMint(mintUrl || '')) return Promise.resolve({ left: true, mint: canonicalMint(mintUrl || ''), home: true });
-    return FoxyWallet.connect(to, null, null, { lazy: true }).then(function () {
+    // saved as the phone's own again only where the person chose it (`mintsChosen`): the home is the mint the phone was on
+    return FoxyWallet.connect(to, null, null, FoxyWallet.mintChosen(to) ? { lazy: true } : { lazy: true, remember: false }).then(function () {
       console.log('[foxy] till: left the till; back at ' + hostOf(to));
       return { left: true, mint: to, home: true };
     }, function (e) {
@@ -24804,8 +24863,8 @@
    *     rᵢ = SHA-256("Cashu_P2BK_v1" ‖ x(e·P) ‖ i),   P′ = P + rᵢ·G
    *
    * the ID at slot 0 and the payer's refund key at slot 1, with a locktime about
-   * thirty days out. It gift-wraps the token to the delivery key over Nostr
-   * (NIP-17). The mint sees keys nobody has seen before, never the ID and never
+   * thirty days out. It gift-wraps the token over Nostr (NIP-17) to keys the
+   * delivery key moves to each day (the drop boxes, below). The mint sees keys nobody has seen before, never the ID and never
    * the refund key, and nothing but this phone's seed opens them (d·E has the
    * same x as e·ID).
    *
@@ -24900,6 +24959,31 @@
   /* The most pieces one payment's throwaway keys are made for: more than any
    * split of an amount, with a retried swap's second set. */
   var CID_PIECES_MAX = 256;
+  /* The drop boxes (CashuID.swift `dropTweak`, docs/CASHU-ID.md "The drop boxes"). A payment is wrapped to one of
+   * the sixteen keys the ID's delivery key moves to on the UTC day it is posted, picked at random, and once more, a
+   * few seconds later (`cidAheadDelay`), to one of the next day's: so the receiver asks only for the day's keys and
+   * for the days it was away, never the same key on two days, and never the delivery key itself. The phone keeps the
+   * last UTC day a listen finished (`CID_HEARD`), and each ANY WALLET request it showed (`CID_ANY_KEYS`: the id, when
+   * it was made and the day it was last asked for), each listened for a year: at every listen in its first day, once
+   * a UTC day in its first month, once a week after. Day numbers and ids, no key. */
+  var CID_DROP_TAG = 'foxy-cashu-id-drop-v1';
+  var CID_ANY_TAG = 'foxy-cashu-id-any-v1';
+  var CID_SLOTS = 16;
+  var CID_DAY_MS = 24 * 60 * 60 * 1000;
+  var CID_HEARD = 'foxy.cid.heard';
+  var CID_ANY_KEYS = 'foxy.cid.any';
+  var CID_WINDOW_DAYS = 32;
+  var CID_ANY_KEEP_MS = 365 * CID_DAY_MS;
+  var CID_ANY_FRESH_MS = CID_DAY_MS;
+  var CID_ANY_DAILY_MS = 30 * CID_DAY_MS;
+  var CID_ANY_WEEK_DAYS = 7;
+  // the most codes kept (FoxyBridge+CashuID.swift `cashuIdMostAny`): one more drops the oldest
+  var CID_ANY_MOST = 960;
+  /* A wrap's envelope carries a random run of filler (`pad`) a NIP-44 bucket or more long, fresh for every wrap: a
+   * payment's two wraps and its daily resends do not always land in the same size bucket (docs/CASHU-ID.md, Posting). */
+  var CID_PAD_MIN = 256;
+  // the most a Nostr send may carry (FoxyBridge+Delivery.swift: half of NIP-44's longest message), filler included
+  var CID_SEND_MAX = 32767;
 
   /* ---- the string ---- */
 
@@ -25048,6 +25132,48 @@
     if (v === BigInt(0) || v >= n) throw new Error('No throwaway key could be made for that payment.');
     return e;
   }
+
+  /* ---- the drop boxes: the payer's half ----
+   *
+   * key(day, j) = x(lift_x(Q) + t·G), t = SHA-256("foxy-cashu-id-drop-v1" ‖ Q ‖ day (4, big-endian) ‖ j), once more
+   * with 0xFF appended when that is 0 or not below n; Q the ID's delivery key (x-only), `day` the unix time over
+   * 86,400. An ANY WALLET request's key: the same with SHA-256("foxy-cashu-id-any-v1" ‖ Q ‖ its 4-byte id). The
+   * phone holds the matching secrets (CashuID.swift); the page never does. 64 hex. */
+  function cidDay(ms) { return Math.floor((ms == null ? Date.now() : Number(ms)) / CID_DAY_MS); }
+
+  function cidMoveBy(bytes) {
+    var n = cidOrder();
+    var t = BigInt('0x' + hexOf(sha256(bytes)));
+    if (t === BigInt(0) || t >= n) t = BigInt('0x' + hexOf(sha256(bytes.concat([255]))));
+    if (t === BigInt(0) || t >= n) throw new Error('No key for that Cashu ID could be made.');
+    return t;
+  }
+
+  function cidMoved(nostrHex, t) {
+    var CT = window.CashuTS;
+    var P = CT.pointFromHex('02' + nostrHex);
+    var G = CT.pointFromHex('0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798');
+    return P.add(G.multiply(t)).toHex(true).slice(2);
+  }
+
+  function cidDropKey(nostrHex, day, j) {
+    var d = Math.floor(Number(day));
+    var slot = Math.floor(Number(j));
+    if (!CID_HEX32.test(String(nostrHex)) || !(d >= 0 && d < 4294967296) || !(slot >= 0 && slot < CID_SLOTS)) throw new Error('That is not a Cashu ID.');
+    var bytes = cidUtf8(CID_DROP_TAG).concat(cidHexBytes(nostrHex), [(d >>> 24) & 255, (d >>> 16) & 255, (d >>> 8) & 255, d & 255], [slot]);
+    return cidMoved(String(nostrHex), cidMoveBy(bytes));
+  }
+
+  function cidAnyKey(nostrHex, idHex) {
+    if (!CID_HEX32.test(String(nostrHex)) || !/^[0-9a-f]{8}$/.test(String(idHex))) throw new Error('That is not a Cashu ID.');
+    return cidMoved(String(nostrHex), cidMoveBy(cidUtf8(CID_ANY_TAG).concat(cidHexBytes(nostrHex), cidHexBytes(idHex))));
+  }
+
+  // a slot picked at random, for one wrap
+  function cidSlot() { return window.CashuTS.createRandomSecretKey()[0] % CID_SLOTS; }
+
+  // where a payment to the delivery key `nostrHex` goes when it is posted on `day`: an nprofile of one of that day's keys
+  function cidDropTarget(nostrHex, day) { return cidNprofile(cidDropKey(nostrHex, day, cidSlot())); }
 
   /* The keys of a payment to `idHex` with `refundHex` as cashu-ts makes them,
    * for a piece's throwaway key `eHex`: { E, L, R } (the ID blinded at slot 0,
@@ -26111,7 +26237,8 @@
    * MY CASHU ID's second button. A NUT-18 request (`creqA…`) any Cashu wallet pays today: no amount, the unit the
    * phone is in, this phone's mints that honour a lock (the default first), locked (NUT-11 through `nut10`) to a fresh
    * key from the seed-derived lock pool (`takeLockKey`, the key a receive request takes, filed as `cid-any-<id>`), and
-   * a Nostr transport to the ID's delivery key, its nprofile naming the three relays its inbox listens on. Every
+   * a Nostr transport to a key of the request's own (`cidAnyKey`: the delivery key moved by the request's id, listened
+   * for a year), its nprofile naming the three relays its inbox listens on. Every
    * opening takes a new key, so no two payers lock to the same one and the mint sees a key once; a key handed out
    * twice (a code shown again, a payer that pays twice) still opens what is locked to it, once per delivery. The
    * payment arrives on the ID's inbox as a NUT-18 payload with no E, and is taken as any ecash locked to this seed
@@ -26165,7 +26292,9 @@
         // and the pool filled behind it, so the next opening has one
         primeLockPool();
         if (!CID_HEX33.test(pub)) throw new Error('No key to lock it to could be made. Try again in a moment.');
-        var target = cidNprofile(mine.nostr, CID_RELAYS);
+        // a key of this request's own, which the phone listens on for a year (`cidAnyKeep`): never the delivery key
+        var target = cidNprofile(cidAnyKey(mine.nostr, id), CID_RELAYS);
+        cidAnyKeep(id);
         var transport = [{ type: CT.PaymentRequestTransportType.NOSTR, target: target, tags: [['n', '17']] }];
         var text = new CT.PaymentRequest(transport, id, undefined, unit, mints, undefined, true,
                                          { kind: 'P2PK', data: pub, tags: [] }).toEncodedRequest();
@@ -26423,7 +26552,89 @@
   // when the phone last said a relay was listening; 0 once it may not be (a return, the route gone, a hush)
   var cidOpenedAt = 0;
 
-  function cidListenGone() { cidOpenedAt = 0; }
+  function cidListenGone() {
+    cidOpenedAt = 0;
+    if (cidDayTimer) { clearTimeout(cidDayTimer); cidDayTimer = null; }
+  }
+
+  /* What one listen asks the phone for (`cashuIdInboxOpen`): { days, any }. `days`: today (UTC) and every day since
+   * the last listen that finished, at most the window's thirty-two back, newest first; the whole window when this
+   * phone has never finished one (a first listen, or storage restored from nothing). `any`: the ANY WALLET requests
+   * due (`cidAnyDue`). The delivery key itself is never asked for: it is all a relay needs to work out every day. */
+  function cidListenPlan(nowMs) {
+    var now = nowMs == null ? Date.now() : nowMs;
+    var today = cidDay(now);
+    var heard = Math.floor(Number(load(CID_HEARD, 0)) || 0);
+    var from = heard > 0 && heard <= today ? Math.max(heard + 1, today - CID_WINDOW_DAYS) : today - CID_WINDOW_DAYS;
+    if (heard > today) from = today;
+    var days = [];
+    for (var d = today; d >= from; d--) days.push(d);
+    if (!days.length) days.push(today);
+    var any = cidAnyKeys(now).filter(function (r) { return cidAnyDue(r, now); }).map(function (r) { return r.id; });
+    return { days: days, any: any, today: today };
+  }
+
+  /* Whether an ANY WALLET request is asked for at a listen at `now`: always in its first day; in its first month,
+   * when it was not asked today; after that, when it was not asked in the last week. */
+  function cidAnyDue(r, now) {
+    var age = now - Number(r.at);
+    var today = cidDay(now);
+    var asked = Math.floor(Number(r.asked)) || 0;
+    if (age < CID_ANY_FRESH_MS) return true;
+    if (age < CID_ANY_DAILY_MS) return asked !== today;
+    return today - asked >= CID_ANY_WEEK_DAYS;
+  }
+
+  // the ANY WALLET requests still listened for: [{ id, at, asked }], each for a year from when it was made
+  function cidAnyKeys(nowMs) {
+    var now = nowMs == null ? Date.now() : nowMs;
+    var l = load(CID_ANY_KEYS, []);
+    var rows = (Array.isArray(l) ? l : []).filter(function (r) {
+      return r && /^[0-9a-f]{8}$/.test(String(r.id)) && Number(r.at) > 0 && Number(r.at) + CID_ANY_KEEP_MS > now;
+    });
+    if (rows.length !== (Array.isArray(l) ? l.length : 0)) save(CID_ANY_KEYS, rows);
+    return rows;
+  }
+
+  function cidAnyKeep(id) {
+    var rows = cidAnyKeys().filter(function (r) { return r.id !== id; });
+    rows.push({ id: id, at: Date.now(), asked: 0 });
+    while (rows.length > CID_ANY_MOST) rows.shift();
+    save(CID_ANY_KEYS, rows);
+  }
+
+  // the requests the relays have answered to the end of every REQ (`_cashuIdAnyHeard`, from the bridge), marked asked today
+  function cidAnyAsked(ids, today) {
+    if (!ids.length) return;
+    var rows = cidAnyKeys();
+    rows.forEach(function (r) { if (ids.indexOf(r.id) >= 0) r.asked = today; });
+    save(CID_ANY_KEYS, rows);
+  }
+
+  /* A listen open across midnight (UTC) asks for the day it opened on: at a random moment in the first hour of the
+   * next day it is closed, and a random 0 to 60 seconds later opened again on the new day's keys, so the end of one
+   * listen and the start of the next are not one instant. */
+  var cidDayTimer = null;
+  function cidDayArm() {
+    if (cidDayTimer) { clearTimeout(cidDayTimer); cidDayTimer = null; }
+    var next = (cidDay() + 1) * CID_DAY_MS;
+    var r = window.CashuTS.createRandomSecretKey();
+    var wait = next - Date.now() + (((r[0] << 16) | (r[1] << 8) | r[2]) % (60 * 60 * 1000));
+    cidDayTimer = setTimeout(function () {
+      cidDayTimer = null;
+      if (!cidOpenedAt) return;
+      cidOpenedAt = 0;
+      bridgeAsk('cashuIdInboxClose', {}, 5000).then(null, function () {}).then(function () {
+        var g = window.CashuTS.createRandomSecretKey();
+        var gap = ((g[0] << 8) | g[1]) % 60001;
+        cidDayTimer = setTimeout(function () {
+          cidDayTimer = null;
+          // opened meanwhile (the wake, MY CASHU ID shown): nothing to do
+          if (!cidOpenedAt) cidListenNow().then(null, function () {});
+        }, gap);
+      });
+    }, Math.max(1000, wait));
+  }
 
   function cidFreshMs() { return CID_TESTS && Number(FoxyWallet._cashuIdFreshMs) > 0 ? Number(FoxyWallet._cashuIdFreshMs) : CID_FRESH_MS; }
 
@@ -26435,11 +26646,17 @@
     if (opts && opts.ifClosed && cidOpenedAt && Date.now() - cidOpenedAt < cidFreshMs()) {
       return cidDrain().then(function () { return 1; }, function () { return 1; });
     }
-    var since = Math.floor(Date.now() / 1000) - CID_SINCE_S + 300;
-    var run = bridgeAsk('cashuIdInboxOpen', { since: since }, 70000).then(function (n) {
+    var plan = cidListenPlan();
+    var run = bridgeAsk('cashuIdInboxOpen', { days: plan.days, any: plan.any }, 120000).then(function (n) {
+      // "1" only once the relay has answered every REQ to its end (EOSE): a listen cut short asks the same days again
       var got = Number(String(n).trim()) || 0;
       cidOpenedAt = got ? Date.now() : 0;
-      console.log('[foxy] cashu id: ' + (got ? 'listening' : 'no relay is listening'));
+      if (got) {
+        // the ANY WALLET codes are marked when their own REQs have ended (`_cashuIdAnyHeard`), not here
+        save(CID_HEARD, plan.today);
+        cidDayArm();
+      }
+      console.log('[foxy] cashu id: ' + (got ? 'listening on ' + plan.days.length + ' day(s) of keys' : 'no relay is listening'));
       return got;
     }, function (e) {
       cidOpenedAt = 0;
@@ -26448,6 +26665,7 @@
     }).then(function (n) {
       // after a restore, and for a week: this seed's own copies of what it paid, read back (`cidCopyArrived`)
       if (!cidRecovering()) return n;
+      var since = Math.floor(Date.now() / 1000) - CID_SINCE_S + 300;
       return bridgeAsk('cashuIdCopiesOpen', { since: since }, 70000).then(function (c) {
         console.log('[foxy] cashu id: ' + ((Number(String(c).trim()) || 0) ? 'reading back this seed’s copies' : 'no relay is holding this seed’s copies yet'));
         return n;
@@ -26501,13 +26719,32 @@
     }
   }
 
+  /* Filler for one wrap: a random length from none to half the token or `CID_PAD_MIN`, whichever is more, and never
+   * more than `room` (what is left under `CID_SEND_MAX`, so a large payment still goes). NIP-44 pads
+   * a message to a bucket (32 bytes up to 256, then an eighth of the next power of two), so this moves a wrap across
+   * one bucket or two: what a relay sees of the size is the bucket, drawn afresh for every wrap. */
+  function cidPad(tokenLength, room) {
+    var r = window.CashuTS.createRandomSecretKey();
+    var most = Math.min(Math.max(CID_PAD_MIN, Math.floor(Number(tokenLength) / 2) || 0), Math.max(0, Math.floor(Number(room)) || 0));
+    return new Array(((r[0] << 16) | (r[1] << 8) | r[2]) % (most + 1) + 1).join('0');
+  }
+
   /* The envelope: the token, the E its tag is bound to, and this phone's ID
    * with the tag that proves it (`cidFromName`), only where this phone's ID is
-   * in use (M6) and the tag was made. */
+   * in use (M6) and the tag was made; and filler of its own (`cidPad`). */
+
   function cidBody(row) {
     var j = /** @type {any} */ ({ v: 2, type: 'foxy-cashu-id', token: row.token, E: row.E });
     if (row.from && row.tag) { j.from = row.from; j.tag = row.tag; }
     if (row.note) j.note = String(row.note).slice(0, CID_NOTE_MAX);
+    // the room left for filler: the send limit less the envelope with an empty `pad`, counted in UTF-8 bytes as the bridge does
+    j.pad = '';
+    var text = JSON.stringify(j), bare;
+    // a lone surrogate cannot be encoded: counted at the most it could take
+    try { bare = encodeURIComponent(text).replace(/%[0-9A-F]{2}/g, 'x').length; } catch (e) { bare = text.length * 3; }
+    var pad = cidPad(String(row.token).length, CID_SEND_MAX - bare);
+    // no filler fits: no `pad` at all, so an envelope within its nine bytes of the limit still goes, as before filler
+    if (pad) j.pad = pad; else delete j.pad;
     return JSON.stringify(j);
   }
 
@@ -26540,9 +26777,12 @@
     var run = due.reduce(function (chain, r) {
       return chain.then(function () {
         if (!routeOpen()) { cidOutboxAmend(r.id, { tries: (Number(r.tries) || 0) + 1 }); return null; }
-        return deliverOverNostr(cidNprofile(r.to), cidBody(r)).then(function () {
+        // to one of the sixteen keys of today (UTC), never to the delivery key itself
+        var day = cidDay();
+        return deliverOverNostr(cidDropTarget(r.to, day), cidBody(r)).then(function () {
           var at = Date.now();
-          var fields = /** @type {any} */ ({ sentAt: r.sentAt || at, lastSentAt: at });
+          // and once more, a while later, to one of tomorrow's: a receiver that listened today before it came asks only tomorrow's
+          var fields = /** @type {any} */ ({ sentAt: r.sentAt || at, lastSentAt: at, aheadDay: day + 1, aheadAt: at + cidAheadDelay() });
           // the first time a relay took it: its copy to this seed's recovery key goes a while later (`cidCopyAll`)
           if (!r.copyAt && !r.copiedAt) fields.copyAt = at + cidCopyDelay();
           cidOutboxAmend(r.id, fields);
@@ -26651,14 +26891,73 @@
     return run;
   }
 
-  // the next copy's moment, kept by one timer (and on every catch-up, for a page that slept through it)
+  /* ---- the next day's wrap ----
+   *
+   * Each time a relay takes a payment, the same envelope goes once more, one to five seconds later with filler of its
+   * own (`cidPad`), wrapped to one of the next UTC day's keys (`aheadDay`): a receiver whose phone listened today
+   * before the payment was posted does not ask today's keys again tomorrow, and finds it among tomorrow's. One whose
+   * day has already gone by when it is finally sent (the page slept) goes to today's keys, and a new next-day wrap is
+   * set behind it. */
+  var cidAheadSending = null;
+
+  // one to five seconds: the page is surely still awake, and the wrap goes to another day's key on its own circuit
+  function cidAheadDelay() {
+    if (CID_TESTS && Number(FoxyWallet._cashuIdAheadMs) > 0) return Number(FoxyWallet._cashuIdAheadMs);
+    var r = window.CashuTS.createRandomSecretKey();
+    return 1000 + (((r[0] << 8) | r[1]) % 4001);
+  }
+
+  function cidAheadDue(r, now) {
+    return r.state === 'out' && Number(r.aheadAt) > 0 && Number(r.aheadAt) <= now && Number(r.lockUntil) * 1000 > now;
+  }
+
+  function cidAheadAll() {
+    if (cidAheadSending) return cidAheadSending;
+    var now = Date.now();
+    var due = cidOutboxRows().filter(function (r) { return cidAheadDue(r, now); });
+    if (!due.length || !routeOpen()) return Promise.resolve(0);
+    var sent = 0;
+    var run = due.reduce(function (chain, r) {
+      return chain.then(function () {
+        var day = Number(r.aheadDay) || 0;
+        var today = cidDay();
+        /* Anything but tomorrow is late (the page slept between the two, even into the wrap's own day, when the receiver
+         * may have finished that day's listen already): it goes to today's keys instead, and a new next-day wrap is set
+         * behind it. A day this phone's clock cannot have meant is today's too. */
+        var late = day !== today + 1;
+        var to = late ? today : day;
+        return deliverOverNostr(cidDropTarget(r.to, to), cidBody(r)).then(function () {
+          cidOutboxAmend(r.id, late ? { aheadDay: today + 1, aheadAt: Date.now() + cidAheadDelay(), aheadSentAt: Date.now(), aheadTries: 0 }
+                                    : { aheadAt: 0, aheadSentAt: Date.now(), aheadTries: 0 });
+          sent += 1;
+        }, function (e) {
+          // tried again on the first wrap's schedule (`cidRetryArm`): once a minute, a quarter of an hour after thirty tries
+          var tries = (Math.floor(Number(r.aheadTries)) || 0) + 1;
+          cidOutboxAmend(r.id, { aheadAt: Date.now() + cidRetryMs() * (tries >= CID_TRIES_FAST ? CID_RETRY_SLOW : 1), aheadTries: tries });
+          console.warn('[foxy] cashu id: a payment’s second wrap was not sent yet:', (e && e.message) || e);
+        });
+      });
+    }, Promise.resolve()).then(function () { return sent; }, function () { return sent; });
+    cidAheadSending = run;
+    var done = function () { if (cidAheadSending === run) cidAheadSending = null; cidCopyArm(); };
+    run.then(done, done);
+    return run;
+  }
+
+  // the next copy's or next-day wrap's moment, kept by one timer (and on every catch-up, for a page that slept through it)
   function cidCopyArm() {
     if (cidCopyTimer) { clearTimeout(cidCopyTimer); cidCopyTimer = null; }
-    var next = cidOutboxRows().filter(function (r) { return r.state === 'out' && !r.copiedAt && Number(r.copyAt) > 0; })
-      .map(function (r) { return Number(r.copyAt); }).sort(function (a, b) { return a - b; })[0];
+    var next = cidOutboxRows().filter(function (r) { return r.state === 'out'; }).reduce(function (all, r) {
+      if (!r.copiedAt && Number(r.copyAt) > 0) all.push(Number(r.copyAt));
+      // one already due while the route is down waits for the route's return (`cidOnRoute`), not for this timer
+      if (Number(r.aheadAt) > 0 && (Number(r.aheadAt) > Date.now() || routeOpen())) all.push(Number(r.aheadAt));
+      return all;
+    }, /** @type {number[]} */ ([])).sort(function (a, b) { return a - b; })[0];
     if (!next) return;
     cidCopyTimer = setTimeout(function () {
       cidCopyTimer = null;
+      var now = Date.now();
+      if (cidOutboxRows().some(function (r) { return cidAheadDue(r, now); })) cidAheadAll().then(null, function () {});
       cidCopyAll().then(null, function () {});
     }, Math.max(1000, next - Date.now()));
   }
@@ -26999,6 +27298,7 @@
       var now = Date.now();
       if (cidOutboxRows().some(function (r) { return cidDue(r, now); })) cidDeliverAll().then(null, function () {});
       if (cidOutboxRows().some(function (r) { return cidWatched(r, now); })) cidWatchAll().then(null, function () {});
+      if (cidOutboxRows().some(function (r) { return cidAheadDue(r, now); })) cidAheadAll().then(null, function () {});
       if (cidOutboxRows().some(function (r) { return cidCopyDue(r, now); })) cidCopyAll().then(null, function () {});
       else cidCopyArm();
       Promise.resolve().then(function () { return cidListenNow({ ifClosed: true }); }).then(null, function () {});
@@ -27015,6 +27315,7 @@
       Promise.resolve().then(function () { return cidListenNow({ ifClosed: true }); }).then(null, function () {});
       if (cidOutboxRows().some(function (r) { return cidDue(r, Date.now()); })) setTimeout(function () { cidDeliverAll().then(null, function () {}); }, 0);
       if (cidOutboxRows().some(function (r) { return cidCopyDue(r, Date.now()); })) setTimeout(function () { cidCopyAll().then(null, function () {}); }, 0);
+      if (cidOutboxRows().some(function (r) { return cidAheadDue(r, Date.now()); })) setTimeout(function () { cidAheadAll().then(null, function () {}); }, 0);
     }
     catch (e) { console.warn('[foxy] cashu id: sending on the route’s return:', (e && e.message) || e); }
   }
@@ -27672,11 +27973,28 @@
         .some(function (u) { return canonicalMint(u) === c; });
     },
 
-    /* Drop one from the list. The proofs under it are left alone. */
+    /* Did the person choose this mint (`mintsChosen`): the phone's own mint, one it was saved on, or one passed through
+     * the lock's gate for adding a mint? A mint only visited is not. For the page's gate (09-melt-paste-switch.js,
+     * `mintOnPhone`). */
+    mintChosen: function (url) {
+      var c = canonicalMint(String(url || ''));
+      if (!c) return false;
+      if (canonicalMint(String(load(K.mint, '') || '')) === c) return true;
+      return mintsChosen().indexOf(c) >= 0;
+    },
+
+    /* The person passed the gate for adding this mint: chosen from now (`mintsChosen`). */
+    chooseMint: function (url) { chooseMint(url); },
+
+    /* Drop one from the list. The proofs under it are left alone. It is no longer chosen either: adding it again asks the
+     * lock, as any new mint does (`mintsChosen`). */
     forgetMintFromList: function (url) {
       var seen = load(K.mints, []);
       if (!Array.isArray(seen)) return;
+      mintsChosen();
       save(K.mints, seen.filter(function (u) { return u !== url; }));
+      var c = canonicalMint(String(url || ''));
+      if (c) save(K.mintsChosen, mintsChosen().filter(function (u) { return u !== c; }));
     },
 
     saved: function () {
@@ -28033,7 +28351,7 @@
         var nameOf = function () { return u.replace(/^https?:\/\//, ''); };
         // already here and answered for real: nothing to switch, and nothing to ask again
         if (wallet && !wallet.foxyFromCache && canonicalMint(mintUrl || '') === u && !mintPendingNow()) {
-          if (plain.remember !== false) save(K.mint, u);
+          if (plain.remember !== false) { save(K.mint, u); chooseMint(u); }
           return Promise.resolve({ id: u, name: nameOf(), balanceSats: sumProofs(proofs()), pending: false });
         }
         var gen = ++mintPendingGen;
@@ -28196,7 +28514,8 @@
         }
         migrateProofs();
         var firstTimeHere = rememberMint(u);
-        if (!opts || opts.remember !== false) save(K.mint, u);
+        // the phone's own mint from now, and so one the person chose (`mintsChosen`); a visit is neither
+        if (!opts || opts.remember !== false) { save(K.mint, u); chooseMint(u); }
         /* Offline, everything below is a request. The wallet is built, the
          * balance is readable and locked ecash can be taken; nothing is swept
          * and nothing is probed until there is a route to do it over. */
@@ -29365,7 +29684,9 @@
       var moveLock = null;   // NUT-20 key for the quote at the destination, if it takes one
       assertRoute();
       var from = String(fromUrl || '').replace(/\/+$/, '');
-      var to = String(mintUrl || '').replace(/\/+$/, '');
+      /* To the phone's own mint (`homeMint`: an open till's, else the one it is saved on), not the live one, which a visit
+       * can have left elsewhere (a take-back, a quote dropped). Moved to a mint only visited, the money would go there. */
+      var to = String((FoxyWallet.homeMint && FoxyWallet.homeMint()) || mintUrl || '').replace(/\/+$/, '');
       var gross = Math.round(Number(sats) || 0);
       if (!to) return Promise.reject(new Error('No mint is connected to send it to.'));
       if (from === to) return Promise.reject(new Error('That token is already from this mint.'));
@@ -29723,12 +30044,24 @@
        * and not saved as the phone's own, so an app killed there opens at
        * home. */
       var visit = !!(opts && opts.visit);
-      var how = visit ? { remember: false } : undefined;
+      /* Nor saved at a mint the person did not choose (`mintsChosen`): landing there is not choosing it. A TRANSFER
+       * chooses its mint when it is pressed, past the gate (26a-transfer.js `runTransfer`). */
+      var how = (visit || !FoxyWallet.mintChosen(plan.to)) ? { remember: false } : undefined;
 
       if (plan.empty) {
         return FoxyWallet.connect(plan.to, null, null, how).then(function (w) {
           return { sats: 0, feeSats: 0, mint: plan.to, name: w && w.name };
         });
+      }
+
+      /* Paid from the mint the plan leaves, or not at all: `pay` spends from the live wallet, and a connect that landed
+       * meanwhile (a trip home, a switch) would have paid this invoice from another mint's money, with what was to move
+       * left where it was and the move written down as made. Refused before anything leaves, so nothing was sent. */
+      if (plan.from && canonicalMint(String(mintUrl || '')) !== canonicalMint(String(plan.from))) {
+        var elsewhere = /** @type {any} */ (new Error('The wallet is on ' + hostOf(mintUrl || '') + ', not on '
+          + hostOf(plan.from) + ', the mint this move pays from. Nothing was sent. Try again.'));
+        elsewhere.unsent = true;
+        return Promise.reject(elsewhere);
       }
 
       /* mustSave, and `unsent`: nothing has left yet, so a refused write must
@@ -33457,10 +33790,10 @@
      * whose answer was lost (`holdInputs`), and, for dollars, the pieces of a
      * swap between units whose payment is still with the mint. Sats are what
      * they always were (`heldSats`). */
-    heldIn: function (unit) {
+    heldIn: function (unit, mint) {
       var u = unitOf(unit) || 'sat';
-      if (u === 'sat') return FoxyWallet.heldSats();
-      var here = wallet ? mintOf(wallet) : '';
+      if (u === 'sat') return FoxyWallet.heldSats(mint);
+      var here = mint ? canonicalMint(String(mint)) : (wallet ? mintOf(wallet) : '');
       var sum = 0;
       var all = load(K.held, {});
       Object.keys(all || {}).forEach(function (id) {
@@ -33477,9 +33810,9 @@
      * took: seconds for a payment, a swap's first leg, a card's payment, and for as long as the mint says PENDING, across
      * a relaunch too. A swap's leg that `heldIn` already names (`unitSwapHeld`) is left out, so nothing is counted twice.
      * Not the balance, and not what home says is pending: those are as they were. */
-    meltingIn: function (unit) {
+    meltingIn: function (unit, mint) {
       var u = unitOf(unit) || 'sat';
-      var here = wallet ? mintOf(wallet) : '';
+      var here = mint ? canonicalMint(String(mint)) : (wallet ? mintOf(wallet) : '');
       if (!here) return 0;
       var named = {};
       if (u !== 'sat') {
@@ -33497,11 +33830,12 @@
       return sum;
     },
 
-    /* What a swap took after Foxy was put away, on its way back (`recoveringSats`). */
-    recoveringIn: function (unit) {
+    /* What a swap took after Foxy was put away, on its way back (`recoveringSats`). Each of these is at the connected mint,
+     * or at `mint` when one is named: the history screen shows one mint's books at a time, not always the connected one's. */
+    recoveringIn: function (unit, mint) {
       var u = unitOf(unit) || 'sat';
-      if (u === 'sat') return FoxyWallet.recoveringSats();
-      var here = wallet ? mintOf(wallet) : '';
+      if (u === 'sat') return FoxyWallet.recoveringSats(mint);
+      var here = mint ? canonicalMint(String(mint)) : (wallet ? mintOf(wallet) : '');
       var pile = {};
       proofs(here, u).forEach(function (p) { if (p && p.secret) pile[p.secret] = true; });
       var held = {};
@@ -34901,7 +35235,10 @@
 
       var here = String(mintUrl || '').replace(/\/+$/, '');
       var from = String(tok.mint || '').replace(/\/+$/, '');
-      var ready = (from && from !== here) ? FoxyWallet.connect(from) : Promise.resolve(null);
+      // at a mint the person did not choose (`mintsChosen`), a visit: taking back is not choosing it
+      var ready = (from && from !== here)
+        ? FoxyWallet.connect(from, null, null, FoxyWallet.mintChosen(from) ? undefined : { remember: false })
+        : Promise.resolve(null);
 
       var intoMint, intoWallet, guard;
       return ready.then(function () {
@@ -35880,8 +36217,11 @@
         return opened.then(function (key) {
           unlockWith = key;
           /* `opts.visit`: taken at its own mint and the phone left where it
-           * banks (`claimUnclaimed` goes home afterwards). */
-          var how = (opts && opts.visit) ? { remember: false } : undefined;
+           * banks (`claimUnclaimed` goes home afterwards). A mint the person
+           * did not choose (`mintsChosen`: a take-back or change at a mint
+           * only visited) is a visit too: taking money there is not choosing
+           * it, and saving the phone there would add it with no lock asked. */
+          var how = ((opts && opts.visit) || (switched && !FoxyWallet.mintChosen(tok.mint))) ? { remember: false } : undefined;
           return FoxyWallet.openSeedForVisit({ arriving: true }).then(function () {
             return switched ? FoxyWallet.connect(tok.mint, null, null, how) : null;
           }, function () {
@@ -40712,6 +41052,8 @@
         .map(function (u) { return { unit: u, balance: card.units[u].balance, pieces: card.units[u].pieces.length }; });
     },
     cardBoth: function (card) { return cardBoth(card); },
+    // whether a taking-off by this phone lifts the card's limits: 'yes', 'no' or 'unknown' (08a-flashcard.js, `cardLiftWanted`)
+    cardLiftWanted: function (card) { return cardLiftWanted(card); },
     /* What this phone promised a card of 1.23 to hold when it set it up (`cardHoldOf`): 'usd' or 'sat' (offer only that one when adding
      * to it), 'both' (ask which), or '' (no promise: ask, as for both). */
     cardHold: function (card) { return cardHoldOf(card); },
@@ -42835,6 +43177,17 @@
     tillKeeperClose: function () { return tillKeeperClose(); },
     tillKeeper: function () { return tillKeeperNow(); },
 
+    /* The mint this phone belongs on now: an open till's (the keeper's default, or the mint a cashier works at), else the
+     * mint it is saved on, else the one it is on. A flow that visited another mint comes back here (the page's
+     * `homeAgain`), and money moved home lands here (`sweepQuote`). */
+    homeMint: function () {
+      var k = tillKeeperNow();
+      if (k && k.def) return canonicalMint(k.def);
+      var c = tillCashierNow();
+      if (c && c.pass && c.pass.mint) return canonicalMint(String(c.pass.mint));
+      return canonicalMint(String(load(K.mint, '') || mintUrl || ''));
+    },
+
     /* Cashier: the till this phone works, { pass, since }, or null. Null once
      * the code has ended, which clears it and takes the phone home. */
     tillCashier: function () {
@@ -42977,6 +43330,15 @@
      * 'rebuilt', 'seen', 'collected' or 'refused'; never rejects. */
     _cashuIdCopy: function (body) { return cidCopyArrived(body); },
 
+    /* The ANY WALLET requests (ids, comma-separated) whose REQs every relay asked has answered to their end, or
+     * failed, from the bridge (FoxyBridge+CashuID.swift): marked asked today, so the next is due by their schedule
+     * (`cidAnyDue`). */
+    _cashuIdAnyHeard: function (ids) {
+      var list = String(ids || '').split(',').filter(function (x) { return /^[0-9a-f]{8}$/.test(x); });
+      cidAnyAsked(list, cidDay());
+      return list.length;
+    },
+
     /* Payments at mints this phone does not use waiting for their receiver, newest last: { key, name, mint, host, unit,
      * amount, at, drop, back, lands, toUnit, fee, why, small, others, total, choice } (`cidOfferView`), `name` a contact's
      * only where the payer proved it, `back` whether SEND IT BACK can be offered, `lands`/`toUnit`/`fee` the way home as
@@ -43036,10 +43398,14 @@
     _cashuIdPieceKey: function (baseHex, j) { return CID_TESTS ? cidPieceKey(baseHex, j) : null; },
     _cashuIdEncode: function (idHex, nostrHex, sigHex) { return CID_TESTS ? cidEncode(idHex, nostrHex, sigHex) : null; },
     _cashuIdNprofile: function (xonlyHex, relays) { return CID_TESTS ? cidNprofile(xonlyHex, relays) : null; },
+    _cashuIdDropKey: function (nostrHex, day, j) { return CID_TESTS ? cidDropKey(nostrHex, day, j) : null; },
+    _cashuIdAnyKey: function (nostrHex, idHex) { return CID_TESTS ? cidAnyKey(nostrHex, idHex) : null; },
+    _cashuIdListenPlan: function (nowMs) { return CID_TESTS ? cidListenPlan(nowMs) : null; },
     _cashuIdLockS: 0,
     _cashuIdRetryMs: 0,
     _cashuIdFreshMs: 0,
     _cashuIdCopyMs: 0,
+    _cashuIdAheadMs: 0,
 
 
     /* ---- BANK ACCOUNT (08f-bank.js) -------------------------------------
@@ -43303,9 +43669,9 @@
      * the moment it happens (07-request-delivery.js, `changeBack`). */
     /* Sats held back at this mint for swaps whose answer was lost, until the
      * mint says whether it made them (04-lost-answers.js, holdInputs). Not in
-     * the balance, and the history screen's audit says so. */
-    heldSats: function () {
-      var here = wallet ? mintOf(wallet) : '';
+     * the balance, and the history screen's audit says so. At `mint` when one is named (the history of another mint). */
+    heldSats: function (mint) {
+      var here = mint ? canonicalMint(String(mint)) : (wallet ? mintOf(wallet) : '');
       var all = load(K.held, {});
       var sum = 0;
       Object.keys(all).forEach(function (id) {
@@ -43322,14 +43688,14 @@
      * outputs with. Out of the pile, not held, and nothing on screen said
      * where it was. Named here so the audit and the home screen can. */
     /// Input fees this mint's top-up swaps have cost, which no history row shows (tidyChange).
-    topUpFeeSats: function () {
-      var here = wallet ? mintOf(wallet) : '';
+    topUpFeeSats: function (mint) {
+      var here = mint ? canonicalMint(String(mint)) : (wallet ? mintOf(wallet) : '');
       var fees = load(K.topUpFees, {});
       return Math.max(0, Math.round(Number(fees[here]) || 0));
     },
 
-    recoveringSats: function () {
-      var here = wallet ? mintOf(wallet) : '';
+    recoveringSats: function (mint) {
+      var here = mint ? canonicalMint(String(mint)) : (wallet ? mintOf(wallet) : '');
       var pile = {};
       proofs(here).forEach(function (p) { if (p && p.secret) pile[p.secret] = true; });
       var held = {};
@@ -44628,4 +44994,4 @@
 /* GENERATED by tools/pack-index.py — do not edit. The build stamp: the sha256 of the joined
  * Web/foxy-wallet.js with this value blanked, the same as the page's meta foxy-wallet-stamp
  * (docs/BUILDING.md, "The build stamp"). */
-if (window.FoxyWallet) window.FoxyWallet.buildStamp = 'df9ca5f9e0c47634642abafbec628188fc6e6a054f8ed026d6e5106f450faf39';
+if (window.FoxyWallet) window.FoxyWallet.buildStamp = '9471f03b82640871ae756416d4dece096e85477040b84bdb0b62c2c5dd16ef78';

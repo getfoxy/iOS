@@ -36,8 +36,8 @@ function method(sig) {
 const methods = new Function('return {' + [
   'moneyBusy() {', 'busyWhy() {', 'refuseSwitchWhileBusy() {', 'tokenSwitchRefused(text) {',
   'justSwitch(url, waited) {', 'sweepHoldsLock() {', 'switchAfterSweep(url, go) {', 'reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'makeTokenForRequest(go) {', 'sweepChange(from, left, already) {',
-  'takeTokenFromPaste(text) {', 'takingToken(run) {', 'newMintKeep() {', 'newMintRedeem() {',
-  'rowUnits(row) {', 'adoptRestoreMint() {', 'sweepNewMint(url, host) {', 'mintNameOf(url) {',
+  'takeTokenFromPaste(text) {', 'takingToken(run) {', 'newMintKeep(passed) {', 'newMintRedeem() {',
+  'rowUnits(row) {', 'adoptRestoreMint(passed) {', 'sweepNewMint(url, host) {', 'mintNameOf(url) {',
   'back() {', 'goSwitchMint(extra) {', 'goTransfer() {', 'trPick(url) {',
   // the verifying-ecash screen a pasted token puts up (07-history-tokens-mints.js)
   'receivingUp(title) {', 'receivingDown() {',

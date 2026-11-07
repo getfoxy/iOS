@@ -1390,6 +1390,19 @@
       return;
     }
 
+    /* DISMISS on its way home (`paidDismiss`, 24-render-receive-and-send.js): a confirmation raised now is swept off by it a moment
+     * later, unseen. It waits in the queue instead, and is raised after home has landed (`paidDismissed`). */
+    if (this.paidDismissingNow && this.paidDismissingNow() && !ev.again) {
+      const hash = String(ev.hash || ev.tokenHash || '');
+      const queue = this._paidQueue = this._paidQueue || [];
+      if (!(hash && queue.some((q) => q && q.hash === hash))) {
+        // (`convert`: what `queuedEv` reads to say it is to be swapped into the other unit)
+        queue.push(Object.assign({}, ev, { dir: ev.dir || 'in', sats: ev.sats, hash: ev.hash || ev.tokenHash, party: ev.to || '', convert: !!ev.askConvert, ev: Object.assign({}, ev) }));
+      }
+      console.log('[foxy] confirmation: waits for the one being dismissed');
+      return 'queued';
+    }
+
     // a banner over the app you are already looking at is just noise
     const away = document.visibilityState !== 'visible';
 
@@ -1414,6 +1427,27 @@
       W.notify(out ? 'sent' : 'received');
     }
     this.haptic && this.haptic('success');
+
+    /* Two or more payments in one opening of Foxy are one screen (the keeper's 2026-11-06 bulk RECEIVED): a receive arriving
+     * while another receive's RECEIVED is up joins its list and its total rather than raising a screen of its own over it,
+     * so they are not dismissed one by one (`paidJoinable`, 15-paid-wake-keyboard.js). The screen it joins keeps what it
+     * goes back to: a second confirmation raised over the first used to take it as its own and lose it. */
+    if (!out && this.paidJoinable && this.paidRowOf && this.paidJoinable(ev)) {
+      if (this.hideStage) this.hideStage('paidCheck');
+      if (ev.awayAt && ev.hash) { this._seenTx = this._seenTx || {}; this._seenTx[ev.hash] = true; }
+      const row = this.paidRowOf(ev);
+      console.log('[foxy] confirmation: in, entry ' + String(ev.hash || '?').slice(0, 12) + ', joins the RECEIVED up');
+      this.setState(p => {
+        // the list the screen up is the head of, or else its own payment: a row kept from an earlier screen is not this one's
+        const own = String(p.paidHash || '');
+        const mine = (r) => !!r && String(r.hash || '') === own;
+        const had = p.paidBulk && p.paidBulk.length && p.paidBulk.some(mine) ? p.paidBulk
+          : [mine(p.paidRow) ? p.paidRow : this.paidRowFromState(p)];
+        if (row.hash && had.some((r) => r && r.hash === row.hash)) return {};
+        return { paidBulk: [row].concat(had) };
+      });
+      return 'joined';
+    }
 
     // This confirmation was not asked for: it arrived while the app was on
     // some other screen. Dismissing it should put that screen back rather
@@ -1463,6 +1497,11 @@
     const nowAt = (!out && ev.awayAt && W && W.mintUrl && canonM(ev.awayAt) !== canonM(W.mintUrl))
       ? ((this.mintNameOf && this.mintNameOf(ev.awayAt)) || String(ev.awayAt).replace(/^https?:\/\//, '')) : '';
     if (ev.awayAt && ev.hash) { this._seenTx = this._seenTx || {}; this._seenTx[ev.hash] = true; }
+    /* A receive's RECEIVED can be joined by the next one (above), from now: the page draws it a moment later, and the history
+     * pass's second payment comes in the same turn as its first. Never a till's: a till shows each sale. */
+    const joinable = !out && !ev.says && !this.state.till;
+    this._paidOpenAt = joinable ? Date.now() : 0;
+    const paidRow = joinable && this.paidRowOf ? this.paidRowOf(ev) : null;
     // the confirmation screen already knows how to word a payment going out
     this.setState(p => ({
       screen: 'paid',
@@ -1496,5 +1535,9 @@
       unit: 'SATS',
       amount: String(ev.unit && ev.unit !== 'sat' ? 0 : ev.sats),
       recv: Object.assign({}, p.recv, { live: 'in' }),
+      // its row, for a bulk RECEIVED the next arrival makes of it (`paidRowOf`), and no list yet
+      paidRow: paidRow,
+      paidBulk: null,
     }));
+    return 'shown';
   }

@@ -12,10 +12,14 @@
     /* A card's WITHDRAW TO (`wdPick`) and TRANSFER TO (`fcPick`): the card's own mint first, ticked, then the others, the line under
      * each rule what the crossing there costs where that is asked (26n-card-withdraw-to.js). A tap picks a mint, NEXT goes on. */
     const cardList = tiles && (!!s.wdPick || !!s.fcPick);
+    /* HISTORY's question (16-history-lists.js, `goHistMints`): whose history to show. The tiles as switching has them, the mint
+     * shown ticked; a tap shows that mint's history and the wallet stays where it is. */
+    const histPick = tiles && !!s.histPick && !s.wdPick && !s.fcPick && !s.tillPick && !s.trStep;
     const cardNextOn = cardList && !!this.fcListNextOn && this.fcListNextOn();
     const tillOn = L ? !!L.next.on : cardList ? cardNextOn : s.tillPick === 'set' && !!this.tillSetNow && this.tillSetNow().length > 0;
     const nowLine = L ? L.line
       : s.bankPick ? 'Trade your Foxy balance for dollars with one of these exchanges.'
+      : histPick ? 'Only the history shown changes. Foxy stays at ' + (this.mintNameOf(window.FoxyWallet && window.FoxyWallet.mintUrl) || 'its mint') + '.'
       : s.wdPick ? (this.fcWdLine ? this.fcWdLine() : '')
       : s.tillPick === 'default' ? 'Payments from mints you did not pick are moved here. Invoices are made here.'
       : s.tillPick ? 'Pick every mint this till takes. Payments from other mints cross into the default, the payer paying the fee.'
@@ -37,7 +41,7 @@
       // the foot holds NEXT, or the till's second button; with neither, only the room the screen's edge wants
       mintFootPad: (L ? (!!L.next.shown || !!L.add.shown) : (cardList || s.tillPick === 'set')) ? '12px 24px 30px' : '0 0 22px',
       // adding a mint belongs to switching, not to picking one to move between
-      mintPickers: !s.trStep && !s.fcPick && !s.tillPick && !s.wdPick && !s.tillList && !s.bankPick,
+      mintPickers: !s.trStep && !s.fcPick && !s.tillPick && !s.wdPick && !s.tillList && !histPick && !s.bankPick,
       /* The same list does three jobs: switching, and the two steps of a
        * transfer between your own mints. */
       /* And a fourth, for a card: which mint it moves to (26f-flashcard.js).
@@ -49,6 +53,7 @@
       // and SEND's BANK ACCOUNT (26q-bank.js, `bankPick`): the exchanges, in the list's look
       mintTitle: L ? L.title
         : s.bankPick ? 'BANK ACCOUNT'
+        : histPick ? 'WHICH MINT\u2019S HISTORY?'
         : s.wdPick ? 'WITHDRAW TO'
         : s.tillPick === 'default' ? 'DEFAULT MINT'
         : s.tillPick ? 'TILL AT WHICH MINTS?'
@@ -93,7 +98,8 @@
             nameSize: cardList ? '32px' : '38px', hostSize: cardList ? '16px' : '17px',
             pad: cardList ? '20px 22px' : '24px 22px', radius: cardList ? '26px' : '28px', gap: cardList ? '14px' : '18px',
             edge: here ? '2px' : '1px',
-            dim: reach ? '1' : '0.4',
+            // (a mint's history is on this phone: one that cannot be reached is not greyed when it is history that is asked)
+            dim: (reach || histPick) ? '1' : '0.4',
             down: !!downText, downText: downText,
             initial: m.name.slice(0, 1).toUpperCase(),
             tint: m.tint,
@@ -105,11 +111,14 @@
             bg: here ? 'rgba(var(--acc-rgb),.12)' : 'var(--surface)',
             border: here ? 'var(--acc)' : 'rgba(var(--ink-rgb),.12)',
             // tapping the one you are already on should do nothing at all
-            tap: !reach ? (() => this.offlineNo('Switching to ' + m.name))
+            tap: histPick ? (() => this.histMintPick(m.url))
+              : !reach ? (() => this.offlineNo('Switching to ' + m.name))
               : s.tillPick === 'default' ? (() => this.tillMintPick(m.url))
               : s.tillPick ? (() => this.tillSetToggle(m.url))
               : s.fcPick ? (() => this.fcSwitchPick(m.url))
-              : s.trStep ? (() => this.trPick(m.url)) : here ? (() => {}) : (() => this.justSwitch(m.url)),
+              : s.trStep ? (() => this.trPick(m.url)) : here ? (() => {})
+              // a mint only visited asks the lock before it is added (09-melt-paste-switch.js `mintTileTap`)
+              : (() => this.mintTileTap(m.url)),
           };
         };
         /* The till's questions: the mints this phone uses (26m-till.js `tillMints`), the one it is on first, each ticked or
@@ -121,6 +130,12 @@
           return ordered.map(m => row(m, this.tillTicked(m.url)));
         }
         if (s.bankPick) return this.bankRows ? this.bankRows() : [];
+        // HISTORY's: every mint, the one on first, the one whose history is shown ticked
+        if (histPick) {
+          const shown = String((this.histShown && this.histShown().mint) || '').replace(/\/+$/, '');
+          const ticked = (m) => !!shown && m.url.replace(/\/+$/, '') === shown;
+          return all.filter(m => this.onMint(m.url)).concat(all.filter(m => !this.onMint(m.url))).map(m => row(m, ticked(m)));
+        }
         if (s.wdPick) return this.fcWdRows ? this.fcWdRows(row) : [];
         // a card's TRANSFER TO (26n-card-withdraw-to.js), each other mint with what the move there costs
         if (s.fcPick) return this.fcMoveRows ? this.fcMoveRows(row) : [];
@@ -152,7 +167,8 @@
       tillNextInk: tillOn ? '#fff' : 'rgba(var(--ink-rgb),.4)',
       tillNextSh: tillOn ? 'inset 0 2px 0 rgba(255,255,255,.4),inset 0 -4px 0 rgba(0,0,0,.16),0 12px 24px rgba(var(--acc-rgb),.34)' : 'none',
       scanOtherMint: () => this.scanOtherMint(),
-      typeOtherMint: () => this.typeMint(),
+      // past the lock where one is set (09-melt-paste-switch.js `mintGate`)
+      typeOtherMint: () => this.typeMintGated(),
     };
   }
 

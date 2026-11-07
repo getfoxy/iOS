@@ -12,8 +12,8 @@
    *     rᵢ = SHA-256("Cashu_P2BK_v1" ‖ x(e·P) ‖ i),   P′ = P + rᵢ·G
    *
    * the ID at slot 0 and the payer's refund key at slot 1, with a locktime about
-   * thirty days out. It gift-wraps the token to the delivery key over Nostr
-   * (NIP-17). The mint sees keys nobody has seen before, never the ID and never
+   * thirty days out. It gift-wraps the token over Nostr (NIP-17) to keys the
+   * delivery key moves to each day (the drop boxes, below). The mint sees keys nobody has seen before, never the ID and never
    * the refund key, and nothing but this phone's seed opens them (d·E has the
    * same x as e·ID).
    *
@@ -108,6 +108,31 @@
   /* The most pieces one payment's throwaway keys are made for: more than any
    * split of an amount, with a retried swap's second set. */
   var CID_PIECES_MAX = 256;
+  /* The drop boxes (CashuID.swift `dropTweak`, docs/CASHU-ID.md "The drop boxes"). A payment is wrapped to one of
+   * the sixteen keys the ID's delivery key moves to on the UTC day it is posted, picked at random, and once more, a
+   * few seconds later (`cidAheadDelay`), to one of the next day's: so the receiver asks only for the day's keys and
+   * for the days it was away, never the same key on two days, and never the delivery key itself. The phone keeps the
+   * last UTC day a listen finished (`CID_HEARD`), and each ANY WALLET request it showed (`CID_ANY_KEYS`: the id, when
+   * it was made and the day it was last asked for), each listened for a year: at every listen in its first day, once
+   * a UTC day in its first month, once a week after. Day numbers and ids, no key. */
+  var CID_DROP_TAG = 'foxy-cashu-id-drop-v1';
+  var CID_ANY_TAG = 'foxy-cashu-id-any-v1';
+  var CID_SLOTS = 16;
+  var CID_DAY_MS = 24 * 60 * 60 * 1000;
+  var CID_HEARD = 'foxy.cid.heard';
+  var CID_ANY_KEYS = 'foxy.cid.any';
+  var CID_WINDOW_DAYS = 32;
+  var CID_ANY_KEEP_MS = 365 * CID_DAY_MS;
+  var CID_ANY_FRESH_MS = CID_DAY_MS;
+  var CID_ANY_DAILY_MS = 30 * CID_DAY_MS;
+  var CID_ANY_WEEK_DAYS = 7;
+  // the most codes kept (FoxyBridge+CashuID.swift `cashuIdMostAny`): one more drops the oldest
+  var CID_ANY_MOST = 960;
+  /* A wrap's envelope carries a random run of filler (`pad`) a NIP-44 bucket or more long, fresh for every wrap: a
+   * payment's two wraps and its daily resends do not always land in the same size bucket (docs/CASHU-ID.md, Posting). */
+  var CID_PAD_MIN = 256;
+  // the most a Nostr send may carry (FoxyBridge+Delivery.swift: half of NIP-44's longest message), filler included
+  var CID_SEND_MAX = 32767;
 
   /* ---- the string ---- */
 
@@ -256,6 +281,48 @@
     if (v === BigInt(0) || v >= n) throw new Error('No throwaway key could be made for that payment.');
     return e;
   }
+
+  /* ---- the drop boxes: the payer's half ----
+   *
+   * key(day, j) = x(lift_x(Q) + t·G), t = SHA-256("foxy-cashu-id-drop-v1" ‖ Q ‖ day (4, big-endian) ‖ j), once more
+   * with 0xFF appended when that is 0 or not below n; Q the ID's delivery key (x-only), `day` the unix time over
+   * 86,400. An ANY WALLET request's key: the same with SHA-256("foxy-cashu-id-any-v1" ‖ Q ‖ its 4-byte id). The
+   * phone holds the matching secrets (CashuID.swift); the page never does. 64 hex. */
+  function cidDay(ms) { return Math.floor((ms == null ? Date.now() : Number(ms)) / CID_DAY_MS); }
+
+  function cidMoveBy(bytes) {
+    var n = cidOrder();
+    var t = BigInt('0x' + hexOf(sha256(bytes)));
+    if (t === BigInt(0) || t >= n) t = BigInt('0x' + hexOf(sha256(bytes.concat([255]))));
+    if (t === BigInt(0) || t >= n) throw new Error('No key for that Cashu ID could be made.');
+    return t;
+  }
+
+  function cidMoved(nostrHex, t) {
+    var CT = window.CashuTS;
+    var P = CT.pointFromHex('02' + nostrHex);
+    var G = CT.pointFromHex('0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798');
+    return P.add(G.multiply(t)).toHex(true).slice(2);
+  }
+
+  function cidDropKey(nostrHex, day, j) {
+    var d = Math.floor(Number(day));
+    var slot = Math.floor(Number(j));
+    if (!CID_HEX32.test(String(nostrHex)) || !(d >= 0 && d < 4294967296) || !(slot >= 0 && slot < CID_SLOTS)) throw new Error('That is not a Cashu ID.');
+    var bytes = cidUtf8(CID_DROP_TAG).concat(cidHexBytes(nostrHex), [(d >>> 24) & 255, (d >>> 16) & 255, (d >>> 8) & 255, d & 255], [slot]);
+    return cidMoved(String(nostrHex), cidMoveBy(bytes));
+  }
+
+  function cidAnyKey(nostrHex, idHex) {
+    if (!CID_HEX32.test(String(nostrHex)) || !/^[0-9a-f]{8}$/.test(String(idHex))) throw new Error('That is not a Cashu ID.');
+    return cidMoved(String(nostrHex), cidMoveBy(cidUtf8(CID_ANY_TAG).concat(cidHexBytes(nostrHex), cidHexBytes(idHex))));
+  }
+
+  // a slot picked at random, for one wrap
+  function cidSlot() { return window.CashuTS.createRandomSecretKey()[0] % CID_SLOTS; }
+
+  // where a payment to the delivery key `nostrHex` goes when it is posted on `day`: an nprofile of one of that day's keys
+  function cidDropTarget(nostrHex, day) { return cidNprofile(cidDropKey(nostrHex, day, cidSlot())); }
 
   /* The keys of a payment to `idHex` with `refundHex` as cashu-ts makes them,
    * for a piece's throwaway key `eHex`: { E, L, R } (the ID blinded at slot 0,
@@ -1319,7 +1386,8 @@
    * MY CASHU ID's second button. A NUT-18 request (`creqA…`) any Cashu wallet pays today: no amount, the unit the
    * phone is in, this phone's mints that honour a lock (the default first), locked (NUT-11 through `nut10`) to a fresh
    * key from the seed-derived lock pool (`takeLockKey`, the key a receive request takes, filed as `cid-any-<id>`), and
-   * a Nostr transport to the ID's delivery key, its nprofile naming the three relays its inbox listens on. Every
+   * a Nostr transport to a key of the request's own (`cidAnyKey`: the delivery key moved by the request's id, listened
+   * for a year), its nprofile naming the three relays its inbox listens on. Every
    * opening takes a new key, so no two payers lock to the same one and the mint sees a key once; a key handed out
    * twice (a code shown again, a payer that pays twice) still opens what is locked to it, once per delivery. The
    * payment arrives on the ID's inbox as a NUT-18 payload with no E, and is taken as any ecash locked to this seed
@@ -1373,7 +1441,9 @@
         // and the pool filled behind it, so the next opening has one
         primeLockPool();
         if (!CID_HEX33.test(pub)) throw new Error('No key to lock it to could be made. Try again in a moment.');
-        var target = cidNprofile(mine.nostr, CID_RELAYS);
+        // a key of this request's own, which the phone listens on for a year (`cidAnyKeep`): never the delivery key
+        var target = cidNprofile(cidAnyKey(mine.nostr, id), CID_RELAYS);
+        cidAnyKeep(id);
         var transport = [{ type: CT.PaymentRequestTransportType.NOSTR, target: target, tags: [['n', '17']] }];
         var text = new CT.PaymentRequest(transport, id, undefined, unit, mints, undefined, true,
                                          { kind: 'P2PK', data: pub, tags: [] }).toEncodedRequest();
@@ -1631,7 +1701,89 @@
   // when the phone last said a relay was listening; 0 once it may not be (a return, the route gone, a hush)
   var cidOpenedAt = 0;
 
-  function cidListenGone() { cidOpenedAt = 0; }
+  function cidListenGone() {
+    cidOpenedAt = 0;
+    if (cidDayTimer) { clearTimeout(cidDayTimer); cidDayTimer = null; }
+  }
+
+  /* What one listen asks the phone for (`cashuIdInboxOpen`): { days, any }. `days`: today (UTC) and every day since
+   * the last listen that finished, at most the window's thirty-two back, newest first; the whole window when this
+   * phone has never finished one (a first listen, or storage restored from nothing). `any`: the ANY WALLET requests
+   * due (`cidAnyDue`). The delivery key itself is never asked for: it is all a relay needs to work out every day. */
+  function cidListenPlan(nowMs) {
+    var now = nowMs == null ? Date.now() : nowMs;
+    var today = cidDay(now);
+    var heard = Math.floor(Number(load(CID_HEARD, 0)) || 0);
+    var from = heard > 0 && heard <= today ? Math.max(heard + 1, today - CID_WINDOW_DAYS) : today - CID_WINDOW_DAYS;
+    if (heard > today) from = today;
+    var days = [];
+    for (var d = today; d >= from; d--) days.push(d);
+    if (!days.length) days.push(today);
+    var any = cidAnyKeys(now).filter(function (r) { return cidAnyDue(r, now); }).map(function (r) { return r.id; });
+    return { days: days, any: any, today: today };
+  }
+
+  /* Whether an ANY WALLET request is asked for at a listen at `now`: always in its first day; in its first month,
+   * when it was not asked today; after that, when it was not asked in the last week. */
+  function cidAnyDue(r, now) {
+    var age = now - Number(r.at);
+    var today = cidDay(now);
+    var asked = Math.floor(Number(r.asked)) || 0;
+    if (age < CID_ANY_FRESH_MS) return true;
+    if (age < CID_ANY_DAILY_MS) return asked !== today;
+    return today - asked >= CID_ANY_WEEK_DAYS;
+  }
+
+  // the ANY WALLET requests still listened for: [{ id, at, asked }], each for a year from when it was made
+  function cidAnyKeys(nowMs) {
+    var now = nowMs == null ? Date.now() : nowMs;
+    var l = load(CID_ANY_KEYS, []);
+    var rows = (Array.isArray(l) ? l : []).filter(function (r) {
+      return r && /^[0-9a-f]{8}$/.test(String(r.id)) && Number(r.at) > 0 && Number(r.at) + CID_ANY_KEEP_MS > now;
+    });
+    if (rows.length !== (Array.isArray(l) ? l.length : 0)) save(CID_ANY_KEYS, rows);
+    return rows;
+  }
+
+  function cidAnyKeep(id) {
+    var rows = cidAnyKeys().filter(function (r) { return r.id !== id; });
+    rows.push({ id: id, at: Date.now(), asked: 0 });
+    while (rows.length > CID_ANY_MOST) rows.shift();
+    save(CID_ANY_KEYS, rows);
+  }
+
+  // the requests the relays have answered to the end of every REQ (`_cashuIdAnyHeard`, from the bridge), marked asked today
+  function cidAnyAsked(ids, today) {
+    if (!ids.length) return;
+    var rows = cidAnyKeys();
+    rows.forEach(function (r) { if (ids.indexOf(r.id) >= 0) r.asked = today; });
+    save(CID_ANY_KEYS, rows);
+  }
+
+  /* A listen open across midnight (UTC) asks for the day it opened on: at a random moment in the first hour of the
+   * next day it is closed, and a random 0 to 60 seconds later opened again on the new day's keys, so the end of one
+   * listen and the start of the next are not one instant. */
+  var cidDayTimer = null;
+  function cidDayArm() {
+    if (cidDayTimer) { clearTimeout(cidDayTimer); cidDayTimer = null; }
+    var next = (cidDay() + 1) * CID_DAY_MS;
+    var r = window.CashuTS.createRandomSecretKey();
+    var wait = next - Date.now() + (((r[0] << 16) | (r[1] << 8) | r[2]) % (60 * 60 * 1000));
+    cidDayTimer = setTimeout(function () {
+      cidDayTimer = null;
+      if (!cidOpenedAt) return;
+      cidOpenedAt = 0;
+      bridgeAsk('cashuIdInboxClose', {}, 5000).then(null, function () {}).then(function () {
+        var g = window.CashuTS.createRandomSecretKey();
+        var gap = ((g[0] << 8) | g[1]) % 60001;
+        cidDayTimer = setTimeout(function () {
+          cidDayTimer = null;
+          // opened meanwhile (the wake, MY CASHU ID shown): nothing to do
+          if (!cidOpenedAt) cidListenNow().then(null, function () {});
+        }, gap);
+      });
+    }, Math.max(1000, wait));
+  }
 
   function cidFreshMs() { return CID_TESTS && Number(FoxyWallet._cashuIdFreshMs) > 0 ? Number(FoxyWallet._cashuIdFreshMs) : CID_FRESH_MS; }
 
@@ -1643,11 +1795,17 @@
     if (opts && opts.ifClosed && cidOpenedAt && Date.now() - cidOpenedAt < cidFreshMs()) {
       return cidDrain().then(function () { return 1; }, function () { return 1; });
     }
-    var since = Math.floor(Date.now() / 1000) - CID_SINCE_S + 300;
-    var run = bridgeAsk('cashuIdInboxOpen', { since: since }, 70000).then(function (n) {
+    var plan = cidListenPlan();
+    var run = bridgeAsk('cashuIdInboxOpen', { days: plan.days, any: plan.any }, 120000).then(function (n) {
+      // "1" only once the relay has answered every REQ to its end (EOSE): a listen cut short asks the same days again
       var got = Number(String(n).trim()) || 0;
       cidOpenedAt = got ? Date.now() : 0;
-      console.log('[foxy] cashu id: ' + (got ? 'listening' : 'no relay is listening'));
+      if (got) {
+        // the ANY WALLET codes are marked when their own REQs have ended (`_cashuIdAnyHeard`), not here
+        save(CID_HEARD, plan.today);
+        cidDayArm();
+      }
+      console.log('[foxy] cashu id: ' + (got ? 'listening on ' + plan.days.length + ' day(s) of keys' : 'no relay is listening'));
       return got;
     }, function (e) {
       cidOpenedAt = 0;
@@ -1656,6 +1814,7 @@
     }).then(function (n) {
       // after a restore, and for a week: this seed's own copies of what it paid, read back (`cidCopyArrived`)
       if (!cidRecovering()) return n;
+      var since = Math.floor(Date.now() / 1000) - CID_SINCE_S + 300;
       return bridgeAsk('cashuIdCopiesOpen', { since: since }, 70000).then(function (c) {
         console.log('[foxy] cashu id: ' + ((Number(String(c).trim()) || 0) ? 'reading back this seed’s copies' : 'no relay is holding this seed’s copies yet'));
         return n;
@@ -1709,13 +1868,32 @@
     }
   }
 
+  /* Filler for one wrap: a random length from none to half the token or `CID_PAD_MIN`, whichever is more, and never
+   * more than `room` (what is left under `CID_SEND_MAX`, so a large payment still goes). NIP-44 pads
+   * a message to a bucket (32 bytes up to 256, then an eighth of the next power of two), so this moves a wrap across
+   * one bucket or two: what a relay sees of the size is the bucket, drawn afresh for every wrap. */
+  function cidPad(tokenLength, room) {
+    var r = window.CashuTS.createRandomSecretKey();
+    var most = Math.min(Math.max(CID_PAD_MIN, Math.floor(Number(tokenLength) / 2) || 0), Math.max(0, Math.floor(Number(room)) || 0));
+    return new Array(((r[0] << 16) | (r[1] << 8) | r[2]) % (most + 1) + 1).join('0');
+  }
+
   /* The envelope: the token, the E its tag is bound to, and this phone's ID
    * with the tag that proves it (`cidFromName`), only where this phone's ID is
-   * in use (M6) and the tag was made. */
+   * in use (M6) and the tag was made; and filler of its own (`cidPad`). */
+
   function cidBody(row) {
     var j = /** @type {any} */ ({ v: 2, type: 'foxy-cashu-id', token: row.token, E: row.E });
     if (row.from && row.tag) { j.from = row.from; j.tag = row.tag; }
     if (row.note) j.note = String(row.note).slice(0, CID_NOTE_MAX);
+    // the room left for filler: the send limit less the envelope with an empty `pad`, counted in UTF-8 bytes as the bridge does
+    j.pad = '';
+    var text = JSON.stringify(j), bare;
+    // a lone surrogate cannot be encoded: counted at the most it could take
+    try { bare = encodeURIComponent(text).replace(/%[0-9A-F]{2}/g, 'x').length; } catch (e) { bare = text.length * 3; }
+    var pad = cidPad(String(row.token).length, CID_SEND_MAX - bare);
+    // no filler fits: no `pad` at all, so an envelope within its nine bytes of the limit still goes, as before filler
+    if (pad) j.pad = pad; else delete j.pad;
     return JSON.stringify(j);
   }
 
@@ -1748,9 +1926,12 @@
     var run = due.reduce(function (chain, r) {
       return chain.then(function () {
         if (!routeOpen()) { cidOutboxAmend(r.id, { tries: (Number(r.tries) || 0) + 1 }); return null; }
-        return deliverOverNostr(cidNprofile(r.to), cidBody(r)).then(function () {
+        // to one of the sixteen keys of today (UTC), never to the delivery key itself
+        var day = cidDay();
+        return deliverOverNostr(cidDropTarget(r.to, day), cidBody(r)).then(function () {
           var at = Date.now();
-          var fields = /** @type {any} */ ({ sentAt: r.sentAt || at, lastSentAt: at });
+          // and once more, a while later, to one of tomorrow's: a receiver that listened today before it came asks only tomorrow's
+          var fields = /** @type {any} */ ({ sentAt: r.sentAt || at, lastSentAt: at, aheadDay: day + 1, aheadAt: at + cidAheadDelay() });
           // the first time a relay took it: its copy to this seed's recovery key goes a while later (`cidCopyAll`)
           if (!r.copyAt && !r.copiedAt) fields.copyAt = at + cidCopyDelay();
           cidOutboxAmend(r.id, fields);
@@ -1859,14 +2040,73 @@
     return run;
   }
 
-  // the next copy's moment, kept by one timer (and on every catch-up, for a page that slept through it)
+  /* ---- the next day's wrap ----
+   *
+   * Each time a relay takes a payment, the same envelope goes once more, one to five seconds later with filler of its
+   * own (`cidPad`), wrapped to one of the next UTC day's keys (`aheadDay`): a receiver whose phone listened today
+   * before the payment was posted does not ask today's keys again tomorrow, and finds it among tomorrow's. One whose
+   * day has already gone by when it is finally sent (the page slept) goes to today's keys, and a new next-day wrap is
+   * set behind it. */
+  var cidAheadSending = null;
+
+  // one to five seconds: the page is surely still awake, and the wrap goes to another day's key on its own circuit
+  function cidAheadDelay() {
+    if (CID_TESTS && Number(FoxyWallet._cashuIdAheadMs) > 0) return Number(FoxyWallet._cashuIdAheadMs);
+    var r = window.CashuTS.createRandomSecretKey();
+    return 1000 + (((r[0] << 8) | r[1]) % 4001);
+  }
+
+  function cidAheadDue(r, now) {
+    return r.state === 'out' && Number(r.aheadAt) > 0 && Number(r.aheadAt) <= now && Number(r.lockUntil) * 1000 > now;
+  }
+
+  function cidAheadAll() {
+    if (cidAheadSending) return cidAheadSending;
+    var now = Date.now();
+    var due = cidOutboxRows().filter(function (r) { return cidAheadDue(r, now); });
+    if (!due.length || !routeOpen()) return Promise.resolve(0);
+    var sent = 0;
+    var run = due.reduce(function (chain, r) {
+      return chain.then(function () {
+        var day = Number(r.aheadDay) || 0;
+        var today = cidDay();
+        /* Anything but tomorrow is late (the page slept between the two, even into the wrap's own day, when the receiver
+         * may have finished that day's listen already): it goes to today's keys instead, and a new next-day wrap is set
+         * behind it. A day this phone's clock cannot have meant is today's too. */
+        var late = day !== today + 1;
+        var to = late ? today : day;
+        return deliverOverNostr(cidDropTarget(r.to, to), cidBody(r)).then(function () {
+          cidOutboxAmend(r.id, late ? { aheadDay: today + 1, aheadAt: Date.now() + cidAheadDelay(), aheadSentAt: Date.now(), aheadTries: 0 }
+                                    : { aheadAt: 0, aheadSentAt: Date.now(), aheadTries: 0 });
+          sent += 1;
+        }, function (e) {
+          // tried again on the first wrap's schedule (`cidRetryArm`): once a minute, a quarter of an hour after thirty tries
+          var tries = (Math.floor(Number(r.aheadTries)) || 0) + 1;
+          cidOutboxAmend(r.id, { aheadAt: Date.now() + cidRetryMs() * (tries >= CID_TRIES_FAST ? CID_RETRY_SLOW : 1), aheadTries: tries });
+          console.warn('[foxy] cashu id: a payment’s second wrap was not sent yet:', (e && e.message) || e);
+        });
+      });
+    }, Promise.resolve()).then(function () { return sent; }, function () { return sent; });
+    cidAheadSending = run;
+    var done = function () { if (cidAheadSending === run) cidAheadSending = null; cidCopyArm(); };
+    run.then(done, done);
+    return run;
+  }
+
+  // the next copy's or next-day wrap's moment, kept by one timer (and on every catch-up, for a page that slept through it)
   function cidCopyArm() {
     if (cidCopyTimer) { clearTimeout(cidCopyTimer); cidCopyTimer = null; }
-    var next = cidOutboxRows().filter(function (r) { return r.state === 'out' && !r.copiedAt && Number(r.copyAt) > 0; })
-      .map(function (r) { return Number(r.copyAt); }).sort(function (a, b) { return a - b; })[0];
+    var next = cidOutboxRows().filter(function (r) { return r.state === 'out'; }).reduce(function (all, r) {
+      if (!r.copiedAt && Number(r.copyAt) > 0) all.push(Number(r.copyAt));
+      // one already due while the route is down waits for the route's return (`cidOnRoute`), not for this timer
+      if (Number(r.aheadAt) > 0 && (Number(r.aheadAt) > Date.now() || routeOpen())) all.push(Number(r.aheadAt));
+      return all;
+    }, /** @type {number[]} */ ([])).sort(function (a, b) { return a - b; })[0];
     if (!next) return;
     cidCopyTimer = setTimeout(function () {
       cidCopyTimer = null;
+      var now = Date.now();
+      if (cidOutboxRows().some(function (r) { return cidAheadDue(r, now); })) cidAheadAll().then(null, function () {});
       cidCopyAll().then(null, function () {});
     }, Math.max(1000, next - Date.now()));
   }
@@ -2207,6 +2447,7 @@
       var now = Date.now();
       if (cidOutboxRows().some(function (r) { return cidDue(r, now); })) cidDeliverAll().then(null, function () {});
       if (cidOutboxRows().some(function (r) { return cidWatched(r, now); })) cidWatchAll().then(null, function () {});
+      if (cidOutboxRows().some(function (r) { return cidAheadDue(r, now); })) cidAheadAll().then(null, function () {});
       if (cidOutboxRows().some(function (r) { return cidCopyDue(r, now); })) cidCopyAll().then(null, function () {});
       else cidCopyArm();
       Promise.resolve().then(function () { return cidListenNow({ ifClosed: true }); }).then(null, function () {});
@@ -2223,6 +2464,7 @@
       Promise.resolve().then(function () { return cidListenNow({ ifClosed: true }); }).then(null, function () {});
       if (cidOutboxRows().some(function (r) { return cidDue(r, Date.now()); })) setTimeout(function () { cidDeliverAll().then(null, function () {}); }, 0);
       if (cidOutboxRows().some(function (r) { return cidCopyDue(r, Date.now()); })) setTimeout(function () { cidCopyAll().then(null, function () {}); }, 0);
+      if (cidOutboxRows().some(function (r) { return cidAheadDue(r, Date.now()); })) setTimeout(function () { cidAheadAll().then(null, function () {}); }, 0);
     }
     catch (e) { console.warn('[foxy] cashu id: sending on the route’s return:', (e && e.message) || e); }
   }

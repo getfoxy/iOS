@@ -287,9 +287,9 @@
     };
   }
 
-  /* History, opened on one balance's tab (a tap on its pill). */
+  /* History, opened on one balance's tab (a tap on its pill), at the connected mint. */
   goHistoryIn(unit) {
-    this.setState(p => ({ screen: 'history', stack: p.stack.concat([p.screen]), histUnit: unit }));
+    this.setState(p => ({ screen: 'history', stack: p.stack.concat([p.screen]), histUnit: unit, histMint: '' }));
   }
 
   /* SWAP, from home's button or the menu's row: dollars into bitcoin or back,

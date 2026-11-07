@@ -113,10 +113,12 @@
    * entries it belongs to, and its share of the balance. Both are set aside
    * together, so a payment being swapped in neither counts nor reads as
    * missing (`W.arriving`). */
-  arrivingBucket(unit) {
+  /* Each of these four is at the connected mint, or at `mint` when one is named: HISTORY shows one mint's books at a time,
+   * and not always the connected one's (`histShown`). */
+  arrivingBucket(unit, mint) {
     const W = window.FoxyWallet;
     let list = [];
-    try { list = (W && W.arriving) ? (W.arriving(unit) || []) : []; } catch (e) { list = []; }
+    try { list = (W && W.arriving) ? (W.arriving(unit, mint || undefined) || []) : []; } catch (e) { list = []; }
     const byHash = new Map();
     let amount = 0;
     list.forEach(a => {
@@ -129,21 +131,21 @@
   }
 
   /// Fees the top-up swaps have cost at this mint, which no history row shows. 0 when none.
-  topUpFeeSats() {
+  topUpFeeSats(mint) {
     const W = window.FoxyWallet;
-    return Math.round(Number(W && W.topUpFeeSats && W.topUpFeeSats()) || 0);
+    return Math.round(Number(W && W.topUpFeeSats && W.topUpFeeSats(mint || undefined)) || 0);
   }
 
   /// What a melt the mint has not settled holds at this mint, in `unit` (W.meltingIn): for the audit only. 0 when none.
-  meltingIn(unit) {
+  meltingIn(unit, mint) {
     const W = window.FoxyWallet;
-    try { return Math.max(0, Math.round(Number(W && W.meltingIn && W.meltingIn(unit)) || 0)); } catch (e) { return 0; }
+    try { return Math.max(0, Math.round(Number(W && W.meltingIn && W.meltingIn(unit, mint || undefined)) || 0)); } catch (e) { return 0; }
   }
 
   /// Sats a swap took after Foxy was put away, still to be collected (recoveringSats). 0 when none.
-  recoveringSats() {
+  recoveringSats(mint) {
     const W = window.FoxyWallet;
-    return Math.round(Number(W && W.recoveringSats && W.recoveringSats()) || 0);
+    return Math.round(Number(W && W.recoveringSats && W.recoveringSats(mint || undefined)) || 0);
   }
 
   /* Why a payment that is `shortBy` sats over the balance cannot go: because
@@ -164,25 +166,71 @@
    * with the rows' own `amount` and `feeAmount`, bitcoin from the sats with
    * `sats` and the fee. A row of the other unit carries the balance through
    * untouched. */
-  histAuditIn(unit) {
-    return unit === 'usd' ? this.histAuditUsd() : this.histAudit();
+  /* `src`, where given, is another mint's history to add up instead of the connected mint's (`histShown`): its rows, its
+   * balances and its url, each figure set aside (held, arriving, melting, recovering, fees) read at that mint. Home's ring
+   * and every other caller ask with none, and get the connected mint's as they always did. */
+  histAuditIn(unit, src) {
+    return unit === 'usd' ? this.histAuditUsd(src) : this.histAudit(src);
   }
 
-  histAudit() {
+  /* Whose history HISTORY shows: the connected mint's, or another picked by the chevron beside its title (`histMint`, the
+   * keeper's words of 2026-11-06: "It should say the mint name in the place of HISTORY. And there should be a chevron to make
+   * it easy to change between mint histories."). Only what is shown changes; the wallet stays where it is. Another mint's
+   * rows are `histOther`, read by `loadHistory`; until they come, `loading`. Its balances are read at it, and so is whether
+   * it has two. */
+  histShown() {
     const s = this.state;
+    const W = window.FoxyWallet;
+    const strip = (u) => String(u || '').replace(/\/+$/, '');
+    const here = strip(W && W.mintUrl);
+    const want = strip(s.histMint);
+    if (!want || want === here) return { mint: here, other: false, history: s.history || [], loading: false };
+    const o = (s.histOther && s.histOther.mint === want) ? s.histOther : null;
+    const bal = (u) => { try { return Math.max(0, Math.round(Number(W && W.balanceOf && W.balanceOf(u, want)) || 0)); } catch (e) { return 0; } };
+    let two = false;
+    try { two = !!(W && W.twoUnits && W.twoUnits(want)); } catch (e) { two = false; }
+    return { mint: want, other: true, history: o ? o.history : [], loading: !o, balSats: bal('sat'), balUsdCents: bal('usd'), two: two };
+  }
+
+  /* A mint's name as the mint list names it (27-render-mints-restore-backup.js), in capitals: HISTORY's title. */
+  histMintName(url) {
+    const strip = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (!strip(url)) return '';
+    const m = (this.allMints ? this.allMints() : []).find(x => strip(x.url) === strip(url));
+    return String((m && m.name) || (this.mintNameOf ? this.mintNameOf(url) : strip(url)) || '').toUpperCase();
+  }
+
+  // the chevron by HISTORY's title: the mint list, to show another mint's history (`histPick`, 27-render-mints-restore-backup.js)
+  goHistMints() { this.goSwitchMint({ histPick: true }); }
+
+  /* A mint picked there: HISTORY again, showing that mint's, its tab chosen afresh. The connected mint is shown as ''. */
+  histMintPick(url) {
+    const W = window.FoxyWallet;
+    const strip = (u) => String(u || '').replace(/\/+$/, '');
+    const at = strip(url) === strip(W && W.mintUrl) ? '' : strip(url);
+    this.setState(p => ({
+      histMint: at, histUnit: '', histPick: false,
+      screen: (p.stack || []).length ? p.stack[p.stack.length - 1] : 'history', stack: (p.stack || []).slice(0, -1),
+    }), () => { if (this.loadHistory) this.loadHistory(); });
+  }
+
+  histAudit(src) {
+    const s = this.state;
+    const at = src ? src.mint : undefined;
+    const rows = s.fresh ? [] : src ? (src.history || []) : (s.history || []);
     const balOf = new Map();
     // the payments a notice on the card is about, and what to call each
     const flagged = new Map();
-    const balNow = Math.round(Number(s.balSats) || 0);
+    const balNow = Math.round(Number(src ? src.balSats : s.balSats) || 0);
     /* Money arriving: a payment taken and still being swapped in. It is in the
      * balance and its entry is in the list, but neither is settled yet, so
      * both are set aside here, together: a payment that is three seconds from
      * landing is not a payment missing (the audit read "balance 0, off by
      * -1216" behind PAID for those seconds). */
-    const arriving = this.arrivingBucket ? this.arrivingBucket('sat') : { byHash: new Map(), amount: 0, count: 0 };
+    const arriving = this.arrivingBucket ? this.arrivingBucket('sat', at) : { byHash: new Map(), amount: 0, count: 0 };
     let run = balNow, dueChange = 0, dueCount = 0, toShow = null, toShowSats = 0, toShowCount = 0;
     const seen = { in: 0, out: 0, inSats: 0, outSats: 0, skipped: 0, skippedSats: 0, arriving: 0, arrivingSats: 0 };
-    (s.fresh ? [] : (s.history || [])).forEach(g => g.items.forEach(t => {
+    rows.forEach(g => g.items.forEach(t => {
       balOf.set(t, run);
       /* A cashier's till row is the keeper's money, taken and sent on, never in this phone's balance (08d-till.js,
        * `forKeeper`): counted, it read as money missing from these books. */
@@ -231,7 +279,7 @@
         seen.skipped += 1; seen.skippedSats += Number(t.sats) || 0;
       }
     }));
-    const whole = !!s.historyComplete && !s.fresh && (s.history || []).length > 0;
+    const whole = !!s.historyComplete && !s.fresh && rows.length > 0;
     /* Less what is held back for a swap the mint has not answered. Those
      * sats are out of the balance on purpose until the mint says whether the
      * swap was made, and the card names them — so they are accounted for, not
@@ -239,23 +287,24 @@
      * for two minutes, and for those two minutes the card and the red ring
      * said DOES NOT ADD UP about money Foxy knew the whereabouts of. */
     const W0 = window.FoxyWallet;
-    const held = Math.round(Number(W0 && W0.heldSats && W0.heldSats()) || 0);
+    const held = Math.round(Number(W0 && W0.heldSats && W0.heldSats(at)) || 0);
     // and what a swap took after Foxy was put away, to be collected on the next connection
-    const back = this.recoveringSats ? this.recoveringSats() : 0;
+    const back = this.recoveringSats ? this.recoveringSats(at) : 0;
     // and the fees the top-ups cost at this mint, which no row carries
-    const fees = this.topUpFeeSats ? this.topUpFeeSats() : 0;
+    const fees = this.topUpFeeSats ? this.topUpFeeSats(at) : 0;
     // and money arriving whose entry is not written yet (it is written when it lands): in the balance, set aside
     run -= Math.max(0, arriving.amount - seen.arrivingSats);
     /* And what a melt still with the mint holds: a payment, a swap's first leg, a card's payment. Out of the balance and
      * on no row until the mint answers, so on its way, as money arriving is (`W.meltingIn`). The audit read "off by" the
      * melt for as long as the mint took, and the ring went red for a payment that was only slow. */
-    const melting = this.meltingIn ? this.meltingIn('sat') : 0;
+    const melting = this.meltingIn ? this.meltingIn('sat', at) : 0;
     const off = whole ? Math.round(run) + held + back + fees + melting : 0;
     /* Said in the log when it changes, with what it was worked out from: a
      * card that says DOES NOT ADD UP and a diary that cannot say why is a
      * report nobody can act on. */
     const sig = [balNow, off, dueChange, toShowCount, seen.in, seen.out, seen.skipped, arriving.amount, melting].join('|');
-    if (whole && sig !== this._auditSig) {
+    // (another mint's books, shown on HISTORY, are not the wallet's: the log follows the connected mint's)
+    if (whole && !src && sig !== this._auditSig) {
       this._auditSig = sig;
       console.log('[foxy] audit: balance ' + balNow + ', off by ' + off + '; ' + seen.in + ' in for ' + seen.inSats
         + ', ' + seen.out + ' out for ' + seen.outSats + ', ' + seen.skipped + ' not counted (' + seen.skippedSats
@@ -267,9 +316,9 @@
        * first: which way, how much, the fee, and what kind of row. Amounts are
        * already in this log; this puts them in one place, in order. */
       if (off !== 0) {
-        const rows = [];
-        (s.history || []).forEach(g => g.items.forEach(t => {
-          rows.push((t.dir === 'in' ? '+' : '-') + (Number(t.sats) || 0)
+        const lines = [];
+        rows.forEach(g => g.items.forEach(t => {
+          lines.push((t.dir === 'in' ? '+' : '-') + (Number(t.sats) || 0)
             + (Number(t.fee || t.feeSats) > 0 ? 'f' + Number(t.fee || t.feeSats) : '')
             + (Number(t.grossSats) > 0 ? 'g' + Number(t.grossSats) : '')
             + (Number(t.changeSats) > 0 ? 'c' + Number(t.changeSats) : '')
@@ -277,21 +326,23 @@
             + (t.pending ? 'P' : '') + (t.failed ? 'F' : '') + (t.atRisk ? 'R' : '') + (t.split ? 'S' : '')
             + (t.memo === 'opening' ? 'O' : '') + (t.changeRow ? 'C' : '') + (Number(t.sats) < 10 ? '<' + String(t.hash || '').slice(0, 14) + '>' : ''));
         }));
-        for (let i = 0; i < rows.length; i += 20) console.log('[foxy] audit rows ' + i + ': ' + rows.slice(i, i + 20).join(' '));
+        for (let i = 0; i < lines.length; i += 20) console.log('[foxy] audit rows ' + i + ': ' + lines.slice(i, i + 20).join(' '));
       }
     }
     return { balOf, balNow, run, whole, off, held, melting, arriving: arriving.amount, dueChange, dueCount, toShow, toShowSats, toShowCount, flagged };
   }
 
-  histAuditUsd() {
+  histAuditUsd(src) {
     const s = this.state;
     const W0 = window.FoxyWallet;
+    const at = src ? src.mint : undefined;
+    const rows = s.fresh ? [] : src ? (src.history || []) : (s.history || []);
     const balOf = new Map();
-    const balNow = Math.max(0, Math.round(Number(s.balUsdCents) || 0));
+    const balNow = Math.max(0, Math.round(Number(src ? src.balUsdCents : s.balUsdCents) || 0));
     // dollars arriving, set aside with their entries as in the bitcoin books (`histAudit`)
-    const arriving = this.arrivingBucket ? this.arrivingBucket('usd') : { byHash: new Map(), amount: 0, count: 0 };
+    const arriving = this.arrivingBucket ? this.arrivingBucket('usd', at) : { byHash: new Map(), amount: 0, count: 0 };
     let run = balNow, arrivingSeen = 0;
-    (s.fresh ? [] : (s.history || [])).forEach(g => g.items.forEach(t => {
+    rows.forEach(g => g.items.forEach(t => {
       balOf.set(t, run);
       // (nor a cashier's till row, which is the keeper's: `histAudit`)
       if (t.forKeeper) return;
@@ -310,15 +361,15 @@
         : Math.round(Number(t.amount) || 0) + Math.max(0, Math.round(Number(t.feeAmount) || 0)) + owedBack;
       run += t.dir === 'in' ? -by : by;
     }));
-    const whole = !!s.historyComplete && !s.fresh && (s.history || []).length > 0;
+    const whole = !!s.historyComplete && !s.fresh && rows.length > 0;
     let held = 0, back = 0;
-    try { held = Math.round(Number(W0 && W0.heldIn && W0.heldIn('usd')) || 0); } catch (e) { held = 0; }
-    try { back = Math.round(Number(W0 && W0.recoveringIn && W0.recoveringIn('usd')) || 0); } catch (e) { back = 0; }
+    try { held = Math.round(Number(W0 && W0.heldIn && W0.heldIn('usd', at)) || 0); } catch (e) { held = 0; }
+    try { back = Math.round(Number(W0 && W0.recoveringIn && W0.recoveringIn('usd', at)) || 0); } catch (e) { back = 0; }
     // and a melt still with the mint, in dollars, that no swap's held figure already names (`histAudit`, `W.meltingIn`)
-    const melting = this.meltingIn ? this.meltingIn('usd') : 0;
+    const melting = this.meltingIn ? this.meltingIn('usd', at) : 0;
     const off = whole ? Math.round(run) - Math.max(0, arriving.amount - arrivingSeen) + held + back + melting : 0;
     const sig = [balNow, off, arriving.amount, melting].join('|');
-    if (whole && sig !== this._auditSigUsd) {
+    if (whole && !src && sig !== this._auditSigUsd) {
       this._auditSigUsd = sig;
       console.log('[foxy] audit (dollars): balance ' + balNow + ' cents, off by ' + off + '; arriving ' + arriving.amount + ' cents'
         + '; with the mint in a melt ' + melting + ' cents');
@@ -452,6 +503,13 @@
        * mint, and is still this session's (26m-till.js, `tillMintsNow`). */
       const tillAt = (this.tillMintsNow ? this.tillMintsNow() : []).map(u => String(u).replace(/\/+$/, ''));
       const list = all.filter(x => !x.mint || x.mint === here || (tillAt.length > 1 && tillAt.indexOf(String(x.mint).replace(/\/+$/, '')) >= 0));
+      /* HISTORY showing another mint's (`histMint`, picked by the chevron beside its title): that mint's rows, grouped as these
+       * are, kept apart as `histOther`. The connected mint's stay `history`, which home, its books and the arrivals below go
+       * on reading; the wallet does not move. Entries that name no mint show at every mint, as they do here. */
+      const strip = (u) => String(u || '').replace(/\/+$/, '');
+      const shownAt = strip(this.state.histMint);
+      const otherAt = shownAt && shownAt !== strip(here) ? shownAt : '';
+      const otherList = otherAt ? all.filter(x => !x.mint || strip(x.mint) === otherAt) : [];
 
       // history already showing money in counts, so the prompt survives a
       // relaunch rather than waiting for the next payment
@@ -459,9 +517,11 @@
       const now = new Date();
       const yest = new Date(now.getTime() - 86400000);
       const buckets = { TODAY: [], YESTERDAY: [], EARLIER: [] };
+      const otherBuckets = { TODAY: [], YESTERDAY: [], EARLIER: [] };
       const seen = {};
 
-      list.forEach(t => {
+      // (`own`: the connected mint's list, whose addresses go to the book)
+      const into = (rows, buckets, own) => rows.forEach(t => {
         const d = this.txWhen(t);
         const key = d.toDateString() === now.toDateString() ? 'TODAY'
           : d.toDateString() === yest.toDateString() ? 'YESTERDAY' : 'EARLIER';
@@ -599,11 +659,13 @@
         // cleared half the contact list. Writing them through means the two
         // are independent: clear history and the names stay; clear contacts
         // and history does not put them back.
-        if (who.indexOf('@') > 0 && !seen[who.toLowerCase()]) {
+        if (own && who.indexOf('@') > 0 && !seen[who.toLowerCase()]) {
           seen[who.toLowerCase()] = true;
           if (W.remember && !this._contactsCleared) W.remember(who, who.split('@')[0]);
         }
       });
+      into(list, buckets, true);
+      if (otherAt) into(otherList, otherBuckets, false);
 
       // a bill still being collected sits at the top, above settled payments.
       // Reconcile first: these transactions are exactly what tells us a share
@@ -648,9 +710,10 @@
         buckets[key].unshift(t);
       });
 
-      const history = ['TODAY', 'YESTERDAY', 'EARLIER']
-        .map(label => ({ label: label, items: buckets[label] }))
+      const grouped = (b) => ['TODAY', 'YESTERDAY', 'EARLIER']
+        .map(label => ({ label: label, items: b[label] }))
         .filter(g => g.items.length);
+      const history = grouped(buckets);
 
       // saved addresses first, then anything the payments implied
       const book = (W.book() || []).map(c => ({
@@ -762,6 +825,8 @@
       this.setState({
         book: W.book(),
         history: history,
+        // another mint's, while HISTORY shows it (`histShown`)
+        histOther: otherAt ? { mint: otherAt, history: grouped(otherBuckets) } : null,
         // five hundred is the most kept; fewer means this is every entry there is
         historyComplete: all.length < 500,
         txs: buckets.TODAY.concat(buckets.YESTERDAY).slice(0, 3).map(t => ({
@@ -771,5 +836,13 @@
         })),
         contacts: merged,
       });
-    }).catch(() => {});
+    }).catch(() => {
+      /* Another mint's rows that could not be read are none: its list says NOTHING TO SEE YET! rather than staying blank,
+       * waiting for rows that are not coming (`histShown`, `loading`). Rows of it already read are kept. */
+      const strip = (u) => String(u || '').replace(/\/+$/, '');
+      const shownAt = strip(this.state.histMint);
+      if (!shownAt || shownAt === strip(W.mintUrl)) return;
+      if (this.state.histOther && this.state.histOther.mint === shownAt) return;
+      this.setState({ histOther: { mint: shownAt, history: [] } });
+    });
   }

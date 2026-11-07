@@ -209,7 +209,9 @@ check "tap held"       1 node tests/tap-held.js
 check "tap settle"     1 node tests/tap-settle.js
 check "tap paid"       1 node tests/tap-paid.js
 check "received, at rest" 1 node tests/paid-rest.js
+check "received, several" 1 node tests/paid-bulk.js
 check "history notes"  1 node tests/history-notes.js
+check "history by mint" 1 node tests/history-mint.js
 check "cross online"   1 node tests/cross-mint-online-only.js
 check "settle quiet"   1 node tests/settle-quiet.js
 check "retry/re-arm"   1 node tests/retry-and-rearm.js
@@ -219,6 +221,7 @@ check "cashu id"       1 node tests/cashu-id.js
 check "cashu id, other mints" 1 node tests/cashu-id-choice.js
 check "cashu id, screens" 1 node tests/cashu-id-ui.js
 check "cashu id, any wallet" 1 node tests/cashu-id-any.js
+check "cashu id, drop boxes" 1 node tests/attack-dropbox-2026-11-06.js
 check "reminder"       1 node tests/remind.js
 check "every field above the keyboard" 1 node tests/keyboard-lift.js
 check "amountless"     1 node tests/amountless-invoice.js
@@ -226,6 +229,7 @@ check "render parity"  1 node tests/render-parity.js
 check "render snapshots" 1 node tests/render-snapshots.js
 check "two balances, screens" 1 node tests/two-balances-screens.js
 check "mint tiles"     1 node tests/mint-tiles.js
+check "mint gate"      1 node tests/mint-gate.js
 check "two balances, send quote" 1 node tests/send-quote-first.js
 check "two balances, swap" 1 node tests/two-balances-swap.js
 check "swap, its requests" 1 node tests/swap-run.js

@@ -73,6 +73,8 @@ const TOKENS = {
   'till window': /Self\.tillSince\(/,
   // the Cashu ID's inbox (FoxyBridge+CashuID.swift): how far back the relays are asked, held to the last twelve days
   'cashu id window': /Self\.cashuIdSince\(/,
+  // and which days' drop-box keys it asks for: whole days from 33 back to tomorrow, 34 at most (`cashuIdDays`)
+  'cashu id days': /Self\.cashuIdDays\(/,
   // the screen kept lit: the flag is the only thing this action touches
   'screen only': /isIdleTimerDisabled = on/,
   // tap to pay over Bluetooth (FoxyBridge+Tap.swift)

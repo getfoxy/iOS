@@ -1520,6 +1520,16 @@ Two phones each showing an invoice, a hand's width apart, and a third to pay.
    does not say to wait for a payment to finish.
 5. **The mint list.** With more mints than fit, the list scrolls to the last
    tile, ADD A MINT, and its scan button.
+5a. **Adding a mint behind the PIN.** SETTINGS, SET PIN on, FACE ID LOCK
+   off. MENU, the mint list, ADD A MINT. **Pass:** ENTER YOUR PIN, "To add a
+   mint.", before the address sheet; CANCEL on the pad leaves the list as it
+   was; the PIN opens the sheet, and ADD connects with no second ask. The
+   scan button, a QR of a mint not on the list: the pad after the scan; a
+   QR of a mint you switched to before switches with nothing asked, as does
+   its tile. A token from a mint not on the list, MOVE TO YOUR MINT: that
+   mint's tile shows, and a tap on it asks the PIN; passed, it switches, and
+   the next tap on it asks nothing. With FACE ID LOCK on: Face ID instead of
+   the pad. With no lock: nothing asked anywhere, as before.
 6. **A receipt.** Pay another Foxy by tap at the same mint (a locked
    payment). Open the payment in history a few seconds later. **Pass:**
    RECEIPT says it was taken by the key it was locked to; COPY RECEIPT copies
@@ -2370,6 +2380,32 @@ claimed on it (a fresh install); step 2 a phone that has.*
 5. On a cashier's till (a CASHIER CODE scanned on a second phone): **Pass:** PAY WITH FOXY CARD is greyed and does nothing.
 6. Off the till, RECEIVE on a mint with two balances. **Pass:** NOTE, COPY, SCAN, CARD and SHARE as ever; the two chips read
    DOLLARS (or BITCOIN) and LIGHTNING with their chevrons, no WALLET or NETWORK label, the same height, words centred.
+
+#### 22p. Several payments while Foxy was closed
+
+*Needs this phone and a second wallet (or a second Foxy) to pay it. Test money
+only.*
+
+1. **Two while closed.** Close Foxy fully. From the other wallet pay this phone
+   twice (two payments to its Cashu ID, which it collects on opening). Open
+   Foxy.
+   **Pass:** one green RECEIVED screen, the yellow flash once, the total of both
+   in large figures, and a row for each, newest first, with its amount, its
+   time, the mint (FORGE etc., or NOW AT another mint) and the payer's name or
+   the note where there was one. Two buttons: SEE HISTORY and DISMISS.
+2. **DISMISS.** Press it. **Pass:** home, the balance counts up once, and no
+   second RECEIVED follows for either payment.
+3. **SEE HISTORY.** Repeat step 1 and press SEE HISTORY. **Pass:** HISTORY,
+   with both payments at the top; back goes home, not to RECEIVED.
+4. **A third while it is up.** Repeat step 1 and, with the screen up, pay once
+   more. **Pass:** a third row appears at the top and the total grows; no
+   screen rises over it and the flash does not play again.
+5. **One.** Close Foxy, pay once, open it. **Pass:** the single RECEIVED with
+   DONE, as before.
+6. **The till.** In the till, take two sales in a row. **Pass:** each sale has
+   its own RECEIVED screen; nothing is listed together.
+7. **Reduce Motion** on: the screen is the same; the flash plays as on the
+   single RECEIVED.
 
 ## Getting a log off somebody else's phone
 

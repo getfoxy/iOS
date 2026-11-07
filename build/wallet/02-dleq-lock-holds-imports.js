@@ -197,7 +197,33 @@
     return 'That mint address is not secure. Foxy needs https:// (or a .onion address over Tor).';
   }
 
+  /* The mints the person chose, as `canonicalMint` writes them: every mint the phone was saved on (a connect with
+   * `remember` not false, which is where `K.mint` is written) and every one passed through the lock's gate for adding a
+   * mint (the page's `mintGate`). A visit (a crossing, PAY FROM, MOVE TO YOUR MINT, a card's load at another mint) puts a
+   * mint on the list (`rememberMint`) so the money left there shows, and does not choose it: adding it is asked. Seeded
+   * once, from the list and the saved mint as they were before this record existed, so no mint already there starts to ask;
+   * seeded before any write to the list (`rememberMint`), so a visit made after the upgrade is not seeded as chosen. */
+  function mintsChosen() {
+    var l = load(K.mintsChosen, null);
+    if (Array.isArray(l)) return l;
+    var seed = [];
+    var seen = load(K.mints, []);
+    (Array.isArray(seen) ? seen : []).concat([load(K.mint, '')]).forEach(function (u) {
+      var c = canonicalMint(String(u || ''));
+      if (c && seed.indexOf(c) < 0) seed.push(c);
+    });
+    save(K.mintsChosen, seed);
+    return seed;
+  }
+  function chooseMint(url) {
+    var c = canonicalMint(String(url || ''));
+    if (!c) return;
+    var l = mintsChosen();
+    if (l.indexOf(c) < 0) save(K.mintsChosen, l.concat([c]));
+  }
+
   function rememberMint(url) {
+    mintsChosen();
     var used = load(K.mintsUsed, []);
     if (!Array.isArray(used)) used = [];
     // whether this wallet has ever been on it, which is what the answer says

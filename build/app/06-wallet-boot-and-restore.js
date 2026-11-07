@@ -585,7 +585,9 @@
       /* One connect at a time. While this one is out, the claims a route starts wait for it
        * (`claimWhenRouteReturns`), and a try after a failed one waits for those claims to be over: each of them
        * visits the mint a payment is at, and whichever connect finished last set the wallet's globals. */
-      const going = Promise.resolve(this._routeWork).then(null, () => null).then(() => W.connect(url));
+      /* Saved as the phone's own only where the person chose it (`connectBack`): a wallet from storage on a mint only
+       * visited is connected to for real as a visit. */
+      const going = Promise.resolve(this._routeWork).then(null, () => null).then(() => (this.connectBack ? this.connectBack(url) : W.connect(url)));
       this._realConnect = going;
       const over = () => { if (this._realConnect === going) this._realConnect = null; };
       going.then(over, over);
@@ -844,7 +846,7 @@
    * that answered is written, not just the one tapped — the tap decides where
    * you land, not what is kept. Anything still being scanned is picked up by
    * runSeedScan as it arrives. */
-  adoptRestoreMint() {
+  adoptRestoreMint(passed) {
     const W = window.FoxyWallet;
     const row = this.state.rsPick;
     if (!row || this.state.rsBusy2) return;
@@ -855,6 +857,20 @@
 
     // landing on the chosen mint is a switch like any other
     if (this.refuseSwitchWhileBusy()) return;
+    /* Every mint kept is added to this phone. The scan looks at the mints on the list (`knownMints`), and a mint there
+     * only from a visit (a crossing, PAY FROM, MOVE TO YOUR MINT) is not one the person chose: where any kept is such a
+     * mint, past the lock first, once for them all, and every one of them chosen once passed (09-melt-paste-switch.js
+     * `mintGate`). Given up, nothing is written and this screen stays. */
+    if (!passed && this.mintGate && this.mintOnPhone) {
+      const fresh = [row].concat(keep).map(r => r && r.url).filter(u => !!u && !this.mintOnPhone(u));
+      if (fresh.length) {
+        this.mintGate(fresh[0], () => {
+          fresh.forEach(u => { if (W && W.chooseMint) W.chooseMint(u); });
+          this.adoptRestoreMint(true);
+        }, 'To add the mints found.');
+        return;
+      }
+    }
     // nor in one restored over it (10-pin.js, `holdSwapWatchStop`)
     if (this.holdSwapWatchStop) this.holdSwapWatchStop();
 

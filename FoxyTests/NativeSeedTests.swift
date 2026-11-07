@@ -122,6 +122,34 @@ final class NativeSeedTests: XCTestCase {
         XCTAssertEqual(FoxyBridge.cashuIdPages, 8)
     }
 
+    /// cashuIdInboxOpen's days: whole numbers from 32 days back to today, each once, newest first; today alone when
+    /// none is. Every listen is the same eleven REQs over the window, three days each, each from two days before the
+    /// start of its oldest day, holding only the days asked. And `any`: 4-byte ids in hex, each once, at most 960.
+    func testCashuIdDaysAndTheirREQs() {
+        let today = 20_400
+        XCTAssertEqual(FoxyBridge.cashuIdDays(nil, today: today), [today])
+        XCTAssertEqual(FoxyBridge.cashuIdDays([today - 1, today, today, true, "20399", 20_398.5, today - 33, today + 1, NSNumber(value: today - 32)],
+                                              today: today), [today, today - 1, today - 32])
+        XCTAssertEqual(FoxyBridge.cashuIdDays(Array((today - 40)...(today + 3)), today: today).count, 33)
+        XCTAssertEqual(FoxyBridge.cashuIdAskCount, 11)
+        let one = FoxyBridge.cashuIdAsks(days: [today], today: today)
+        let all = FoxyBridge.cashuIdAsks(days: Array((today - 32)...today).reversed(), today: today)
+        XCTAssertEqual(one.count, 11)
+        XCTAssertEqual(all.count, 11)
+        XCTAssertEqual(one.map(\.since), all.map(\.since), "the same REQs whatever is asked")
+        XCTAssertEqual(one.first?.days, [today])
+        XCTAssertTrue(one.dropFirst().allSatisfy { $0.days.isEmpty }, "the rest is filler")
+        XCTAssertEqual(all.first?.days, [today, today - 1, today - 2])
+        XCTAssertEqual(all.first?.since, (today - 2) * 86_400 - 172_800)
+        XCTAssertEqual(all.last?.days, [today - 30, today - 31, today - 32])
+        XCTAssertTrue(all.allSatisfy { $0.days.count == 3 && $0.since % 86_400 == 0 })
+        XCTAssertEqual(FoxyBridge.cashuIdDaysPerAsk * CashuID.dropSlots, NostrInbox.askKeys)
+        XCTAssertEqual(FoxyBridge.cashuIdAnyIds(["8c0e1f22", "8C0E1F22", "8c0e1f", 5, "zzzzzzzz"]).map { NUT13.hex($0) }, ["8c0e1f22"])
+        XCTAssertEqual(FoxyBridge.cashuIdAnyIds((0..<1200).map { String(format: "%08x", $0) }).count, FoxyBridge.cashuIdMostAny)
+        XCTAssertEqual(FoxyBridge.cashuIdMostAny, 960)
+        XCTAssertEqual(FoxyBridge.cashuIdAnyIds(nil).count, 0)
+    }
+
     /// tillInboxOpen's since: a number inside the last twelve days, else five days back. A boolean is told apart by
     /// its CF type: `value is Bool` is true of any NSNumber 0 or 1, and of nothing else, so it let neither through
     /// as a boolean nor stopped a real 0 or 1; the same check as `cashuIdSince`.

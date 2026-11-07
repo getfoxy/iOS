@@ -111,6 +111,11 @@
       // landing on a token's own screen: ask the mint about it at once
       if (this.state.screen === 'tokenOut') this.tokenWatchNow();
       if (this.state.screen === 'home') this.endReceiveAtHome();
+      // a RECEIVED left by any way: its row and its bulk list go with it (15-paid-wake-keyboard.js, `paidJoinable`)
+      if (prevState.screen === 'paid' && (this.state.paidRow || this.state.paidBulk)) {
+        this._paidOpenAt = 0;
+        this.setState({ paidRow: null, paidBulk: null });
+      }
       /* The till's SET AMOUNT is its home (26m-till.js, `tillIdle`): a receive ends there as it ends at home, and in a till
        * that takes both the next customer is asked which again. A till in one currency is in it whatever this says
        * (`walletNow`). */

@@ -2044,10 +2044,20 @@
     };
     var changeHash = 'tap-change-' + Date.now();
     if (routeOpen()) {
+      /* Change at a mint the person did not choose is taken there as a visit (`receiveToken`), and the phone comes back
+       * to the mint it was on after, the session never left there. */
+      var changeFrom = canonicalMint(mintUrl || '');
+      var changeHome = function () {
+        if (!changeFrom || canonicalMint(mintUrl || '') === changeFrom) return;
+        FoxyWallet.connect(changeFrom, null, null, FoxyWallet.mintChosen(changeFrom) ? undefined : { remember: false })
+          .then(null, function (e) { console.warn('[foxy] change: could not get back to ' + hostOf(changeFrom) + ':', (e && e.message) || e); });
+      };
       FoxyWallet.receiveToken(text, { hash: changeHash }).then(function () {
         try { FoxyWallet.tag(changeHash, { change: true }); } catch (x) {}
         kept('');
+        changeHome();
       }, function (e) {
+        changeHome();
         // locked to this phone and signed by the mint: kept as it is, and claimed on the next try
         if (!chk.signed) return no('the mint would not swap it and its signatures do not verify');
         try { keepChange(text, chk.amount); kept(', written down to settle later'); } catch (x) { no(String((x && x.message) || x)); }

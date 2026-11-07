@@ -81,6 +81,17 @@
     tillKeeperClose: function () { return tillKeeperClose(); },
     tillKeeper: function () { return tillKeeperNow(); },
 
+    /* The mint this phone belongs on now: an open till's (the keeper's default, or the mint a cashier works at), else the
+     * mint it is saved on, else the one it is on. A flow that visited another mint comes back here (the page's
+     * `homeAgain`), and money moved home lands here (`sweepQuote`). */
+    homeMint: function () {
+      var k = tillKeeperNow();
+      if (k && k.def) return canonicalMint(k.def);
+      var c = tillCashierNow();
+      if (c && c.pass && c.pass.mint) return canonicalMint(String(c.pass.mint));
+      return canonicalMint(String(load(K.mint, '') || mintUrl || ''));
+    },
+
     /* Cashier: the till this phone works, { pass, since }, or null. Null once
      * the code has ended, which clears it and takes the phone home. */
     tillCashier: function () {
