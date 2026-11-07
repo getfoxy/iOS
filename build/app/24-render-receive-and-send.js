@@ -61,8 +61,10 @@
       isConfirm: sc === 'confirm',
       recvHeadOne: !two,
       recvHeadTwo: two,
-      recvChipsOne: !two || tillBoth,
-      recvChipsTwo: two && !tillBoth,
+      /* The WALLET chip is drawn only where tapping it could change something: never in the till (its currency is fixed, or it
+       * receives in its main), so there the NETWORK chip has the row alone, as at a mint of one balance. */
+      recvChipsOne: !two || tillBoth || tillRecv,
+      recvChipsTwo: two && !tillBoth && !tillRecv,
       // the chip says the money in full, DOLLARS or BITCOIN, with no WALLET label over it
       recvWalletWord: two ? (this.walletNow('receive') === 'usd' ? 'DOLLARS' : 'BITCOIN') : '',
       // offline too: only the request changes, and that needs no mint

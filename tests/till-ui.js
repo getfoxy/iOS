@@ -1966,6 +1966,19 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     v.shareQr(); await settle();
     ok(shared === 1, 'and SHARE’s own way in shares nothing in the till');
     ok(/LIGHTNING/.test(textOf(w)) && !/NETWORK/.test(textOf(w)) && !!w.document.querySelector('img[data-req-qr]'), 'the network chip (LIGHTNING, no NETWORK label over it) and the QR stay');
+    {
+      // a mint of two balances, the till in bitcoin alone: the WALLET chip would do nothing there, so it is not drawn, and the
+      // NETWORK chip takes the row alone, as at a mint of one balance
+      const wasTwo = W.twoUnits, wasUnits = W.mintUnits;
+      W.twoUnits = () => true; W.mintUnits = () => ['sat', 'usd'];
+      A.setState({ screen: 'amount', stack: [] }); await settle();
+      A.setState({ amount: '1000', unit: 'SATS', screen: 'confirm', stack: ['amount'], invoice: 'lnbc-till-two', recvRail: 'LIGHTNING' }); await settle();
+      v = V();
+      const chip = (l) => !!w.document.querySelector('[aria-label="' + l + '"]');
+      ok(v.recvChipsOne === true && v.recvChipsTwo === false && !chip('Wallet') && chip('Network') && /LIGHTNING/.test(textOf(w)) && !/BITCOIN/.test(textOf(w)),
+        'the till in bitcoin at a mint of two balances: no WALLET chip, the NETWORK chip alone', JSON.stringify([v.recvChipsOne, v.recvChipsTwo, chip('Wallet'), chip('Network')]));
+      W.twoUnits = wasTwo; W.mintUnits = wasUnits;
+    }
     // a cashier's: CARD was not there, so the button is greyed and does nothing
     await cashierTill(W);
     A.setState({ amount: '1000', unit: 'SATS', screen: 'confirm', stack: ['amount'], recvUnit: 'sat', invoice: 'lnbc-cashier', recvRail: 'LIGHTNING' }); await settle();

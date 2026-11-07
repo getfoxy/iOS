@@ -17821,8 +17821,10 @@ class Component extends DCLogic {
       isConfirm: sc === 'confirm',
       recvHeadOne: !two,
       recvHeadTwo: two,
-      recvChipsOne: !two || tillBoth,
-      recvChipsTwo: two && !tillBoth,
+      /* The WALLET chip is drawn only where tapping it could change something: never in the till (its currency is fixed, or it
+       * receives in its main), so there the NETWORK chip has the row alone, as at a mint of one balance. */
+      recvChipsOne: !two || tillBoth || tillRecv,
+      recvChipsTwo: two && !tillBoth && !tillRecv,
       // the chip says the money in full, DOLLARS or BITCOIN, with no WALLET label over it
       recvWalletWord: two ? (this.walletNow('receive') === 'usd' ? 'DOLLARS' : 'BITCOIN') : '',
       // offline too: only the request changes, and that needs no mint
@@ -19410,8 +19412,15 @@ class Component extends DCLogic {
         name: h.name, sub: h.sub,
         sign: TILE[HOLD_TILE[h.key]].sign, signOne: h.key !== 'both', signTwo: h.key === 'both',
         signA: '$', signB: '\u20bf', signInkA: 'rgba(15,42,51,.16)', signInkB: 'rgba(26,10,2,.18)',
-        labelPx: '40px', radius: '30px', shadow: 'inset 0 1px 0 rgba(255,255,255,.35)',
-        outline: holding === h.key ? '3px solid var(--ink)' : 'none',
+        labelPx: '40px', radius: '30px',
+        // (the one chosen also has a dark halo, outside the tile and in a band inside the ring, so the ring reads on any half of a tile)
+        shadow: holding === h.key ? 'inset 0 1px 0 rgba(255,255,255,.35),0 0 0 3px rgba(0,0,0,.55),inset 0 0 0 8px rgba(0,0,0,.45)' : 'inset 0 1px 0 rgba(255,255,255,.35)',
+        /* The one chosen is what PAY FROM does for its chosen source: a 4px ring in the accent and the accent's tick, with the
+         * white of both on the orange tile and the split one, where the accent would not show; every other tile is dimmed. */
+        pickOn: holding === h.key,
+        outline: holding === h.key ? '4px solid ' + (h.key === 'dollars' ? 'var(--acc)' : '#FFFFFF') : 'none',
+        tickBg: h.key === 'dollars' ? 'var(--acc)' : '#FFFFFF', tickInk: h.key === 'dollars' ? '#FFFFFF' : '#D9561C',
+        opacity: (!holding || holding === h.key) ? '1' : '.55',
         tap: () => this.setState({ holdPick: h.key }),
       })),
       holdBack: () => this.holdLater(),

@@ -846,6 +846,8 @@ function representative(logic) {
   add('settings, what it takes offline', at('home', { open0: true },
     { wallet: { tillCaps: () => ({ payerSats: 66000, holdSats: 396000, promptSats: 198000, payerSet: false, holdSet: true }) } }));
   add('SET AMOUNT, what one payer may hand you offline', at('amount', { flow: 'tillCap', tillCapWhich: 'payer', unit: 'USD', amount: '40' }));
+  add('two balances: what to hold, Dollars picked', at('holdChoice', Object.assign({ holdPick: 'dollars' }, TWO_LIVE), { wallet: TWO() }));
+  add('two balances: what to hold, Bitcoin picked', at('holdChoice', Object.assign({ holdPick: 'bitcoin' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: what to hold, Both picked', at('holdChoice', Object.assign({ holdPick: 'both' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: CURRENCY before the first receive', at('currency', Object.assign({ currencyFlow: 'receive', currencyNext: 'amount' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: SET AMOUNT, a dollars receive', at('amount', Object.assign({ flow: 'receive', wallet: 'usd', unit: 'USD', amount: '5.00' }, TWO_LIVE), { wallet: TWO() }));

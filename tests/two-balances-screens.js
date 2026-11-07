@@ -543,6 +543,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     const v = V();
     ok(v.recvHeadTwo && v.recvChipsTwo && !v.recvChipsOne, 'the title between the round buttons; WALLET and NETWORK chips');
     eq([v.recvWalletWord, v.confirmNetwork], ['DOLLARS', 'LIGHTNING'], 'the chips read DOLLARS and LIGHTNING');
+    ok(!!w.document.querySelector('[aria-label="Wallet"]') && !!w.document.querySelector('[aria-label="Network"]'), 'where the person can choose, both chips are drawn');
     {
       // the chips carry only their word and the chevron: no small WALLET or NETWORK label over it
       const mk = require('fs').readFileSync(require('path').join(__dirname, '..', 'build', 'markup.html'), 'utf8');

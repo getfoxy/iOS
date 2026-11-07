@@ -30,8 +30,8 @@ The parts are pieces of one file, not separate modules: they share one scope, so
 | `21-render-values.js` | 668 | `renderVals`, `renderValsBase`, `renderFieldLog`, `renderContext` |
 | `22-render-shell-and-dialogs.js` | 55 | `renderShell`, `renderNote` |
 | `23-render-home-and-amount.js` | 842 | `renderHome`, `renderHomeTwo`, `goHistoryIn`, `swapStart`, `keypadLocked`, `usdKeypad`, `keypadStale`, `keypadWallet`, `torBannerVals`, `shieldVals`, `shieldWatch`, `renderAmount` |
-| `24-render-receive-and-send.js` | 1286 | `renderReceive`, `renderPaid`, `renderPaidRest`, `paidBulkVals`, `paidBulkTotal`, `paidBulkRows`, `paidBulkWhen`, `renderPaidBase`, `paidDismiss`, `paidDismissingNow`, `renderSend`, `renderSent`, `sendBehindOther`, `renderSentBase`, `renderToken`, `renderTokenBase`, `priceSpec`, `priceAnswer`, `crossSpec`, `crossAnswer`, `peerRateRow`, `requestSpec` |
-| `25-render-confirm-and-blocked.js` | 378 | `renderConfirmShell`, `cfMoreToggle`, `cfPayLook`, `renderBlocked`, `renderCurrency` |
+| `24-render-receive-and-send.js` | 1288 | `renderReceive`, `renderPaid`, `renderPaidRest`, `paidBulkVals`, `paidBulkTotal`, `paidBulkRows`, `paidBulkWhen`, `renderPaidBase`, `paidDismiss`, `paidDismissingNow`, `renderSend`, `renderSent`, `sendBehindOther`, `renderSentBase`, `renderToken`, `renderTokenBase`, `priceSpec`, `priceAnswer`, `crossSpec`, `crossAnswer`, `peerRateRow`, `requestSpec` |
+| `25-render-confirm-and-blocked.js` | 385 | `renderConfirmShell`, `cfMoreToggle`, `cfPayLook`, `renderBlocked`, `renderCurrency` |
 | `26-render-history-and-contacts.js` | 807 | `renderHistory`, `segLook`, `renderTxDetail`, `histRowTwo`, `renderContacts` |
 | `26a-transfer.js` | 358 | `goTransfer`, `trHeldAt`, `trPick`, `trPickTo`, `trFromSats`, `trFromText`, `trNext`, `quoteTransfer`, `trMoveLess`, `runTransfer`, `trCancel`, `trLook`, `transferSpec`, `transferSpecUsd` |
 | `26b-onchain.js` | 567 | `onchainAsk`, `ocCan`, `ocReceiveAddress`, `ocReceiveNote`, `ocFloorShort`, `ocFloorSays`, `ocReceiveBlocked`, `payOnchain`, `ocNext`, `ocQuote`, `ocPickFee`, `ocFeeLabel`, `ocTxidOf`, `ocPay`, `onchainSpec`, `ocCancel`, `onchainWatchLater`, `onchainWatch` |

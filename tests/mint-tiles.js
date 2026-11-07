@@ -399,6 +399,30 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
        'the three choices in the currency tiles: blue, orange, split, each sign faint, the word 40px', JSON.stringify(r.map((h) => [h.name, h.sign])));
     ok(r[1].outline !== 'none' && r[0].outline === 'none' && typeof V().holdDone === 'function', 'the chosen one outlined, DONE kept');
     ok(/Steady\. For spending\./.test(textOf(w)), 'each with its line', textOf(w).slice(0, 200));
+    // the header as every set-up screen has it: the title beside the back button, the divider, then the mint line as the subtitle
+    {
+      const root = w.document.querySelector('[data-template="hold"]');
+      const row = root && root.children[0];
+      const rule = root && root.children[1];
+      const kids = row ? Array.from(row.children) : [];
+      ok(kids.length === 3 && /CURRENCIES/.test(kids[1].textContent) && kids[1].style.fontSize === '22px' && kids[2].style.width === '52px',
+         'CURRENCIES sits beside the back button, 22px, with the 52px spacer', row && row.textContent);
+      ok(rule && rule.style.height === '1px' && /^At /.test(rule.nextElementSibling.textContent.trim()), 'the divider comes before the mint line, the subtitle', rule && rule.nextElementSibling && rule.nextElementSibling.textContent);
+      ok(!Array.from(root.querySelectorAll('div')).some((d) => d.style.fontSize === '34px'), 'no 34px title is left');
+    }
+    // the chosen tile: the ring and the tick PAY FROM gives its chosen source, the others dimmed, for each of the three choices
+    for (const [pick, ring, tickBg] of [['dollars', 'var(--acc)', 'var(--acc)'], ['bitcoin', '#FFFFFF', '#FFFFFF'], ['both', '#FFFFFF', '#FFFFFF']]) {
+      A.setState({ screen: 'holdChoice', stack: ['home'], holdPick: pick });
+      await settle();
+      const rr = V().holdRows;
+      const at = rr.findIndex((h) => h.key === undefined ? h.name.toLowerCase() === pick : false);
+      ok(at >= 0 && rr.every((h, i) => (i === at) === !!h.pickOn), pick + ': exactly that tile is marked chosen');
+      ok(rr[at].outline === '4px solid ' + ring && rr[at].opacity === '1' && /0 0 0 3px rgba\(0,0,0,\.55\)/.test(rr[at].shadow) && rr[at].tickBg === tickBg, pick + ': a 4px ring, a dark halo and a tick', JSON.stringify(rr[at]));
+      ok(rr.every((h, i) => i === at || (h.outline === 'none' && h.opacity === '.55' && h.shadow.indexOf('0 0 0 3px') < 0)), pick + ': the others have no ring and are dimmed');
+      const tiles = w.document.querySelectorAll('[data-template="hold"] [role="button"][aria-label]');
+      const ticks = w.document.querySelectorAll('[data-hold-tick]');
+      ok(ticks.length === 1 && tiles[at].contains(ticks[0]), pick + ': one tick drawn, on the chosen tile');
+    }
     A.setState({ screen: 'home', stack: [], holdPick: '' });
   }
 
