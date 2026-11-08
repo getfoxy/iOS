@@ -1091,8 +1091,8 @@ function representative(logic) {
    * River's paste screen, SET AMOUNT straight to the address kept with CHANGE EXCHANGE, and the sent screen for each. */
   const BANK_W = (over) => ({ wallet: Object.assign({
     bankExchanges: () => [{ key: 'strike', name: 'Strike', domain: 'strike.me', by: 'address' }, { key: 'river', name: 'River', domain: 'river.com', by: 'invoice' },
-      { key: 'cashapp', name: 'Cash App', domain: 'cash.app', by: 'address', unchecked: true }],
-    bankUser: (ex, raw) => String(raw || '').trim().replace(/^[$@]+/, '').split('@')[0].toLowerCase(),
+      { key: 'cashapp', name: 'Cash App', domain: 'cash.app', by: 'invoice' }],
+    bankUser: (ex, raw) => String(raw || '').trim().replace(/^@+/, '').split('@')[0].toLowerCase(),
     bankSaved: () => null,
   }, over || {}) });
   const STRIKE = { bank: { ex: 'strike', to: 'alice@strike.me' }, recipient: 'alice@strike.me', recipientKind: 'email' };
@@ -1105,15 +1105,15 @@ function representative(logic) {
   add('BANK ACCOUNT: a Strike username not found', at('bankAsk', { bankEx: 'strike', bankDraft: 'bob',
     bankLook: { state: 'missing', user: 'bob', addr: 'bob@strike.me' } }, BANK_W()));
   add('BANK ACCOUNT: Strike could not be reached', at('bankAsk', { bankEx: 'strike', bankDraft: 'bob', bankLook: { state: 'failed', user: 'bob' } }, BANK_W()));
-  add('BANK ACCOUNT: a cashtag that could not be checked', at('bankAsk', { bankEx: 'cashapp', bankDraft: 'alice',
-    bankLook: { state: 'unchecked', user: 'alice', addr: 'alice@cash.app' } }, BANK_W()));
+  add('BANK ACCOUNT: Cash App, an invoice to paste, Cash App kept', at('bankAsk', { bankEx: 'cashapp', bankShort: true, bankLook: null }, BANK_W()));
+  add('BANK ACCOUNT: Cash App, what was pasted is no invoice', at('bankAsk', { bankEx: 'cashapp', bankLook: { state: 'bad' } }, BANK_W()));
   add('BANK ACCOUNT: River, an invoice to paste, River kept', at('bankAsk', { bankEx: 'river', bankShort: true, bankLook: null }, BANK_W()));
   add('BANK ACCOUNT: River, what was pasted is no invoice', at('bankAsk', { bankEx: 'river', bankLook: { state: 'bad' } }, BANK_W()));
   add('BANK ACCOUNT: SET AMOUNT for the Strike address kept, CHANGE EXCHANGE', at('amount', Object.assign({ flow: 'send', unit: 'USD', amount: '12.50',
     bankShort: true }, STRIKE), BANK_W()));
   add('BANK ACCOUNT: sent to Strike', at('sendDone', Object.assign({ sendPhase: 'settled', amount: '12.50', unit: 'USD' }, STRIKE), BANK_W()));
-  add('BANK ACCOUNT: sent to Cash App', at('sendDone', { sendPhase: 'settled', amount: '12.50', unit: 'USD', recipient: 'alice@cash.app', recipientKind: 'email',
-    bank: { ex: 'cashapp', to: 'alice@cash.app' } }, BANK_W()));
+  add('BANK ACCOUNT: sent to Cash App', at('sendDone', { sendPhase: 'settled', amount: '12.50', unit: 'USD', recipient: 'lnbc21u1pcashinvoice', recipientKind: 'invoice',
+    bank: { ex: 'cashapp', to: 'lnbc21u1pcashinvoice' } }, BANK_W()));
   add('BANK ACCOUNT: sent to River', at('sendDone', { sendPhase: 'settled', amount: '2100', unit: 'SATS', recipient: 'lnbc21u1priverinvoice', recipientKind: 'invoice',
     bank: { ex: 'river', to: 'lnbc21u1priverinvoice' } }, BANK_W()));
   return v;
@@ -1481,7 +1481,6 @@ function cards() {
   }
   // SEND > BANK ACCOUNT's question before a username (26q-bank.js)
   add('card: ALREADY HAVE AN ACCOUNT WITH STRIKE?', (a) => a.bankHaveAsk('strike'));
-  add('card: ALREADY HAVE AN ACCOUNT WITH CASH APP?', (a) => a.bankHaveAsk('cashapp'));
   return v;
 }
 

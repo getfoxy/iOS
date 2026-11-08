@@ -127,6 +127,10 @@
      * nothing goes into this phone's pile. */
     tillTakeToken: function (text) { return tillTake(text); },
 
+    /* The key a sale is locked to: a code's key `lock` moved by the sale's nonce `n` (32 hex), { pub, t } in hex
+     * (`tillSaleKey`, 08d-till.js). For the suites and for anything that checks a sale's key from outside. */
+    _tillSaleKey: function (lock, n) { return tillSaleKey(lock, n); },
+
     // for the suites: a row put in the outbox as a payment would put it, and the wait between tries (ms)
     _tillOutboxAdd: function (o) { return tillOutboxAdd(o); },
     _tillRetryMs: 0,

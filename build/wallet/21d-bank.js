@@ -11,7 +11,7 @@
     // [{ key, name, domain, by }], in the order the list shows them
     bankExchanges: function () {
       return ['strike', 'river', 'cashapp'].map(function (k) {
-        return { key: k, name: BANK[k].name, domain: BANK[k].domain, by: BANK[k].by, unchecked: !!BANK[k].unchecked };
+        return { key: k, name: BANK[k].name, domain: BANK[k].domain, by: BANK[k].by };
       });
     },
     bankUser: function (ex, raw) { return bankUser(ex, raw); },

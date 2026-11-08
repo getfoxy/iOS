@@ -151,26 +151,26 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     return !!el;
   };
 
-  // ---- 1. SWITCH: TO WHICH MINT?, a tile a mint, the one you are on first and ticked, ADD A MINT last --------------
+  // ---- 1. SWITCH: titled SWITCH MINT, a tile a mint, the one you are on first and ticked, ADD A MINT last --------------
   {
     A.goSwitchMint();
     await settle();
     const v = V();
-    ok(v.mintTitle === 'TO WHICH MINT?' && v.mintTilesShown === true && v.mintRowsShown === false && v.mintNowShown === false,
-       'switching: TO WHICH MINT?, drawn as tiles, no line under the title', JSON.stringify([v.mintTitle, v.mintTilesShown, v.mintNowLine]));
+    ok(v.mintTitle === 'SWITCH MINT' && v.mintTilesShown === true && v.mintRowsShown === false && v.mintNowShown === false,
+       'switching: SWITCH MINT, drawn as tiles, no line under the title', JSON.stringify([v.mintTitle, v.mintTilesShown, v.mintNowLine]));
     const rows = v.mintRows;
     eq(rows.slice(0, 3).map(hostOf), ['forge.flashapp.me', 'mint.minibits.cash', 'mint.macadamia.cash'], 'the mint you are on first, then the others');
     ok(rows[0].here === true && rows[0].border === 'var(--acc)' && rows[0].edge === '2px' && rows.slice(1).every((r) => !r.here && r.edge === '1px'),
        'the mint you are on ticked, in the accent with a 2px edge; the others not', JSON.stringify(rows.map((r) => [r.here, r.border, r.edge])));
     const mb = rows[1];
-    ok(mb.big === 'MINIBITS MINT' && mb.nameSize === '38px' && mb.hostSize === '17px' && mb.radius === '28px',
+    ok(mb.big === 'MINIBITS' && mb.nameSize === '38px' && mb.hostSize === '17px' && mb.radius === '28px',
        'a tile: the name in capitals at 38px, the host at 17px', JSON.stringify([mb.big, mb.nameSize, mb.hostSize, mb.radius]));
     ok(mb.lineBal === true && mb.balSym === true && mb.balMain === '6,149' && mb.balAbout === '≈ $4.61' && !mb.lineFee && !mb.lineWait,
        'under its rule: the sat sign, 6,149, and ≈ $4.61', JSON.stringify([mb.balMain, mb.balAbout]));
     ok(rows[0].balMain === '25,066 + $10.33' && rows[0].balAbout === '≈ $29.13',
        'a mint with two balances: 25,066 + $10.33 ≈ $29.13', JSON.stringify([rows[0].balMain, rows[0].balAbout]));
     const page = textOf(w);
-    ok(/TO WHICH MINT\?/.test(page) && /MINIBITS MINT/.test(page) && /6,149/.test(page) && /≈ \$4\.61/.test(page) && /ADD A MINT/.test(page)
+    ok(/SWITCH MINT/.test(page) && !/TO WHICH MINT/.test(page) && /MINIBITS/.test(page) && /6,149/.test(page) && /≈ \$4\.61/.test(page) && /ADD A MINT/.test(page)
        && !/ADD MINT BY URL/.test(page) && !/ADD MINT BY QR/.test(page),
        'drawn: the title, the tiles with their balances, and ADD A MINT in place of the two old buttons', page.slice(0, 300));
     let typed = 0, scanned = 0;

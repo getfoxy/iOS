@@ -175,6 +175,13 @@
     tillPasses: 'foxy.till.passes',
     tillSeen: 'foxy.till.seen',
     tillInbox: 'foxy.till.inbox',
+    /* The keeper's per-sale keys: each request or invoice a cashier makes is locked to the code's key moved by a nonce
+     * of its own (08d-till.js `tillSaleKey`); a delivery names the nonce, and the moved key and its move are kept here,
+     * keyed by the moved key, so whatever spends that ecash later finds its private key (`lockKeyMatching`). */
+    tillSales: 'foxy.till.sales',
+    /* A cashier's: every sale key it put in a request, with its nonce, for its code's life and the week after, so a
+     * payment locked to it is still taken however long after its request closed (08d-till.js `tillIssuedKeep`). */
+    tillIssued: 'foxy.till.issued',
     /* A cashier's: the code it works the till by, the mint it banks at, to go back to, and what it took for the keeper,
      * locked to the keeper's key, until it is sent. The outbox is the keeper's money: written with mustSave. */
     tillCashier: 'foxy.till.cashier',

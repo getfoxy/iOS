@@ -736,6 +736,12 @@
       this.hideMelt();
       this.announceTaken(r);
       this.loadHistory();
+      /* Short of its request: the running total so far against the price, so the cashier asks for the rest (the request
+       * stays open, and the token that brings the total to the price closes it). */
+      if (r && r.short && Number(r.asked) > 0) {
+        const u = r.unit === 'usd' ? 'usd' : 'sat';
+        this.toast(this.unitFigure(Number(r.soFar) || 0, u) + ' of ' + this.unitFigure(Number(r.asked), u) + ' so far');
+      }
     }).catch((e) => {
       this.hideMelt();
       this.blockedCard('tillTokenRefused', {

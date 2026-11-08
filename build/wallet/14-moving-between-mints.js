@@ -5,6 +5,14 @@
       return String(mintUrl || '').replace(/^https?:\/\//, '');
     },
 
+    /* The name a mint said about itself (its /v1/info, kept with its keysets), or '' where this phone has none on file. */
+    mintSaidName: function (url) {
+      try {
+        var c = mintCacheFor(canonicalMint(url || ''));
+        return String((c && c.info && c.info.name) || '');
+      } catch (e) { return ''; }
+    },
+
     /* What it would cost to move everything here to another mint.
      *
      * There is no direct route: ecash from one mint is worthless at another, so

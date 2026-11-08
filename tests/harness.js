@@ -1162,6 +1162,17 @@ function cashuIdMovedSecret(q, t) {
   const even = ptMul(q, SECP_G)[1] & 1n ? SECP_ORDER - q : q;
   return fmod(even + t, SECP_ORDER);
 }
+/* A till sale's key (build/wallet/08d-till.js `tillSaleKey`): t = SHA-256("foxy-till-lock-v1" ‖ L (33) ‖ n (16)), once
+ * more with 0xFF; K = L + t·G, L with its own parity; its secret l + t. Written here a second time, with BigInt. */
+function tillSaleTweak(lockHex, nonceHex) {
+  const msg = Buffer.concat([Buffer.from('foxy-till-lock-v1'), Buffer.from(lockHex, 'hex'), Buffer.from(nonceHex, 'hex')]);
+  let t = big(sha(msg));
+  if (t === 0n || t >= SECP_ORDER) t = big(sha(msg, Buffer.from([0xff])));
+  if (t === 0n || t >= SECP_ORDER) throw new Error('no till sale tweak');
+  return t;
+}
+const tillSaleKey = (lockHex, nonceHex) => ptBytes(ptAdd(ptParse(Buffer.from(lockHex, 'hex')), ptMul(tillSaleTweak(lockHex, nonceHex), SECP_G))).toString('hex');
+const tillSaleSecret = (privHex, lockHex, nonceHex) => n32(fmod(BigInt('0x' + privHex) + tillSaleTweak(lockHex, nonceHex), SECP_ORDER)).toString('hex');
 const cashuIdDropKey = (nostrHex, day, slot) => cashuIdMoved(nostrHex, cashuIdDropTweak(nostrHex, day, slot));
 const cashuIdAnyKey = (nostrHex, idHex) => cashuIdMoved(nostrHex, cashuIdAnyTweak(nostrHex, idHex));
 // BIP-340 signing, auxiliary randomness all zero (a test model's)
@@ -1944,4 +1955,5 @@ function nativePhone(opts) {
 module.exports = { cardGate, load, proof, stubCashu, connected, loadReal, fakeMint, books, booksWrong, rebook, noBooks, nativePhone, NATIVE_RULES, NATIVE_SAYS, counterSlot, PHONE_WORDS,
                    p2pkParent, p2pkAt, cardOwnerScalar, p256Public, p256Sign, p256Verify, CARD_LABELS,
                    cashuIdKeys, cashuIdOneTime, cashuIdBlind, cashuIdTag, cashuIdPayBase, cashuIdPieceKey, cashuIdBindDigest,
-                   p2bkTweak, sharedX, schnorrSign, cashuIdDropTweak, cashuIdAnyTweak, cashuIdDropKey, cashuIdAnyKey, cashuIdMovedSecret };
+                   p2bkTweak, sharedX, schnorrSign, cashuIdDropTweak, cashuIdAnyTweak, cashuIdDropKey, cashuIdAnyKey, cashuIdMovedSecret,
+                   tillSaleTweak, tillSaleKey, tillSaleSecret };

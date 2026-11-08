@@ -118,7 +118,7 @@ const PRICE = 80000;
 const LOCK = '02' + 'ab'.repeat(32);
 const NPROFILE = 'nprofile1' + 'qqqqqqqqqqqqqqqqqqqqqqqqqqqqqq';
 const b64url = (s) => Buffer.from(s, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-const passOf = (o) => Object.assign({ v: 1, id: '0123456789abcdef', mint: KEEPER_MINT, unit: 'sat', lock: LOCK, to: NPROFILE,
+const passOf = (o) => Object.assign({ v: 2, id: '0123456789abcdef', mint: KEEPER_MINT, unit: 'sat', lock: LOCK, to: NPROFILE,
   exp: Math.floor(Date.now() / 1000) + 72 * 3600 }, o || {});
 const codeOf = (pass) => 'https://getfoxy.io/till#' + b64url(JSON.stringify(pass));
 /* The code is read by the real wallet's own reader (build/wallet/08d-till.js: `classify`, `tillDecode`, `tillProblem`), so
@@ -667,6 +667,12 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq(W.calls.taken, ['cashuBo2F0gaJhaUgA'], 'SCAN on the receive screen: a token goes to the till’s own way in');
     ok(tillAmount() || A.state.screen === 'paid', 'and the receive screen closes onto the till');
     ok(A.acceptTarget('cashuBsecond') === true && W.calls.taken.length === 2, 'a token pasted: the same way in');
+    // a token short of its request: the running total so far against the price, said
+    W.tillTakeToken = (t) => { W.calls.taken.push(t); return Promise.resolve({ hash: 'till-tok-2', sats: 300, amount: 300, unit: 'sat', short: true, soFar: 301, asked: 500 }); };
+    toasts = [];
+    ok(A.acceptTarget('cashuBshort') === true, '(set-up) a short token pasted');
+    await settle(); await settle();
+    ok(toasts.some((m) => /301 of .*500 so far/.test(m)), 'a short token: the cashier is told the total so far against the price', JSON.stringify(toasts));
     ok(A.acceptTarget('lnbc1invoice') === false && toasts.some((m) => /The till only receives/.test(m)), 'an invoice: the till only receives');
     ok(A.acceptTarget('creqAsomething') === false, 'a payment request: the same');
     ok(A.acceptTarget(codeOf(passOf({ id: '1111111111111111' }))) === false && toasts.some((m) => /Leave the till first/.test(m)), 'another cashier code: leave the till first');
@@ -1827,6 +1833,13 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     A.setState({ screen: 'paid', stack: ['amount', 'confirm'], paidUnit: 'sat', paidAmount: 15000, paidHash: 'sale-1' }); await settle(); await settle();
     ok(W.calls.tipTaken.length === 1 && W.calls.tipTaken[0].amount === 2500 && W.calls.tipTaken[0].unit === 'sat' && W.calls.tipTaken[0].hash === 'sale-1',
       'PAID 15,000 sats for $10 + $2: 2,500 sats of it passed on as the tip, by the sale’s row', JSON.stringify(W.calls.tipTaken));
+    /* The keeper's receipt: a sale's row says the sale and the tip as two figures beside each other (its amount is the two
+     * together), so a cashier's sale that was nearly all tip is plain at a glance. */
+    const rowSaid = A.tillTipRowText({ sats: 10014, tillTip: 9999, tillTipUnit: 'sat' });
+    ok(/^sale ₿ 15 · tip ₿ 9,999$/.test(rowSaid), 'a sale’s row itemizes it: sale ₿ 15 · tip ₿ 9,999', rowSaid);
+    ok(/^sale \$ 10\.00 · tip \$ 2\.00$/.test(A.tillTipRowText({ unit: 'usd', amount: 1200, tillTip: 200, tillTipUnit: 'usd' })),
+      'and in dollars: sale $ 10.00 · tip $ 2.00', A.tillTipRowText({ unit: 'usd', amount: 1200, tillTip: 200, tillTipUnit: 'usd' }));
+    ok(A.tillTipRowText({ sats: 500 }) === '', 'a row with no tip says nothing of one');
     ok(/^Tip .* · goes to Ana$/.test(toasts.slice(-1)[0] || ''), 'and said', toasts.slice(-1)[0]);
     A.setState({ screen: 'paid', stack: ['amount'], paidUnit: 'sat', paidAmount: 9000, paidHash: 'sale-2' }); await settle();
     ok(W.calls.tipTaken.length === 1, 'a later PAID with no tip on screen passes nothing on');

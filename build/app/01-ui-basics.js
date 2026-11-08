@@ -355,8 +355,9 @@ class Component extends DCLogic {
   sendToText() {
     const s = this.state;
     if (s.recipientKind === 'email') return (s.recipient || '').toUpperCase();
-    // an invoice River made for BANK ACCOUNT (26q-bank.js) says whose it is
-    if (this.bankNow && this.bankNow() === 'river') return 'YOUR RIVER ACCOUNT \u00b7 ' + this.shortId(s.recipient || '');
+    // an invoice River or Cash App made for BANK ACCOUNT (26q-bank.js) says whose it is
+    const own = this.bankOwn ? this.bankOwn() : '';
+    if (own) return own + ' \u00b7 ' + this.shortId(s.recipient || '');
     // an invoice is 200-odd characters and filled the screen; five each end is
     // enough to recognise it against what was pasted
     return this.shortId(s.recipient || '');

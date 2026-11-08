@@ -339,9 +339,8 @@
       /* Which mint carried this. The screen said LIGHTNING and never said
        * whose — and the mint is the party that held the money. At a mint with
        * two balances, the row's own mint, which a swap or a payment names. */
-      txMint: (two && tx.mint) ? String(tx.mint).replace(/^https?:\/\//, '')
-        : (window.FoxyWallet && window.FoxyWallet.mintHost
-        && window.FoxyWallet.mintHost()) || 'unknown',
+      txMint: (two && tx.mint) ? (this.mintNameOf(tx.mint) || String(tx.mint).replace(/^https?:\/\//, ''))
+        : this.mintName() || 'unknown',
       // a swap between balances: the rate the mint gave, kept on the row
       txSwapShown: two && tx.kind === 'swap',
       /* The wallet keeps the rate on the row as a plain number (dollars per

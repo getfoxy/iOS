@@ -186,10 +186,10 @@ const names = (v) => [].concat(...(v.historyGroups || []).map((g) => g.items.map
     A.loadHistory();
     await settle();
     const v = V();
-    ok(v.histTitle === 'FLASH FORGE', 'the title is the mint’s name as the mint list names it, in capitals', v.histTitle);
+    ok(v.histTitle === 'FORGE', 'the title is the mint’s name as the mint list names it, in capitals', v.histTitle);
     ok(v.histMintPick === true && typeof v.histMintGo === 'function', 'and it can be tapped to change mints');
     const btn = w.document.querySelector('[aria-label="Change mint"]');
-    ok(!!btn && /FLASH FORGE/.test(btn.textContent) && !!btn.querySelector('path[d="m6 9 6 6 6-6"]'),
+    ok(!!btn && /FORGE/.test(btn.textContent) && !!btn.querySelector('path[d="m6 9 6 6 6-6"]'),
        'drawn: the name with the receive chips’ chevron after it', btn ? btn.outerHTML.slice(0, 200) : 'no button');
     const plain = [...w.document.querySelectorAll('div')].filter((d) => !d.children.length && d.textContent.trim() === 'HISTORY');
     ok(v.histTitlePlain === false && plain.length === 0, 'HISTORY gives way to the mint’s name: no plain HISTORY title is drawn',
@@ -217,7 +217,7 @@ const names = (v) => [].concat(...(v.historyGroups || []).map((g) => g.items.map
     await settle();
     const v = V();
     ok(A.state.screen === 'history', 'back on HISTORY', A.state.screen);
-    ok(v.histTitle === 'MINIBITS MINT', 'titled with the mint picked', v.histTitle);
+    ok(v.histTitle === 'MINIBITS', 'titled with the mint picked', v.histTitle);
     eq(names(v).sort(), ['Minibits coffee', 'Minibits tip'], 'its rows, and no other mint’s');
     ok(W.mintUrl === FORGE && W.switches === 0 && A.state.balSats === 25066, 'the wallet is still at Forge: nothing was switched', JSON.stringify([W.mintUrl, W.switches]));
     ok(v.histTabsShown === false, 'one balance there: no tabs');
@@ -298,7 +298,7 @@ const names = (v) => [].concat(...(v.historyGroups || []).map((g) => g.items.map
       await settle();
     };
     // Minibits, only shown
-    ok(V().histTitle === 'MINIBITS MINT', 'still showing Minibits');
+    ok(V().histTitle === 'MINIBITS', 'still showing Minibits');
     await changeCase('Minibits', MB, 6149, (n) => { W.bal[MB].sat = n; });
     ok(W.mintUrl === FORGE && W.switches === 0, 'and the wallet never left Forge');
     // Forge, the mint the wallet is on, its bitcoin tab
@@ -308,7 +308,7 @@ const names = (v) => [].concat(...(v.historyGroups || []).map((g) => g.items.map
     await settle();
     A.setState({ histUnit: 'sat' });
     await settle();
-    ok(V().histTitle === 'FLASH FORGE', 'Forge shown again');
+    ok(V().histTitle === 'FORGE', 'Forge shown again');
     await changeCase('Forge', FORGE, 25066, (n) => { W.bal[FORGE].sat = n; A.setState({ balSats: n }); });
     ok(V().histAuditTitle === 'ADDS UP' && V().histAuditEnd, 'with the change gone, Forge’s books are at the end again', V().histAuditTitle);
     // back to Minibits for what follows
@@ -325,7 +325,7 @@ const names = (v) => [].concat(...(v.historyGroups || []).map((g) => g.items.map
     V().mintRows[2].tap();
     await settle();
     const v = V();
-    ok(v.histTitle === 'MACADAMIA MINT' && v.historyEmpty === true && names(v).length === 0 && !v.histAuditShown, 'no history there: NOTHING TO SEE YET!',
+    ok(v.histTitle === 'MACADAMIA' && v.historyEmpty === true && names(v).length === 0 && !v.histAuditShown, 'no history there: NOTHING TO SEE YET!',
        JSON.stringify([v.histTitle, v.historyEmpty, names(v)]));
     ok(/NOTHING TO SEE YET!/.test(textOf(w)), 'drawn');
   }
@@ -339,7 +339,7 @@ const names = (v) => [].concat(...(v.historyGroups || []).map((g) => g.items.map
     A.setState({ histUnit: 'sat' });
     await settle();
     let v = V();
-    ok(v.histTitle === 'FLASH FORGE' && v.histTabsShown, 'Forge again, with its tabs');
+    ok(v.histTitle === 'FORGE' && v.histTabsShown, 'Forge again, with its tabs');
     eq(names(v).sort(), ['Forge lunch', 'Forge rent'], 'BITCOIN: its sat rows');
     ok(v.histAuditTitle === 'ADDS UP' && v.histAuditEnd && !v.histAuditTop, 'BITCOIN adds up: at the end', v.histAuditTitle);
     // the dollars short by a dollar: the dollar tab's books at the top, the bitcoin tab's still at the end
@@ -376,7 +376,7 @@ const names = (v) => [].concat(...(v.historyGroups || []).map((g) => g.items.map
     V().mintRows[2].tap();
     await settle();
     const v = V();
-    ok(v.histTitle === 'MACADAMIA MINT' && v.historyEmpty === true && names(v).length === 0 && /NOTHING TO SEE YET!/.test(textOf(w)),
+    ok(v.histTitle === 'MACADAMIA' && v.historyEmpty === true && names(v).length === 0 && /NOTHING TO SEE YET!/.test(textOf(w)),
        'its rows not read: NOTHING TO SEE YET!, not a list left loading for ever', JSON.stringify([v.histTitle, v.historyEmpty, names(v)]));
     W.transactions = txs;
   }
@@ -433,7 +433,7 @@ const names = (v) => [].concat(...(v.historyGroups || []).map((g) => g.items.map
     A.go('history');
     await settle();
     let v = V();
-    ok(v.histTitle === 'FLASH FORGE' && names(v).some((n) => /Forge/.test(n)), 'opened again, it starts at the mint this phone is on', v.histTitle);
+    ok(v.histTitle === 'FORGE' && names(v).some((n) => /Forge/.test(n)), 'opened again, it starts at the mint this phone is on', v.histTitle);
     A.setState({ screen: 'history', stack: ['home', 'flashcard'], histCard: 'K1', fc: { key: 'K1', unit: 'sat' }, histFilter: 'all' });
     await settle();
     v = V();

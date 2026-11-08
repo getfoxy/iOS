@@ -1024,10 +1024,14 @@ async function run() {
     B.W._cashuIdAheadMs = 60;
     await B.W.cashuIdCopies();
     B.W._resumed(40);
-    ok(await until(() => relay.filter((r) => toDay(r) === 'today').length >= 1 && relay.filter((r) => toDay(r) === 'tomorrow').length >= 1, 3000),
-      'DROP (M2): a second wrap whose day has passed goes to today’s keys, and a new one to tomorrow’s', relay.map(toDay).join(','));
+    /* This payment's wraps alone, by day: a wrap of the payment before (its own ahead timer, at 60 ms) may land in
+     * between, so nothing here is read by its place in `relay`. */
+    const ofThis = (r) => { try { return JSON.parse(r.body).token === lastRow.token; } catch (e) { return false; } };
+    const wrapOn = (day) => relay.filter((r) => ofThis(r) && toDay(r) === day);
+    ok(await until(() => wrapOn('today').length >= 1 && wrapOn('tomorrow').length >= 1, 5000),
+      'DROP (M2): a second wrap whose day has passed goes to today’s keys, and a new one to tomorrow’s', relay.map((r) => toDay(r) + (ofThis(r) ? '' : '*')).join(','));
     B.W._cashuIdAheadMs = 3600000;
-    ok(relay.length >= 2 && bare(relay[0].body) === bare(relay[1].body) && JSON.parse(relay[0].body).token === lastRow.token,
+    ok(wrapOn('today').length >= 1 && wrapOn('tomorrow').length >= 1 && bare(wrapOn('today')[0].body) === bare(wrapOn('tomorrow')[0].body),
       'DROP (M2): the same envelope, both times');
   }
 

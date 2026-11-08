@@ -1,0 +1,42 @@
+{
+  "tag": "foxy-till-lock-v1",
+  "words": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+  "cases": [
+    {
+      "index": 0,
+      "L": "03d5e349add0f7c450d20e0968ecdb9e5e4b64ceecfd1a5c8c90664b482ab37649",
+      "l": "83686ff4170082b77dc0d20b9b726b24c07e10aaed01e33205a714c6e9621821",
+      "n": "00000000000000000000000000000000",
+      "t": "b16ba162e16800887d29148ab0e44994683f156a11977d74bb074768cffd29e9",
+      "K": "03b81dd8ca72b5ff1d16074f54ff53867d72243a046a01dd4fd01af000afd4b139",
+      "k": "34d41156f868833ffae9e6964c56b4ba6e0e492e4f50c06b00dbfda2e92900c9"
+    },
+    {
+      "index": 1,
+      "L": "037db85d2a01d197b59a906526300d675f9b46700106282ee55b2a414f25a7e618",
+      "l": "f33b913c92a8544d089a9e5c989dab7d32522829354c81eeea807b285b3711fc",
+      "n": "0123456789abcdef0123456789abcdef",
+      "t": "22106d7d17c4ec8db7bf5393e52829a62175f24db45b93a2db370347491c2eba",
+      "K": "021be9a4cf1e4a8db9cc24a377c5c97e3d820bd163e371c997d3c1d746622924cf",
+      "k": "154bfeb9aa6d40dac059f1f07dc5d52499193d903a5f755605e51fe2d41cff75"
+    },
+    {
+      "index": 4,
+      "L": "024d7972bddf11dd24e1165262e558bd215430e10a63b09d7eb9edcb34b4892b7a",
+      "l": "7b5be37073225530eca1fca3f939fe96a32b32ef837672554a7964f0424a3672",
+      "n": "ffffffffffffffffffffffffffffffff",
+      "t": "46e525cde2f5dc46210769309eecb7a79e3f1aa1c2ebd3d488671f3217d3868e",
+      "K": "02a6739be56a1ed806083e8d1649a82485cee798f9d22b0a38c11ca246780b5249",
+      "k": "c241093e561831770da965d49826b63e416a4d9146624629d2e084225a1dbd00"
+    },
+    {
+      "index": 5,
+      "L": "02a4fb77a963c716ea080d87e467677192d29fb68e5c27c8c7b5f957dbe64e22a5",
+      "l": "96facbceca0ba224d8c3e02dd427a4cefb3a795284614ed60f5d47ffaaebeeda",
+      "n": "5c2e1f0a9b8d7c6e5f4a3b2c1d0e9f8a",
+      "t": "dc3a5ff279b2e38215beb4e8f0c8a2dceadf1394192211081282db14cf39f5ee",
+      "K": "033f3f7cd4f56b65ffde1da57d26c84b9c0a68ec3315f79440fe0cec1e327aee9f",
+      "k": "73352bc143be85a6ee829516c4f047ad2b6aafffee3abfa2620dc487a9efa387"
+    }
+  ]
+}

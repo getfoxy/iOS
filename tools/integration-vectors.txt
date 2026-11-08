@@ -1,0 +1,60 @@
+# integration vectors: app path, then the path under $FOXY_LIBS, then a mode (see tools/check-integration-vectors.js).
+# A change to the card's or the tap's wire format changes these; the copies are updated in the same change.
+# the card applet's recordings and its own vectors, two copies each
+tests/fixtures/flashcard-transcript-110.json  card-rust/tests/fixtures/foxy/flashcard-transcript-110.json
+tests/fixtures/flashcard-transcript-111.json  card-rust/tests/fixtures/foxy/flashcard-transcript-111.json
+tests/fixtures/flashcard-transcript-112.json  card-rust/tests/fixtures/foxy/flashcard-transcript-112.json
+tests/fixtures/flashcard-transcript-113.json  card-rust/tests/fixtures/foxy/flashcard-transcript-113.json
+tests/fixtures/flashcard-transcript-114.json  card-rust/tests/fixtures/foxy/flashcard-transcript-114.json
+tests/fixtures/flashcard-transcript-115.json  card-rust/tests/fixtures/foxy/flashcard-transcript-115.json
+tests/fixtures/flashcard-transcript-116.json  card-rust/tests/fixtures/foxy/flashcard-transcript-116.json
+tests/fixtures/flashcard-transcript-117.json  card-rust/tests/fixtures/foxy/flashcard-transcript-117.json
+tests/fixtures/flashcard-transcript-118.json  card-rust/tests/fixtures/foxy/flashcard-transcript-118.json
+tests/fixtures/flashcard-transcript-123.json  card-rust/tests/fixtures/foxy/flashcard-transcript-123.json
+tests/fixtures/flashcard-transcript-16.json  card-rust/tests/fixtures/foxy/flashcard-transcript-16.json
+tests/fixtures/flashcard-transcript-17.json  card-rust/tests/fixtures/foxy/flashcard-transcript-17.json
+tests/fixtures/flashcard-transcript-18.json  card-rust/tests/fixtures/foxy/flashcard-transcript-18.json
+tests/fixtures/flashcard-transcript-19.json  card-rust/tests/fixtures/foxy/flashcard-transcript-19.json
+tests/fixtures/flashcard-transcript-3.json  card-rust/tests/fixtures/foxy/flashcard-transcript-3.json
+tests/fixtures/flashcard-transcript.json  card-rust/tests/fixtures/foxy/flashcard-transcript.json
+tests/fixtures/flashcard-vectors.json  card-rust/tests/fixtures/foxy/flashcard-vectors.json
+tests/fixtures/flashcard-vectors-4.json  card-rust/tests/fixtures/foxy/flashcard-vectors-4.json
+tests/fixtures/flashcard-transcript-110.json  card-ts/test/vendor/fixtures/flashcard-transcript-110.json
+tests/fixtures/flashcard-transcript-111.json  card-ts/test/vendor/fixtures/flashcard-transcript-111.json
+tests/fixtures/flashcard-transcript-112.json  card-ts/test/vendor/fixtures/flashcard-transcript-112.json
+tests/fixtures/flashcard-transcript-113.json  card-ts/test/vendor/fixtures/flashcard-transcript-113.json
+tests/fixtures/flashcard-transcript-114.json  card-ts/test/vendor/fixtures/flashcard-transcript-114.json
+tests/fixtures/flashcard-transcript-115.json  card-ts/test/vendor/fixtures/flashcard-transcript-115.json
+tests/fixtures/flashcard-transcript-116.json  card-ts/test/vendor/fixtures/flashcard-transcript-116.json
+tests/fixtures/flashcard-transcript-117.json  card-ts/test/vendor/fixtures/flashcard-transcript-117.json
+tests/fixtures/flashcard-transcript-118.json  card-ts/test/vendor/fixtures/flashcard-transcript-118.json
+tests/fixtures/flashcard-transcript-123.json  card-ts/test/vendor/fixtures/flashcard-transcript-123.json
+tests/fixtures/flashcard-transcript-16.json  card-ts/test/vendor/fixtures/flashcard-transcript-16.json
+tests/fixtures/flashcard-transcript-17.json  card-ts/test/vendor/fixtures/flashcard-transcript-17.json
+tests/fixtures/flashcard-transcript-18.json  card-ts/test/vendor/fixtures/flashcard-transcript-18.json
+tests/fixtures/flashcard-transcript-19.json  card-ts/test/vendor/fixtures/flashcard-transcript-19.json
+tests/fixtures/flashcard-transcript-3.json  card-ts/test/vendor/fixtures/flashcard-transcript-3.json
+tests/fixtures/flashcard-transcript.json  card-ts/test/vendor/fixtures/flashcard-transcript.json
+tests/fixtures/flashcard-vectors.json  card-ts/test/vendor/fixtures/flashcard-vectors.json
+tests/fixtures/flashcard-vectors-4.json  card-ts/test/vendor/fixtures/flashcard-vectors-4.json
+# the model of the card and the replay of its recordings
+tests/flashcard-card.js  card-ts/test/vendor/flashcard-card.js
+tests/flashcard-model.js  card-ts/test/vendor/flashcard-model.js
+# the PIN sealing, recomputed with the app's own code
+build/wallet/08a-flashcard.js  card-rust/tests/fixtures/seal/seal-vectors.json  seal
+# the tap's wire constants: the labels, the version and the offer size, in each port
+Foxy/Bluetooth/TapCrypto.swift  tap-native/swift/FoxyTap/Sources/FoxyTapCore/TapCrypto.swift  grep:Data\("(foxy\stap\sv2[^"]*)"
+Foxy/Bluetooth/TapCrypto.swift  tap-native/swift/FoxyTap/Sources/FoxyTapCore/TapCrypto.swift  grep:version:\sUInt8\s=\s(\d+)
+Foxy/Bluetooth/TapCrypto.swift  tap-native/swift/FoxyTap/Sources/FoxyTapCore/TapCrypto.swift  grep:offerSize\s=\s(\d+)
+Foxy/Bluetooth/TapCrypto.swift  tap-native/react-native/ios/FoxyTap/TapCrypto.swift  grep:Data\("(foxy\stap\sv2[^"]*)"
+Foxy/Bluetooth/TapCrypto.swift  tap-native/react-native/ios/FoxyTap/TapCrypto.swift  grep:version:\sUInt8\s=\s(\d+)
+Foxy/Bluetooth/TapCrypto.swift  tap-native/react-native/ios/FoxyTap/TapCrypto.swift  grep:offerSize\s=\s(\d+)
+Foxy/Bluetooth/TapCrypto.swift  tap-native/kotlin/foxy-tap/core/src/main/kotlin/io/getfoxy/tap/TapCrypto.kt  grep:Data\("(foxy\stap\sv2[^"]*)"~"(foxy\stap\sv2[^"]*)"\.toByteArray
+Foxy/Bluetooth/TapCrypto.swift  tap-native/kotlin/foxy-tap/core/src/main/kotlin/io/getfoxy/tap/TapCrypto.kt  grep:version:\sUInt8\s=\s(\d+)~VERSION:\sByte\s=\s(\d+)
+Foxy/Bluetooth/TapCrypto.swift  tap-native/kotlin/foxy-tap/core/src/main/kotlin/io/getfoxy/tap/TapCrypto.kt  grep:offerSize\s=\s(\d+)~OFFER_SIZE\s=\s(\d+)
+Foxy/Bluetooth/TapCrypto.swift  tap-native/react-native/android/src/main/java/io/getfoxy/tap/core/TapCrypto.kt  grep:Data\("(foxy\stap\sv2[^"]*)"~"(foxy\stap\sv2[^"]*)"\.toByteArray
+Foxy/Bluetooth/TapCrypto.swift  tap-native/react-native/android/src/main/java/io/getfoxy/tap/core/TapCrypto.kt  grep:version:\sUInt8\s=\s(\d+)~VERSION:\sByte\s=\s(\d+)
+Foxy/Bluetooth/TapCrypto.swift  tap-native/react-native/android/src/main/java/io/getfoxy/tap/core/TapCrypto.kt  grep:offerSize\s=\s(\d+)~OFFER_SIZE\s=\s(\d+)
+# the test mint and the P-256 helpers: blocks of tests/harness.js, found by their first and last lines
+tests/harness.js  card-ts/test/vendor/harness.js  block:^function\sfakeMint\(~^\}$
+tests/harness.js  card-ts/test/vendor/harness.js  block:^const\sP256_ORDER~^\s\s\}\scatch\s\(e\)\s\{\sreturn\sfalse;\s\}$

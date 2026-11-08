@@ -684,9 +684,9 @@
         : this.fitStack(H => this.satsStack(sats, 'in', H)),
       sentToLabel: s.recvPending ? 'DELIVERING TO'
         : (sendPhase === 'done' || sendPhase === 'settled') ? 'DELIVERED TO' : 'SENDING TO',
-      // (an invoice River made for BANK ACCOUNT is said as theirs: 26q-bank.js)
+      // (an invoice River or Cash App made for BANK ACCOUNT is said as theirs: 26q-bank.js)
       sentTo: s.recipientKind === 'email' ? (s.recipient || '').toUpperCase()
-        : (this.bankNow && this.bankNow() === 'river') ? 'YOUR RIVER ACCOUNT' : this.shortId(s.recipient || ''),
+        : (this.bankOwn && this.bankOwn()) ? this.bankOwn() : this.shortId(s.recipient || ''),
       sentBg: (sendPhase === 'done' || sendPhase === 'settled')
         ? "var(--acc)" : 'var(--bg)',
       sentGrid: (sendPhase === 'done' || sendPhase === 'settled') ? 'transparent' : 'rgba(var(--ink-rgb),.05)',

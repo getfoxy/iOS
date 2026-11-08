@@ -1995,6 +1995,18 @@ matter to a person:
 - **Whoever has the twelve words and the card** has everything on it. **Whoever
   loses the words** loses the PIN and limit for good.
 
+## The integration vectors
+
+The card's recordings and vectors in `tests/fixtures/`, the model of the card
+(`tests/flashcard-card.js`, `tests/flashcard-model.js`), the PIN sealing and the
+tap's wire constants (`Foxy/Bluetooth/TapCrypto.swift`) are also kept as copies
+beside this app, for the integration vectors that other code is held to. A
+change to the card's or the tap's wire format therefore changes those vectors:
+`tools/check-integration-vectors.js` (a stage of `tools/check-all.sh`) compares
+each pair listed in `tools/integration-vectors.txt` and refuses until the copies
+are updated in the same change. The keeper sets `FOXY_LIBS` to the folder that
+holds them; without it the stage says it is skipped.
+
 ## Where it is in the code
 
 - Screens: `build/app/26f-flashcard.js`, and the FLASHCARD block of

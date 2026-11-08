@@ -59,7 +59,8 @@
         : s.tillPick ? 'TILL AT WHICH MINTS?'
         : s.fcPick ? 'TRANSFER TO'
         : s.trStep === 'from' ? 'FROM WHICH MINT?'
-        : 'TO WHICH MINT?',
+        // TRANSFER's second question keeps its words; plain switching, the one these tiles are reached from, is SWITCH MINT
+        : s.trStep ? 'TO WHICH MINT?' : 'SWITCH MINT',
       mintNowLine: nowLine,
       mintNowShown: !!nowLine,
       /* The mint you are on comes first and looks different. It used to be

@@ -7,9 +7,8 @@
    *   Strike ..... a Lightning address, <username>@strike.me. Looked up at
    *                https://strike.me/.well-known/lnurlp/<username> before it is kept: a payment record is the account
    *                found; an answer of 400-499, or an answer that is not a payment record, is no account by that name.
-   *   Cash App ... <cashtag>@cash.app, no $. Looked up the same way at cash.app; whatever stops the lookup there short of
-   *                a refusal by the person is taken as an address that could not be checked, and kept as typed.
-   *   River ...... no Lightning address: the person makes an invoice in River and pastes it. Nothing is looked up.
+   *   River,
+   *   Cash App ... no Lightning address: the person makes an invoice in the app and pastes it. Nothing is looked up.
    *
    * The lookup is the well-known request of LUD-16 alone, over the wallet's Tor road and on the same terms as a
    * Lightning address's lookup when it is paid (`lookupLnurl`, 16-sending.js): asked again on a fresh circuit while it
@@ -20,23 +19,23 @@
 
   var BANK = {
     strike: { name: 'Strike', domain: 'strike.me', site: 'strike', by: 'address' },
-    cashapp: { name: 'Cash App', domain: 'cash.app', site: 'cashapp', by: 'address', unchecked: true },
+    cashapp: { name: 'Cash App', domain: 'cash.app', site: 'cashapp', by: 'invoice' },
     river: { name: 'River', domain: 'river.com', site: 'river', by: 'invoice' },
   };
   var BANK_KEY = 'foxy.bank';
 
-  /* A username as the person typed or pasted it, made into the one this exchange knows: the address's own domain, a $ in
-   * front of a cashtag and a leading @ come off; a name at another domain is not one. '' for one that is not. */
+  /* A username as the person typed or pasted it, made into the one this exchange knows: the address's own domain and a
+   * leading @ come off; a name at another domain is not one. '' for one that is not. */
   function bankUser(ex, raw) {
     var b = BANK[ex];
     if (!b || b.by !== 'address') return '';
-    var t = String(raw || '').trim().replace(/^lightning:/i, '').replace(/^[$@]+/, '');
+    var t = String(raw || '').trim().replace(/^lightning:/i, '').replace(/^@+/, '');
     var at = t.lastIndexOf('@');
     if (at >= 0) {
       if (t.slice(at + 1).toLowerCase() !== b.domain) return '';
       t = t.slice(0, at);
     }
-    t = t.replace(/^\$+/, '').toLowerCase();
+    t = t.toLowerCase();
     return /^[a-z0-9._-]{1,64}$/.test(t) && !/^[.]|[.]$/.test(t) ? t : '';
   }
 
@@ -63,10 +62,9 @@
 
   /* The lookup: { state, ex, user, addr, min, max, why }, `state` one of
    *   found ...... the exchange answered with a payment record for this name (min and max in sats, 0 where it said none);
-   *   missing .... it answered, and not with one: no account by that name;
-   *   unchecked .. Cash App only: no clear answer, so the address is taken as typed (`why` says what happened).
-   * Rejects for a name that is not one, with no route, when the person said no to contacting the address, and, for
-   * Strike, when no answer came at all: that is a lookup to try again, not an answer. */
+   *   missing .... it answered, and not with one: no account by that name.
+   * Rejects for a name that is not one, with no route, when the person said no to contacting the address, and when no
+   * answer came at all: that is a lookup to try again, not an answer. */
   function bankLookup(ex, raw) {
     var b = BANK[ex];
     if (!b || b.by !== 'address') return Promise.reject(new Error('That exchange is not paid to a username.'));
@@ -83,12 +81,11 @@
           max: Number(meta.maxSendable) > 0 ? Math.floor(Number(meta.maxSendable) / 1000) : 0,
         });
       }
-      return b.unchecked ? said('unchecked', { why: 'It did not answer with a payment address.' }) : said('missing');
+      return said('missing');
     }, function (e) {
       var msg = String((e && e.message) || e || '');
       // the person's own no to contacting the address is theirs, not the exchange's answer
       if (/did not allow Foxy/i.test(msg)) throw e;
-      if (b.unchecked) return said('unchecked', { why: msg });
       var status = Number(e && e.status) || 0;
       if (status >= 400 && status < 500) return said('missing');
       throw e;

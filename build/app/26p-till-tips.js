@@ -567,11 +567,14 @@
     }, (e) => console.warn('[foxy] till: the tip could not be passed on:', (e && e.message) || e));
   }
 
-  // a history row's tip, said: "tip $1.00", and where one could not be passed on, that it stayed here
+  /* A history row's tip, itemized beside its sale as two figures: "sale $10.00 · tip $2.00" (the row's amount is the two
+   * together), so a sale that was mostly tip is plain at a glance; and where a tip could not be passed on, that it stayed here. */
   tillTipRowText(t) {
     if (!t || !(Number(t.tillTip) > 0)) return '';
     const unit = t.tillTipUnit === 'usd' ? 'usd' : 'sat';
-    let words = 'tip ' + this.unitFigure(Number(t.tillTip), unit);
+    const total = Number(t.unit ? t.amount : t.sats);
+    const sale = total >= Number(t.tillTip) ? total - Number(t.tillTip) : NaN;
+    let words = (isFinite(sale) ? 'sale ' + this.unitFigure(sale, unit) + ' · ' : '') + 'tip ' + this.unitFigure(Number(t.tillTip), unit);
     if (Array.isArray(t.tillTipFailed) && t.tillTipFailed.length) words += ' · not sent to ' + t.tillTipFailed.join(', ') + ', kept';
     return words;
   }

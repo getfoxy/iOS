@@ -15,7 +15,12 @@
  * The cashier's books are not judged by the harness: its till rows are the
  * keeper's money (`forKeeper`) and the harness's sum does not know that yet.
  */
-const { loadReal, fakeMint, nativePhone, PHONE_WORDS, noBooks } = require('./harness');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const { loadReal, fakeMint, nativePhone, PHONE_WORDS, noBooks, tillSaleKey, tillSaleSecret } = require('./harness');
+// a till sale's key, made three ways and held to one set of numbers (tests/fixtures/till-key-vectors-generate.js)
+const VEC = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'till-key-vectors.json'), 'utf8'));
 
 const MINT = 'https://m.test';
 const HOME = 'https://home.test';
@@ -95,6 +100,9 @@ function proofsOf(ctx, token) {
 }
 const lockOf = (pr) => { try { return JSON.parse(pr.secret)[1].data; } catch (e) { return ''; } };
 const bodyFor = (id, proofs, extra) => JSON.stringify(Object.assign({ id, mint: MINT, unit: 'sat', proofs }, extra || {}));
+/* A sale of a code's own, as a cashier's request makes one: a fresh nonce and the key it moves the code's key to
+ * (harness.js's arithmetic), for a delivery made by hand. */
+const saleOf = (pass) => { const n = crypto.randomBytes(16).toString('hex'); return { n, key: tillSaleKey(pass.lock, n) }; };
 
 async function run() {
   const K = page(PHONE_WORDS);
@@ -118,7 +126,7 @@ async function run() {
   ok(Math.abs(made.exp - (nowS + 72 * 3600)) <= 5, 'and it ends 72 hours from now', String(made.exp - nowS));
   ok(K.said.keyMake.length === 1 && K.said.keyMake[0] === made.id, 'the phone was asked to make the code’s Nostr key, by the code’s id', JSON.stringify(K.said.keyMake));
   const pass = K.W.tillDecode(made.text);
-  ok(!!pass && pass.v === 1 && pass.id === made.id && pass.mint === MINT && pass.unit === 'sat', 'the code decodes to its pass', JSON.stringify(pass));
+  ok(!!pass && pass.v === 2 && pass.id === made.id && pass.mint === MINT && pass.unit === 'sat', 'the code decodes to its pass', JSON.stringify(pass));
   const rows = K.store('foxy.till.passes', []);
   ok(rows.length === 1 && rows[0].id === made.id && rows[0].lock === pass.lock && rows[0].lockId === 'till-' + made.id && rows[0].to === pass.to,
     'the pass row is kept with its lock, lock id and Nostr key', JSON.stringify(rows[0] || {}).slice(0, 120));
@@ -137,7 +145,7 @@ async function run() {
   const good = Object.assign({}, pass);
   ok(!!K.W.tillDecode(enc(good)), 'a pass built by hand from the same fields decodes');
   const bad = [
-    Object.assign({}, good, { v: 2 }), Object.assign({}, good, { id: 'abc' }), Object.assign({}, good, { id: good.id.toUpperCase() }),
+    Object.assign({}, good, { v: 3 }), Object.assign({}, good, { v: 1 }), Object.assign({}, good, { id: 'abc' }), Object.assign({}, good, { id: good.id.toUpperCase() }),
     Object.assign({}, good, { mint: 'http://m.test' }), Object.assign({}, good, { mint: 'ftp://x' }), Object.assign({}, good, { unit: 'eur' }),
     Object.assign({}, good, { lock: '04' + good.lock.slice(2) }), Object.assign({}, good, { lock: good.lock.slice(0, 60) }),
     Object.assign({}, good, { to: 'npub1' + 'q'.repeat(50) }), Object.assign({}, good, { to: 'nprofile1BAD' }),
@@ -146,6 +154,26 @@ async function run() {
   ];
   ok(bad.every((b) => K.W.tillDecode(enc(b)) === null), 'each hand-broken pass decodes to null', bad.map((b) => !!K.W.tillDecode(enc(b))).join(','));
   ok(/expired/.test(K.W.tillProblem(enc(Object.assign({}, good, { exp: nowS - 60 })))), 'an ended code is said to have expired');
+  // a code of version 1 locked every sale to its one key: refused in words a cashier can act on
+  ok(/older Foxy\. Ask the keeper for a new one/.test(K.W.tillProblem(enc(Object.assign({}, good, { v: 1 })))), 'a code of the version before is refused: from an older Foxy, ask the keeper for a new one',
+    K.W.tillProblem(enc(Object.assign({}, good, { v: 1 }))));
+  ok(/newer Foxy/.test(K.W.tillProblem(enc(Object.assign({}, good, { v: 3 })))), 'and one of a version after is from a newer Foxy');
+  let joinOld = '';
+  try { await C.W.tillJoin(enc(Object.assign({}, good, { v: 1 }))); } catch (e) { joinOld = e.message; }
+  ok(/older Foxy/.test(joinOld) && C.W.tillCashier() === null, 'a cashier is refused a code of the version before, and works no till', joinOld);
+
+  /* ---- a sale's key, three ways: the page, harness.js's BigInt and the fixture (FoxyTests/TillSaleKeyTests.swift
+   * holds libsecp256k1 and P2PK.swift to the same fixture) ---- */
+  const vOk = VEC.cases.map((c) => {
+    const page = K.W._tillSaleKey(c.L, c.n);
+    return page.pub === c.K && page.t === c.t && tillSaleKey(c.L, c.n) === c.K && tillSaleSecret(c.l, c.L, c.n) === c.k
+      && K.W._lockPubOf(c.k) === c.K;
+  });
+  ok(VEC.cases.length >= 4 && vOk.every(Boolean) && VEC.cases.some((c) => c.L.startsWith('02')) && VEC.cases.some((c) => c.L.startsWith('03')),
+    'the page’s sale key and move, the harness’s and the fixture’s agree, and l + t is the key K, for L of either parity', JSON.stringify(vOk));
+  ok(VEC.cases[0].L === pass.lock, 'the fixture’s first L is this phone’s first lock key, the one its first code carries', pass.lock.slice(0, 12));
+  const vBad = ['', 'zz', '00'.repeat(15), '00'.repeat(17)].every((n) => { try { K.W._tillSaleKey(pass.lock, n); return false; } catch (e) { return true; } });
+  ok(vBad, 'a nonce that is not 16 bytes of hex makes no key');
   ok(K.W.tillDecode(made.text + 'A'.repeat(2100)) === null, 'a code longer than 2,048 characters is null');
   ok(K.W.tillDecode('till:' + made.text.slice(URL0.length)) === null && K.W.tillDecode(made.text.replace('https://', 'http://')) === null,
     'only the https://getfoxy.io/till# form is read');
@@ -189,9 +217,11 @@ async function run() {
   const keysBefore = JSON.stringify(C.store('foxy.req.lockkeys', {}));
   const reqText = C.W.paymentRequest(21, { unit: 'sat', lockPub: pass.lock, purpose: 'till' });
   const req = C.W.decodeRequest(reqText) || {};
-  ok(!!reqText && req.lockTo === pass.lock, 'a till request carries the keeper’s lock', String(req.lockTo));
   const open = C.store('foxy.req.open', {})[req.id] || {};
-  ok(open.purpose === 'till' && open.tillLock === pass.lock && open.tillPass === pass.id && open.tillTo === pass.to, 'and is open with purpose till and where to send', JSON.stringify(open));
+  ok(!!reqText && /^[0-9a-f]{32}$/.test(String(open.tillNonce)) && req.lockTo === tillSaleKey(pass.lock, open.tillNonce) && req.lockTo !== pass.lock,
+    'a till request is locked to a key of its own: the code’s key moved by the request’s nonce, never the code’s key', String(req.lockTo));
+  ok(open.purpose === 'till' && open.tillLock === req.lockTo && open.tillPass === pass.id && open.tillTo === pass.to, 'and is open with purpose till, its key and where to send', JSON.stringify(open));
+  ok(reqText.indexOf(open.tillNonce) < 0 && JSON.stringify(req).indexOf(pass.lock) < 0, 'the request names neither the nonce nor the code’s key');
   ok(JSON.stringify(C.store('foxy.req.lockpool', [])) === poolBefore && JSON.stringify(C.store('foxy.req.lockkeys', {})) === keysBefore,
     'no key of the cashier’s is taken or filed for it');
   ok(C.W.paymentRequest(21, { unit: 'sat', lockPub: '02' + 'ab'.repeat(32) }) === '', 'a request with any other key is not made');
@@ -200,9 +230,9 @@ async function run() {
   const paidSaid = [];
   C.W.onRequestPaid((x) => paidSaid.push(x));
   const pileBefore = await C.W.balanceSats();
-  const send21 = await P.W.sendToken(21, { unit: 'sat', lockTo: pass.lock });
+  const send21 = await P.W.sendToken(21, { unit: 'sat', lockTo: req.lockTo });
   const proofs21 = proofsOf(P, send21.token);
-  ok(proofs21.every((pr) => lockOf(pr) === pass.lock), 'the payer’s ecash is locked to the keeper');
+  ok(proofs21.every((pr) => lockOf(pr) === req.lockTo), 'the payer’s ecash is locked to the request’s key');
   relay = [];
   await C.W._requestPaid(bodyFor(req.id, proofs21), 'a1', '');
   const ans1 = C.said.answers.find((a) => a.answer === 'a1') || {};
@@ -223,15 +253,18 @@ async function run() {
   const sent1 = relay[0] ? JSON.parse(relay[0].body) : {};
   ok(sent1.id === 'till:' + pass.id + ':1' && sent1.mint === MINT && sent1.unit === 'sat' && sent1.memo === 'till' && sent1.proofs.length === proofs21.length,
     'as a NUT-18 payment named till:<id>:<n>', JSON.stringify({ id: sent1.id, mint: sent1.mint }));
+  ok(sent1.n === open.tillNonce, 'naming the request’s nonce, for the keeper to find its key by', String(sent1.n));
   ok(out[0] && out[0].sentAt > 0, 'the row is marked sent');
   hist = C.store('foxy.cashu.log', []);
   ok((hist.find((e) => e.hash === 'till-' + req.id) || {}).tillSent === true, 'and its history row says sent');
 
   // the same payment again, to a new request
   const req2 = C.W.decodeRequest(C.W.paymentRequest(21, { unit: 'sat', lockPub: pass.lock })) || {};
+  ok(req2.lockTo && req2.lockTo !== req.lockTo, 'the next request has a key of its own');
   await C.W._requestPaid(bodyFor(req2.id, proofs21), 'a2', '');
   const ans2 = C.said.answers.find((a) => a.answer === 'a2') || {};
-  ok(ans2.status === 409 && /already/.test(ans2.text), 'the same ecash a second time is refused as taken already', JSON.stringify(ans2));
+  ok(ans2.status === 422 && /locked to another payment/.test(ans2.text) && C.store('foxy.till.outbox', []).length === 1,
+    'the same ecash at another request is refused: it is locked to the first request’s key', JSON.stringify(ans2));
 
   // refusals, each with nothing kept
   const outN = () => C.store('foxy.till.outbox', []).length;
@@ -248,7 +281,12 @@ async function run() {
   const elsewhere = await P.W.sendToken(21, { unit: 'sat', lockTo: own.lockTo });
   await C.W._requestPaid(bodyFor(req3.id, proofsOf(P, elsewhere.token)), 'a4', '');
   const ans4 = C.said.answers.find((a) => a.answer === 'a4') || {};
-  ok(ans4.status === 422 && /not locked to the keeper/.test(ans4.text), 'ecash locked to another key is refused', JSON.stringify(ans4));
+  ok(ans4.status === 422 && /locked to another payment/.test(ans4.text), 'ecash locked to another key is refused', JSON.stringify(ans4));
+  // and ecash locked to the code's own key, which no request carries: the one thing a payer could hand to two tills
+  const atRoot = await P.W.sendToken(21, { unit: 'sat', lockTo: pass.lock });
+  await C.W._requestPaid(bodyFor(req3.id, proofsOf(P, atRoot.token)), 'a4r', '');
+  const ans4r = C.said.answers.find((a) => a.answer === 'a4r') || {};
+  ok(ans4r.status === 422 && /locked to another payment/.test(ans4r.text), 'ecash locked to the code’s own key is refused at a request', JSON.stringify(ans4r));
 
   const send25 = await P.W.sendToken(25, { unit: 'sat' });
   const p25 = proofsOf(P, send25.token);
@@ -257,17 +295,18 @@ async function run() {
   ok(ans5.status === 422 && /cannot give change/.test(ans5.text), 'a plain over-payment the payer did not mark is refused, still the payer’s', JSON.stringify(ans5));
 
   C.W._privacy({ tor: 'connecting', progress: 40, everUp: true });
-  const send21b = await P.W.sendToken(21, { unit: 'sat', lockTo: pass.lock });
+  const send21b = await P.W.sendToken(21, { unit: 'sat', lockTo: req3.lockTo });
   const p21b = proofsOf(P, send21b.token);
   await C.W._requestPaid(bodyFor(req3.id, p21b), 'a6', '');
   const ans6 = C.said.answers.find((a) => a.answer === 'a6') || {};
   ok(ans6.status === 422 && /needs a connection/.test(ans6.text), 'with no route, a till takes nothing', JSON.stringify(ans6));
   C.W._privacy({ tor: 'up', progress: 100, everUp: true });
 
-  // spent: the keeper, which holds the key, swaps it in first
-  const send21c = await P.W.sendToken(21, { unit: 'sat', lockTo: pass.lock });
-  await K.W.receiveToken(send21c.token);
-  ok(!!K.store('foxy.req.lockkeys', {})['till-' + pass.id], 'a token locked to a code’s key, taken in the ordinary way, leaves the code’s lock row');
+  // spent: the keeper, which holds the key, takes it in first (delivered by hand, naming the request's nonce)
+  const send21c = await P.W.sendToken(21, { unit: 'sat', lockTo: req3.lockTo });
+  const n3 = (C.store('foxy.req.open', {})[req3.id] || {}).tillNonce;
+  ok((await K.W._tillArrived(pass.id, bodyFor('till:' + pass.id + ':h', proofsOf(P, send21c.token), { n: n3 }))) === 'taken', '(set-up) the keeper takes it in first');
+  ok(!!K.store('foxy.req.lockkeys', {})['till-' + pass.id], 'a payment to a sale of a code’s, taken in, leaves the code’s lock row');
   await C.W._requestPaid(bodyFor(req3.id, proofsOf(P, send21c.token)), 'a7', '');
   const ans7 = C.said.answers.find((a) => a.answer === 'a7') || {};
   ok(ans7.status === 409 && /spent/.test(ans7.text), 'ecash already spent is refused, as not confirmed (409)', JSON.stringify(ans7));
@@ -276,7 +315,7 @@ async function run() {
   /* Over, unmarked, and locked to the keeper: a refusal would strand it (the payer cannot spend it back), so it is taken
    * whole into the outbox, its row saying what came, as the keeper's own till takes one at another mint (below). */
   const reqOver = C.W.decodeRequest(C.W.paymentRequest(21, { unit: 'sat', lockPub: pass.lock })) || {};
-  const lock25 = proofsOf(P, (await P.W.sendToken(25, { unit: 'sat', lockTo: pass.lock })).token);
+  const lock25 = proofsOf(P, (await P.W.sendToken(25, { unit: 'sat', lockTo: reqOver.lockTo })).token);
   await C.W._requestPaid(bodyFor(reqOver.id, lock25), 'a5l', '');
   const ans5l = C.said.answers.find((a) => a.answer === 'a5l') || {};
   const rowOverC = C.store('foxy.till.outbox', []).find((r) => r.hash === 'till-' + reqOver.id) || {};
@@ -284,7 +323,7 @@ async function run() {
     'a locked over-payment is taken whole for the keeper, the outbox row saying 25, never refused and stranded', JSON.stringify([ans5l, rowOverC.amount]));
 
   // the over-payment, marked: taken, no change
-  const p25m = proofsOf(P, (await P.W.sendToken(25, { unit: 'sat', lockTo: pass.lock })).token);
+  const p25m = proofsOf(P, (await P.W.sendToken(25, { unit: 'sat', lockTo: req3.lockTo })).token);
   await C.W._requestPaid(bodyFor(req3.id, p25m, { overpaid: true }), 'a8', '');
   const ans8 = C.said.answers.find((a) => a.answer === 'a8') || {};
   ok(ans8.status === 200 && outN() === n0 + 2, 'an over-payment the payer marked is taken, whole', JSON.stringify(ans8));
@@ -293,7 +332,8 @@ async function run() {
   /* ---- delivery: sent only on success, tried again ------------------------ */
   relayDown = true;
   const req4 = C.W.decodeRequest(C.W.paymentRequest(21, { unit: 'sat', lockPub: pass.lock })) || {};
-  await C.W._requestPaid(bodyFor(req4.id, p21b), 'a9', '');
+  const p21d = proofsOf(P, (await P.W.sendToken(21, { unit: 'sat', lockTo: req4.lockTo })).token);
+  await C.W._requestPaid(bodyFor(req4.id, p21d), 'a9', '');
   await wait(30);
   let row4 = C.store('foxy.till.outbox', []).find((r) => r.hash === 'till-' + req4.id) || {};
   ok(row4.amount === 21 && !row4.sentAt && Number(row4.tries) >= 1, 'a send no relay took is not marked sent, and counts a try', JSON.stringify({ s: row4.sentAt, t: row4.tries }));
@@ -317,13 +357,15 @@ async function run() {
   const outB = outN();
   const inv = await C.W.invoice(13, '', { unit: 'sat', lockPub: pass.lock });
   const qrec = (C.store('foxy.cashu.quotes', []).find((q) => q.quote === inv.hash) || {});
-  ok(qrec.lockPub === pass.lock && qrec.till === true && qrec.tillTo === pass.to && qrec.tillPass === pass.id, 'the invoice’s record names the keeper’s lock', JSON.stringify(qrec).slice(0, 160));
+  ok(/^[0-9a-f]{32}$/.test(String(qrec.tillNonce)) && qrec.lockPub === tillSaleKey(pass.lock, qrec.tillNonce) && qrec.till === true && qrec.tillTo === pass.to && qrec.tillPass === pass.id,
+    'the invoice’s record names a key of its own, the code’s key moved by its nonce', JSON.stringify(qrec).slice(0, 160));
   const got13 = await C.W.claim(inv.hash);
   ok(got13 === 13, 'claimed, it resolves the amount', String(got13));
   ok((await C.W.balanceSats()) === pileB, 'and nothing is in the cashier’s pile');
   const row13 = C.store('foxy.till.outbox', []).find((r) => r.hash === inv.hash) || {};
   ok(outN() === outB + 1 && row13.amount === 13, 'one outbox row, 13');
-  ok((row13.proofs || []).length > 0 && row13.proofs.every((pr) => lockOf(pr) === pass.lock), 'every piece minted is locked to the keeper');
+  ok((row13.proofs || []).length > 0 && row13.proofs.every((pr) => lockOf(pr) === qrec.lockPub) && row13.nonce === qrec.tillNonce,
+    'every piece minted is locked to the invoice’s key, and its outbox row keeps the nonce');
   const h13 = C.store('foxy.cashu.log', []).filter((e) => e.hash === inv.hash);
   ok(h13.length === 1 && h13[0].till === true && h13[0].forKeeper === true && h13[0].sats === 13, 'one history row, the keeper’s', JSON.stringify(h13));
   ok(!C.store('foxy.cashu.quotes', []).some((q) => q.quote === inv.hash), 'and the quote’s record is gone');
@@ -339,14 +381,21 @@ async function run() {
   ok(!!lost && Array.isArray(rec2.tillLocked) && rec2.tillLocked.length > 0, 'a lost answer leaves its locked outputs on the record', lost.slice(0, 60));
   const got8 = await C.W.claim(inv2.hash);
   const row8 = C.store('foxy.till.outbox', []).find((r) => r.hash === inv2.hash) || {};
-  ok(got8 === 8 && row8.amount === 8 && row8.proofs.every((pr) => lockOf(pr) === pass.lock), 'and the next claim rebuilds them for the keeper', String(got8));
+  ok(got8 === 8 && row8.amount === 8 && row8.proofs.every((pr) => lockOf(pr) === rec2.lockPub) && rec2.lockPub !== qrec.lockPub,
+    'and the next claim rebuilds them for the keeper, locked to that invoice’s own key', String(got8));
   await wait(60);
 
   /* ---- a token scanned at the till ---------------------------------------- */
-  const scan = await P.W.sendToken(9, { unit: 'sat', lockTo: pass.lock });
+  const scanRoot = await P.W.sendToken(9, { unit: 'sat', lockTo: pass.lock });
+  const rootNo = await C.W.tillTakeToken(scanRoot.token).then(() => 'taken', (e) => e.message);
+  ok(/locked to the till’s code/.test(rootNo), 'a token locked to the code’s own key is refused at the till', rootNo);
+  const reqS = C.W.decodeRequest(C.W.paymentRequest(9, { unit: 'sat', lockPub: pass.lock, purpose: 'till' })) || {};
+  const nS = (C.store('foxy.req.open', {})[reqS.id] || {}).tillNonce;
+  const scan = await P.W.sendToken(9, { unit: 'sat', lockTo: reqS.lockTo });
   const took = await C.W.tillTakeToken(scan.token);
-  ok(took && took.till === true && took.amount === 9, 'a locked token scanned at the till is taken for the keeper', JSON.stringify(took));
-  ok(C.store('foxy.till.outbox', []).some((r) => r.hash === took.hash), 'into the outbox');
+  ok(took && took.till === true && took.amount === 9, 'a token locked to an open request’s key, scanned at the till, is taken for the keeper', JSON.stringify(took));
+  const scanRow = C.store('foxy.till.outbox', []).find((r) => r.hash === took.hash) || {};
+  ok(scanRow.nonce === nS && !(reqS.id in C.store('foxy.req.open', {})), 'into the outbox with that request’s nonce, and the request is closed', JSON.stringify({ n: scanRow.nonce }));
   let scanTwice = '';
   try { await C.W.tillTakeToken(scan.token); } catch (e) { scanTwice = e.message; }
   ok(/already/.test(scanTwice), 'and not twice', scanTwice);
@@ -366,7 +415,7 @@ async function run() {
   const kRow = K.store('foxy.cashu.log', []).find((e) => e.till === true) || {};
   ok(kRow.dir === 'in' && kRow.who === 'cashier' && kRow.sats === 21, 'with a history row tagged till, cashier', JSON.stringify(kRow));
   ok(!!K.store('foxy.req.lockkeys', {})['till-' + pass.id], 'and the code’s lock row is kept for the next payment');
-  ok(K.store('foxy.till.seen', []).length === JSON.parse(first.body).proofs.length, 'its secrets are noted');
+  ok(JSON.parse(first.body).proofs.every((pr) => K.store('foxy.till.seen', []).indexOf(pr.secret) >= 0), 'its secrets are noted');
   ok((await K.W._tillArrived(pass.id, first.body)) === 'seen', 'the same delivery read again is taken once');
   ok((await K.W.balanceSats()) === kBefore + 21, 'and the balance is unchanged by it');
   const firstJ = JSON.parse(first.body);
@@ -374,6 +423,10 @@ async function run() {
   ok((await K.W._tillArrived(pass.id, JSON.stringify(Object.assign({}, firstJ, { mint: HOME })))) === 'refused', 'one at another mint is refused');
   const ownK = await P.W.sendToken(4, { unit: 'sat', lockTo: own.lockTo });
   ok((await K.W._tillArrived(pass.id, bodyFor('till:x:9', proofsOf(P, ownK.token)))) === 'refused', 'one locked to another key is refused');
+  ok((await K.W._tillArrived(pass.id, bodyFor('till:x:9', proofsOf(P, ownK.token), { n: saleOf(pass).n }))) === 'refused', 'and so is one naming a sale whose key it is not locked to');
+  const rootK = await P.W.sendToken(4, { unit: 'sat', lockTo: pass.lock });
+  ok((await K.W._tillArrived(pass.id, bodyFor('till:x:10', proofsOf(P, rootK.token)))) === 'refused', 'one locked to the code’s own key, naming no sale, is refused by a code of version 2');
+  ok((await K.W._tillArrived(pass.id, bodyFor('till:x:11', proofsOf(P, rootK.token), { n: 'zz' }))) === 'refused', 'as is one whose nonce is not one');
   ok((await K.W._tillArrived(pass.id, 'not json')) === 'refused', 'and something that is not a payment');
 
   // at another mint, with a route: taken at the code's mint by a wallet made for it, the phone staying where it is
@@ -411,33 +464,37 @@ async function run() {
   /* ---- review w3: what anybody who has seen the QR code can send ------------- */
   const hex = (n) => Array.from({ length: n }, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('');
   const realKeyset = firstJ.proofs[0].id;
+  const fSale = saleOf(pass);
   const forged = (n, kid) => Array.from({ length: n }, () => ({
     id: kid || realKeyset, amount: 1, C: '02' + hex(64),
-    secret: JSON.stringify(['P2PK', { nonce: hex(64), data: pass.lock, tags: [] }]),
+    secret: JSON.stringify(['P2PK', { nonce: hex(64), data: fSale.key, tags: [] }]),
   }));
+  const fN = { n: fSale.n };
   let mintAsked = K.said.mintCalls.length;
-  ok((await K.W._tillArrived(pass.id, bodyFor('till:x:1', forged(3)))) === 'refused' && K.said.mintCalls.length === mintAsked,
-    'ecash locked to the code’s key that the mint never signed is refused, and the mint is not asked', String(K.said.mintCalls.length - mintAsked));
+  ok((await K.W._tillArrived(pass.id, bodyFor('till:x:1', forged(3), fN))) === 'refused' && K.said.mintCalls.length === mintAsked,
+    'ecash locked to a sale’s key that the mint never signed is refused, and the mint is not asked', String(K.said.mintCalls.length - mintAsked));
   const unsigned = JSON.parse(second.body).proofs.map((pr) => Object.assign({}, pr, { dleq: undefined }));
-  ok((await K.W._tillArrived(pass.id, bodyFor('till:x:2', unsigned))) === 'refused', 'and real pieces with their DLEQ taken off are refused too');
-  ok((await K.W._tillArrived(pass.id, bodyFor('till:x:3', forged(3, '00ffeeddccbbaa99')))) === 'refused', 'as are pieces of a keyset the code’s mint does not have');
-  ok((await K.W._tillArrived(pass.id, bodyFor('till:x:4', forged(101)))) === 'refused', 'more than a hundred pieces is refused');
-  ok((await K.W._tillArrived(pass.id, JSON.stringify({ id: 'till:x:5', mint: MINT, unit: 'sat', proofs: forged(1), pad: 'x'.repeat(70000) }))) === 'refused',
+  ok((await K.W._tillArrived(pass.id, bodyFor('till:x:2', unsigned, { n: JSON.parse(second.body).n }))) === 'refused', 'and real pieces with their DLEQ taken off are refused too');
+  ok((await K.W._tillArrived(pass.id, bodyFor('till:x:3', forged(3, '00ffeeddccbbaa99'), fN))) === 'refused', 'as are pieces of a keyset the code’s mint does not have');
+  ok((await K.W._tillArrived(pass.id, bodyFor('till:x:4', forged(101), fN))) === 'refused', 'more than a hundred pieces is refused');
+  ok((await K.W._tillArrived(pass.id, JSON.stringify({ id: 'till:x:5', mint: MINT, unit: 'sat', proofs: forged(1), n: fSale.n, pad: 'x'.repeat(70000) }))) === 'refused',
     'and a body over 64 KB, before it is read');
   await K.W.connect(HOME, { remember: true });
   K.W._privacy({ tor: 'connecting', progress: 40, everUp: true });
-  ok((await K.W._tillArrived(pass.id, bodyFor('till:x:6', forged(3)))) === 'refused' && K.store('foxy.till.inbox', []).length === 0,
+  ok((await K.W._tillArrived(pass.id, bodyFor('till:x:6', forged(3), fN))) === 'refused' && K.store('foxy.till.inbox', []).length === 0,
     'at another mint with no route a forged body is refused, not kept for later');
-  const late = await P.W.sendToken(6, { unit: 'sat', lockTo: pass.lock });
+  const lateS = saleOf(pass);
+  const late = await P.W.sendToken(6, { unit: 'sat', lockTo: lateS.key });
   const lateP = proofsOf(P, late.token);
-  ok((await K.W._tillArrived(pass.id, bodyFor('till:' + pass.id + ':7', lateP))) === 'kept', 'a real one there is kept, checked by the mint’s keys on file');
-  ok((await K.W._tillArrived(pass.id, bodyFor('till:' + pass.id + ':8', lateP))) === 'kept' && K.store('foxy.till.inbox', []).length === 1,
+  ok((await K.W._tillArrived(pass.id, bodyFor('till:' + pass.id + ':7', lateP, { n: lateS.n }))) === 'kept', 'a real one there is kept, checked by the mint’s keys on file');
+  ok((await K.W._tillArrived(pass.id, bodyFor('till:' + pass.id + ':8', lateP, { n: lateS.n }))) === 'kept' && K.store('foxy.till.inbox', []).length === 1,
     'the same pieces under another id are kept once', String(K.store('foxy.till.inbox', []).length));
   const junkRows = Array.from({ length: 50 }, (_, i) => ({ key: 'j' + i, pass: pass.id, body: '{"proofs":[]}', at: 1 }));
   const realRow = K.store('foxy.till.inbox', [])[0];
   K.storage.setItem('foxy.till.inbox', JSON.stringify(junkRows));
-  const late2 = await P.W.sendToken(7, { unit: 'sat', lockTo: pass.lock });
-  const late2Body = bodyFor('till:' + pass.id + ':9', proofsOf(P, late2.token));
+  const late2S = saleOf(pass);
+  const late2 = await P.W.sendToken(7, { unit: 'sat', lockTo: late2S.key });
+  const late2Body = bodyFor('till:' + pass.id + ':9', proofsOf(P, late2.token), { n: late2S.n });
   ok((await K.W._tillArrived(pass.id, late2Body)) === 'refused' && K.store('foxy.till.inbox', []).length === 50
     && K.store('foxy.till.inbox', []).every((r) => /^j/.test(r.key)), 'a full inbox (50) refuses the next and pushes none out');
   K.storage.setItem('foxy.till.inbox', JSON.stringify([realRow]));
@@ -463,7 +520,7 @@ async function run() {
   /* ---- the cashier leaves; the outbox stays ------------------------------- */
   relayDown = true;
   const req5 = C.W.decodeRequest(C.W.paymentRequest(21, { unit: 'sat', lockPub: pass.lock })) || {};
-  const send21d = await P.W.sendToken(21, { unit: 'sat', lockTo: pass.lock });
+  const send21d = await P.W.sendToken(21, { unit: 'sat', lockTo: req5.lockTo });
   await C.W._requestPaid(bodyFor(req5.id, proofsOf(P, send21d.token)), 'a10', '');
   await wait(30);
   const left = await C.W.tillLeave();
@@ -484,27 +541,27 @@ async function run() {
   await C.W.tillJoin(pass);
   const wr1 = C.W.decodeRequest(C.W.paymentRequest(21, { unit: 'sat', lockPub: pass.lock })) || {};
   const wr2 = C.W.decodeRequest(C.W.paymentRequest(21, { unit: 'sat', lockPub: pass.lock })) || {};
-  const twin = proofsOf(P, (await P.W.sendToken(21, { unit: 'sat', lockTo: pass.lock })).token);
+  const twin = proofsOf(P, (await P.W.sendToken(21, { unit: 'sat', lockTo: wr1.lockTo })).token);
   const outW = outN();
   await Promise.all([C.W._requestPaid(bodyFor(wr1.id, twin), 'w1a', ''), C.W._requestPaid(bodyFor(wr2.id, twin), 'w1b', '')]);
-  const wst = C.said.answers.filter((a) => a.answer === 'w1a' || a.answer === 'w1b').map((a) => a.status).sort();
-  ok(JSON.stringify(wst) === '[200,409]' && outN() === outW + 1, 'the same ecash at two requests at once: one 200, one 409, one outbox row',
+  const wst = ['w1a', 'w1b'].map((n) => (C.said.answers.find((a) => a.answer === n) || {}).status);
+  ok(wst[0] === 200 && (wst[1] === 409 || wst[1] === 422) && outN() === outW + 1, 'the same ecash at two requests at once: one 200, one refused, one outbox row',
     JSON.stringify(wst) + ', outbox +' + (outN() - outW));
-  ok(/being taken already/.test((C.said.answers.find((a) => a.status === 409 && (a.answer === 'w1a' || a.answer === 'w1b')) || {}).text || ''),
-    'the second is told it is being taken already');
+  ok(/being taken already|locked to another payment/.test((C.said.answers.find((a) => a.answer === 'w1b') || {}).text || ''),
+    'the second is told it is being taken already, or is another payment’s');
   const wr3 = C.W.decodeRequest(C.W.paymentRequest(9, { unit: 'sat', lockPub: pass.lock })) || {};
-  const tw9 = await P.W.sendToken(9, { unit: 'sat', lockTo: pass.lock });
+  const tw9 = await P.W.sendToken(9, { unit: 'sat', lockTo: wr3.lockTo });
   const outW2 = outN();
   const scanBeside = await Promise.all([
     C.W._requestPaid(bodyFor(wr3.id, proofsOf(P, tw9.token)), 'w1c', ''),
     C.W.tillTakeToken(tw9.token).then(() => 'taken', (e) => e.message),
   ]);
-  ok(outN() === outW2 + 1 && /being taken already/.test(scanBeside[1]), 'and posted and scanned at once, one row; the scan is told', scanBeside[1]);
+  ok(outN() === outW2 + 1 && /being (taken|paid) already/.test(scanBeside[1]), 'and posted and scanned at once, one row; the scan is told', scanBeside[1]);
   await wait(60);
 
   /* ---- review w6: a send with no route, and the route's return ---------------- */
   const wr4 = C.W.decodeRequest(C.W.paymentRequest(21, { unit: 'sat', lockPub: pass.lock })) || {};
-  const tw21 = proofsOf(P, (await P.W.sendToken(21, { unit: 'sat', lockTo: pass.lock })).token);
+  const tw21 = proofsOf(P, (await P.W.sendToken(21, { unit: 'sat', lockTo: wr4.lockTo })).token);
   const relayW = relay.length;
   await C.W._requestPaid(bodyFor(wr4.id, tw21), 'w6', '');
   C.W._privacy({ tor: 'connecting', progress: 40, everUp: true });
@@ -584,24 +641,31 @@ async function run() {
   await C.W.tillLeave();
   ok(C.W.mintUrl === HOME, 'tillLeave then takes it home', C.W.mintUrl);
 
-  /* ---- review w2: one live code at a time, and a live code is never dropped ---- */
+  /* ---- one code per cashier, and a live code is never dropped ----------------- */
   const makes0 = K.said.keyMake.length;
   const again4 = [];
   for (let i = 0; i < 4; i++) again4.push(await K.W.tillPassMake());
-  ok(again4.every((m) => m.text === made.text && m.id === made.id && m.exp === made.exp), 'while a code is live, asking again answers that same code',
-    JSON.stringify(again4.map((m) => m.id)));
-  ok(K.said.keyMake.length === makes0 && K.said.keyDrop.indexOf(pass.id) < 0 && K.store('foxy.till.passes', []).length === 1,
-    'with no key made and none dropped, and one pass row');
+  const decoded4 = again4.map((m) => K.W.tillDecode(m.text) || {});
+  ok(new Set(again4.map((m) => m.id).concat([made.id])).size === 5 && new Set(decoded4.map((d) => d.lock).concat([pass.lock])).size === 5
+    && new Set(decoded4.map((d) => d.to).concat([pass.to])).size === 5,
+    'every ask makes a new code, each with its own id, lock key and Nostr key: no two cashiers share one', JSON.stringify(again4.map((m) => m.id)));
+  ok(K.said.keyMake.length === makes0 + 4 && K.said.keyDrop.indexOf(pass.id) < 0 && K.store('foxy.till.passes', []).length === 5,
+    'four keys made, none dropped, five pass rows', String(K.store('foxy.till.passes', []).length));
+  ok(K.W.tillPassList().live.length === 5, 'and the list of codes shows all five');
+  // (those four go again, keys and all, so the rows below are as they were)
   const sNow = () => Math.floor(Date.now() / 1000);
-  let pr = K.store('foxy.till.passes', []);
+  // a code run out by hand, so the eight a keeper may have out at once leave room for the next
+  const runOut = (id) => { const rr = K.store('foxy.till.passes', []); rr.forEach((x) => { if (x.id === id) x.exp = sNow() - 60; }); K.storage.setItem('foxy.till.passes', JSON.stringify(rr)); };
+  let pr = K.store('foxy.till.passes', []).filter((r) => r.id === pass.id);
+  K.storage.setItem('foxy.till.passes', JSON.stringify(pr));
   pr[0].exp = sNow() - 3600;
   K.storage.setItem('foxy.till.passes', JSON.stringify(pr));
   const twoAsks = await Promise.all([K.W.tillPassMake(), K.W.tillPassMake()]);
-  ok(twoAsks[0].id === twoAsks[1].id && twoAsks[0].id !== pass.id && K.said.keyMake.length === makes0 + 1,
-    'once it has ended a new one is made, once for two asks at once');
+  ok(twoAsks[0].id !== twoAsks[1].id && twoAsks[0].id !== pass.id && K.said.keyMake.length === makes0 + 6,
+    'two asks at once are two codes');
   pr = K.store('foxy.till.passes', []);
-  ok(pr.length === 2 && pr.some((r) => r.id === pass.id), 'the ended one is kept, still listened for');
-  ok(K.W.tillPasses().length === 1 && K.W.tillPasses()[0].id === twoAsks[0].id, 'tillPasses lists only the live one');
+  ok(pr.length === 3 && pr.some((r) => r.id === pass.id), 'the ended one is kept, still listened for');
+  ok(K.W.tillPasses().length === 2 && K.W.tillPasses().every((p) => p.id !== pass.id), 'tillPasses lists only the live ones');
 
   // a code that ended six days ago is still the keeper's: its key kept, a late payment taken
   const fresh1 = K.W.tillDecode(twoAsks[0].text);
@@ -611,8 +675,9 @@ async function run() {
   K.W.tillPasses();
   ok(K.store('foxy.till.passes', []).some((r) => r.id === fresh1.id) && K.said.keyDrop.indexOf(fresh1.id) < 0, 'a code ended six days ago is kept with its key');
   const k6 = await K.W.balanceSats();
-  const late6 = await P.W.sendToken(5, { unit: 'sat', lockTo: fresh1.lock });
-  ok((await K.W._tillArrived(fresh1.id, bodyFor('till:' + fresh1.id + ':1', proofsOf(P, late6.token)))) === 'taken'
+  const late6S = saleOf(fresh1);
+  const late6 = await P.W.sendToken(5, { unit: 'sat', lockTo: late6S.key });
+  ok((await K.W._tillArrived(fresh1.id, bodyFor('till:' + fresh1.id + ':1', proofsOf(P, late6.token), { n: late6S.n }))) === 'taken'
     && (await K.W.balanceSats()) === k6 + 5, 'and a payment sent to it then is taken');
 
   // eight at most: only one run out goes, oldest first, with its keys
@@ -655,7 +720,9 @@ async function run() {
   /* ---- a code in the unit asked ------------------------------------------- */
   const satCode = await K.W.tillPassMake({ unit: 'sat' });
   ok(/^[0-9a-f]{16}$/.test(satCode.id) && K.store('foxy.till.passes', []).some((r) => r.id === satCode.id && r.unit === 'sat'), 'tillPassMake({ unit }) makes a code in that unit once none is live in it', satCode.id);
-  ok((await K.W.tillPassMake({ unit: 'sat' })).id === satCode.id && (await K.W.tillPassMake()).id === satCode.id, 'and answers it again, asked in that unit or in none', satCode.id);
+  const satAgain = await K.W.tillPassMake({ unit: 'sat' });
+  ok(satAgain.id !== satCode.id && K.W.tillDecode(satAgain.text).lock !== K.W.tillDecode(satCode.text).lock, 'asked again, another code with another key, for the next cashier', satAgain.id);
+  runOut(satAgain.id);
 
   /* ---- the keeper's till at another of its mints ---------------------------- */
   const atBefore = K.W.mintUrl;
@@ -699,7 +766,9 @@ async function run() {
   ok(pass2 && pass2.mint === MINT && JSON.stringify(pass2.mints) === JSON.stringify([MINT, HOME]), 'it decodes to mint: the default, and mints: both', JSON.stringify(pass2 && pass2.mints));
   const raw2 = JSON.parse(Buffer.from(code2.text.slice(URL0.length).replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString());
   ok(raw2.mint === MINT && JSON.stringify(raw2.mints) === JSON.stringify([MINT, HOME]), 'and its text says so, mint first for a Foxy from before');
-  ok((await K.W.tillPassMake({ unit: 'sat' })).id === code2.id, 'asked again, the same code');
+  const code2b = await K.W.tillPassMake({ unit: 'sat' });
+  ok(code2b.id !== code2.id && JSON.stringify(code2b.mints) === JSON.stringify([MINT, HOME]), 'asked again, another code for the same two mints');
+  runOut(code2b.id);
   ok(!!liveSat && K.W.tillPasses().some((r) => r.id === satCode.id), 'and the one-mint code stays live for the cashiers already on it');
   const oldShape = Object.assign({}, pass2); delete oldShape.mints;
   ok(JSON.stringify((K.W.tillDecode(enc(oldShape)) || {}).mints) === JSON.stringify([MINT]), 'a code with no mints reads as its one mint');
@@ -809,8 +878,10 @@ async function run() {
     'a code for both at a default issuing both is a code of its own, unit both, at the set', bothCode.no || JSON.stringify(bothPass));
   const rawBoth = bothCode.text ? JSON.parse(Buffer.from(bothCode.text.slice(URL0.length).replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString()) : {};
   ok(rawBoth.unit === 'both', 'and its text says both', JSON.stringify(rawBoth.unit));
-  ok((await K.W.tillPassMake({ unit: 'both' })).id === bothCode.id && (await K.W.tillPassMake({ unit: 'usd' })).id === usdCode.id,
-    'each asked again answers its own: a live code is reused only for the same unit and set');
+  const bothB = await K.W.tillPassMake({ unit: 'both' }), usdB = await K.W.tillPassMake({ unit: 'usd' });
+  ok(bothB.id !== bothCode.id && usdB.id !== usdCode.id && (K.W.tillDecode(bothB.text) || {}).unit === 'both' && (K.W.tillDecode(usdB.text) || {}).unit === 'usd',
+    'each asked again is another code in its own unit: no live code is handed out twice');
+  runOut(bothB.id); runOut(usdB.id);
 
   /* A till in both, its main said on the code: `main` on a code for both alone (sats on one from before it said), and a code
    * for both with dollars first is a code of its own. */
@@ -819,8 +890,8 @@ async function run() {
   const bothUsdCode = await K.W.tillPassMake({ unit: 'both', main: 'usd' }).then((c) => c, (e) => ({ no: e.message }));
   const bothUsdPass = bothUsdCode.text ? K.W.tillDecode(bothUsdCode.text) : null;
   ok(!!bothUsdPass && bothUsdPass.unit === 'both' && bothUsdPass.main === 'usd' && bothUsdCode.main === 'usd' && bothUsdCode.id !== bothCode.id
-    && (await K.W.tillPassMake({ unit: 'both', main: 'sat' })).id === bothCode.id,
-    'a code for both, dollars first, is a code of its own, and each main asked again answers its own', bothUsdCode.no || JSON.stringify(bothUsdPass));
+    && (K.W.tillDecode((await K.W.tillPassMake({ unit: 'both', main: 'sat' })).text) || {}).main === 'sat',
+    'a code for both, dollars first, is a code of its own, and one asked with sats first says sats', bothUsdCode.no || JSON.stringify(bothUsdPass));
   const noMain = Object.assign({}, rawBoth); delete noMain.main;
   ok((K.W.tillDecode(URL0 + Buffer.from(JSON.stringify(noMain)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')) || {}).main === 'sat'
     && K.W.tillDecode(URL0 + Buffer.from(JSON.stringify(Object.assign({}, rawBoth, { main: 'eur' }))).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')) === null,
@@ -878,14 +949,15 @@ async function run() {
   await P.W.claim((await P.W.invoice(800, '', { unit: 'usd' })).hash);
   const cbSat = C.W.decodeRequest(C.W.paymentRequest(30, { unit: 'sat', lockPub: bothPass.lock, purpose: 'till' })) || {};
   const cbUsd = C.W.decodeRequest(C.W.paymentRequest(150, { unit: 'usd', lockPub: bothPass.lock, purpose: 'till' })) || {};
-  ok(cbSat.unit === 'sat' && cbSat.lockTo === bothPass.lock && JSON.stringify(cbSat.mints) === JSON.stringify([USDM, HOME]),
+  const saleKeyOf = (rq) => tillSaleKey(bothPass.lock, (C.store('foxy.req.open', {})[rq.id] || {}).tillNonce || '00'.repeat(16));
+  ok(cbSat.unit === 'sat' && cbSat.lockTo === saleKeyOf(cbSat) && JSON.stringify(cbSat.mints) === JSON.stringify([USDM, HOME]),
     'its sat request: locked to the keeper, at both mints', JSON.stringify([cbSat.unit, cbSat.mints]));
-  ok(cbUsd.unit === 'usd' && cbUsd.lockTo === bothPass.lock && JSON.stringify(cbUsd.mints) === JSON.stringify([USDM]),
+  ok(cbUsd.unit === 'usd' && cbUsd.lockTo === saleKeyOf(cbUsd) && cbUsd.lockTo !== cbSat.lockTo && JSON.stringify(cbUsd.mints) === JSON.stringify([USDM]),
     'its dollar request: locked to the keeper, at the dollar mint alone', JSON.stringify([cbUsd.unit, cbUsd.mints]));
   const cbInv = await C.W.invoice(150, '', { unit: 'usd', lockPub: bothPass.lock }).then((q) => q, (e) => ({ no: e.message }));
   ok(!cbInv.no && cbInv.unit === 'usd', 'and a dollar invoice is made for it, in the unit of the receive', cbInv.no || JSON.stringify(cbInv.unit));
-  const pbSat = proofsOf(P, (await P.W.sendToken(30, { unit: 'sat', lockTo: bothPass.lock })).token);
-  const pbUsd = proofsOf(P, (await P.W.sendToken(150, { unit: 'usd', lockTo: bothPass.lock })).token);
+  const pbSat = proofsOf(P, (await P.W.sendToken(30, { unit: 'sat', lockTo: cbSat.lockTo })).token);
+  const pbUsd = proofsOf(P, (await P.W.sendToken(150, { unit: 'usd', lockTo: cbUsd.lockTo })).token);
   relay = [];
   await C.W._requestPaid(JSON.stringify({ id: cbSat.id, mint: USDM, unit: 'sat', proofs: pbSat }), 'cb1', '');
   await C.W._requestPaid(JSON.stringify({ id: cbUsd.id, mint: USDM, unit: 'usd', proofs: pbUsd }), 'cb2', '');
@@ -895,7 +967,8 @@ async function run() {
   const obUsd = C.store('foxy.till.outbox', []).find((r) => r.hash === 'till-' + cbUsd.id) || {};
   ok(obSat.unit === 'sat' && obSat.amount === 30 && obUsd.unit === 'usd' && obUsd.amount === 150 && obUsd.passId === bothPass.id,
     'into the outbox, each in its own unit, for the keeper', JSON.stringify([[obSat.unit, obSat.amount], [obUsd.unit, obUsd.amount]]));
-  const tokUsd = await P.W.sendToken(40, { unit: 'usd', lockTo: bothPass.lock });
+  const cbUsd40 = C.W.decodeRequest(C.W.paymentRequest(40, { unit: 'usd', lockPub: bothPass.lock, purpose: 'till' })) || {};
+  const tokUsd = await P.W.sendToken(40, { unit: 'usd', lockTo: cbUsd40.lockTo });
   const tookUsd = await C.W.tillTakeToken(tokUsd.token).then((r) => r, (e) => ({ no: e.message }));
   ok(tookUsd.till === true && tookUsd.unit === 'usd' && tookUsd.amount === 40, 'a dollar token scanned at the till is taken for the keeper too', tookUsd.no || JSON.stringify(tookUsd));
   await until(() => relay.length >= 3);
@@ -913,14 +986,14 @@ async function run() {
   const cpSat = C.W.decodeRequest(cpSatText) || {};
   const cpUsd = C.W.decodeRequest(C.W.paymentRequest(100, { unit: 'usd', lockPub: bothPass.lock, purpose: 'till', kept: true, twin: cpSatText })) || {};
   const openC = () => C.store('foxy.req.open', {});
-  ok(cpSat.lockTo === bothPass.lock && cpUsd.lockTo === bothPass.lock && openC()[cpSat.id].twin === cpUsd.id && openC()[cpUsd.id].twin === cpSat.id,
-    'a cashier’s pair: both locked to the keeper, each naming the other', JSON.stringify([cpSat.lockTo, cpUsd.lockTo]));
-  const cpPayUsd = proofsOf(P, (await P.W.sendToken(100, { unit: 'usd', lockTo: bothPass.lock })).token);
+  ok(cpSat.lockTo === saleKeyOf(cpSat) && cpUsd.lockTo === saleKeyOf(cpUsd) && cpSat.lockTo !== cpUsd.lockTo && openC()[cpSat.id].twin === cpUsd.id && openC()[cpUsd.id].twin === cpSat.id,
+    'a cashier’s pair: each locked to a key of its own, each naming the other', JSON.stringify([cpSat.lockTo, cpUsd.lockTo]));
+  const cpPayUsd = proofsOf(P, (await P.W.sendToken(100, { unit: 'usd', lockTo: cpUsd.lockTo })).token);
   await C.W._requestPaid(JSON.stringify({ id: cpUsd.id, mint: USDM, unit: 'usd', proofs: cpPayUsd }), 'cp1', '');
   const obCp = C.store('foxy.till.outbox', []).find((r) => r.hash === 'till-' + cpUsd.id) || {};
   ok(ansB('cp1').status === 200 && obCp.unit === 'usd' && obCp.amount === 100 && openC()[cpSat.id] && openC()[cpSat.id].twinPaid === cpUsd.id,
     'its dollar half paid: into the outbox in dollars, for the keeper, and the sat half closed', JSON.stringify([ansB('cp1'), obCp.unit, obCp.amount, openC()[cpSat.id]]));
-  const cpPaySat = proofsOf(P, (await P.W.sendToken(20, { unit: 'sat', lockTo: bothPass.lock })).token);
+  const cpPaySat = proofsOf(P, (await P.W.sendToken(20, { unit: 'sat', lockTo: cpSat.lockTo })).token);
   await C.W._requestPaid(JSON.stringify({ id: cpSat.id, mint: USDM, unit: 'sat', proofs: cpPaySat }), 'cp2', '');
   ok(ansB('cp2').status === 422 && /already been paid/.test(ansB('cp2').text) && !C.store('foxy.till.outbox', []).some((r) => r.hash === 'till-' + cpSat.id),
     'a payment to the closed sat half after: refused as already paid, nothing in the outbox', JSON.stringify(ansB('cp2')));
@@ -949,9 +1022,15 @@ async function run() {
   ok(j2 && JSON.stringify(j2.pass.mints) === JSON.stringify([MINT, HOME]) && C.W.mintUrl === MINT && !!cache2[MINTc] && !!cache2[HOME],
     'joined by the two-mint code: at MINT, both mints’ keys on file', C.W.mintUrl);
   const cReq = C.W.decodeRequest(C.W.paymentRequest(30, { unit: 'sat', lockPub: pass2.lock, purpose: 'till' })) || {};
-  ok(JSON.stringify(cReq.mints) === JSON.stringify([MINT, HOME]) && cReq.lockTo === pass2.lock, 'the cashier’s request lists the code’s mints, locked to the keeper', JSON.stringify(cReq.mints));
+  ok(JSON.stringify(cReq.mints) === JSON.stringify([MINT, HOME]) && cReq.lockTo === tillSaleKey(pass2.lock, (C.store('foxy.req.open', {})[cReq.id] || {}).tillNonce),
+    'the cashier’s request lists the code’s mints, locked to its own sale key', JSON.stringify(cReq.mints));
+  // a token to a sale of the cashier's: a request asked for, its key the payer locks to (a payer who could not deliver shows it)
+  const saleTok = async (n, ps, unit) => {
+    const rq = C.W.decodeRequest(C.W.paymentRequest(n, { unit: unit || 'sat', lockPub: ps.lock, purpose: 'till' })) || {};
+    return P.W.sendToken(n, { unit: unit || 'sat', lockTo: rq.lockTo });
+  };
   await P.W.connect(HOME, { remember: true });
-  const cHome = proofsOf(P, (await P.W.sendToken(30, { unit: 'sat', lockTo: pass2.lock })).token);
+  const cHome = proofsOf(P, (await P.W.sendToken(30, { unit: 'sat', lockTo: cReq.lockTo })).token);
   relay = [];
   const cPile = await C.W.balanceSats();
   await C.W._requestPaid(JSON.stringify({ id: cReq.id, mint: HOME, unit: 'sat', proofs: cHome }), 'c1', '');
@@ -963,7 +1042,7 @@ async function run() {
   const cSent = relay.map((r) => JSON.parse(r.body)).find((b) => b.id === 'till:' + pass2.id + ':' + cRow.n) || {};
   ok(String(cSent.mint).replace(/\/+$/, '') === HOME && (C.store('foxy.till.outbox', []).find((r) => r.hash === 'till-' + cReq.id) || {}).sentAt > 0,
     'and delivered, the body naming HOME', JSON.stringify({ id: cSent.id, m: cSent.mint }));
-  const cScan = await P.W.sendToken(7, { unit: 'sat', lockTo: pass2.lock });
+  const cScan = await saleTok(7, pass2);
   const cTook = await C.W.tillTakeToken(cScan.token);
   ok(cTook.till === true && cTook.amount === 7 && String(cTook.mint).replace(/\/+$/, '') === HOME, 'a HOME token scanned at the till is taken for the keeper, at HOME', JSON.stringify(cTook));
   await wait(80);
@@ -1000,7 +1079,7 @@ async function run() {
   // the cashier's next HOME payments, delivered: the keeper's copy of HOME's keys gone
   const deliver = async (n) => {
     relay = [];
-    const t = await P.W.sendToken(n, { unit: 'sat', lockTo: pass2.lock });
+    const t = await saleTok(n, pass2);
     await C.W.tillTakeToken(t.token);
     await until(() => relay.length > 0);
     return (relay.find((r) => sumOf(JSON.parse(r.body).proofs) === n) || {}).body;
@@ -1040,7 +1119,7 @@ async function run() {
     JSON.stringify(K.said.answers.find((a) => a.answer === 'k6')));
   // and the cashier's
   const cReq5 = C.W.decodeRequest(C.W.paymentRequest(15, { unit: 'sat', lockPub: pass2.lock, purpose: 'till' })) || {};
-  const pay15 = proofsOf(P, (await P.W.sendToken(15, { unit: 'sat', lockTo: pass2.lock })).token);
+  const pay15 = proofsOf(P, (await P.W.sendToken(15, { unit: 'sat', lockTo: cReq5.lockTo })).token);
   dropKeys(C, HOME);
   await C.W._requestPaid(JSON.stringify({ id: cReq5.id, mint: HOME, unit: 'sat', proofs: pay15 }), 'c5', '');
   await until(() => (C.said.answers.find((a) => a.answer === 'c5') || {}).status > 0);
@@ -1068,6 +1147,141 @@ async function run() {
   SP.setItem = setItem0;
   ok(/keys of home\.test could not be kept/.test(open8b) && K.store('foxy.till.keeper', null) === null,
     'keys gone by the end of the opening: refused for that, naming the mint, no till written', open8b);
+
+  /* ---- one locked payment, two tills: taken at most once ------------------------------------------------------------
+   * A payer makes its own locked pieces, so it holds a copy of what it paid with. Two tills by one code once each took
+   * the same payment as a sale (the mint says UNSPENT until the keeper swaps, hours later), and every cashier who asked
+   * was handed that one code. Now each cashier gets a code of its own, and each request a key of its own: the copy is
+   * refused at the second till, by request and by scan, and the keeper hears one sale. */
+  const C2 = page('zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong');
+  noBooks(C2, 'a cashier’s till rows are the keeper’s money (forKeeper)');
+  await C2.W.connect(HOME, { remember: true });
+  await K.W.connect(MINT, { remember: true });
+  await P.W.connect(MINT, { remember: true });
+  await P.W.claim((await P.W.invoice(400, '')).hash);
+  const codeA = await K.W.tillPassMake(), codeB = await K.W.tillPassMake();
+  const passA = K.W.tillDecode(codeA.text), passB = K.W.tillDecode(codeB.text);
+  ok(codeA.id !== codeB.id && passA.lock !== passB.lock && passA.to !== passB.to,
+    'two cashiers asking for a code get two codes, with two ids, two locks and two Nostr keys', JSON.stringify([codeA.id, codeB.id]));
+  // the worst case: one code on two tills (a cashier handing its code on)
+  await C.W.tillJoin(passA);
+  await C2.W.tillJoin(passA);
+  const rA = C.W.decodeRequest(C.W.paymentRequest(40, { unit: 'sat', lockPub: passA.lock, purpose: 'till' })) || {};
+  const tokA = await P.W.sendToken(40, { unit: 'sat', lockTo: rA.lockTo });
+  const pA = proofsOf(P, tokA.token);
+  relay = [];
+  const kA0 = K.W.balanceAt(MINT);
+  await C.W._requestPaid(bodyFor(rA.id, pA), 'rp1', '');
+  const rA2 = C2.W.decodeRequest(C2.W.paymentRequest(40, { unit: 'sat', lockPub: passA.lock, purpose: 'till' })) || {};
+  await C2.W._requestPaid(bodyFor(rA2.id, pA), 'rp2', '');
+  const scan2 = await C2.W.tillTakeToken(tokA.token).then((x) => 'taken ' + x.amount, (e) => e.message);
+  const ansR = (k, ctx) => (ctx.said.answers.find((a) => a.answer === k) || {});
+  ok(ansR('rp1', C).status === 200, 'till 1 takes the payment to its request', JSON.stringify(ansR('rp1', C)));
+  ok(ansR('rp2', C2).status === 422 && /another payment/.test(ansR('rp2', C2).text || ''), 'the same pieces at till 2’s request, on the same code, are refused', JSON.stringify(ansR('rp2', C2)));
+  ok(!/^taken/.test(scan2), 'and scanned at till 2 they are refused too', scan2);
+  ok(C2.store('foxy.till.outbox', []).length === 0, 'till 2 holds nothing for the keeper');
+  // and at a till on another code
+  await C2.W.tillLeave();
+  await C2.W.tillJoin(passB);
+  const rB = C2.W.decodeRequest(C2.W.paymentRequest(40, { unit: 'sat', lockPub: passB.lock, purpose: 'till' })) || {};
+  await C2.W._requestPaid(JSON.stringify({ id: rB.id, mint: MINT, unit: 'sat', proofs: pA }), 'rp3', '');
+  const scan3 = await C2.W.tillTakeToken(tokA.token).then((x) => 'taken ' + x.amount, (e) => e.message);
+  ok(ansR('rp3', C2).status === 422 && !/^taken/.test(scan3) && C2.store('foxy.till.outbox', []).length === 0,
+    'at a till on another code: refused by request and by scan', JSON.stringify([ansR('rp3', C2).status, scan3]));
+  await until(() => relay.some((x) => x.target === passA.to));
+  await wait(60);
+  const heard = relay.filter((x) => x.target === passA.to || x.target === passB.to).map((x) => x.body);
+  const tookA = [];
+  for (const b of heard) tookA.push(await K.W._tillArrived(passA.id, b));
+  ok(heard.length === 1 && tookA[0] === 'taken' && K.W.balanceAt(MINT) === kA0 + 40, 'the keeper hears one sale of 40, and its balance rises by 40',
+    JSON.stringify([heard.length, tookA, K.W.balanceAt(MINT) - kA0]));
+  ok((await K.W._tillArrived(passB.id, heard[0])) === 'refused', 'the same delivery sent as another code’s is refused: its sale’s key is not that code’s');
+  await C2.W.tillLeave();
+
+  /* ---- a sale's key kept for the code's life: a payer's token taken long after its request closed, once ---------------
+   * Only the till knows a request's nonce, and a request is open an hour. A payer whose post was refused, or whose
+   * answer was lost, holds pieces only l + t opens: the till keeps every key it put in a request, and takes a token
+   * locked to one it has not been paid on, however late, once. */
+  const rLate = C.W.decodeRequest(C.W.paymentRequest(20, { unit: 'sat', lockPub: passA.lock, purpose: 'till' })) || {};
+  const tokLate = await P.W.sendToken(20, { unit: 'sat', lockTo: rLate.lockTo });
+  const tokLate2 = await P.W.sendToken(20, { unit: 'sat', lockTo: rLate.lockTo });
+  const issuedRow = (C.store('foxy.till.issued', []) || []).find((x) => x.k === rLate.lockTo) || {};
+  ok(issuedRow.n === (C.store('foxy.req.open', {})[rLate.id] || {}).tillNonce && issuedRow.pass === passA.id && issuedRow.amount === 20,
+    'the till keeps the request’s key and nonce on its own list, apart from the open request', JSON.stringify(issuedRow));
+  const realNow = C.window.Date.now;
+  const shift = 2 * 3600 * 1000;
+  C.window.Date.now = () => realNow.call(C.window.Date) + shift;
+  try {
+    C.W.paymentRequest(5, { unit: 'sat', lockPub: passA.lock, purpose: 'till' });
+    ok(!(rLate.id in C.store('foxy.req.open', {})), '(set-up) two hours on, the request has closed');
+    const late1 = await C.W.tillTakeToken(tokLate.token).then((x) => 'taken ' + x.amount, (e) => e.message);
+    ok(late1 === 'taken 20', 'a token locked to its key, scanned two hours on, is taken for the keeper', late1);
+    const rowL = C.store('foxy.till.outbox', []).find((x) => x.nonce === issuedRow.n) || {};
+    ok(rowL.amount === 20 && rowL.passId === passA.id, 'into the outbox with that key’s nonce, for the keeper to spend', JSON.stringify({ a: rowL.amount }));
+    // a second, different token to the paid key: the payer paying twice; extra money for the keeper, no sale, no tip, never stranded
+    const late2 = await C.W.tillTakeToken(tokLate2.token).then((x) => x, (e) => ({ no: e.message }));
+    const rowsL = C.store('foxy.till.outbox', []).filter((x) => x.nonce === issuedRow.n);
+    ok(late2.amount === 20 && late2.extra === true && rowsL.length === 2 && !rowsL[1].tip, 'a second token to the same key, paid already, is taken as extra, with no tip', JSON.stringify(late2));
+    const late3 = await C.W.tillTakeToken(tokLate2.token).then((x) => 'taken', (e) => e.message);
+    ok(/already/.test(late3), 'and the same token a third time is refused, taken already', late3);
+  } finally { C.window.Date.now = realNow; }
+
+  /* ---- either prefix: the mint reads a lock by its x alone (NUT-11), so a payer who writes K with the other prefix pays
+   * K, and the keeper must find K's key for it ---- */
+  const flip = (h) => (h.slice(0, 2) === '02' ? '03' : '02') + h.slice(2);
+  await until(() => relay.some((x) => x.target === passA.to));
+  relay = [];
+  const rF = C.W.decodeRequest(C.W.paymentRequest(30, { unit: 'sat', lockPub: passA.lock, purpose: 'till' })) || {};
+  const tokF = await P.W.sendToken(30, { unit: 'sat', lockTo: flip(rF.lockTo) });
+  const tookF = await C.W.tillTakeToken(tokF.token).then((x) => 'taken ' + x.amount, (e) => e.message);
+  const rF2 = C.W.decodeRequest(C.W.paymentRequest(31, { unit: 'sat', lockPub: passA.lock, purpose: 'till' })) || {};
+  const pF2 = proofsOf(P, (await P.W.sendToken(31, { unit: 'sat', lockTo: flip(rF2.lockTo) })).token);
+  await C.W._requestPaid(bodyFor(rF2.id, pF2), 'flip2', '');
+  ok(tookF === 'taken 30' && ansR('flip2', C).status === 200, 'a token and a post locked to the request’s key with the other prefix are taken', JSON.stringify([tookF, ansR('flip2', C)]));
+  const flipBodies = () => relay.filter((x) => x.target === passA.to).map((x) => x.body)
+    .filter((b) => [30, 31].indexOf(sumOf(JSON.parse(b).proofs)) >= 0);
+  await until(() => flipBodies().length >= 2);
+  const kF0 = K.W.balanceAt(MINT);
+  const gotFl = [];
+  for (const b of flipBodies()) gotFl.push(await K.W._tillArrived(passA.id, b));
+  ok(gotFl.length === 2 && gotFl.every((x) => x === 'taken') && K.W.balanceAt(MINT) === kF0 + 61, 'and the keeper spends both: their key found by its x', JSON.stringify([gotFl, K.W.balanceAt(MINT) - kF0]));
+  // (the late 20 delivered too, so every note is spent)
+  for (const b of relay.filter((x) => x.target === passA.to).map((x) => x.body)) await K.W._tillArrived(passA.id, b);
+  ok(Object.keys(K.store('foxy.till.sales', {})).length === 0, 'each sale’s note goes once its swap lands', JSON.stringify(Object.keys(K.store('foxy.till.sales', {}))));
+
+  /* ---- a token short of its request: taken (locked to the keeper, a refusal would strand it), but it closes nothing ---- */
+  const rS = C.W.decodeRequest(C.W.paymentRequest(500, { unit: 'sat', lockPub: passA.lock, purpose: 'till' })) || {};
+  const tokS = await P.W.sendToken(1, { unit: 'sat', lockTo: rS.lockTo });
+  const tookS = await C.W.tillTakeToken(tokS.token).then((x) => x, (e) => ({ no: e.message }));
+  ok(tookS.amount === 1 && tookS.short === true && (rS.id in C.store('foxy.req.open', {})), 'a 1-sat token for a 500-sat request is taken as 1 sat, and the request stays open for the rest', JSON.stringify(tookS));
+  ok(tookS.soFar === 1 && tookS.asked === 500, 'its answer says 1 of 500 so far, for the screen', JSON.stringify([tookS.soFar, tookS.asked]));
+  const tokS2 = await P.W.sendToken(300, { unit: 'sat', lockTo: rS.lockTo });
+  const tookS2 = await C.W.tillTakeToken(tokS2.token).then((x) => x, (e) => ({ no: e.message }));
+  ok(tookS2.amount === 300 && tookS2.short === true && tookS2.soFar === 301 && (rS.id in C.store('foxy.req.open', {})), 'short tokens add up: 301 of 500, still open', JSON.stringify(tookS2));
+  const tokS3 = await P.W.sendToken(199, { unit: 'sat', lockTo: rS.lockTo });
+  const tookS3 = await C.W.tillTakeToken(tokS3.token).then((x) => x, (e) => ({ no: e.message }));
+  ok(tookS3.amount === 199 && !tookS3.short && tookS3.soFar === 500 && !(rS.id in C.store('foxy.req.open', {})),
+    'and the one that brings them to the price closes the request', JSON.stringify(tookS3));
+  const iS = (C.store('foxy.till.issued', []) || []).find((x) => x.k === rS.lockTo) || {};
+  ok(iS.got === 500 && iS.paidAt > 0, 'its key paid, with 500 counted', JSON.stringify({ got: iS.got, paid: !!iS.paidAt }));
+
+  /* ---- the issued keys: past five thousand, only those paid or of a code that has ended go; a live code's unpaid key never ---- */
+  const nowS9 = Math.floor(Date.now() / 1000);
+  const fakeK = (i, o) => Object.assign({ k: '02' + i.toString(16).padStart(64, '0'), n: i.toString(16).padStart(32, '0'), pass: passA.id, exp: passA.exp, at: i, amount: 1, unit: 'sat', tip: 0 }, o || {});
+  const many = [];
+  for (let i = 1; i <= 4990; i++) many.push(fakeK(i));
+  for (let i = 4991; i <= 4995; i++) many.push(fakeK(i, { paidAt: 1 }));
+  for (let i = 4996; i <= 5000; i++) many.push(fakeK(i, { pass: '0123456789abcdef', exp: nowS9 - 60 }));
+  C.storage.setItem('foxy.till.issued', JSON.stringify(many));
+  await C.W.tillJoin(passA);
+  for (let i = 0; i < 12; i++) C.W.paymentRequest(7, { unit: 'sat', lockPub: passA.lock, purpose: 'till' });
+  const after9 = C.store('foxy.till.issued', []);
+  ok(after9.filter((x) => x.paidAt === 1).length === 0 && after9.filter((x) => x.exp === nowS9 - 60).length === 0
+    && after9.filter((x) => x.at <= 4990).length === 4990 && after9.length === 5002,
+    'twelve more past 5,000: the five paid go, then the five whose code ended, and every unpaid key of the live code stays (5,002 kept)',
+    JSON.stringify([after9.length, after9.filter((x) => x.at <= 4990).length]));
+  C.storage.setItem('foxy.till.issued', JSON.stringify(after9.filter((x) => x.at > 5000)));
+  await C.W.tillLeave();
 
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
   if (failed) process.exitCode = 1;

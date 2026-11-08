@@ -872,7 +872,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     A.setState({ balUsdCents: 4205, screen: 'txDetail', tx: Object.assign({ mint: MINT }, items[0]) });
     await settle();
     const d = V();
-    eq([d.txSwapShown, d.txSwapRate, d.txMint, d.txTotalAlt], [true, '₿ 1 = $ 81,786', 'forge.example.com', 'DOLLARS'], 'a swap’s detail: its rate, its own mint, DOLLARS');
+    eq([d.txSwapShown, d.txSwapRate, d.txMint, d.txTotalAlt], [true, '₿ 1 = $ 81,786', 'Forge', 'DOLLARS'], 'a swap’s detail: its rate, its own mint by its short name, DOLLARS');
     /* A dollar payment out with a fee: SENT is the amount, TOTAL is the amount
      * and the fee. A card paying a $1.01 invoice with a 5-cent fee showed
      * TOTAL $1.01, and the fee read as a cent. */

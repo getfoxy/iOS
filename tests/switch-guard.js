@@ -38,6 +38,7 @@ const methods = new Function('return {' + [
   'justSwitch(url, waited) {', 'sweepHoldsLock() {', 'switchAfterSweep(url, go) {', 'reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'makeTokenForRequest(go) {', 'sweepChange(from, left, already) {',
   'takeTokenFromPaste(text) {', 'takingToken(run) {', 'newMintKeep(passed) {', 'newMintRedeem() {',
   'rowUnits(row) {', 'adoptRestoreMint(passed) {', 'sweepNewMint(url, host) {', 'mintNameOf(url) {',
+  'shortMintName(raw, url) {', 'mintKnownName(url) {',
   'back() {', 'goSwitchMint(extra) {', 'goTransfer() {', 'trPick(url) {',
   // the verifying-ecash screen a pasted token puts up (07-history-tokens-mints.js)
   'receivingUp(title) {', 'receivingDown() {',

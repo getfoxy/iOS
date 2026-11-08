@@ -357,8 +357,9 @@ class Component extends DCLogic {
   sendToText() {
     const s = this.state;
     if (s.recipientKind === 'email') return (s.recipient || '').toUpperCase();
-    // an invoice River made for BANK ACCOUNT (26q-bank.js) says whose it is
-    if (this.bankNow && this.bankNow() === 'river') return 'YOUR RIVER ACCOUNT \u00b7 ' + this.shortId(s.recipient || '');
+    // an invoice River or Cash App made for BANK ACCOUNT (26q-bank.js) says whose it is
+    const own = this.bankOwn ? this.bankOwn() : '';
+    if (own) return own + ' \u00b7 ' + this.shortId(s.recipient || '');
     // an invoice is 200-odd characters and filled the screen; five each end is
     // enough to recognise it against what was pasted
     return this.shortId(s.recipient || '');
@@ -2715,11 +2716,46 @@ class Component extends DCLogic {
     return this.mintNameOf(this.mintHost());
   }
 
-  /* A mint's short name from its address: its own in MINT_NAMES, else the
-   * first label after "mint.". */
+  /* The one rule for how a mint is called on a screen. A name a mint gives itself (or the shipped list gives it) loses a leading
+   * or trailing word "mint" in any case, "Flash Forge" is Forge, the two test mints at testnut.cashu.space are Testnut whatever they
+   * say, a name that is nothing but "mint" (or no name at all) is the host, and a name written all in small letters gets its capitals
+   * ("macadamia" is Macadamia). Names with capitals of their own (WesternBTC) are left as they are. */
+  shortMintName(raw, url) {
+    const host = String(url || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (/^([^/]*\.)?testnut\.cashu\.space$/i.test(host.split('/')[0])) return 'Testnut';
+    let name = String(raw || '').replace(/\s+/g, ' ').trim();
+    if (/^flash forge$/i.test(name)) return 'Forge';
+    for (let again = true; again;) {
+      const cut = name.replace(/^mint(\s+|$)/i, '').replace(/(^|\s+)mint$/i, '').trim();
+      again = cut !== name;
+      name = cut;
+    }
+    if (!name) return host;
+    return name === name.toLowerCase() ? name.replace(/(^|\s)([a-z])/g, (m, s, c) => s + c.toUpperCase()) : name;
+  }
+
+  /* What this phone knows to call a mint other than by its address: a test mint, or the name the mint said about itself (kept
+   * with its keysets by the wallet), cut by the rule above. Empty when it says nothing. */
+  mintKnownName(url) {
+    const host = String(url || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (!host) return '';
+    if (/^([^/]*\.)?testnut\.cashu\.space$/i.test(host.split('/')[0])) return 'Testnut';
+    const W = window.FoxyWallet;
+    let said = '';
+    try { said = (W && W.mintSaidName && W.mintSaidName(url)) || ''; } catch (e) { said = ''; }
+    return said ? this.shortMintName(said, url) : '';
+  }
+
+  /* A mint's short name: the shipped list's own, else what the rule makes of the name it gave itself, else the first label
+   * after "mint." of its address (MINT_NAMES for the ones that read wrong capitalised). */
   mintNameOf(url) {
     const host = String(url || '').replace(/^https?:\/\//, '');
     if (!host) return '';
+    const bare = host.replace(/\/+$/, '');
+    const shipped = (this.DEFAULT_MINTS || []).find(m => String(m.url).replace(/^https?:\/\//, '').replace(/\/+$/, '') === bare);
+    if (shipped) return shipped.name;
+    const known = this.mintKnownName(url);
+    if (known) return known;
     const domain = host.split('/')[0].replace(/^mint\./i, '');
     const label = domain.split('.')[0].toLowerCase();
     return this.MINT_NAMES[label] || (label.charAt(0).toUpperCase() + label.slice(1));
@@ -2951,16 +2987,16 @@ class Component extends DCLogic {
   DEFAULT_MINTS = [
     /* Forge first: where a fresh install connects (the wallet's `defaultMint`), and the mint that issues dollars as well as
      * bitcoin, so the second balance and the question of what to hold are there from the start. */
-    { url: 'https://forge.flashapp.me', name: 'Flash Forge',
+    { url: 'https://forge.flashapp.me', name: 'Forge',
       host: 'forge.flashapp.me', tint: '#C9822F' },
-    { url: 'https://mint.minibits.cash/Bitcoin', name: 'Minibits mint',
+    { url: 'https://mint.minibits.cash/Bitcoin', name: 'Minibits',
       host: 'mint.minibits.cash', tint: '#4E7BE8' },
     /* Coinos and WesternBTC were here and were taken out, Coinos for being
      * unreliable; so were the two public test mints (testnut.cashu.space), whose
      * fake money has no place on a list a new user picks from. A phone that has
      * used any of them still lists it, from its own record of the mints it has
      * connected to, and the test mints keep their warning card when they are. */
-    { url: 'https://mint.macadamia.cash', name: 'macadamia Mint',
+    { url: 'https://mint.macadamia.cash', name: 'Macadamia',
       host: 'mint.macadamia.cash', tint: '#8A5A2B' },
   ];
 
@@ -2974,8 +3010,8 @@ class Component extends DCLogic {
     seen.forEach(url => {
       if (known.indexOf(strip(url)) >= 0) return;
       known.push(strip(url));
-      // a mint nobody shipped: no logo, and its host stands in for a name
-      out.push({ url: url, name: strip(url), host: strip(url), logo: '', tint: '#5A5A5A' });
+      // a mint nobody shipped: no logo, and its host stands in for a name unless it is a test mint or has said its own
+      out.push({ url: url, name: this.mintKnownName(url) || strip(url), host: strip(url), logo: '', tint: '#5A5A5A' });
     });
     return out;
   }
@@ -18444,9 +18480,9 @@ class Component extends DCLogic {
         : this.fitStack(H => this.satsStack(sats, 'in', H)),
       sentToLabel: s.recvPending ? 'DELIVERING TO'
         : (sendPhase === 'done' || sendPhase === 'settled') ? 'DELIVERED TO' : 'SENDING TO',
-      // (an invoice River made for BANK ACCOUNT is said as theirs: 26q-bank.js)
+      // (an invoice River or Cash App made for BANK ACCOUNT is said as theirs: 26q-bank.js)
       sentTo: s.recipientKind === 'email' ? (s.recipient || '').toUpperCase()
-        : (this.bankNow && this.bankNow() === 'river') ? 'YOUR RIVER ACCOUNT' : this.shortId(s.recipient || ''),
+        : (this.bankOwn && this.bankOwn()) ? this.bankOwn() : this.shortId(s.recipient || ''),
       sentBg: (sendPhase === 'done' || sendPhase === 'settled')
         ? "var(--acc)" : 'var(--bg)',
       sentGrid: (sendPhase === 'done' || sendPhase === 'settled') ? 'transparent' : 'rgba(var(--ink-rgb),.05)',
@@ -19772,9 +19808,8 @@ class Component extends DCLogic {
       /* Which mint carried this. The screen said LIGHTNING and never said
        * whose — and the mint is the party that held the money. At a mint with
        * two balances, the row's own mint, which a swap or a payment names. */
-      txMint: (two && tx.mint) ? String(tx.mint).replace(/^https?:\/\//, '')
-        : (window.FoxyWallet && window.FoxyWallet.mintHost
-        && window.FoxyWallet.mintHost()) || 'unknown',
+      txMint: (two && tx.mint) ? (this.mintNameOf(tx.mint) || String(tx.mint).replace(/^https?:\/\//, ''))
+        : this.mintName() || 'unknown',
       // a swap between balances: the rate the mint gave, kept on the row
       txSwapShown: two && tx.kind === 'swap',
       /* The wallet keeps the rate on the row as a plain number (dollars per
@@ -37570,6 +37605,12 @@ class Component extends DCLogic {
       this.hideMelt();
       this.announceTaken(r);
       this.loadHistory();
+      /* Short of its request: the running total so far against the price, so the cashier asks for the rest (the request
+       * stays open, and the token that brings the total to the price closes it). */
+      if (r && r.short && Number(r.asked) > 0) {
+        const u = r.unit === 'usd' ? 'usd' : 'sat';
+        this.toast(this.unitFigure(Number(r.soFar) || 0, u) + ' of ' + this.unitFigure(Number(r.asked), u) + ' so far');
+      }
     }).catch((e) => {
       this.hideMelt();
       this.blockedCard('tillTokenRefused', {
@@ -39084,11 +39125,14 @@ class Component extends DCLogic {
     }, (e) => console.warn('[foxy] till: the tip could not be passed on:', (e && e.message) || e));
   }
 
-  // a history row's tip, said: "tip $1.00", and where one could not be passed on, that it stayed here
+  /* A history row's tip, itemized beside its sale as two figures: "sale $10.00 · tip $2.00" (the row's amount is the two
+   * together), so a sale that was mostly tip is plain at a glance; and where a tip could not be passed on, that it stayed here. */
   tillTipRowText(t) {
     if (!t || !(Number(t.tillTip) > 0)) return '';
     const unit = t.tillTipUnit === 'usd' ? 'usd' : 'sat';
-    let words = 'tip ' + this.unitFigure(Number(t.tillTip), unit);
+    const total = Number(t.unit ? t.amount : t.sats);
+    const sale = total >= Number(t.tillTip) ? total - Number(t.tillTip) : NaN;
+    let words = (isFinite(sale) ? 'sale ' + this.unitFigure(sale, unit) + ' · ' : '') + 'tip ' + this.unitFigure(Number(t.tillTip), unit);
     if (Array.isArray(t.tillTipFailed) && t.tillTipFailed.length) words += ' · not sent to ' + t.tillTipFailed.join(', ') + ', kept';
     return words;
   }
@@ -39099,20 +39143,19 @@ class Component extends DCLogic {
    *
    *   SEND > BANK ACCOUNT ........ the SWITCH MINT list, titled BANK ACCOUNT (`bankList`, `bankPick`): STRIKE, RIVER,
    *                                CASH APP.
-   *   STRIKE, CASH APP ........... ALREADY HAVE AN ACCOUNT WITH STRIKE? (`bankHaveAsk`): NO opens the exchange's site; YES
+   *   STRIKE ..................... ALREADY HAVE AN ACCOUNT WITH STRIKE? (`bankHaveAsk`): NO opens the exchange's site; YES
    *                                asks the username on the TYPE screen's look ('bankAsk'), the domain shown after the
    *                                field, with PASTE; CHECK looks it up over Tor (`bankCheck`) and says found or not; a
-   *                                name found (or, at Cash App, one that could not be checked) is kept, and NEXT is SET
-   *                                AMOUNT for that address.
-   *   RIVER ...................... the same screen with no field: OPEN RIVER and PASTE; an invoice pasted goes where any
+   *                                name found is kept, and NEXT is SET AMOUNT for that address.
+   *   RIVER, CASH APP ............ the same screen with no field: OPEN RIVER (CASH APP) and PASTE; an invoice pasted goes where any
    *                                pasted invoice goes (`acceptTarget`): the confirmation with its own amount, SET AMOUNT
    *                                for one with none.
    *   paying ..................... the send of a Lightning address or an invoice, unchanged: SET AMOUNT in dollars first,
    *                                PAY FROM, the confirmation, `payLnurl` / `pay`. The payment is marked as this exchange's
    *                                (`bank`) while its recipient is the one chosen here (`bankNow`).
    *   done ....................... the sent screen says what to do in the exchange, with OPEN STRIKE / RIVER / CASH APP.
-   *   next time .................. BANK ACCOUNT goes straight to SET AMOUNT for the address kept (River: to its paste
-   *                                screen), with CHANGE EXCHANGE back to the list.
+   *   next time .................. BANK ACCOUNT goes straight to SET AMOUNT for the address kept (River, Cash App: to
+   *                                its paste screen), with CHANGE EXCHANGE back to the list.
    *   history .................... "To Strike", "To River", "To Cash App". */
 
   BANK_NAMES = { strike: 'Strike', river: 'River', cashapp: 'Cash App' };
@@ -39128,13 +39171,22 @@ class Component extends DCLogic {
     return to && to === String(b.to).toLowerCase() ? String(b.ex) : '';
   }
 
-  /* SEND > BANK ACCOUNT: the address kept, straight to SET AMOUNT; River kept, its paste screen; otherwise the list. */
+  // the exchanges paid by an invoice pasted each time (no Lightning address): River and Cash App
+  bankByInvoice(ex) { return ex === 'river' || ex === 'cashapp'; }
+
+  // "YOUR RIVER ACCOUNT" for an invoice made in River or Cash App for BANK ACCOUNT, else ''
+  bankOwn() {
+    const ex = this.bankNow();
+    return this.bankByInvoice(ex) ? 'YOUR ' + this.bankName(ex).toUpperCase() + ' ACCOUNT' : '';
+  }
+
+  /* SEND > BANK ACCOUNT: the address kept, straight to SET AMOUNT; River or Cash App kept, its paste screen; otherwise the list. */
   bankStart() {
     if (this.offlineNow()) { this.offlineNo('Sending to a bank account'); return; }
     const W = window.FoxyWallet;
     const saved = W && W.bankSaved ? W.bankSaved() : null;
     if (saved && saved.addr) { this.bankAmount(saved.ex, saved.addr, true); return; }
-    if (saved && saved.ex === 'river') { this.bankAskOpen('river', true); return; }
+    if (saved && this.bankByInvoice(saved.ex)) { this.bankAskOpen(saved.ex, true); return; }
     this.bankList();
   }
 
@@ -39162,9 +39214,9 @@ class Component extends DCLogic {
     });
   }
 
-  /* A row tapped. River: its paste screen. Strike, Cash App: whether there is an account there already. */
+  /* A row tapped. River, Cash App: its paste screen. Strike: whether there is an account there already. */
   bankPick(ex) {
-    if (ex === 'river') { this.bankAskOpen('river', false); return; }
+    if (this.bankByInvoice(ex)) { this.bankAskOpen(ex, false); return; }
     this.bankHaveAsk(ex);
   }
 
@@ -39185,7 +39237,7 @@ class Component extends DCLogic {
     this.toast('Make an account with ' + this.bankName(ex) + ', then come back to BANK ACCOUNT.');
   }
 
-  /* The username screen, or River's paste screen. `short`: reached from BANK ACCOUNT with River kept, so CHANGE EXCHANGE
+  /* The username screen, or the paste screen of River or Cash App. `short`: reached from BANK ACCOUNT with River kept, so CHANGE EXCHANGE
    * is offered on it. */
   bankAskOpen(ex, short) {
     this.setState(p => ({
@@ -39198,15 +39250,15 @@ class Component extends DCLogic {
     this.setState({ bankDraft: String((e && e.target && e.target.value) || ''), bankLook: null });
   }
 
-  /* The screen's big button: OPEN RIVER for River; for an address, CHECK until the name typed is found, then NEXT. */
+  /* The screen's big button: OPEN RIVER or OPEN CASH APP; for an address, CHECK until the name typed is found, then NEXT. */
   bankGo() {
     const s = this.state;
     const ex = s.bankEx;
     const W = window.FoxyWallet;
-    if (ex === 'river') { if (W && W.bankOpen) Promise.resolve(W.bankOpen('river')).catch(() => {}); return; }
+    if (this.bankByInvoice(ex)) { if (W && W.bankOpen) Promise.resolve(W.bankOpen(ex)).catch(() => {}); return; }
     const look = s.bankLook;
     const user = W && W.bankUser ? W.bankUser(ex, s.bankDraft) : '';
-    if (look && look.user && look.user === user && (look.state === 'found' || look.state === 'unchecked')) {
+    if (look && look.user && look.user === user && look.state === 'found') {
       this.bankAmount(ex, look.addr, false);
       return;
     }
@@ -39214,7 +39266,7 @@ class Component extends DCLogic {
     this.bankCheck();
   }
 
-  /* The username looked up over Tor (`bankLookup`): found, not found, or, at Cash App, not checked. A name found is kept. */
+  /* The username looked up over Tor (`bankLookup`): found or not found. A name found is kept. */
   bankCheck(pasted) {
     const s = this.state;
     const ex = s.bankEx;
@@ -39229,7 +39281,7 @@ class Component extends DCLogic {
     this.setState({ bankLook: { state: 'checking', user, addr: '', why: '' } });
     Promise.resolve(W.bankLookup(ex, draft)).then((r) => {
       if (this._bankRun !== run) return;
-      if (r && (r.state === 'found' || r.state === 'unchecked') && W.bankSave) W.bankSave(ex, r.user);
+      if (r && r.state === 'found' && W.bankSave) W.bankSave(ex, r.user);
       this.setState({ bankLook: r || { state: 'failed', user, addr: '', why: '' } });
     }).catch((e) => {
       if (this._bankRun !== run) return;
@@ -39238,19 +39290,19 @@ class Component extends DCLogic {
   }
 
   /* PASTE, by Apple's button over it (`syncPreview`) or the page's own: a username into the field, checked at once; for
-   * River, the invoice, on to where any pasted invoice goes. */
+   * River or Cash App, the invoice, on to where any pasted invoice goes. */
   bankPasted(text) {
     const W = window.FoxyWallet;
     const ex = this.state.bankEx;
     const t = String(text || '').trim().replace(/^lightning:/i, '');
     if (!W) return;
-    if (ex === 'river') {
+    if (this.bankByInvoice(ex)) {
       if (!t || !W.classify || W.classify(t) !== 'invoice') {
         this.setState({ bankLook: { state: 'bad', user: '', addr: '', why: '' } });
         return;
       }
-      if (W.bankSave) W.bankSave('river');
-      this.setState({ bank: { ex: 'river', to: t }, bankShort: false, bankLook: null });
+      if (W.bankSave) W.bankSave(ex);
+      this.setState({ bank: { ex, to: t }, bankShort: false, bankLook: null });
       this.acceptTarget(t);
       return;
     }
@@ -39277,7 +39329,7 @@ class Component extends DCLogic {
     }));
   }
 
-  // CHANGE EXCHANGE, under NEXT on SET AMOUNT or on River's screen: the list again
+  // CHANGE EXCHANGE, under NEXT on SET AMOUNT or on a paste screen: the list again
   bankChange() {
     this.setState({ bankShort: false });
     this.bankList();
@@ -39305,24 +39357,23 @@ class Component extends DCLogic {
     const ex = on ? String(s.bankEx || '') : '';
     const W = window.FoxyWallet;
     const name = this.bankName(ex);
-    const river = ex === 'river';
-    const domain = ex === 'strike' ? 'strike.me' : ex === 'cashapp' ? 'cash.app' : '';
+    const river = this.bankByInvoice(ex);
+    const domain = ex === 'strike' ? 'strike.me' : '';
     const look = on ? s.bankLook : null;
     const user = on && !river && W && W.bankUser ? W.bankUser(ex, s.bankDraft) : '';
     const typed = !!String((on && s.bankDraft) || '').trim();
     const checking = !!look && look.state === 'checking';
-    const ready = !!look && !!look.user && look.user === user && (look.state === 'found' || look.state === 'unchecked');
+    const ready = !!look && !!look.user && look.user === user && look.state === 'found';
     const status = !look ? ''
       : look.state === 'checking' ? 'Checking with ' + name + '…'
       : look.state === 'found' ? look.addr + ' — found'
       : look.state === 'missing' ? look.addr + ' — not found, check the spelling'
-      : look.state === 'unchecked' ? look.addr + ' — could not be checked'
-      : look.state === 'bad' ? (river ? 'That is not a Lightning invoice. In River, copy the Lightning invoice, then paste it here.'
+      : look.state === 'bad' ? (river ? 'That is not a Lightning invoice. In ' + name + ', copy the Lightning invoice, then paste it here.'
         : 'That is not a ' + name + ' username.')
       : 'Could not reach ' + name + ' to check it. Try again.';
     const statusInk = !look ? 'rgba(var(--ink-rgb),.55)'
       : look.state === 'found' ? 'var(--acc-ink)'
-      : (look.state === 'checking' || look.state === 'unchecked') ? 'rgba(var(--ink-rgb),.6)' : '#FF5C5C';
+      : look.state === 'checking' ? 'rgba(var(--ink-rgb),.6)' : '#FF5C5C';
     const lit = river || (typed && !checking);
     // the sent screen's line and button, for a payment BANK ACCOUNT chose, once it is sent
     const sendPhase = s.sendPhase || 'in';
@@ -39331,17 +39382,18 @@ class Component extends DCLogic {
     return {
       isBankAsk: on,
       bkTitle: name.toUpperCase(),
-      bkQuestion: river ? 'Open River, choose Receive bitcoin, Use Lightning, copy the invoice, then come back and paste it here.'
+      bkQuestion: ex === 'cashapp' ? 'Open Cash App, tap Money, then Bitcoin, then Receive, turn on Lightning, copy the invoice, then come back and paste it here.'
+        : river ? 'Open River, choose Receive bitcoin, Use Lightning, copy the invoice, then come back and paste it here.'
         : 'What is your ' + name + ' username?',
       bkByName: on && !river,
       bkLabel: (name + ' username').toUpperCase(),
       bkDraft: on ? String(s.bankDraft || '') : '',
-      bkPlaceholder: ex === 'cashapp' ? 'cashtag' : 'username',
+      bkPlaceholder: 'username',
       bkDomain: domain ? '@' + domain : '',
       onBankType: (e) => this.bankType(e),
       bkStatus: status,
       bkStatusInk: statusInk,
-      bkCta: river ? 'OPEN RIVER' : checking ? 'CHECKING…' : ready ? 'NEXT' : 'CHECK',
+      bkCta: river ? 'OPEN ' + name.toUpperCase() : checking ? 'CHECKING…' : ready ? 'NEXT' : 'CHECK',
       bkGo: () => this.bankGo(),
       bkPaste: () => this.bankPaste(),
       bkChangeShown: on && !!s.bankShort,
@@ -39726,7 +39778,8 @@ class Component extends DCLogic {
         : s.tillPick ? 'TILL AT WHICH MINTS?'
         : s.fcPick ? 'TRANSFER TO'
         : s.trStep === 'from' ? 'FROM WHICH MINT?'
-        : 'TO WHICH MINT?',
+        // TRANSFER's second question keeps its words; plain switching, the one these tiles are reached from, is SWITCH MINT
+        : s.trStep ? 'TO WHICH MINT?' : 'SWITCH MINT',
       mintNowLine: nowLine,
       mintNowShown: !!nowLine,
       /* The mint you are on comes first and looks different. It used to be

@@ -21,7 +21,7 @@
  *
  * Pages on harness.js's fake mints; the phone's till and Cashu ID sides are harness.js's, the relays stubbed. */
 const crypto = require('crypto');
-const { loadReal, fakeMint, nativePhone, cashuIdKeys, cashuIdDropKey } = require('./harness');
+const { loadReal, fakeMint, nativePhone, cashuIdKeys, cashuIdDropKey, tillSaleKey } = require('./harness');
 
 const MINT = 'https://m.test';
 const HOME = 'https://home.test';
@@ -51,7 +51,7 @@ function page(words) {
     bridge: (w, m) => {
       if (m.action === 'mintRequest') {
         const url = String(m.url || '');
-        return reply(w, m.id, (url.indexOf('home.test') >= 0 ? mints.home : mints.main).handle(m));
+        return reply(w, m.id, (url.indexOf('home.test') >= 0 ? mints.home : url.indexOf('fee.test') >= 0 ? mints.fee : mints.main).handle(m));
       }
       if (m.action === 'tillKeyMake') {
         const tail = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'.split('').sort(() => Math.random() - 0.5).join('');
@@ -76,6 +76,8 @@ function page(words) {
       phone.attach(w);
       if (!mints.main) mints.main = fakeMint(w, { p2pk: true });
       if (!mints.home) mints.home = fakeMint(w, { p2pk: true, fill: 9, quoteFrom: 50000 });
+      // a mint that charges an input fee, a sat a piece (as macadamia does)
+      if (!mints.fee) mints.fee = fakeMint(w, { p2pk: true, fill: 17, quoteFrom: 80000, feePpk: 1000 });
     },
   });
   ctx.W._nodeProbeDelay = [86400000, 86400000];
@@ -95,6 +97,15 @@ const plain = (v) => JSON.parse(JSON.stringify(v, (k, x) => (typeof x === 'bigin
 const proofsOf = (ctx, token) => plain(ctx.W.tokenInfo(token).proofs);
 const logRow = (ctx, hash) => (ctx.store('foxy.cashu.log', []) || []).find((e) => e.hash === hash) || null;
 const jobs = (ctx) => ctx.store('foxy.till.tips.jobs', []);
+/* A sale row in the keeper's history, as a payment taken in writes one, for the job cases that need a sale bigger than
+ * the balance or at another mint: a tip is passed on only from a sale this phone took in (`tipSaleRow`). */
+/* (Rows made up for the test, taken off again before the books are judged: `dropFakes`.) */
+const fakeRows = [];
+const fakeSale = (ctx, hash, sats, mint, extra) => { fakeRows.push(hash); ctx.put('foxy.cashu.log', [Object.assign({ at: Math.floor(Date.now() / 1000), mint: mint || MINT, dir: 'in', sats, feeSats: 0,
+  settled: true, state: 'success', memo: '', hash }, extra || {})].concat(ctx.store('foxy.cashu.log', []))); };
+const dropFakes = (ctx) => ctx.put('foxy.cashu.log', ctx.store('foxy.cashu.log', []).filter((e) => fakeRows.indexOf(e.hash) < 0));
+// a sale of a code's own (08d-till.js `tillSaleKey`): a nonce and the key it moves the code's key to
+const saleOf = (pass) => { const n = crypto.randomBytes(16).toString('hex'); return { n, key: tillSaleKey(pass.lock, n) }; };
 // a Cashu ID of somebody else's, kept as a contact under `name`
 async function contact(ctx, name) {
   const k = cashuIdKeys(crypto.randomBytes(64));
@@ -169,6 +180,10 @@ async function run() {
   eq(T.split(grp([50, 30, 20]), 0), [], 'nor for no tip');
 
   /* ---- 3  the keeper's own till: one person --------------------------------------------------------- */
+  // (a tip from the keeper's own till is passed on only while that till is open: closed, its PAID names nothing)
+  ok((await K.W.tillTipTaken({ amount: 10, unit: 'sat', mint: MINT, hash: sale.hash })).jobs === 0 && !logRow(K, sale.hash).tillTip,
+    'with no till open, the keeper’s own till passes no tip on');
+  await K.W.tillKeeperOpen(MINT);
   K.W.tillTipsSet({ on: true, to: 'one', ids: [{ id: ana.id, name: 'Ana' }] });
   eq(K.W.tillTipsNow().to, 'one', 'the till’s answer is kept (tillTipsNow)');
   ok(K.store('foxy.till.tips', null) && K.store('foxy.till.tips', null).ids[0].id === ana.id, 'in the till’s own storage');
@@ -227,12 +242,14 @@ async function run() {
   /* ---- 5  the jobs: waiting, retrying, giving up ----------------------------------------------------- */
   K.W.tillTipsSet({ on: true, to: 'one', ids: [{ id: ben.id, name: 'Ben' }] });
   // another mint: waits, no try counted
+  fakeSale(K, 'sale-at-home', 30, HOME);
   const fOther = await K.W.tillTipTaken({ amount: 30, unit: 'sat', mint: HOME, hash: 'sale-at-home' });
   await wait(150);
   const away = jobs(K).find((j) => j.sale === 'sale-at-home') || {};
   ok(fOther.jobs === 1 && away.state === 'due' && away.tries === 0, 'a tip landed at another mint waits for the phone to be there, counting nothing', JSON.stringify(away));
   // more than the balance: fails, is tried again, and goes once there is money
   const have = await K.W.balanceSats();
+  fakeSale(K, 'sale-big', have + 200);
   const fBig = await K.W.tillTipTaken({ amount: have + 200, unit: 'sat', mint: MINT, hash: 'sale-big' });
   await until(() => (jobs(K).find((j) => j.sale === 'sale-big') || {}).tries >= 2, 3000);
   const big = jobs(K).find((j) => j.sale === 'sale-big') || {};
@@ -243,12 +260,18 @@ async function run() {
   // ten failures give up: the money stays and the sale's row says so
   const sale5 = await K.W.invoice(300, ''); await K.W.claim(sale5.hash);
   const bal5 = await K.W.balanceSats();
-  await K.W.tillTipTaken({ amount: bal5 + 5000, unit: 'sat', mint: MINT, hash: sale5.hash });
-  await until(() => (jobs(K).find((j) => j.sale === sale5.hash) || {}).state === 'failed', 6000);
-  const gave = jobs(K).find((j) => j.sale === sale5.hash) || {};
-  ok(gave.state === 'failed' && gave.tries === 9 && (await K.W.balanceSats()) === bal5, 'ten failures give up, and nothing left the balance', JSON.stringify({ state: gave.state, tries: gave.tries }));
-  const row5 = logRow(K, sale5.hash) || {};
-  ok(Array.isArray(row5.tillTipFailed) && row5.tillTipFailed[0] === 'Ben' && row5.tillTipLeft === bal5 + 5000, 'the sale’s row says Ben’s tip was not sent and is kept', JSON.stringify(row5));
+  // (a tip is never more than its sale, so the sale that fails is a row as big as the tip)
+  const five = await K.W.tillTipTaken({ amount: bal5 + 5000, unit: 'sat', mint: MINT, hash: sale5.hash });
+  ok(five.jobs === 1 && (jobs(K).find((j) => j.sale === sale5.hash) || {}).amount === 300, 'a tip bigger than its sale passes on no more than the sale', JSON.stringify(five));
+  await until(() => (jobs(K).find((j) => j.sale === sale5.hash) || {}).state === 'sent', 4000);
+  const bal5b = await K.W.balanceSats();
+  fakeSale(K, 'sale-five', bal5b + 5000);
+  await K.W.tillTipTaken({ amount: bal5b + 5000, unit: 'sat', mint: MINT, hash: 'sale-five' });
+  await until(() => (jobs(K).find((j) => j.sale === 'sale-five') || {}).state === 'failed', 6000);
+  const gave = jobs(K).find((j) => j.sale === 'sale-five') || {};
+  ok(gave.state === 'failed' && gave.tries === 9 && (await K.W.balanceSats()) === bal5b, 'ten failures give up, and nothing left the balance', JSON.stringify({ state: gave.state, tries: gave.tries }));
+  const row5 = logRow(K, 'sale-five') || {};
+  ok(Array.isArray(row5.tillTipFailed) && row5.tillTipFailed[0] === 'Ben' && row5.tillTipLeft === bal5b + 5000, 'the sale’s row says Ben’s tip was not sent and is kept', JSON.stringify(row5));
   // a week old and still waiting: given up
   const rows = jobs(K);
   rows.forEach((j) => { if (j.sale === 'sale-at-home') j.at = Date.now() - 8 * 86400 * 1000; });
@@ -258,6 +281,7 @@ async function run() {
   // no route: waits, counting nothing
   K.W.tillTipsSet({ on: true, to: 'one', ids: [{ id: cy.id, name: 'Cy' }] });
   K.W._privacy({ tor: 'down', offline: true, network: 'none' });
+  fakeSale(K, 'sale-off', 25);
   const fOff = await K.W.tillTipTaken({ amount: 25, unit: 'sat', mint: MINT, hash: 'sale-off' });
   await wait(150);
   const off = jobs(K).find((j) => j.sale === 'sale-off') || {};
@@ -298,13 +322,14 @@ async function run() {
   ok(quote.tillTip === 20 && quote.tillPass === pass.id, 'an invoice’s tip is on its quote’s record', JSON.stringify({ t: quote.tillTip }));
 
   relay = [];
-  const pay = await P.W.sendToken(60, { unit: 'sat', lockTo: pass.lock });
+  const pay = await P.W.sendToken(60, { unit: 'sat', lockTo: req.lockTo });
   await C.W._requestPaid(JSON.stringify({ id: req.id, mint: MINT, unit: 'sat', proofs: proofsOf(P, pay.token) }), 'c1', '');
   const outRow = (C.store('foxy.till.outbox', []) || []).find((r) => r.hash === 'till-' + req.id) || {};
   ok(outRow.tip === 10 && outRow.amount === 60, 'the outbox row says 10 of its 60 was a tip', JSON.stringify({ tip: outRow.tip, amount: outRow.amount }));
   await until(() => relay.some((r) => r.target === pass.to), 3000);
   const sent = JSON.parse((relay.find((r) => r.target === pass.to) || {}).body || '{}');
-  ok(sent.tip === 10 && sent.memo === 'till' && sent.proofs.length > 0, 'and the delivery to the keeper carries tip: 10', JSON.stringify({ tip: sent.tip }));
+  ok(sent.tip === 10 && sent.base === 50 && sent.memo === 'till' && sent.proofs.length > 0 && /^[0-9a-f]{32}$/.test(String(sent.n)),
+    'and the delivery to the keeper carries tip: 10, base: 50 and the sale’s nonce', JSON.stringify({ tip: sent.tip, base: sent.base }));
 
   // the keeper takes it and passes the tip on by its own row of the code
   relay = [];
@@ -314,17 +339,40 @@ async function run() {
   const benTip = jobs(K).filter((j) => j.from === 'cashier' && j.cid === ben.id);
   ok(benTip.length === 1 && benTip[0].amount === 10 && benTip[0].state === 'sent', 'and sends Ben the 10', JSON.stringify(benTip.map((j) => [j.amount, j.state])));
   ok((await K.W.balanceSats()) === kb + 60 - 10, 'the keeper keeps 50 of the 60', String(await K.W.balanceSats()));
-  // a delivery claiming more tip than it carries passes on no more than came in
-  const pay2 = await P.W.sendToken(15, { unit: 'sat', lockTo: pass.lock });
-  const greedy = { id: 'till:' + pass.id + ':9', mint: MINT, unit: 'sat', proofs: proofsOf(P, pay2.token), memo: 'till', tip: 9999 };
-  ok((await K.W._tillArrived(pass.id, JSON.stringify(greedy))) === 'taken', 'a delivery that says its tip is 9,999 is taken');
-  await wait(100);
-  const greedyJob = jobs(K).filter((j) => j.from === 'cashier').slice(-1)[0] || {};
-  ok(greedyJob.amount === 15, 'and passes on no more than the 15 that came', String(greedyJob.amount));
+  /* A delivery says its tip and its sale (`base`); the keeper passes the tip on as it says, and its row shows the two as two
+   * figures. A word beyond what arrived passes on no tip, and so does a sale of nothing; the payment is taken either way. */
+  ok(K.W.tillTipCap === undefined && K.W.tillTipCapSet === undefined, 'there is no tip limit to set');
+  const cashierJobs = () => jobs(K).filter((j) => j.from === 'cashier').length;
+  const deliverTip = async (n, extra) => {
+    const sl = saleOf(pass);
+    const pay2 = await P.W.sendToken(n, { unit: 'sat', lockTo: sl.key });
+    const before = cashierJobs();
+    const got = await K.W._tillArrived(pass.id, JSON.stringify(Object.assign({ id: 'till:' + pass.id + ':9', mint: MINT, unit: 'sat',
+      proofs: proofsOf(P, pay2.token), memo: 'till', n: sl.n }, extra)));
+    await wait(100);
+    const made = jobs(K).filter((j) => j.from === 'cashier').slice(before);
+    const row = (K.store('foxy.cashu.log', []) || []).find((e) => e.dir === 'in' && e.till && e.sats === n) || {};
+    return { got, jobs: made.length, amount: made.reduce((t, j) => t + j.amount, 0), row };
+  };
+  await P.W.claim((await P.W.invoice(12000, '')).hash);
+  const whole = await deliverTip(10014, { tip: 9999, base: 15 });
+  ok(whole.got === 'taken' && whole.jobs === 1 && whole.amount === 9999, 'a delivery of 10,014 that says its tip is 9,999 on a sale of 15 passes the 9,999 on', JSON.stringify([whole.got, whole.jobs, whole.amount]));
+  ok(whole.row.sats === 10014 && whole.row.tillTip === 9999, 'and the keeper’s row of it keeps the whole payment and the tip, the two figures its screen shows (till-ui.js)', JSON.stringify({ sats: whole.row.sats, tip: whole.row.tillTip }));
+  const greedy = await deliverTip(15, { tip: 9999 });
+  ok(greedy.got === 'taken' && greedy.jobs === 0, 'a delivery of 15 that says its tip is 9,999 is taken, and passes on no tip: more than arrived', JSON.stringify(greedy));
+  const allTip = await deliverTip(15, { tip: 15, base: 0 });
+  ok(allTip.got === 'taken' && allTip.jobs === 0, 'one that says base 0 passes on no tip', JSON.stringify(allTip));
+  const noBase = await deliverTip(15, { tip: 15 });
+  ok(noBase.jobs === 0, 'nor one whose tip is the whole of it, naming no sale', JSON.stringify(noBase));
+  const over = await deliverTip(30, { tip: 10, base: 25 });
+  ok(over.got === 'taken' && over.jobs === 0, 'a sale and tip that add up to more than came in pass on no tip, not a smaller one', JSON.stringify(over));
+  const fair = await deliverTip(30, { tip: 10, base: 20 });
+  ok(fair.jobs === 1 && fair.amount === 10, 'a tip of 10 on a sale of 20, 30 in all, goes as it says', JSON.stringify(fair));
   // a code without tips: a tip it is told of is not passed on
-  const pay3 = await P.W.sendToken(12, { unit: 'sat', lockTo: passNo.lock });
+  const s3 = saleOf(passNo);
+  const pay3 = await P.W.sendToken(12, { unit: 'sat', lockTo: s3.key });
   const n0 = jobs(K).length;
-  ok((await K.W._tillArrived(passNo.id, JSON.stringify({ id: 'till:' + passNo.id + ':1', mint: MINT, unit: 'sat', proofs: proofsOf(P, pay3.token), memo: 'till', tip: 5 }))) === 'taken'
+  ok((await K.W._tillArrived(passNo.id, JSON.stringify({ id: 'till:' + passNo.id + ':1', mint: MINT, unit: 'sat', proofs: proofsOf(P, pay3.token), memo: 'till', tip: 5, base: 7, n: s3.n }))) === 'taken'
     && jobs(K).length === n0, 'a code that takes no tips passes on none, whatever its delivery says');
   // a cashier on a code without tips makes no tip on a request
   await C.W.tillLeave();
@@ -346,8 +394,9 @@ async function run() {
   ok(K.store('foxy.till.passes', []).some((r) => r.id === code.id), 'its row and key stay: its cashier may still send what it took');
   ok((await K.W.tillPassMake()).id !== code.id, 'CASHIER CODE never answers an ended code again');
   // the code ended is still taken from, the keeper's money
-  const pay4 = await P.W.sendToken(8, { unit: 'sat', lockTo: pass.lock });
-  ok((await K.W._tillArrived(pass.id, JSON.stringify({ id: 'till:' + pass.id + ':20', mint: MINT, unit: 'sat', proofs: proofsOf(P, pay4.token), memo: 'till' }))) === 'taken',
+  const s4 = saleOf(pass);
+  const pay4 = await P.W.sendToken(8, { unit: 'sat', lockTo: s4.key });
+  ok((await K.W._tillArrived(pass.id, JSON.stringify({ id: 'till:' + pass.id + ':20', mint: MINT, unit: 'sat', proofs: proofsOf(P, pay4.token), memo: 'till', n: s4.n }))) === 'taken',
     'what its cashier sends after END is still taken');
   // run out: PAST, expired
   const pr = K.store('foxy.till.passes', []);
@@ -374,10 +423,57 @@ async function run() {
   /* ---- 8  the object anything else reuses ---------------------------------------------------------------- */
   ok(['check', 'split', 'forward', 'jobs', 'carry', 'run'].every((k) => typeof K.W.tillTips[k] === 'function') && K.W.tillTips.MAX_IDS === 8
     && K.W.tillTips.MIN.sat === 10 && K.W.tillTips.MIN.usd === 1, 'tillTips: check, split, forward, jobs, carry, run, MAX_IDS 8, MIN 10 sats / 1 cent');
+  fakeSale(K, 'other-sale', 70, MINT, { till: true, who: 'cashier', memo: 'till' });
   const viaObj = K.W.tillTips.forward({ tips: { on: true, to: 'self' }, amount: 7, unit: 'sat', mint: MINT, hash: 'other-sale' });
   ok(viaObj.kept === 7, 'forward works the same from anything that calls it');
+  /* A sale nothing received: no job, nothing from the balance, whatever the caller says (forward and tillTipTaken alike).
+   * An unknown hash once made a job and paid it out of the keeper's balance, again for every hash made up. */
+  const kb9 = await K.W.balanceSats();
+  const nJobs = jobs(K).length;
+  const madeUp = K.W.tillTips.forward({ unit: 'sat', amount: 300, hash: 'made-up-' + Date.now(), mint: MINT,
+    tips: { on: true, to: 'one', ids: [{ id: ana.id, nostr: ana.nostr, name: 'Ana' }] }, from: 'cashier' });
+  const noHash = K.W.tillTips.forward({ unit: 'sat', amount: 300, mint: MINT, tips: { on: true, to: 'one', ids: [{ id: ana.id, nostr: ana.nostr, name: 'Ana' }] } });
+  const viaTaken = await K.W.tillTipTaken({ amount: 300, unit: 'sat', mint: MINT, hash: 'made-up-2' });
+  await wait(300);
+  ok(madeUp.jobs === 0 && noHash.jobs === 0 && viaTaken.jobs === 0 && jobs(K).length === nJobs && (await K.W.balanceSats()) === kb9,
+    'a tip for a hash that is no received row (or none) makes no job and takes nothing from the balance', JSON.stringify([madeUp, noHash, viaTaken]));
+  const outRow9 = { dir: 'out', sats: 300, hash: 'paid-out-sale', state: 'success', mint: MINT };
+  fakeRows.push('paid-out-sale');
+  K.put('foxy.cashu.log', [outRow9].concat(K.store('foxy.cashu.log', [])));
+  ok(K.W.tillTips.forward({ unit: 'sat', amount: 30, hash: 'paid-out-sale', mint: MINT, tips: { on: true, to: 'self' } }).kept === 0, 'nor for a row of money paid out');
+  // an ordinary receive is no till sale: only the keeper's own till (from 'till', its own PAID) may name one
+  fakeSale(K, 'plain-receive', 400);
+  ok(K.W.tillTips.forward({ unit: 'sat', amount: 30, hash: 'plain-receive', mint: MINT, tips: { on: true, to: 'self' }, from: 'cashier' }).kept === 0
+    && K.W.tillTips.forward({ unit: 'sat', amount: 30, hash: 'plain-receive', mint: MINT, tips: { on: true, to: 'self' } }).kept === 0,
+    'a tip named for an ordinary receive is refused to any caller but the keeper’s own till');
+  ok(K.W.tillTips.forward({ unit: 'sat', amount: 30, hash: 'plain-receive', mint: MINT, tips: { on: true, to: 'self' }, from: 'till' }).kept === 30,
+    'and taken from the keeper’s own till, whose PAID names its own sale');
+
+  /* ---- a fee mint: the cashier says its sale and tip on the pieces it sent; the keeper's own swap fee comes off after ---- */
+  const FEE = 'https://fee.test';
+  await K.W.connect(FEE, { remember: true });
+  await P.W.connect(FEE, { remember: true });
+  await P.W.claim((await P.W.invoice(2000, '')).hash);
+  const feeCode = await K.W.tillPassMake({ fresh: true, tips: tipsBen, label: 'Fee mint' });
+  const feePass = K.W.tillDecode(feeCode.text);
+  const fs1 = saleOf(feePass);
+  const feePay = await P.W.sendToken(600, { unit: 'sat', lockTo: fs1.key });
+  const feeProofs = proofsOf(P, feePay.token);
+  const jobsF = jobs(K).length;
+  /* As a cashier's invoice sale is said: its amount the pieces' sum (the till's claim pays no fee), the sale that less the
+   * tip. The keeper's swap then takes its fee, so what lands is less than base + tip. */
+  const feeSum = feeProofs.reduce((t, pr) => t + Number(pr.amount), 0);
+  const gotF = await K.W._tillArrived(feePass.id, JSON.stringify({ id: 'till:' + feePass.id + ':1', mint: FEE, unit: 'sat', proofs: feeProofs, memo: 'till', n: fs1.n, tip: 100, base: feeSum - 100 }));
+  await wait(150);
+  const feeRow = (K.store('foxy.cashu.log', []) || []).find((e) => e.dir === 'in' && e.till && e.mint === FEE) || {};
+  const feeJob = jobs(K).slice(jobsF).filter((j) => j.from === 'cashier');
+  ok(gotF === 'taken' && feeRow.sats < feeSum && Number(feeRow.feeSats) > 0, '(set-up) at a fee mint the keeper takes the pieces less its swap fee', JSON.stringify([gotF, feeRow.sats, feeSum]));
+  ok(feeJob.length === 1 && feeJob[0].amount === Math.min(100, feeRow.sats - (feeSum - 100)) && feeJob[0].amount > 90,
+    'an honest tip of 100 said on the pieces sent is passed on, less what the keeper’s own swap fee took, not refused', JSON.stringify([feeJob.map((j) => j.amount), feeRow.sats]));
+  await K.W.connect(MINT, { remember: true });
   ok(K.W.tillKeeperClose && (await K.W.tillKeeperClose()) && K.store('foxy.till.tips', null) === null, 'closing the till lets its answer go');
 
+  dropFakes(K);
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 }

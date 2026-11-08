@@ -51,7 +51,7 @@ function method(sig, optional) {
   return src.slice(at + 3, i + 1);
 }
 const SIGS = ['announcePayment(ev) {', 'nextPaidScreen() {', 'queueLater() {', 'paidDismissed() {', 'renderPaid(c) {', 'renderPaidBase(c) {',
-  'renderPaidRest(c, v) {', 'txWhen(t) {', 'txClock(d) {', 'txDay(d, now) {', 'txWho(t) {', 'mintNameOf(url) {'];
+  'renderPaidRest(c, v) {', 'txWhen(t) {', 'txClock(d) {', 'txDay(d, now) {', 'txWho(t) {', 'mintNameOf(url) {', 'shortMintName(raw, url) {', 'mintKnownName(url) {'];
 // the bulk screen's own parts, which the base does not have (so its checks fail there rather than the suite throwing)
 const NEW = ['paidJoinable(ev) {', 'paidRowOf(ev) {', 'paidRowFromState(p) {', 'paidJoinQueued() {', 'queuedEv(next) {',
   'paidBulkWhen(at, now) {', 'paidBulkTotal(rows) {', 'paidBulkRows(rows) {', 'paidBulkVals(s) {', 'paidDismiss(history) {', 'paidDismissingNow() {'];

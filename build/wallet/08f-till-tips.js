@@ -43,6 +43,25 @@
   var TIP_GIVE_UP_MS = 7 * 24 * 60 * 60 * 1000;
   var TIP_JOBS_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
   var TIP_SALES_MAX = 500;
+  /* The history row of a sale this phone took in, by its hash, or null: a row in, of this phone's own money (not
+   * a cashier's row, which is the keeper's). A tip is passed on only from a sale that landed here. */
+  /* `tillOnly`: a cashier's sale alone (a till row the keeper took from a cashier, `till` and `who: 'cashier'`),
+   * for any caller but the keeper's own till (`from: 'till'`), which is held to its till being open. */
+  function tipSaleRow(hash, tillOnly) {
+    if (!hash) return null;
+    var rows = load(K.log, []);
+    if (!Array.isArray(rows)) return null;
+    for (var i = 0; i < rows.length; i++) {
+      var e = rows[i];
+      if (e && e.hash === hash && e.dir === 'in' && !e.forKeeper && e.state !== 'failed') {
+        /* A cashier's sale, for anybody but the keeper's own till. For that, a row of this phone's own, and only while
+         * its till is open (`tillKeeperNow`): its PAID names the sale it has just landed. */
+        if (tillOnly ? !(e.till === true && e.who === 'cashier') : !tillKeeperNow()) return null;
+        return e;
+      }
+    }
+    return null;
+  }
 
   // whether a code (a pass, or this phone's row of one) offers tips
   function tillTipsOn(p) {
@@ -167,6 +186,22 @@
     var mint = canonicalMint(String((o && o.mint) || mintUrl || ''));
     var out = { kept: 0, jobs: 0, waiting: 0, seen: false };
     if (!(amount > 0) || !mint) return out;
+    /* Only for a sale this phone took in: its row is in the history, in, and its own. A tip named for a sale
+     * nothing received would be paid out of the keeper's balance for nothing. Never more than the sale. */
+    var saleRow = tipSaleRow(hash, !(o && o.from === 'till'));
+    if (!saleRow) {
+      console.warn('[foxy] till: a tip for a sale this phone has no record of taking in; nothing passed on');
+      out.refused = true;
+      return out;
+    }
+    var landed = unitOf(saleRow.unit) && unitOf(saleRow.unit) !== 'sat' ? satsOf(saleRow.amount) : satsOf(saleRow.sats != null ? saleRow.sats : saleRow.amount);
+    if ((unitOf(saleRow.unit) || 'sat') !== unit) {
+      console.warn('[foxy] till: a tip in another unit than its sale; nothing passed on');
+      out.refused = true;
+      return out;
+    }
+    if (landed >= 0 && amount > landed) amount = Math.floor(landed);
+    if (!(amount > 0)) return out;
     if (hash) {
       var sales = load(K.tillTipSales, []);
       if (!Array.isArray(sales)) sales = [];
@@ -211,15 +246,30 @@
   }
 
   /* A cashier's word of how much of a payment was its tip (`tip` on the delivery, 08d-till.js
-   * `tillDeliverAll`): a whole number above nought, and never more than what came in. 0 otherwise. */
+   * `tillDeliverAll`), and of the sale itself (`base`): passed on as it says, since the keeper's row
+   * shows the sale and the tip as two figures (26p-till-tips.js `tillTipRowText`). The word is held to
+   * the pieces that came (their sum, before this phone's own swap fee, which the cashier could not know):
+   * a tip over them, or a sale and tip that add up to more, passes on no tip at all (the payment is still
+   * taken), and so does a sale of nothing. What is passed on is the tip, less any part of it the swap fee
+   * took (never more than landed less the sale). A whole number; 0 otherwise. */
   function tillTipOfBody(j, r, unit) {
     var tip = Number(j && j.tip);
     if (!(Math.floor(tip) === tip && tip > 0)) return 0;
     var came = 0;
     if (r && typeof r === 'object') came = unit === 'sat' ? satsOf(r.sats != null ? r.sats : r.amount) : satsOf(r.amount != null ? r.amount : r.sats);
-    var sum = Array.isArray(j.proofs) ? sumProofs(j.proofs) : 0;
-    var most = came > 0 ? Math.min(came, sum || came) : sum;
-    return Math.max(0, Math.min(tip, Math.floor(most) || 0));
+    var sum = Math.floor(Array.isArray(j.proofs) ? sumProofs(j.proofs) : 0) || 0;
+    var said = Number(j && j.base);
+    var base = (Math.floor(said) === said && said >= 0) ? said : sum - tip;
+    if (tip > sum || base > sum - tip) {
+      console.warn('[foxy] till: a cashier’s delivery says a tip and sale beyond what arrived; no tip passed on');
+      return 0;
+    }
+    if (!(base > 0)) {
+      console.warn('[foxy] till: a cashier’s delivery says the whole of it was a tip; no tip passed on');
+      return 0;
+    }
+    var landed = came > 0 ? Math.floor(came) : sum;
+    return Math.max(0, Math.min(tip, landed - base));
   }
 
   var tipRunning = null;

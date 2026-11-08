@@ -27,7 +27,9 @@
       if (opts && opts.lockPub) {
         try {
           var tp = tillTermsFor(opts.lockPub, unit || 'sat', at);
-          tillExtra = /** @type {any} */ ({ lockPub: tp.lock, till: true, tillPass: tp.id, tillTo: tp.to, tillExp: tp.exp });
+          // its ecash locked to a key of this invoice's own (08d-till.js `tillSaleKey`), never the code's key itself
+          var sale = tillSaleNew(tp);
+          tillExtra = /** @type {any} */ ({ lockPub: sale.lock, tillNonce: sale.nonce, till: true, tillPass: tp.id, tillTo: tp.to, tillExp: tp.exp });
           // the part that is a tip, on a code that offers tips (`opts.tillTip`, in the invoice's unit): sent to the keeper with it
           var tipAsk = Math.round(Number(opts.tillTip) || 0);
           if (tipAsk > 0 && tp.tips === true) tillExtra.tillTip = Math.min(tipAsk, Math.round(Number(amount) || 0));

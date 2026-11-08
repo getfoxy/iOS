@@ -2555,15 +2555,39 @@
   function lockKeyMatching(pubkey, derive) {
     var want = String(pubkey || '').toLowerCase();
     if (!/^0[23][0-9a-f]{64}$/.test(want)) return Promise.resolve('');
+    /* A till sale's key (08d-till.js `tillSaleKey`): a cashier code's key L
+     * moved by t, noted as its delivery was read (`tillSaleKeep`). Its private
+     * half is L's, found as any lock's is (its row, or the walk), plus t; and
+     * it must give back the very key asked for. Every road that spends a
+     * till's ecash comes through here: the delivery's swap, a try after a
+     * lost answer, a token pasted in later. */
+    /* By the key's x alone, here and below: the mint reads a lock that way
+     * (NUT-11, `sameLockKey`), so a payer who wrote K with the other prefix
+     * made ecash the mint lets K's key spend, and a lookup by the whole 33
+     * bytes found nothing for it, for good. */
+    var sale = tillSaleFor(want);
+    if (sale && !sameLockKey(sale.L, want)) {
+      var moveBy = sale.t;
+      return lockKeyMatching(sale.L, derive).then(function (l) {
+        var k = l ? tillSalePriv(l, moveBy) : '';
+        var back = '';
+        try { back = k ? String(FoxyWallet._lockPubOf(k) || '').toLowerCase() : ''; } catch (e) { back = ''; }
+        if (k && !sameLockKey(back, want)) {
+          console.warn('[foxy] a till sale’s key did not come back as the key its ecash is locked to; not used');
+          return '';
+        }
+        return k;
+      });
+    }
     var all = lockKeys(), ids = Object.keys(all), named = '';
     for (var i = 0; i < ids.length && !named; i++) {
       var one = all[ids[i]];
       // a row from before: the key itself, compared the way it always was
       if (one && typeof one.key === 'string') {
-        try { if (derive(one.key) === want) return Promise.resolve(one.key); } catch (e) {}
+        try { if (sameLockKey(derive(one.key), want)) return Promise.resolve(one.key); } catch (e) {}
         continue;
       }
-      if (lockPubOf(one) === want) named = ids[i];
+      if (sameLockKey(lockPubOf(one), want)) named = ids[i];
     }
     /* A row names it: one request to the phone, and the walk below is not run.
      * If that index does not open it — the phone refused, the seed was replaced,
@@ -2625,7 +2649,7 @@
           return stopped(new Error('the phone’s lock keys were not for what was asked'));
         }
         for (var k = 0; k < keys.length; k++) {
-          if (String(keys[k]).toLowerCase() !== want) continue;
+          if (!sameLockKey(String(keys[k]).toLowerCase(), want)) continue;
           var index = start + k;
           console.log('[foxy] this token’s lock is this wallet’s own key, at index', index,
                       '— found by walking the seed, with no record of the request it belonged to');
@@ -2634,7 +2658,7 @@
            * and `receiveToken` rejected with the bridge's own words. */
           return nativeJson('p2pkKey', { index: index }, 60000).then(function (got) {
             var priv = String((got && got.privkey) || '');
-            if (!/^[0-9a-f]{64}$/i.test(priv) || String((got && got.pubkey) || '').toLowerCase() !== want) {
+            if (!/^[0-9a-f]{64}$/i.test(priv) || !sameLockKey(String((got && got.pubkey) || '').toLowerCase(), want)) {
               return stopped(new Error('the answer for index ' + index + ' was not that lock’s key'));
             }
             found = priv.toLowerCase();
@@ -2677,7 +2701,7 @@
     if (!/^0[23][0-9a-f]{64}$/.test(want)) return '';
     var all = lockKeys(), ids = Object.keys(all);
     for (var i = 0; i < ids.length; i++) {
-      if (lockPubOf(all[ids[i]]) === want) return ids[i];
+      if (sameLockKey(lockPubOf(all[ids[i]]), want)) return ids[i];
     }
     return '';
   }

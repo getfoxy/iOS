@@ -843,12 +843,22 @@
          * key on the code this phone works by, never to one of this phone's,
          * and nothing taken from the pool. Made only where the lock holds:
          * without one, what was paid would be the cashier's to spend. */
-        var tillPass = null;
+        var tillPass = null, tillSale = null;
         if (o.lockPub) {
           try { tillPass = tillTermsFor(o.lockPub, unit, mint); }
           catch (eTill) { console.warn('[foxy] a till request was not made: ' + eTill.message); return ''; }
           if (!canLock) { console.warn('[foxy] a till request was not made: the mint does not honour a lock'); return ''; }
-          lock = { kind: 'P2PK', data: tillPass.lock, tags: [] };
+          /* Locked to a key of this request's own, the code's key moved by a nonce (08d-till.js `tillSaleKey`), never to
+           * the code's key itself: a payment to it is good at this request alone, on this till alone. */
+          try {
+            tillSale = tillSaleNew(tillPass);
+            // kept for the code's life, before the request is shown: its key may be paid long after it closes (08d-till.js)
+            var tipKeep = Math.round(Number(o.tillTip) || 0);
+            tillIssuedKeep(tillPass, tillSale, { amount: n > 0 ? n : 0, unit: unit,
+                                                 tip: tipKeep > 0 && tillPass.tips === true ? (n > 0 ? Math.min(tipKeep, n) : 0) : 0 });
+          }
+          catch (eSale) { console.warn('[foxy] a till request was not made: ' + eSale.message); return ''; }
+          lock = { kind: 'P2PK', data: tillSale.lock, tags: [] };
         } else if (o.lock !== false && canLock) {
           try {
             var pub = takeLockKey(hexOf(id), { unit: unit, amount: n > 0 ? n : 0 });
@@ -900,9 +910,10 @@
          * other (`closeTwin`), so one price is never paid twice. */
         if (o.twin) pairRequests(hexOf(id), o.twin);
         // the keeper's key and where to send what is paid, on the open request (`tillRequestLock`, `tillRequestPaid`)
-        if (tillPass) {
+        if (tillPass && tillSale) {
           var openTill = openRequests[hexOf(id)];
-          openTill.tillLock = tillPass.lock;
+          openTill.tillLock = tillSale.lock;
+          openTill.tillNonce = tillSale.nonce;
           openTill.tillPass = tillPass.id;
           openTill.tillTo = tillPass.to;
           openTill.tillExp = tillPass.exp;

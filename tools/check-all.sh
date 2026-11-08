@@ -12,6 +12,11 @@
 # Stops at the first failure. Simulator tests are in tools/sim; the live
 # test-mint run is tools/live.
 #
+# The integration vectors stage compares this app's protocol vectors with the copies kept
+# beside it (tools/integration-vectors.txt lists the pairs). The keeper sets FOXY_LIBS to
+# that folder, for example FOXY_LIBS=/path/to/that/folder sh tools/check-all.sh;
+# without it the stage says "skipped" and passes, as it does for anyone who has no such folder.
+#
 # It writes no tracked file. Smoke packs the page into a temporary folder and
 # compares what it made with Web/index.html, the joined files and the part
 # READMEs in the tree; python3 tools/pack-index.py is what writes them (audit
@@ -61,6 +66,8 @@ check "two balances"   1 node tests/two-balances.js
 check "usd tap"        1 node tests/usd-tap.js
 check "interleavings"  1 node tests/interleave.js
 check "bridge matrix"  1 node tests/bridge-matrix.js
+check "integration vectors" 2 node tools/check-integration-vectors.js
+check "integration vectors, checked" 1 node tests/integration-vectors.js
 check "gate scenarios" 1 node tests/gate-scenarios.js
 check "home first"     1 node tests/home-first.js
 check "two doors"      1 node tests/two-doors.js
@@ -229,6 +236,7 @@ check "render parity"  1 node tests/render-parity.js
 check "render snapshots" 1 node tests/render-snapshots.js
 check "two balances, screens" 1 node tests/two-balances-screens.js
 check "mint tiles"     1 node tests/mint-tiles.js
+check "mint names"     1 node tests/mint-names.js
 check "mint gate"      1 node tests/mint-gate.js
 check "two balances, send quote" 1 node tests/send-quote-first.js
 check "two balances, swap" 1 node tests/two-balances-swap.js

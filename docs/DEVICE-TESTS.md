@@ -2381,6 +2381,36 @@ claimed on it (a fresh install); step 2 a phone that has.*
 6. Off the till, RECEIVE on a mint with two balances. **Pass:** NOTE, COPY, SCAN, CARD and SHARE as ever; the two chips read
    DOLLARS (or BITCOIN) and LIGHTNING with their chevrons, no WALLET or NETWORK label, the same height, words centred.
 
+#### 22q. Two cashiers, and the itemized tip
+
+*First, after updating the keeper: CASHIER CODES, END THIS CODE on every code made before the update, and make each
+cashier a new one. Old codes still work on tills still on the old build until they end, and on those the replay in step 3
+is still open.*
+
+*Three phones: a keeper (POINT OF SALE open, tips on, to ONE PERSON, a Cashu ID contact on a fourth wallet or a second
+Foxy) and two cashiers. A payer: a fourth Foxy, or another Cashu wallet. Test money only.*
+
+1. **One code each.** On the keeper, CASHIER CODES, ADD A CASHIER twice (names Front and Patio). **Pass:** two LIVE rows;
+   the two QR codes differ. Scan Front on cashier 1 and Patio on cashier 2, START on each.
+2. **A code from an older Foxy.** On a cashier, scan a CASHIER CODE made by a keeper still on the build before this one.
+   **Pass:** THAT CODE WON'T WORK, `That cashier code is from an older Foxy. Ask the keeper for a new one.` A cashier still
+   on the build before this one scanning Front says `from a newer Foxy`.
+3. **One payment, one sale.** On cashier 1 type 100 sats, NEXT; pay it from the payer by its request (scan the QR and pay,
+   not the invoice). **Pass:** PAID on cashier 1, and within a minute the keeper's history has one till row of 100.
+   Then on cashier 2 type 100 sats, NEXT, and on the payer try the same payment again (a wallet that can resend a locked
+   token: show the token it made to cashier 2, scanned or pasted at its till). **Pass:** cashier 2 says `locked to another payment` or `locked
+   to the till's code`, takes nothing, and the keeper's history still has one till row of 100.
+4. **The itemized tip.** On cashier 1 type 1,000 sats, ADD A TIP, OTHER, a 2,000-sat tip, and take the payment.
+   **Pass:** the keeper takes 3,000; its till history shows the sale's row with `sale ₿ 1,000 · tip ₿ 2,000` beside it, and
+   a row of its own `Tip to <name>` for the 2,000 paid on to the contact. CASHIER CODES has no tip limit button.
+5. **Late, short and the other prefix.** On cashier 1 make a 200-sat request and pay it from the payer with no route on the
+   cashier (airplane mode), so the post fails; wait over an hour, then show the payer's token at the till. **Pass:** taken
+   for the keeper, once; a second, different token to the same request is taken as extra (no tip, no sale). A token of 50
+   sats for a 200-sat request: taken as 50, a toast says `₿ 50 of ₿ 200 so far`, the request stays open; a 150-sat token to
+   it then closes it.
+6. **The log.** `sh tools/pull-device-log.sh` on the keeper. **Pass:** no `a tip for a sale this phone has no record of
+   taking in`, and no `a till sale’s key did not come back`.
+
 #### 22p. Several payments while Foxy was closed
 
 *Needs this phone and a second wallet (or a second Foxy) to pay it. Test money

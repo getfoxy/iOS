@@ -360,6 +360,13 @@ simulator, where CI never reaches it. It prints what it does not check: each
 action's own argument checks, and Face ID, which `SeedVault` enforces on the
 read.
 
+**`integration-vectors.js`** runs `tools/check-integration-vectors.js` against a
+made-up folder of copies: matching copies pass, one byte changed fails and names
+the pair, a missing file fails, and with `FOXY_LIBS` unset the stage is skipped
+with exit 0. It also covers the manifest's other modes (`json`, `grep:` and
+`seal`) passing and failing. The real comparison is the "integration vectors"
+stage of `tools/check-all.sh`, run with `FOXY_LIBS` set to the folder of copies.
+
 **`fixtures/native-rules.json`** is the native seed's rules and refusals, held
 once. They used to be written twice — in the Swift that ships and again in the
 mock above — and kept in step by hand, which is drift nobody sees: the page goes

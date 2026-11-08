@@ -431,11 +431,46 @@
     return this.mintNameOf(this.mintHost());
   }
 
-  /* A mint's short name from its address: its own in MINT_NAMES, else the
-   * first label after "mint.". */
+  /* The one rule for how a mint is called on a screen. A name a mint gives itself (or the shipped list gives it) loses a leading
+   * or trailing word "mint" in any case, "Flash Forge" is Forge, the two test mints at testnut.cashu.space are Testnut whatever they
+   * say, a name that is nothing but "mint" (or no name at all) is the host, and a name written all in small letters gets its capitals
+   * ("macadamia" is Macadamia). Names with capitals of their own (WesternBTC) are left as they are. */
+  shortMintName(raw, url) {
+    const host = String(url || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (/^([^/]*\.)?testnut\.cashu\.space$/i.test(host.split('/')[0])) return 'Testnut';
+    let name = String(raw || '').replace(/\s+/g, ' ').trim();
+    if (/^flash forge$/i.test(name)) return 'Forge';
+    for (let again = true; again;) {
+      const cut = name.replace(/^mint(\s+|$)/i, '').replace(/(^|\s+)mint$/i, '').trim();
+      again = cut !== name;
+      name = cut;
+    }
+    if (!name) return host;
+    return name === name.toLowerCase() ? name.replace(/(^|\s)([a-z])/g, (m, s, c) => s + c.toUpperCase()) : name;
+  }
+
+  /* What this phone knows to call a mint other than by its address: a test mint, or the name the mint said about itself (kept
+   * with its keysets by the wallet), cut by the rule above. Empty when it says nothing. */
+  mintKnownName(url) {
+    const host = String(url || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (!host) return '';
+    if (/^([^/]*\.)?testnut\.cashu\.space$/i.test(host.split('/')[0])) return 'Testnut';
+    const W = window.FoxyWallet;
+    let said = '';
+    try { said = (W && W.mintSaidName && W.mintSaidName(url)) || ''; } catch (e) { said = ''; }
+    return said ? this.shortMintName(said, url) : '';
+  }
+
+  /* A mint's short name: the shipped list's own, else what the rule makes of the name it gave itself, else the first label
+   * after "mint." of its address (MINT_NAMES for the ones that read wrong capitalised). */
   mintNameOf(url) {
     const host = String(url || '').replace(/^https?:\/\//, '');
     if (!host) return '';
+    const bare = host.replace(/\/+$/, '');
+    const shipped = (this.DEFAULT_MINTS || []).find(m => String(m.url).replace(/^https?:\/\//, '').replace(/\/+$/, '') === bare);
+    if (shipped) return shipped.name;
+    const known = this.mintKnownName(url);
+    if (known) return known;
     const domain = host.split('/')[0].replace(/^mint\./i, '');
     const label = domain.split('.')[0].toLowerCase();
     return this.MINT_NAMES[label] || (label.charAt(0).toUpperCase() + label.slice(1));
@@ -667,16 +702,16 @@
   DEFAULT_MINTS = [
     /* Forge first: where a fresh install connects (the wallet's `defaultMint`), and the mint that issues dollars as well as
      * bitcoin, so the second balance and the question of what to hold are there from the start. */
-    { url: 'https://forge.flashapp.me', name: 'Flash Forge',
+    { url: 'https://forge.flashapp.me', name: 'Forge',
       host: 'forge.flashapp.me', tint: '#C9822F' },
-    { url: 'https://mint.minibits.cash/Bitcoin', name: 'Minibits mint',
+    { url: 'https://mint.minibits.cash/Bitcoin', name: 'Minibits',
       host: 'mint.minibits.cash', tint: '#4E7BE8' },
     /* Coinos and WesternBTC were here and were taken out, Coinos for being
      * unreliable; so were the two public test mints (testnut.cashu.space), whose
      * fake money has no place on a list a new user picks from. A phone that has
      * used any of them still lists it, from its own record of the mints it has
      * connected to, and the test mints keep their warning card when they are. */
-    { url: 'https://mint.macadamia.cash', name: 'macadamia Mint',
+    { url: 'https://mint.macadamia.cash', name: 'Macadamia',
       host: 'mint.macadamia.cash', tint: '#8A5A2B' },
   ];
 
@@ -690,8 +725,8 @@
     seen.forEach(url => {
       if (known.indexOf(strip(url)) >= 0) return;
       known.push(strip(url));
-      // a mint nobody shipped: no logo, and its host stands in for a name
-      out.push({ url: url, name: strip(url), host: strip(url), logo: '', tint: '#5A5A5A' });
+      // a mint nobody shipped: no logo, and its host stands in for a name unless it is a test mint or has said its own
+      out.push({ url: url, name: this.mintKnownName(url) || strip(url), host: strip(url), logo: '', tint: '#5A5A5A' });
     });
     return out;
   }

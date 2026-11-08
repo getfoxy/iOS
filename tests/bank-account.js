@@ -4,7 +4,7 @@
  *     node tests/bank-account.js
  *
  *   1. the wallet (build/wallet/08f-bank.js), against a stand-in for the exchanges' address servers behind the phone's
- *      bridge: a username cleaned, looked up at strike.me or cash.app over the Tor road (found, not found, no answer,
+ *      bridge: a username cleaned, looked up at strike.me over the Tor road (found, not found, no answer,
  *      asked again on a fresh circuit), what is kept, and the LNURL-pay a payment to that address goes through
  *      (`lookupLnurl`: min and max, the amount the callback is asked, the invoice's amount, a failure);
  *   2. the screens, lifted out of build/foxy-app.js: SEND's tile, the list, ALREADY HAVE AN ACCOUNT?, the username
@@ -21,6 +21,7 @@ const ok = (good, name, detail) => {
   console.log((good ? 'ok    ' : 'FAIL  ') + name + (good || detail === undefined ? '' : ' — ' + detail));
   if (good) passed += 1; else failed += 1;
 };
+const CASH_Q = 'Open Cash App, tap Money, then Bitcoin, then Receive, turn on Lightning, copy the invoice, then come back and paste it here.';
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e || new Error('rejected with nothing'); } };
 
@@ -76,12 +77,10 @@ async function run() {
   {
     const { W } = exchangeCtx(() => 'hang');
     const names = W.bankExchanges().map((x) => x.key + ':' + x.domain + ':' + x.by);
-    ok(names.join(' ') === 'strike:strike.me:address river:river.com:invoice cashapp:cash.app:address', 'three exchanges, in the list’s order', names.join(' '));
+    ok(names.join(' ') === 'strike:strike.me:address river:river.com:invoice cashapp:cash.app:invoice', 'three exchanges, in the list’s order', names.join(' '));
     ok(W.bankUser('strike', ' Alice ') === 'alice' && W.bankUser('strike', 'alice@strike.me') === 'alice' && W.bankUser('strike', 'ALICE@STRIKE.ME') === 'alice',
        'a Strike username: as typed, lower case, its domain taken off', [W.bankUser('strike', ' Alice '), W.bankUser('strike', 'alice@strike.me')].join(','));
-    ok(W.bankUser('cashapp', '$Alice') === 'alice' && W.bankUser('cashapp', 'alice@cash.app') === 'alice' && W.bankUser('cashapp', '$alice@cash.app') === 'alice',
-       'a cashtag: the $ comes off, and the domain', W.bankUser('cashapp', '$Alice'));
-    ok(W.bankUser('strike', 'alice@cash.app') === '' && W.bankUser('strike', 'al ice') === '' && W.bankUser('strike', '') === '' && W.bankUser('river', 'alice') === '',
+    ok(W.bankUser('strike', 'alice@cash.app') === '' && W.bankUser('strike', 'al ice') === '' && W.bankUser('strike', '') === '' && W.bankUser('river', 'alice') === '' && W.bankUser('cashapp', '$alice') === '',
        'a name at another domain, with a space, empty, or for River, is no username');
   }
   {
@@ -113,22 +112,13 @@ async function run() {
     ok(!!e && /did not answer/.test(e.message), 'Strike: no answer at all is not an answer: the lookup fails, to be tried again', e && e.message);
   }
   {
-    const found = exchangeCtx((u) => (u === 'https://cash.app/.well-known/lnurlp/alice' ? RECORD({ callback: 'https://cash.app/cb' }) : '404\n{}'));
-    const r = await found.W.bankLookup('cashapp', '$alice');
-    ok(r.state === 'found' && r.addr === 'alice@cash.app', 'Cash App: looked up at cash.app/.well-known/lnurlp/<cashtag>, no $', JSON.stringify(r) + ' ' + JSON.stringify(found.asked));
-    const no = await found.W.bankLookup('cashapp', 'bob');
-    ok(no.state === 'unchecked' && no.addr === 'bob@cash.app', 'Cash App: a lookup that fails takes the address as typed, unchecked', JSON.stringify(no));
-    const quiet = exchangeCtx(() => 'hang');
-    quiet.W._reachMs = 300;
-    const q = await quiet.W.bankLookup('cashapp', 'dave');
-    ok(q.state === 'unchecked' && /did not answer/.test(q.why), 'and so does one that never answers, saying why', JSON.stringify(q));
-  }
-  {
     const t = exchangeCtx(() => RECORD());
     const e = await threw(() => t.W.bankLookup('strike', 'not a name'));
     ok(!!e && /not a Strike username/.test(e.message) && t.asked.length === 0, 'a name that is not one is refused before anything is asked', e && e.message);
     const r = await threw(() => t.W.bankLookup('river', 'alice'));
     ok(!!r && t.asked.length === 0, 'River has no username to look up');
+    const c = await threw(() => t.W.bankLookup('cashapp', 'alice'));
+    ok(!!c && t.asked.length === 0, 'Cash App has no username to look up either: nothing is asked at cash.app');
   }
   {
     const dark = exchangeCtx(() => RECORD(), { tor: 'connecting', progress: 0, everUp: true, unprotected: false, transport: 'direct', network: 'none' });
@@ -147,6 +137,12 @@ async function run() {
     W.bankSave('river');
     const r = W.bankSaved();
     ok(r && r.ex === 'river' && !r.addr, 'River: only the choice is kept', JSON.stringify(r));
+    W.bankSave('cashapp');
+    const c = W.bankSaved();
+    ok(c && c.ex === 'cashapp' && !c.addr && Object.keys(JSON.parse(ctx.storage.getItem('foxy.bank'))).sort().join() === 'at,ex', 'Cash App: only the choice is kept', JSON.stringify(c));
+    ctx.storage.setItem('foxy.bank', JSON.stringify({ ex: 'cashapp', user: 'alice' }));
+    const old = W.bankSaved();
+    ok(old && old.ex === 'cashapp' && !old.addr, 'a cashtag kept by an earlier version reads as Cash App kept, with no address', JSON.stringify(old));
     ctx.storage.setItem('foxy.bank', JSON.stringify({ ex: 'strike', user: 'bad name' }));
     ok(W.bankSaved() === null, 'what no longer reads as a username is nothing kept');
     W.bankForget();
@@ -177,7 +173,7 @@ async function run() {
   // ---- 2. the screens ----------------------------------------------------------------------------------------------
   console.log('\n2. the screens');
   global.CTA_INK = () => '#050505';
-  const SIGS = ['bankName(ex) {', 'bankNow() {', 'bankStart() {', 'bankList() {', 'bankRows() {', 'bankPick(ex) {', 'bankHaveAsk(ex) {',
+  const SIGS = ['bankName(ex) {', 'bankByInvoice(ex) {', 'bankOwn() {', 'bankNow() {', 'bankStart() {', 'bankList() {', 'bankRows() {', 'bankPick(ex) {', 'bankHaveAsk(ex) {',
     'bankNoAccount(ex) {', 'bankAskOpen(ex, short) {', 'bankType(e) {', 'bankGo() {', 'bankCheck(pasted) {', 'bankPasted(text) {',
     'bankAmount(ex, addr, short) {', 'bankChange() {', 'bankAmountQuestion() {', 'bankDoneSays(ex) {', 'renderBank(c) {', 'bankShortHere() {',
     'goSwitchMint(extra) {'];
@@ -187,9 +183,9 @@ async function run() {
     const said = { opened: [], looked: [], accepted: [], cards: [], toasts: [] };
     global.window = { FoxyWallet: {
       bankExchanges: () => [{ key: 'strike', name: 'Strike', domain: 'strike.me', by: 'address' }, { key: 'river', name: 'River', domain: 'river.com', by: 'invoice' },
-        { key: 'cashapp', name: 'Cash App', domain: 'cash.app', by: 'address', unchecked: true }],
+        { key: 'cashapp', name: 'Cash App', domain: 'cash.app', by: 'invoice' }],
       bankUser: (ex, raw) => {
-        const d = { strike: 'strike.me', cashapp: 'cash.app' }[ex];
+        const d = { strike: 'strike.me' }[ex];
         if (!d) return '';
         let t = String(raw || '').trim().replace(/^[$@]+/, '');
         if (t.indexOf('@') >= 0) { if (t.split('@')[1].toLowerCase() !== d) return ''; t = t.split('@')[0]; }
@@ -197,7 +193,7 @@ async function run() {
       },
       bankLookup: (ex, raw) => { said.looked.push([ex, raw]); return opt.lookup ? opt.lookup(ex, raw) : new Promise(() => {}); },
       bankSaved: () => store.kept,
-      bankSave: (ex, user) => { store.kept = ex === 'river' ? { ex } : { ex, user, addr: user + '@' + (ex === 'strike' ? 'strike.me' : 'cash.app') }; return true; },
+      bankSave: (ex, user) => { store.kept = ex !== 'strike' ? { ex } : { ex, user, addr: user + '@' + (ex === 'strike' ? 'strike.me' : 'cash.app') }; return true; },
       bankOpen: (ex) => { said.opened.push(ex); return Promise.resolve(); },
       classify: (t) => (/^lnbc/i.test(t) ? 'invoice' : /@/.test(t) ? 'lnurl' : 'unknown'),
       reason: (e) => String((e && e.message) || e),
@@ -317,19 +313,33 @@ async function run() {
     ok(d.said.looked.length === 0 && /needs a connection/.test(d.said.toasts[0]), 'offline: nothing asked, and said why', JSON.stringify(d.said.toasts));
   }
   {
-    // Cash App: unchecked is taken, and PASTE fills and checks
-    const a = make({ state: { screen: 'bankAsk', stack: [], bankEx: 'cashapp', bankDraft: '' },
-      lookup: (ex, raw) => Promise.resolve({ state: 'unchecked', ex, user: 'alice', addr: 'alice@cash.app', why: 'x' }) });
+    // Cash App: as River, no username and no question first, an invoice pasted
+    const a = make({ state: { screen: 'switchMint', stack: ['home', 'sendHow'], bankPick: true } });
+    a.bankRows()[2].tap();
+    ok(a.state.screen === 'bankAsk' && a.state.bankEx === 'cashapp' && !a.said.cards.length, 'CASH APP asks no question first: its paste screen', JSON.stringify([a.state.screen, a.state.bankEx, a.said.cards.length]));
     let v = vals(a);
-    ok(v.bkTitle === 'CASH APP' && v.bkDomain === '@cash.app' && v.bkPlaceholder === 'cashtag', 'Cash App: its cashtag, @cash.app after it');
-    a.bankPasted('$Alice');
-    await wait(0);
-    v = vals(a);
-    ok(a.state.bankDraft === 'alice' && a.said.looked.length === 1 && v.bkStatus === 'alice@cash.app — could not be checked' && v.bkCta === 'NEXT',
-       'PASTE fills the field and checks it; Cash App unchecked: "could not be checked", and NEXT', JSON.stringify([a.state.bankDraft, v.bkStatus, v.bkCta]));
-    ok(a.store.kept && a.store.kept.ex === 'cashapp', 'and it is kept');
+    ok(v.bkTitle === 'CASH APP' && v.bkQuestion === CASH_Q && !v.bkByName && v.bkCta === 'OPEN CASH APP' && v.bkDomain === '',
+       'CASH APP: what to do in Cash App, OPEN CASH APP, PASTE, no field and no domain', JSON.stringify([v.bkQuestion, v.bkCta, v.bkDomain]));
     a.bankGo();
-    ok(a.state.screen === 'amount' && a.state.recipient === 'alice@cash.app', 'NEXT: SET AMOUNT for alice@cash.app');
+    await wait(0);
+    ok(a.said.opened.join() === 'cashapp' && a.said.looked.length === 0, 'OPEN CASH APP opens Cash App and looks nothing up');
+    a.bankPasted('$alice');
+    v = vals(a);
+    ok(v.bkStatus === 'That is not a Lightning invoice. In Cash App, copy the Lightning invoice, then paste it here.' && !a.said.accepted.length && !a.store.kept && a.said.looked.length === 0,
+       'a cashtag or anything that is no invoice is refused with Cash App’s words, nothing looked up or kept', v.bkStatus);
+    a.bankPasted('lightning:lnbc2500n1pinvoicecash');
+    ok(a.said.accepted[0] === 'lnbc2500n1pinvoicecash' && a.state.screen === 'sendConfirm' && a.bankNow() === 'cashapp',
+       'an invoice goes to the confirmation, as any pasted invoice, marked as Cash App’s', JSON.stringify(a.state));
+    ok(a.store.kept && a.store.kept.ex === 'cashapp' && !a.store.kept.addr, 'and Cash App is kept as the choice, not the invoice', JSON.stringify(a.store.kept));
+    const b = make({ state: { screen: 'bankAsk', stack: ['home', 'sendHow'], bankEx: 'cashapp' } });
+    b.bankPasted('lnbc1pnoamountcash');
+    ok(b.state.screen === 'amount' && b.bankAmountQuestion() === 'How much to send to your Cash App account?', 'an invoice with no amount: SET AMOUNT, asking how much to send to Cash App');
+    const k = make({ kept: { ex: 'cashapp' } });
+    k.bankStart();
+    ok(k.state.screen === 'bankAsk' && k.state.bankEx === 'cashapp' && vals(k).bkChangeShown, 'Cash App kept: BANK ACCOUNT goes to its paste screen, with CHANGE EXCHANGE');
+    k.bankChange();
+    ok(k.state.screen === 'switchMint' && k.state.bankPick === true && !k.state.bankShort, 'CHANGE EXCHANGE: the list again');
+    ok(k.bankRows().map((r) => r.name).join() === 'STRIKE,RIVER,CASH APP', 'which lists the three');
   }
   {
     // River: paste an invoice with an amount, and one with none
@@ -381,7 +391,7 @@ async function run() {
     v.sentBankGo();
     await wait(0);
     ok(a.said.opened.join() === 'strike', 'which opens Strike');
-    a.state.recipient = 'alice@cash.app'; a.state.bank = { ex: 'cashapp', to: 'alice@cash.app' };
+    a.state.recipient = 'lnbc1pcash'; a.state.bank = { ex: 'cashapp', to: 'lnbc1pcash' };
     v = vals(a);
     ok(v.sentBankSays === 'Sent to your Cash App. Turn on Receive Lightning as dollars in Cash App so it arrives as dollars. Cash App allows $999 over Lightning every 7 days and is not available in New York.'
        && v.sentBankCta === 'OPEN CASH APP', 'Cash App: the switch, the weekly limit and New York, and OPEN CASH APP', v.sentBankSays);
@@ -393,7 +403,11 @@ async function run() {
     a.state.sendPhase = 'settled'; a.state.recipient = 'bob@example.com';
     ok(!vals(a).sentBankShown && a.bankNow() === '', 'nor for a payment to anyone else afterwards');
     const sent = method('renderSentBase(c) {');
-    ok(/bank: null, bankShort: false/.test(sent) && /'YOUR RIVER ACCOUNT'/.test(sent), 'DONE ends it, and River’s invoice is said as theirs');
+    ok(/bank: null, bankShort: false/.test(sent) && /this\.bankOwn\(\)/.test(sent), 'DONE ends it, and an invoice made in River or Cash App is said as theirs');
+    a.state.recipient = 'lnbc1priver'; a.state.bank = { ex: 'river', to: 'lnbc1priver' };
+    ok(a.bankOwn() === 'YOUR RIVER ACCOUNT', 'River’s invoice: YOUR RIVER ACCOUNT', a.bankOwn());
+    a.state.recipient = 'lnbc1pcash'; a.state.bank = { ex: 'cashapp', to: 'lnbc1pcash' };
+    ok(a.bankOwn() === 'YOUR CASH APP ACCOUNT', 'Cash App’s invoice: YOUR CASH APP ACCOUNT', a.bankOwn());
   }
   {
     // the payment is marked, and history says whose it was
@@ -402,7 +416,7 @@ async function run() {
        'a payment BANK ACCOUNT chose is tagged with its exchange, settled or pending');
     const hist = new Function('return {' + ['loadHistory() {', 'bankName(ex) {'].map(method).join(',\n') + '}')();
     const day = Math.floor(Date.now() / 1000);
-    const tags = { h1: { to: 'alice@strike.me', bank: 'strike' }, h2: { to: 'lnbc1priver', bank: 'river' }, h3: { to: 'alice@cash.app', bank: 'cashapp' }, h4: { to: 'bob@example.com' } };
+    const tags = { h1: { to: 'alice@strike.me', bank: 'strike' }, h2: { to: 'lnbc1priver', bank: 'river' }, h3: { to: 'lnbc1pcash', bank: 'cashapp' }, h4: { to: 'bob@example.com' } };
     const remembered = [];
     global.window = { FoxyWallet: {
       connected: true, mintUrl: 'https://m.test',

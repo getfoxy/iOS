@@ -2236,10 +2236,96 @@ having taken the payment, passes the tip on by its own row of the code. A
 delivery claiming a larger tip than it brought passes on no more than came in;
 a code without tips passes on nothing whatever its delivery says.
 
+**The sale and the tip, itemized.** The delivery carries `tip` and `base` (the
+sale itself, the payment less the tip), and the keeper passes the tip on as it
+says: there is no limit on how much of a sale may be tip. What keeps it honest is
+the keeper's receipt: the sale's one history row (its amount the whole payment)
+says the two as two figures, `sale ₿ 15 · tip ₿ 9,999` (`tillTipRowText`), and
+each payment that passed a tip on is a row of its own, "Tip to <name>", so a sale
+that was nearly all tip is plain at a glance. A word beyond what arrived is
+refused, not cut down: a tip over what came in, or a `base` over what came in
+less the tip, passes on no tip at all, and so does a sale of nothing (`base` 0,
+or a tip that is the whole payment); the payment itself is still taken. The
+word is held to the pieces' sum, which is what the cashier sent; what is passed
+on is the tip less any part of it the keeper's own swap fee took (never more than
+landed less the sale), so at a mint that charges input fees an honest tip still
+goes. The itemized row detects a whole-sale tip, after the fact: the tip has
+already been passed on by then, and nothing takes it back. It does not prevent
+one; a cashier who says tip = payment − 1 and base = 1 sends nearly the whole
+sale on as a tip. And a tip is passed on only from a sale this phone took in: `tipForward` refuses
+a hash that is not a received row of its own in the history (not a cashier's
+`forKeeper` row, not money paid out; for any caller but the keeper's own
+till only a till row taken from a cashier, and for the keeper's own till only
+while that till is open), and never passes on more than that row says landed, so a sale named by nobody makes no job and moves nothing out of the
+keeper's balance.
+
+**A key for each sale.** A code carries the keeper's key `L` (a seed-derived
+lock key on the row `till-<id>`), but nothing is locked to `L` itself. Each
+request and each invoice a cashier makes picks a nonce `n` of its own (16 random
+bytes) and is locked to
+
+    K = L + t·G,  t = SHA-256("foxy-till-lock-v1" ‖ L (33 bytes) ‖ n)
+
+(once more with 0xFF appended where t is 0 or not below the group order, as the
+Cashu ID's drop boxes are moved). `n` is kept on the cashier's open request
+(`tillNonce`) or the invoice's quote record, on its outbox row (`nonce`), and
+goes in the delivery (`n`); the request the payer sees names `K` and neither `n`
+nor `L`. A till takes only ecash locked to the `K` of the request it is paid at:
+the same pieces at another request, on this till or another, or locked to `L`,
+are refused before anything is held ("locked to another payment"). Locks are
+compared by the key's x alone, as the mint compares them (NUT-11): a payer who
+writes `K` with the other prefix pays `K`, and the keeper finds `K`'s key for it.
+A request is open an hour, but a payer's wallet locks its pieces before it
+posts them, so a refused post or a lost answer would leave pieces only `l + t`
+opens and nobody else knows `n`: the till keeps every key it put in a request,
+with its nonce, amount and tip (`foxy.till.issued`, for its code's life and the
+week after, written before the request is shown; past five thousand, keys paid go
+first, then keys whose code has ended, and an unpaid key of a live code is never
+let go). A token
+scanned at a till is taken where it is locked to one of that till's open
+requests, or to a key it issued and has not been paid on, however long ago; a
+token for the whole amount closes the request and marks the key paid. A second,
+different token to a paid key is the payer paying twice: it is taken whole as
+extra money, with no tip and no sale, since nobody else can deliver it. A token
+short of what was asked is taken too (it is locked to the keeper, and refused it
+would be nobody's): short tokens to one key add up (`got` on its note), the
+cashier is shown the total so far against the price, and the token that brings
+the total to the price closes the request and carries its tip. A short post is refused by the request's
+own check, as before, and its payer can show the token at the till instead. The keeper reads a delivery's `n`, works `K`
+out from its own row's `L`, takes the delivery only where every piece is locked
+to that `K`, and notes `K` (by its x) with `L` and `t` (`foxy.till.sales`, five
+hundred at most) before it swaps; the note goes once the swap lands. Whatever spends that ecash, then or on a later try, asks
+`lockKeyMatching` for `K`'s key, which finds `l` as any lock key's is (its row,
+or the walk of the seed) and answers `l + t`, checked to give back `K`. The
+spend is in the page: the phone hands over `l` for `L`'s index (`p2pkKey`) as
+for any lock, and derives nothing else. `L` keeps its own parity (a compressed
+key), so no negation is needed. tests/fixtures/till-key-vectors.json holds the
+numbers: the page and harness.js's BigInt arithmetic are held to it by
+tests/till-wallet.js, and libsecp256k1 with P2PK.swift by
+FoxyTests/TillSaleKeyTests.swift. Codes are version 2 (`v: 2`); a cashier on a
+build that reads version 1 alone refuses one as "from a newer Foxy", and this
+build refuses a version 1 code as "from an older Foxy. Ask the keeper for a new
+one." A keeper's row made before version 2 (no `v`) still takes what its
+cashiers send locked to `L`, until it ends; a row of version 2 refuses a
+delivery that names no sale. So the replay stays open on tills still on the old
+build, working old codes, until those codes end (72 hours, then a week in which
+their deliveries are still taken): each such till can still show PAID for a
+copy of one payment, though the keeper takes the money once. After updating, a
+keeper ends its old codes and makes new ones for its cashiers (DEVICE-TESTS
+§22q).
+
+Before this, one code was handed to every cashier who asked and everything was
+locked to `L`: a payer, who makes its own locked pieces and so keeps a copy,
+paid one till and then the next with the same token, the mint saying UNSPENT
+until the keeper swapped hours later, and both tills said PAID.
+
 **The list.** CASHIER CODE on the till's SET AMOUNT opens CASHIER CODES: the live
 codes, each a row with its label (only the keeper's phone has it), its mints,
 its currency, its tips and when it ends; ADD A CASHIER makes another beside them,
-so several cashiers work at once (eight codes at most, live or ended within the
+so several cashiers work at once. Every code is made for one cashier: asking for
+a code always makes a new one, with its own id, lock key and Nostr key, and none
+is ever handed out a second time (a row of the list shows its own QR again, for
+the cashier it was made for). Eight codes at most, live or ended within the
 week a late payment by one may still arrive in, and the phone listens on all
 eight). A row shows its QR again with END THIS CODE. END takes it off the list
 for good; its cashier is not told (nothing reaches a cashier but its code) and
@@ -2251,8 +2337,10 @@ keys). Nothing on any of these screens totals what a code, a cashier or the till
 took.
 
 The suites: `tests/till-tips.js` (the wallet: the answer's checks, the split,
-the jobs, the cashier's fields, the list) and `tests/till-ui.js` §20 (the
-screens).
+the jobs, the cashier's fields, a tip and sale beyond what arrived, a made-up sale refused, the
+list), `tests/till-wallet.js` (the sale keys, the vectors, one payment at two
+tills taken once, the old code refused) and `tests/till-ui.js` §20 (the
+screens, the itemized row among them).
 
 ## 20. Saying what arrived — one RECEIVED for several
 

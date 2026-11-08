@@ -90,6 +90,116 @@
   var TILL_TO = /^nprofile1[02-9ac-hj-np-z]{20,1200}$/;
   var TILL_ID = /^[0-9a-f]{16}$/;
 
+  /* ---- a key for each sale ----
+   *
+   * A code carries the keeper's key L, but nothing is ever locked to L itself.
+   * Each request and invoice a cashier makes picks a nonce n of its own (16
+   * random bytes) and is locked to
+   *
+   *     K = L + t·G,  t = SHA-256("foxy-till-lock-v1" ‖ L (33 bytes) ‖ n),
+   *
+   * once more with 0xFF appended where t is 0 or not below the group order, as
+   * the Cashu ID's drop boxes are moved (08e-cashu-id.js `cidDropKey`). The
+   * delivery names n, and the keeper spends with l + t, l the private half of
+   * L. L keeps its own parity (a compressed key), so the move needs no
+   * negation. A payment to one request's K is nobody else's: another request,
+   * on this till or another, has another K, and a till takes only ecash
+   * locked to the K of the request it is paid at. Two tills sharing one code
+   * once both took one locked payment as two sales, the payer having made the
+   * pieces and kept a copy; and every cashier was handed that one code. */
+  var TILL_CODE_V = 2;
+  var TILL_LOCK_TAG = 'foxy-till-lock-v1';
+  var TILL_NONCE = /^[0-9a-f]{32}$/;
+  var TILL_SALES_MAX = 500;
+
+  function tillSaleTweak(lockHex, nonceHex) {
+    var L = String(lockHex || '').toLowerCase(), n = String(nonceHex || '').toLowerCase();
+    if (!TILL_LOCK.test(L) || !TILL_NONCE.test(n)) throw new Error('That is not a till sale’s key.');
+    var head = Array.prototype.slice.call(new TextEncoder().encode(TILL_LOCK_TAG))
+      .concat(Array.prototype.slice.call(bytesOfHex(L)), Array.prototype.slice.call(bytesOfHex(n)));
+    var order = cidOrder();
+    var t = BigInt('0x' + hexOf(sha256(head)));
+    if (t === BigInt(0) || t >= order) t = BigInt('0x' + hexOf(sha256(head.concat([255]))));
+    if (t === BigInt(0) || t >= order) throw new Error('No key could be made for that sale.');
+    return t;
+  }
+
+  function tillHex32(v) {
+    var h = v.toString(16);
+    while (h.length < 64) h = '0' + h;
+    return h;
+  }
+
+  /* The key a sale with nonce `n` at a code of key `L` is locked to:
+   * { pub, t }, both hex, `pub` compressed. Throws on anything else. */
+  function tillSaleKey(lockHex, nonceHex) {
+    var t = tillSaleTweak(lockHex, nonceHex);
+    var CT = window.CashuTS;
+    var G = CT.pointFromHex('0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798');
+    var P = CT.pointFromHex(String(lockHex).toLowerCase()).add(G.multiply(t));
+    var pub = P.toHex(true);
+    if (!TILL_LOCK.test(pub)) throw new Error('No key could be made for that sale.');
+    return { pub: pub, t: tillHex32(t) };
+  }
+
+  // the private half of a sale's key: l + t, mod the group order; '' where that is nothing
+  function tillSalePriv(privHex, tHex) {
+    if (!/^[0-9a-f]{64}$/i.test(String(privHex || '')) || !/^[0-9a-f]{64}$/i.test(String(tHex || ''))) return '';
+    var k = (BigInt('0x' + privHex) + BigInt('0x' + tHex)) % cidOrder();
+    return k === BigInt(0) ? '' : tillHex32(k);
+  }
+
+  // a fresh nonce for a sale, 16 random bytes in hex
+  function tillSaleNonce() {
+    var raw = new Uint8Array(16);
+    (window.crypto || window.msCrypto).getRandomValues(raw);
+    return hexOf(raw);
+  }
+
+  /* The keeper's note of a sale's key, before its ecash is spent: `K` the
+   * moved key, `L` the code's, `t` the move. Kept by K's x, newest last,
+   * until its swap lands (`tillSaleDrop`), five hundred at most: a key whose
+   * note has gone is found again by the next delivery that names its nonce.
+   * `mustSave`, since the spend that follows needs it. */
+  function tillSalesNow() {
+    var m = load(K.tillSales, {});
+    return m && typeof m === 'object' && !Array.isArray(m) ? m : {};
+  }
+
+  // a note's key: the moved key's x alone, so either prefix a payer wrote finds it (`sameLockKey`)
+  function tillSaleX(pub) { var k = String(pub || '').toLowerCase(); return k.length === 66 ? k.slice(2) : k; }
+
+  /* Its swap landed (or the mint has it spent): the note goes, so the list holds only what is still to be spent. A
+   * delivery read again writes it again. */
+  function tillSaleDrop(pub) {
+    var all = tillSalesNow(), k = tillSaleX(pub);
+    if (!(k in all)) return;
+    delete all[k];
+    save(K.tillSales, all);
+  }
+
+  function tillSaleKeep(pub, lockHex, tHex) {
+    var all = tillSalesNow();
+    var k = tillSaleX(pub);
+    if (all[k] && all[k].L === lockHex && all[k].t === tHex) return;
+    all[k] = { L: String(lockHex).toLowerCase(), t: String(tHex).toLowerCase(), at: Date.now() };
+    var keys = Object.keys(all);
+    if (keys.length > TILL_SALES_MAX) {
+      keys.sort(function (a, b) { return Number(all[a].at) - Number(all[b].at); })
+        .slice(0, keys.length - TILL_SALES_MAX).forEach(function (x) { delete all[x]; });
+    }
+    mustSave(K.tillSales, all);
+  }
+
+  // the note for a moved key, or null: { L, t }, both checked again against it
+  function tillSaleFor(pub) {
+    var full = String(pub || '').toLowerCase();
+    if (!TILL_LOCK.test(full)) return null;
+    var one = tillSalesNow()[tillSaleX(full)];
+    if (!one || !TILL_LOCK.test(String(one.L)) || !/^[0-9a-f]{64}$/.test(String(one.t))) return null;
+    return { L: one.L, t: one.t };
+  }
+
   /* ---- the pass, as text ---- */
 
   function tillB64(text) {
@@ -129,7 +239,11 @@
   function tillCheck(j) {
     var bad = { why: 'That is not a cashier code Foxy can read.' };
     if (!j || typeof j !== 'object' || Array.isArray(j)) return bad;
-    if (j.v !== 1) return { why: 'That cashier code is from a newer Foxy. Update Foxy and scan it again.' };
+    /* Version 2 locks every sale to a key of its own (`tillSaleKey`). A code
+     * of version 1 is refused here, and a cashier still on a build that reads
+     * only version 1 refuses this one with "from a newer Foxy". */
+    if (j.v === 1) return { why: 'That cashier code is from an older Foxy. Ask the keeper for a new one.' };
+    if (j.v !== TILL_CODE_V) return { why: 'That cashier code is from a newer Foxy. Update Foxy and scan it again.' };
     if (typeof j.id !== 'string' || !TILL_ID.test(j.id)) return bad;
     if (typeof j.mint !== 'string' || j.mint.length > 512 || mintUrlProblem(j.mint)) return bad;
     /* The mints it takes payments at: none named is the one mint a code from
@@ -153,7 +267,7 @@
      * not in the code (the keeper's phone keeps that, on its row of the code),
      * so a code at a counter names nobody's Cashu ID. */
     if (j.tips !== undefined && typeof j.tips !== 'boolean') return bad;
-    var out = { v: 1, id: j.id, mint: mints[0], mints: mints, unit: j.unit, main: main, lock: j.lock, to: j.to, exp: j.exp };
+    var out = { v: TILL_CODE_V, id: j.id, mint: mints[0], mints: mints, unit: j.unit, main: main, lock: j.lock, to: j.to, exp: j.exp };
     if (j.tips === true) out.tips = true;
     return { pass: out };
   }
@@ -198,7 +312,7 @@
   /* `main` only on a code for both, so a code in one currency reads as it always did. */
   function tillPassText(p) {
     var mints = tillMintsOf(p);
-    var body = { v: 1, id: p.id, mint: mints[0] || p.mint, mints: mints, unit: p.unit };
+    var body = { v: TILL_CODE_V, id: p.id, mint: mints[0] || p.mint, mints: mints, unit: p.unit };
     if (p.unit === 'both') body.main = p.main === 'usd' ? 'usd' : 'sat';
     body.lock = p.lock; body.to = p.to; body.exp = p.exp;
     // `tips` only on a code whose till offers them (`tillTipsOn`): a code without reads as it always did
@@ -450,31 +564,15 @@
     return TILL_TO.test(t) ? t : '';
   }
 
-  /* The newest code still live, or null: in `unit` alone where one is named
-   * (sats, dollars or both: a code says what its till takes), and at `mints`
-   * alone where they are named. A code for another set of mints is still
-   * live for the cashiers on it, but it is not this till's. */
-  /* (and with the main named, `main`, of that main alone: a code for both whose QR invoices are in sats is not the till's
-   * whose are in dollars) */
-  function tillLiveNewest(unit, mints, main) {
-    var now = Date.now();
-    var live = tillPrune().filter(function (r) {
-      return Number(r.exp) * 1000 > now && !r.endedAt && (!unit || r.unit === unit) && (!mints || tillSameMints(tillMintsOf(r), mints))
-        && (!main || r.unit !== 'both' || tillMainOf(r) === main);
-    }).sort(function (a, b) { return Number(a.made) - Number(b.made); });
-    return live.length ? live[live.length - 1] : null;
-  }
-
-  /* A code for a cashier. One at a time: while a code is live, asking again
-   * answers that same code (its text, id and end), and a new one is made only
-   * once none is. A code names no cashier, so every cashier can work by the
-   * one on screen; and a code is never dropped while it is live. Each
-   * opening of CASHIER CODE used to make a fresh one, and the fifth threw
-   * the first away with its key while a cashier was still working by it:
-   * everything that cashier took after went to a key nobody held (review
-   * w2). Two asks at once share the one being made. */
-  var tillMaking = null;
-
+  /* A code for a cashier: a new one every time, with an id, a lock key and a
+   * Nostr key of its own, so no two cashiers ever work by one code. Asking
+   * again used to answer the code already live, to every cashier who asked,
+   * and two tills on one code took one locked payment as two sales (the
+   * payer, who made the pieces, kept a copy and paid the second till with
+   * it). A code is never dropped while it is live: eight at most are out,
+   * and only one run out makes room (`tillPassMakeNew`). The list of codes
+   * (CASHIER CODES, 26p-till-tips.js) shows a code again to the cashier it was
+   * made for. */
   /* The mints a new code takes payments at: those the screen names
    * (`opts.mints`, the till it opened), the mint the phone is on first, or the
    * open till's (`tillKeeperMints`). [] where the named ones are not mints
@@ -487,28 +585,11 @@
   }
 
   function tillPassMake(opts) {
-    var want = opts && opts.unit ? unitOf(opts.unit) : '';
     var named = mintUrl ? tillPassMints(opts, mintUrl) : null;
     if (named && !named.length) {
       return Promise.reject(new Error('A cashier code takes payments at the mint this phone is on, and at mints Foxy can use.'));
     }
-    var mainWant = opts && (opts.main === 'usd' || opts.main === 'sat') ? opts.main : '';
-    /* `opts.fresh`: another code, for another cashier, whatever is live (CASHIER CODE's ADD); a code
-     * with tips asked of it apart from the till's is one too. Otherwise a live code for this till is
-     * answered again, as it always was. */
-    var fresh = !!(opts && (opts.fresh || opts.tips !== undefined));
-    var live = fresh ? null : tillLiveNewest(want, named, mainWant);
-    if (live) {
-      Promise.resolve().then(function () { return FoxyWallet.tillListen(); }).then(null, function () {});
-      return Promise.resolve({ text: tillPassText(live), id: live.id, exp: live.exp, mints: tillMintsOf(live), main: tillMainOf(live),
-                               tips: tillTipsOn(live), label: String(live.label || '') });
-    }
-    if (tillMaking && !fresh) return tillMaking;
-    var run = tillPassMakeNew(opts);
-    tillMaking = run;
-    var done = function () { if (tillMaking === run) tillMaking = null; };
-    run.then(done, done);
-    return run;
+    return tillPassMakeNew(opts);
   }
 
   function tillPassMakeNew(opts) {
@@ -555,6 +636,8 @@
         // a till in both: the main its screen chose (`opts.main`), sats where none was
         if (unit === 'both') row.main = o.main === 'usd' ? 'usd' : 'sat';
         row.tips = tips;
+        // a code of version 2: whatever is sent by it names the nonce its sale's key was moved by (`tillSaleKey`)
+        row.v = TILL_CODE_V;
         if (label) row.label = label;
         // a code no phone could read back (its mints' addresses too long between them) is not handed out
         if (tillPassText(row).length > TILL_TEXT_MAX) {
@@ -772,7 +855,22 @@
     if (!proofs.every(function (pr) {
       return typeof pr.secret === 'string' && typeof pr.C === 'string' && typeof pr.id === 'string' && satsOf(pr.amount) > 0;
     })) return refuse('it holds a proof Foxy cannot read');
-    if (!proofs.every(function (pr) { return onlyLockedTo(pr, pass.lock); })) return refuse('it is not locked to the code’s key');
+    /* Locked to the key of the sale it names (`n`, `tillSaleKey`), never to
+     * the code's own: a payment locked to the code's key L is what one payer
+     * could hand to two tills. Only a code made before every sale had its own
+     * key (no `v` on its row) still takes ecash locked to L, from a cashier
+     * still sending what it took by it. */
+    var sale = null;
+    if (j.n !== undefined) {
+      if (typeof j.n !== 'string' || !TILL_NONCE.test(j.n)) return refuse('it names no sale Foxy can read');
+      try { sale = tillSaleKey(pass.lock, j.n); } catch (eS) { return refuse('it names no sale Foxy can read'); }
+    } else if (Number(pass.v) >= TILL_CODE_V) {
+      return refuse('it names no sale, and every sale by this code has a key of its own');
+    }
+    var lockNow = sale ? sale.pub : pass.lock;
+    if (!proofs.every(function (pr) { return onlyLockedTo(pr, lockNow); })) {
+      return refuse(sale ? 'it is not locked to the key of the sale it names' : 'it is not locked to the code’s key');
+    }
     var kw = tillKeysAt(mint, unit);
     var sets = kw ? keysetsOf(mint, kw) : null;
     var known = !!sets && proofs.every(function (pr) { return !!keysetUnit(mint, pr.id, kw, sets); });
@@ -831,10 +929,20 @@
     var token;
     try { token = encodeToken(mint, proofs, unit); }
     catch (e) { return refuse('it would not make a token'); }
+    /* The sale's key noted before anything spends it: `lockKeyMatching` finds
+     * l + t by it, here and on any later try of this ecash. */
+    if (sale) {
+      try { tillSaleKeep(sale.pub, pass.lock, sale.t); }
+      catch (e) {
+        try { tillInboxKeep(id, j, text); } catch (eK) {}
+        return 'kept';
+      }
+    }
     var at = tillInboxKey(id, j);
     var away = canonicalMint(mintUrl || '') !== mint;
     return FoxyWallet.receiveToken(token, { till: true, memo: 'till', away: away }).then(function (r) {
       tillSeenAdd(proofs);
+      if (sale) tillSaleDrop(sale.pub);
       tillInboxDrop(at);
       console.log('[foxy] till: a payment from a cashier was taken in');
       /* Its tip, where the code offers tips: the cashier says how much of it was the tip (`tip`, in
@@ -850,6 +958,7 @@
       var why = String((e && e.message) || e);
       if (/already|spent/i.test(why)) {
         tillSeenAdd(proofs);
+        if (sale) tillSaleDrop(sale.pub);
         key = at;
         return refuse('the mint has it as spent already');
       }
@@ -925,6 +1034,74 @@
     return pass;
   }
 
+  /* A sale's own key on the code this phone works by: { lock, nonce }, the
+   * key a request or invoice is locked to and the nonce that moved the code's
+   * key to it (`tillSaleKey`). A new one for every request and invoice. */
+  function tillSaleNew(pass) {
+    var nonce = tillSaleNonce();
+    return { lock: tillSaleKey(pass.lock, nonce).pub, nonce: nonce };
+  }
+
+  /* ---- the cashier's own note of every sale key it asked to be paid to ----
+   *
+   * Only this till knows a request's nonce, and a request is open an hour. A
+   * payer's wallet locks its pieces to K before it posts them: a post refused,
+   * an answer lost, or a request let go, and those pieces open only with l + t,
+   * which nobody can work out without n. So every key a request carried is
+   * kept here, with its nonce, for its code's life and the week after
+   * (`TILL_SEND_UNTIL_MS`), and a token locked to it is taken at this till
+   * (`tillTake`) once, whenever it is shown, as a token locked to the code's
+   * key was while the code lived. No other till ever issued that key, so this
+   * opens no second sale. `mustSave`, before the request is shown. */
+  /* Past this many, keys go to make room: first those paid (a later token to one is only extra money), then those whose
+   * code has ended (oldest first). An unpaid key of a code still live is never let go, whatever the count: a late token
+   * locked to it would be nobody's. */
+  var TILL_ISSUED_MAX = 5000;
+
+  function tillIssuedRows() {
+    var l = load(K.tillIssued, []);
+    return Array.isArray(l) ? l.filter(function (r) {
+      return r && typeof r === 'object' && TILL_LOCK.test(String(r.k)) && TILL_NONCE.test(String(r.n)) && TILL_ID.test(String(r.pass));
+    }) : [];
+  }
+
+  function tillIssuedKeep(pass, sale, o) {
+    var now = Date.now();
+    var rows = tillIssuedRows().filter(function (r) { return !(Number(r.exp) > 0 && Number(r.exp) * 1000 + TILL_SEND_UNTIL_MS <= now); });
+    rows.push({ k: sale.lock, n: sale.nonce, pass: pass.id, exp: Number(pass.exp) || 0, at: now,
+                amount: Math.round(Number(o && o.amount) || 0), unit: unitOf(o && o.unit) || 'sat', tip: Math.round(Number(o && o.tip) || 0) });
+    while (rows.length > TILL_ISSUED_MAX) {
+      var paid = rows.filter(function (r) { return r.paidAt; })[0];
+      var ended = paid ? null : rows.filter(function (r) { return Number(r.exp) * 1000 <= now; })[0];
+      if (!paid && !ended) break;
+      rows.splice(rows.indexOf(paid || ended), 1);
+    }
+    mustSave(K.tillIssued, rows);
+  }
+
+  // the note of a key this till issued on `pass`, by the key (either prefix: the mint reads a lock by its x alone), or null
+  function tillIssuedFor(pass, pub) {
+    var hit = /** @type {any} */ (null);
+    tillIssuedRows().forEach(function (r) { if (!hit && r.pass === pass.id && sameLockKey(r.k, pub)) hit = r; });
+    return hit;
+  }
+
+  // a key's sale paid: a later token locked to it is extra money, not a sale
+  function tillIssuedPaid(pub) {
+    var rows = tillIssuedRows(), hit = false;
+    rows.forEach(function (r) { if (!r.paidAt && sameLockKey(r.k, pub)) { r.paidAt = Date.now(); hit = true; } });
+    if (hit) save(K.tillIssued, rows);
+  }
+
+  /* What short tokens to a key have brought so far (`got`, after fees, in the request's unit), added to by each: the
+   * running total that closes the request once it covers the price. Answers the new total. */
+  function tillIssuedAdd(pub, n) {
+    var rows = tillIssuedRows(), total = 0;
+    rows.forEach(function (r) { if (sameLockKey(r.k, pub)) { r.got = Math.round((Number(r.got) || 0) + n); total = r.got; } });
+    save(K.tillIssued, rows);
+    return total;
+  }
+
   // the open request's lock, for a till request: what `lockPubFor` answers when no row of this phone's names one
   function tillRequestLock(id) {
     var open = id && Object.prototype.hasOwnProperty.call(openRequests, id) ? openRequests[id] : null;
@@ -965,6 +1142,11 @@
     // the part of it that was a tip, said to the keeper with the payment (`tip`): never more than the payment
     var tip = Math.round(Number(o.tip) || 0);
     if (tip > 0) row.tip = Math.min(tip, row.amount);
+    /* and the rest, the sale itself (`base`), said beside it: the keeper's row shows the two, and a sale and tip said
+     * beyond what arrived pass on no tip (`tillTipOfBody`, 08f-till-tips.js) */
+    if (row.tip > 0) row.base = Math.max(0, row.amount - row.tip);
+    // the nonce the sale's key was moved by (`tillSaleKey`), which the keeper needs to spend it
+    if (typeof o.nonce === 'string' && TILL_NONCE.test(o.nonce)) row.nonce = o.nonce;
     rows.push(row);
     mustSave(K.tillOutbox, rows);
     return row;
@@ -1037,7 +1219,9 @@
           if (!routeOpen()) { tillTried(r); return null; }
           var sends = { id: 'till:' + r.passId + ':' + r.n, mint: r.mint, unit: r.unit, proofs: r.proofs, memo: 'till' };
           // and how much of it was a tip, for the keeper to pass on (`tillTipOfBody`)
-          if (Number(r.tip) > 0) sends.tip = Math.round(Number(r.tip));
+          if (Number(r.tip) > 0) { sends.tip = Math.round(Number(r.tip)); sends.base = Math.max(0, Math.round(Number(r.base != null ? r.base : r.amount - r.tip) || 0)); }
+          // the sale's nonce: the keeper moves the code's key by it to find the key this ecash is locked to
+          if (typeof r.nonce === 'string' && TILL_NONCE.test(r.nonce)) sends.n = r.nonce;
           var body = JSON.stringify(sends);
           return deliverOverNostr(r.to, body).then(function () {
             var rows = tillOutboxRows();
@@ -1112,6 +1296,18 @@
 
   /* ---- what a cashier takes: locked to the keeper, signed, unspent ---- */
 
+  /* '' where every piece is locked to `lock` (the sale's key) and to nobody else, or the sentence that says why not.
+   * Asked before anything is held (`tillHold`), so ecash locked to one request's key, posted to another at the same
+   * moment, cannot hold up the payment at the request it is for. */
+  function tillLockWhy(list, lock) {
+    if (list.every(function (pr) { return onlyLockedTo(pr, lock); })) return '';
+    // locked, and to some other key: another request's (on this till or another), the code's own, or a stranger's
+    if (list.every(function (pr) { return !!lockedTo(pr); })) {
+      return 'That ecash is locked to another payment, not this one, so this till cannot take it. Pay the request on screen.';
+    }
+    return 'That ecash is not locked to the keeper, so this till cannot take it. Pay the request on screen.';
+  }
+
   /* '' when these proofs may be taken for the keeper, or the sentence that
    * says why not. The mint is asked whether they are unspent, so with no
    * route nothing is taken: a cashier cannot tell a copy already spent from
@@ -1120,9 +1316,8 @@
     var list = Array.isArray(proofs) ? proofs : [];
     if (!list.length) return Promise.resolve('That payment holds no usable proofs.');
     if (repeatedProof(list)) return Promise.resolve('That payment names the same ecash more than once.');
-    if (!list.every(function (pr) { return onlyLockedTo(pr, lock); })) {
-      return Promise.resolve('That ecash is not locked to the keeper, so this till cannot take it. Pay the request on screen.');
-    }
+    var notOurs = tillLockWhy(list, lock);
+    if (notOurs) return Promise.resolve(notOurs);
     if (dleqAudit(dw, list).invalid) {
       return Promise.resolve('That ecash’s signatures do not match the keys this mint publishes, so it was not taken.');
     }
@@ -1205,6 +1400,9 @@
       console.log('[foxy] till: a payment over the amount asked by ' + said(kept - Number(p.asked))
         + ', locked to the keeper; taken whole, no change made');
     }
+    // not locked to this request's key: refused before anything is held, so it holds up no other request
+    var lockNo = Array.isArray(p.proofs) && p.proofs.length ? tillLockWhy(p.proofs, lock) : '';
+    if (lockNo) return Promise.resolve(no(422, lockNo, true));
     // the same ecash at another request, or scanned, at this moment: one of them takes it
     release = tillHold(p.proofs);
     if (!release) return Promise.resolve(no(409, TILL_IN_FLIGHT));
@@ -1222,12 +1420,14 @@
       var hash = 'till-' + p.id;
       try {
         tillOutboxAdd({ proofs: p.proofs, mint: p.mint, unit: pu, amount: kept, to: open.tillTo, passId: open.tillPass,
-                        exp: open.tillExp, hash: hash, tip: Number(open.tillTip) || 0 });
+                        exp: open.tillExp, hash: hash, tip: Number(open.tillTip) || 0, nonce: open.tillNonce });
       } catch (e) {
         console.error('[foxy] till: a payment could not be written down; refusing it:', (e && e.message) || e);
         return no(422, 'This phone could not write the payment down, so it was not taken. Try again.');
       }
       release();
+      // and its key takes nothing more, by scan or post (`tillIssuedFor`)
+      tillIssuedPaid(lock);
       try { tillLogIn(hash, kept, pu, p.mint, open.tillPass); }
       catch (e) { console.warn('[foxy] till: the history row for a payment could not be written:', (e && e.message) || e); }
       delete FoxyWallet._requestsBeingPaid[p.id];
@@ -1297,7 +1497,7 @@
       already = tillOutboxHolds(fresh);
       if (!already) {
         tillOutboxAdd({ proofs: fresh, mint: at, unit: unit, amount: got, to: entry.tillTo, passId: entry.tillPass,
-                        exp: entry.tillExp, hash: quoteId, tip: Number(entry.tillTip) || 0 });
+                        exp: entry.tillExp, hash: quoteId, tip: Number(entry.tillTip) || 0, nonce: entry.tillNonce });
       }
     } finally { free(); }
     drop();
@@ -1389,26 +1589,79 @@
     }
     var hash = 'till-' + piecesFingerprint(proofs);
     if (txSeen(hash)) return Promise.reject(new Error('This till has taken that ecash already.'));
+    /* Locked to the key of one of this till's requests (`tillSaleKey`): one still open, or one it issued and was not
+     * paid on (`tillIssuedFor`), however long ago, while the code lives and the week after. A payer who could not
+     * deliver shows the token instead. Ecash locked to the code's own key is no request's, and is the one thing a
+     * payer could hand to two tills; it is refused. */
+    var first = null;
+    for (var fi = 0; fi < proofs.length && !first; fi++) { if (lockedTo(proofs[fi])) first = proofs[fi]; }
+    var want = String((first && lockedTo(first)) || '').toLowerCase();
+    var reqId = '';
+    Object.keys(openRequests).forEach(function (rid) {
+      var o = openRequests[rid];
+      if (!reqId && o && o.purpose === 'till' && o.tillPass === pass.id && TILL_NONCE.test(String(o.tillNonce || ''))
+          && want && sameLockKey(String(o.tillLock || ''), want)) reqId = rid;
+    });
+    var open = reqId ? openRequests[reqId] : null;
+    var issued = want ? tillIssuedFor(pass, want) : null;
+    /* A key already paid: a second, different token locked to it is the payer paying twice. It is the keeper's money
+     * and nobody else can deliver it, so it is taken whole, as extra, with no tip and no sale (the same token twice is
+     * refused above, by its pieces). */
+    var extra = !open && !!issued && !!issued.paidAt;
+    if (!open && !issued && want && sameLockKey(want, pass.lock)) {
+      return Promise.reject(new Error('That ecash is locked to the till’s code, not to a payment asked for here, so it was not taken. Pay the request on screen.'));
+    }
+    // what is asked of this sale: the open request's, or the key's own note
+    var sale = open ? { lock: String(open.tillLock).toLowerCase(), nonce: open.tillNonce, tip: Number(open.tillTip) || 0,
+                        asked: Math.round(satsOf(open.amount)) }
+      : issued ? { lock: String(issued.k).toLowerCase(), nonce: issued.n, tip: extra ? 0 : Number(issued.tip) || 0, asked: extra ? 0 : Math.round(satsOf(issued.amount)) }
+      : null;
+    var lockNow = sale ? sale.lock : '';
+    var lockNo = proofs.length ? tillLockWhy(proofs, lockNow) : '';
+    if (lockNo || !sale) return Promise.reject(new Error(lockNo || 'That ecash is not locked to the keeper, so this till cannot take it. Pay the request on screen.'));
+    var asked = sale;
+    if (open && FoxyWallet._requestsBeingPaid[reqId]) return Promise.reject(new Error('That request is being paid already.'));
     // the same ecash posted to a request at this moment: one of them takes it (`tillHold`)
     var held = tillHold(proofs);
     if (!held) return Promise.reject(new Error(TILL_IN_FLIGHT));
     var free = held;
     var checking;
-    try { checking = tillAccept(dw, proofs, pass.lock); } catch (e) { checking = Promise.reject(e); }
+    try { checking = tillAccept(dw, proofs, lockNow); } catch (e) { checking = Promise.reject(e); }
     return checking.then(function (why) {
       if (why) throw new Error(why);
       var fee = 0;
       try { fee = swapFeeFor(dw, proofs); } catch (e) { fee = 0; }
       var kept = Math.max(0, Math.round(sumProofs(proofs) - fee));
+      /* Short of what was asked: taken (locked to the keeper, a refusal would strand it, as an over-payment would be),
+       * but it pays no tip and closes nothing: the request stays open for the rest, and so does its key. A short post
+       * is refused by the request's own check (`readPayment`), and its payer can show the token here. */
+      /* Short tokens add up (`tillIssuedAdd`): the one that brings the total to the price closes the request. The tip
+       * rides on no short token: the price was asked with it, and the keeper is told it once, on the token that closes
+       * it, as the part of that token it is, at most. */
+      var before = extra ? 0 : Math.round(Number(issued && issued.got) || 0);
+      var soFar = before + kept;
+      var whole = extra || !(asked.asked > 0) || soFar >= asked.asked;
       try {
-        tillOutboxAdd({ proofs: proofs, mint: at, unit: unit, amount: kept, to: pass.to, passId: pass.id, exp: pass.exp, hash: hash });
+        tillOutboxAdd({ proofs: proofs, mint: at, unit: unit, amount: kept, to: pass.to, passId: pass.id, exp: pass.exp, hash: hash,
+                        nonce: asked.nonce, tip: whole && !extra ? asked.tip : 0 });
       } finally { free(); }
+      if (!extra && asked.asked > 0) soFar = tillIssuedAdd(asked.lock, kept) || soFar;
+      // paid: the request it was for is closed, and its key's later tokens are extra money
+      if (extra) {
+        console.log('[foxy] till: a second token to a request already paid was taken for the keeper, as extra');
+      } else if (whole) {
+        if (reqId) dropOpenRequest(reqId);
+        tillIssuedPaid(asked.lock);
+      } else {
+        console.log('[foxy] till: a token short of its request was taken for the keeper; the request stays open for the rest');
+      }
       try { tillLogIn(hash, kept, unit, at, pass.id); }
       catch (e) { console.warn('[foxy] till: the history row for a token could not be written:', (e && e.message) || e); }
       console.log('[foxy] till: a token was taken for the keeper; sending');
       tillDeliverSoon();
       return { sats: unit === 'sat' ? kept : 0, unit: unit, amount: kept, mint: at, host: hostOf(at),
-               hash: hash, switched: false, till: true };
+               hash: hash, switched: false, till: true, short: !whole, extra: extra,
+               soFar: extra ? 0 : soFar, asked: extra ? 0 : asked.asked };
     }).then(null, function (e) { free(); throw e; });
   }
 
