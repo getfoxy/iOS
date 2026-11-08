@@ -214,6 +214,9 @@
    * Any refusal rejects, so connect refuses rather than building a wallet the
    * seed cannot recover, and the next call asks again. Nothing here ever makes
    * words. */
+  /* Whether the phone made this wallet's seed in this launch: a first run, whose set-up asks which currencies to use
+   * (the app's `firstRunAfterSeed`). */
+  var seedMadeNow = false;
   function nativeReady() {
     if (nativeSeedKnown && movedToPhone) return Promise.resolve();
     if (nativeReadying) return nativeReadying;
@@ -235,6 +238,7 @@
         return nativeJson('seedCreate').then(function (c) {
           if (c.created !== true) throw new Error('the phone did not say it made a seed');
           createdHere = true;
+          seedMadeNow = true;
           console.log('[foxy] the phone made this wallet’s seed');
         }, function (e) {
           if (String(e && e.message) === 'a seed already exists') return;

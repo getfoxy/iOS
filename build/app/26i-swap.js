@@ -982,8 +982,8 @@
       swapBackGo: () => this.back(),
       swapCloseGo: () => this.setState(p => ({ screen: p.stack.indexOf('flashcard') >= 0 ? 'flashcard' : 'home', stack: [] })),
       swapNextGo: () => this.swapToAmount(),
-      swapFoot: !on ? '' : this.offlineNow() ? 'Swapping needs the mint.'
-        : 'At ' + this.swapRateWho() + '. You see the rate and the fee before anything moves.',
+      // (no line under the tiles but the offline one: the rate and the fee are on the confirmation, 2026-11-08)
+      swapFoot: !on ? '' : this.offlineNow() ? 'Swapping needs the mint.' : '',
       swapNextBg: canGo ? 'var(--acc)' : 'rgba(var(--ink-rgb),.14)',
       swapNextFur: canGo ? FUR_CTA : 'none,none,none',
       swapNextInk: canGo ? '#fff' : 'rgba(var(--ink-rgb),.4)',

@@ -121,8 +121,9 @@
           + '<span style="font-weight:800;font-size:19px;letter-spacing:-.01em;white-space:nowrap">' + esc(r.value) + '</span></div>').join('')
         + '</div>' : '';
     // (`still`: the picture without its breathing, for a screen that is read and not waited at)
-    let art = this.STAGE_ART[o.art] || '';
-    if (o.still) art = art.replace(/animation:[^;"]*;?/g, '');
+    // ('cardspin': the card's picture on its turntable, 26j-card-wheel.js `fcCardStageHtml`)
+    let art = o.art === 'cardspin' ? this.fcCardStageHtml('clamp(160px, calc(100vh - 620px), 340px)') : (this.STAGE_ART[o.art] || '');
+    if (o.still && o.art !== 'cardspin') art = art.replace(/animation:[^;"]*;?/g, '');
     root.innerHTML =
       '<div style="position:absolute;left:50%;top:44%;width:420px;height:420px;border-radius:50%;'
       + 'background:radial-gradient(circle, rgba(255,255,255,.75) 0%, rgba(255,255,255,0) 65%);'
@@ -189,6 +190,7 @@
     }
     root.appendChild(wrap);
     document.body.appendChild(root);
+    if (o.art === 'cardspin') { this._fcSpinA = 0; if (this._fcSpin) this._fcSpin.a = 0; if (this.fcSpinOn) this.fcSpinOn(); }
     if (this.syncPreview) this.syncPreview();
     console.log('[foxy] screen: ' + kind + (hasQr ? ', with a code of ' + String(o.qr).length + ' chars' : ''));
 
@@ -437,64 +439,8 @@
     document.body.appendChild(root);
   }
 
-  /* GET DOLLARS: informational, and deliberately nothing else.
-   *
-   * Four companies that take bitcoin and pay dollars to a bank. Foxy saves no
-   * username, looks nothing up and pays nobody from here — an earlier design
-   * did all three and every hole in it was one of those (a typo paying a
-   * stranger, an identity kept on the phone, a lookup over Tor that may be
-   * refused). The person makes an account there and comes back to SEND.
-   *
-   * A tile opens that company's site in the phone's browser, by name: the
-   * addresses themselves are on the native side (openCompany). The icons are
-   * each company's own, as the App Store shows them (Web/gd-*.jpg). */
-  showGetDollars() {
-    this.hideGetDollars();
-    const W = window.FoxyWallet;
-    const apps = [
-      { key: 'cashapp', icon: 'gd-cashapp.jpg', name: 'CASH APP', url: 'cash.app' },
-      { key: 'strike', icon: 'gd-strike.jpg', name: 'STRIKE', url: 'strike.me' },
-      { key: 'river', icon: 'gd-river.jpg', name: 'RIVER', url: 'river.com' },
-      { key: 'flash', icon: 'gd-flash.jpg', name: 'FLASH', url: 'getflash.io' },
-    ];
-    const root = document.createElement('div');
-    root.id = 'foxy-get-dollars';
-    root.style.cssText = 'position:fixed;inset:0;z-index:2147483200;display:flex;flex-direction:column;'
-      + 'box-sizing:border-box;padding:calc(34px + env(safe-area-inset-top)) 24px calc(28px + env(safe-area-inset-bottom));'
-      + 'background:var(--bg,#050505);color:rgb(var(--ink-rgb,255,255,255));'
-      + "font-family:Sora,system-ui,sans-serif;overflow-y:auto;animation:foxyIn .18s ease";
-    const para = 'margin:0;font-weight:500;font-size:18px;line-height:1.42;text-align:center;'
-      + 'color:rgba(var(--ink-rgb,255,255,255),.84)';
-    root.innerHTML = ''
-      + '<div style="text-align:center;font-weight:800;font-size:24px;letter-spacing:.01em">WITHDRAW TO BANK</div>'
-      + '<div style="flex:0 0 1px;height:1px;margin:20px 4px 0;background:rgba(var(--ink-rgb,255,255,255),.14)"></div>'
-      + '<p style="' + para + ';margin-top:24px">These apps let you sell your bitcoin and deposit dollars into your bank account.</p>'
-      + '<div style="margin:28px auto 0;display:grid;grid-template-columns:1fr 1fr;gap:22px 34px;width:fit-content">'
-      + apps.map(a => ''
-        + '<div data-gd="' + a.key + '" style="display:flex;flex-direction:column;align-items:center;gap:9px;cursor:pointer">'
-        + '<img alt="" src="' + a.icon + '" style="display:block;box-sizing:border-box;width:96px;height:96px;'
-        + 'border-radius:22px;border:1px solid rgba(var(--ink-rgb,255,255,255),.16);box-shadow:0 6px 16px rgba(0,0,0,.45)">'
-        + '<div style="font-weight:700;font-size:14px;letter-spacing:.04em;white-space:nowrap">' + a.name + '</div>'
-        + '<div style="margin-top:-4px;font-weight:500;font-size:13px;white-space:nowrap;color:rgba(var(--ink-rgb,255,255,255),.55)">' + a.url + '</div>'
-        + '</div>').join('')
-      + '</div>'
-      + '<p style="' + para + ';margin-top:28px">Create an account with one of them and ask your AI how to receive bitcoin and sell it for dollars on that app.</p>'
-      + '<div style="flex:1 1 auto;min-height:24px"></div>'
-      + '<div data-gd-close="1" style="flex:0 0 auto;height:58px;border-radius:30px;background:var(--acc);color:#050505;'
-      + 'display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;letter-spacing:.04em;cursor:pointer">CLOSE</div>';
-    root.addEventListener('click', (e) => {
-      const t = /** @type {any} */ (e && e.target);
-      if (!t || !t.closest) return;
-      if (t.closest('[data-gd-close]')) { this.hideGetDollars(); return; }
-      const hit = t.closest('[data-gd]');
-      if (hit && W && W.openCompany) {
-        this.haptic && this.haptic('tap');
-        W.openCompany(hit.getAttribute('data-gd'));
-      }
-    });
-    document.body.appendChild(root);
-  }
-
+  /* The screen that listed companies that pay dollars to a bank is gone (BANK ACCOUNT, 26q-bank.js, has the exchanges, without
+   * their pictures); what is left is the removal of its overlay, which other screens still ask for. */
   hideGetDollars() {
     const old = document.getElementById('foxy-get-dollars');
     if (old && old.parentNode) old.parentNode.removeChild(old);

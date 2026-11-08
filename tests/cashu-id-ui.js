@@ -19,7 +19,8 @@
  *   7  home's round button at the top left has MY CASHU ID's profile drawing and opens MY CASHU ID, nothing armed to open
  *      the menu after: DONE goes home; with no ID to read, NO CASHU ID as from the menu
  *   8  no messages: no chat or INBOX screen, no unread counts, no NEW MESSAGES in CONTACTS
- *   9  empty CONTACTS: its words, ADD A CASHU ID and SCAN A CASHU ID, each where the wallet can do it
+ *   9  empty CONTACTS: its words, PASTE A CASHU ID (reading the clipboard, straight to the name; no ID on it is THAT WON'T
+ *      WORK) and SCAN A CASHU ID, each where the wallet can do it; no search button until there is a contact
  *  10  no FOXY CARD and no CHAT in the menu; MY CASHU ID with the profile drawing; a screen opened from the menu goes back
  *      to the menu when it is left (MY CASHU ID's DONE too), a payment that ends on PAID does not, nor one that comes in
  *      over home, nor a swap still going; a row that only says something (SWAP offline) leaves nothing armed
@@ -539,13 +540,41 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
     ok(V().contactsEmpty === true
       && text().indexOf('Ask another Foxy user to share their Cashu ID with you to add them as a contact.') >= 0, 'empty CONTACTS: Ask another Foxy user to share their Cashu ID with you to add them as a contact.', text().slice(0, 300));
     ok(text().indexOf('Anyone you pay is saved here automatically.') < 0, 'and the old words are gone');
-    ok(/ADD A CASHU ID/.test(text()), 'with ADD A CASHU ID');
+    ok(/PASTE A CASHU ID/.test(text()) && !/ADD A CASHU ID/.test(text()), 'with PASTE A CASHU ID (no ADD A CASHU ID)', text().slice(0, 300));
     ok(/SCAN A CASHU ID/.test(text()), 'and SCAN A CASHU ID');
-    press(screen(), 'ADD A CASHU ID');
+    const searchBtn = () => !!(screen() && screen().querySelector('.fxShine1 circle'));
+    ok(!searchBtn(), 'with nobody in CONTACTS the search button is hidden');
+    // PASTE A CASHU ID reads the clipboard through the bridge, the path home's PASTE takes, and goes straight to the name
+    W.clipboard = () => { W.calls.clip = (W.calls.clip || 0) + 1; return Promise.resolve('  ' + ID_ALICE + '\n'); };
+    press(screen(), 'PASTE A CASHU ID');
     await settle();
-    ok(/PASTE A CASHU ID/.test(card()), 'which opens the paste-a-Cashu-ID card', card());
-    await addFlow(W, ID_ALICE, 'Alice');
+    ok(W.calls.clip === 1 && /NAME THIS CONTACT\?/.test(card()), 'PASTE A CASHU ID reads the clipboard once and asks NAME THIS CONTACT?', card());
+    await typeIn('Alice', 'SAVE');
+    ok(W.calls.adds.length === 1 && W.calls.adds[0][0] === ID_ALICE && W.calls.adds[0][1] === 'Alice', 'SAVE keeps the pasted ID under the name', JSON.stringify(W.calls.adds));
     ok(A.state.screen === 'contacts' && V().contactsEmpty === false && /Alice/.test(text()), 'the saved contact is on the CONTACTS list, the empty state gone', text().slice(0, 200));
+    ok(searchBtn(), 'and with a contact the search button is back');
+    // a clipboard with no Cashu ID on it: the THAT WON'T WORK card, nothing kept
+    const W2 = stubWallet();
+    W2.clipboard = () => Promise.resolve('lnbc1notanid');
+    await fresh(W2, { screen: 'contacts', stack: ['home'] });
+    press(screen(), 'PASTE A CASHU ID');
+    await settle();
+    ok(/THAT WON’T WORK/.test(card()) && W2.calls.adds.length === 0, 'a clipboard with no foxyid1 string: THAT WON’T WORK', card());
+    shutCard();
+    const W2b = stubWallet();
+    W2b.clipboard = () => Promise.resolve('');
+    await fresh(W2b, { screen: 'contacts', stack: ['home'] });
+    press(screen(), 'PASTE A CASHU ID');
+    await settle();
+    ok(/THAT WON’T WORK/.test(card()), 'and an empty clipboard the same', card());
+    shutCard();
+    // a page with no clipboard bridge falls back to the card with a field
+    const W2c = stubWallet();
+    await fresh(W2c, { screen: 'contacts', stack: ['home'] });
+    press(screen(), 'PASTE A CASHU ID');
+    await settle();
+    ok(/PASTE A CASHU ID/.test(card()), 'with no clipboard to read: the paste card with a field', card());
+    await addFlow(W2c, ID_ALICE, 'Alice');
     // SCAN A CASHU ID: the camera's text goes the same way
     const W3 = stubWallet();
     W3.scan = (what) => { W3.scanned = what; return Promise.resolve(ID_ALICE); };
@@ -558,10 +587,10 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
     const W4 = stubWallet();
     delete W4.cashuIdCheck;
     await fresh(W4, { screen: 'contacts', stack: ['home'] });
-    ok(!/ADD A CASHU ID/.test(text()) && !/SCAN A CASHU ID/.test(text()), 'where the wallet cannot read an ID: neither button');
+    ok(!/PASTE A CASHU ID/.test(text()) && !/SCAN A CASHU ID/.test(text()), 'where the wallet cannot read an ID: neither button');
     const W5 = stubWallet();
     await fresh(W5, { screen: 'contacts', stack: ['home'] });
-    ok(/ADD A CASHU ID/.test(text()) && !/SCAN A CASHU ID/.test(text()), 'where it cannot scan: ADD A CASHU ID alone');
+    ok(/PASTE A CASHU ID/.test(text()) && !/SCAN A CASHU ID/.test(text()), 'where it cannot scan: PASTE A CASHU ID alone');
   }
 
   // ---- 10 no FOXY CARD and no CHAT in the menu; MY CASHU ID's profile; screens from the menu go back to it ----
@@ -659,19 +688,20 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
     w.location.hash = '#foxy=home';
     A.applyDeepLink(); await settle(); await settle();
     ok(A.state.screen === 'home' && !A.state.open0 && !A.state.menuReturn, 'a link to home from HISTORY: home, the drawer shut', JSON.stringify([A.state.screen, A.state.open0, A.state.menuReturn]));
-    // POINT OF SALE under Face ID, answered yes, then ACCEPT TIPS? shut with no answer: nothing left armed
+    // POINT OF SALE under Face ID, answered yes, then back off the ACCEPT TIPS? screen: the menu again, nothing left armed
     {
       const W2 = w.FoxyWallet;
       const keep = { screenLocked: W2.screenLocked, faceLock: W2.faceLock, biometric: W2.biometric, pinIsSet: W2.pinIsSet };
       Object.assign(W2, { screenLocked: () => true, faceLock: () => true, biometric: () => Promise.resolve('yes'), pinIsSet: () => false });
       A.setState({ open0: true, screen: 'home', stack: [], till: null }); await settle();
       await click('POINT OF SALE'); await settle(); await settle();
-      const asked = !!A._blockedEl && /TIP/i.test(card());
-      if (A._blockedEl) A._blockedEl.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+      const asked = A.state.screen === 'tillTips' && !A._blockedEl;
+      A.back();
       await settle(); await settle();
       Object.assign(W2, keep);
-      ok(asked && !A._blockedEl && !A.state.till && !A.state.menuReturn, 'POINT OF SALE: Face ID yes, ACCEPT TIPS? shut unanswered: no till, nothing armed',
-        JSON.stringify([asked, !!A._blockedEl, !!A.state.till, A.state.menuReturn]));
+      ok(asked && !A._blockedEl && !A.state.till && !A.state.menuReturn && A.state.open0 === true,
+        'POINT OF SALE: Face ID yes, back off ACCEPT TIPS?: no till, the menu again, nothing armed',
+        JSON.stringify([asked, !!A._blockedEl, !!A.state.till, A.state.menuReturn, A.state.open0]));
       A.setState({ open0: false }); await settle();
       A.go('history'); await settle(); A.back(); await settle(); await settle();
       ok(A.state.screen === 'home' && !A.state.open0, 'and a trip from home and back after it: the drawer shut', String(A.state.open0));
@@ -698,7 +728,7 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
     const ORDER = ['WALLET', 'MY CASHU ID', 'HISTORY', 'CONTACTS', 'HIDE BALANCE',
       'MINTS', 'SWITCH/ADD MINTS', 'TRANSFER MONEY',
       'TOOLS', 'POINT OF SALE', 'SPLIT A BILL',
-      'SETTINGS', 'BLUETOOTH TAP', 'SET PIN', 'FACE ID LOCK', 'BACKUP', 'RESTORE', 'RESTORE LOST CARD', 'TEST LOGS',
+      'SETTINGS', 'FACE ID LOCK', 'SET PIN', 'BLUETOOTH TAP', 'BACKUP', 'RESTORE', 'RESTORE LOST CARD', 'TEST LOGS',
       'OFFLINE LIMITS', 'PER PERSON', 'TOTAL'];
     const full = (o) => {
       const W = stubWallet();

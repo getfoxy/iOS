@@ -379,7 +379,7 @@ const touched = (W, what) => W.calls.some(c => c.indexOf(what) === 0);
     check('nothing opens the mint list around goSwitchMint', strays === 2, strays + ' places set screen switchMint');
   }
 
-  // 9. a switch lands at once (`switchTo`), and "Now on" waits for the mint's answer (`mintConnected`)
+  // 9. a switch lands at once (`switchTo`), and nothing says "Now on" (the keeper, 2026-11-08), the mint's answer is `mintConnected`
   {
     let pending = null;
     const W = wallet({
@@ -411,11 +411,11 @@ const touched = (W, what) => W.calls.some(c => c.indexOf(what) === 0);
     const refreshes = W.calls.filter(c => c === 'refresh').length;
     pending = null;
     a.mintConnected({ url: THERE, ok: true });
-    check('when the mint answers: "Now on" it, and the balance is read again',
-      a.toasts.indexOf('Now on mint.there') >= 0 && W.calls.filter(c => c === 'refresh').length === refreshes + 1 && !a._switchSay,
+    check('when the mint answers: the balance is read again, and no "Now on" is said',
+      !a.toasts.some(t => /^Now on/.test(t)) && W.calls.filter(c => c === 'refresh').length === refreshes + 1 && !a._switchSay,
       JSON.stringify({ toasts: a.toasts, calls: W.calls }));
     a.mintConnected({ url: THERE, ok: true });
-    check('and only once for the switch', a.toasts.filter(t => t === 'Now on mint.there').length === 1, JSON.stringify(a.toasts));
+    check('and no "Now on" at any time for the switch', !a.toasts.some(t => /^Now on/.test(t)), JSON.stringify(a.toasts));
 
     // one that does not answer: the phone stays, says so, and is asked again behind the screen
     const b = app(W);
@@ -460,11 +460,11 @@ const touched = (W, what) => W.calls.some(c => c.indexOf(what) === 0);
         !g.toasts.some(t => /^Now on/.test(t)) && !!g._switchSay && g._switchSay.gen === 3, JSON.stringify({ toasts: g.toasts, say: g._switchSay }));
       g.mintConnected({ url: THERE, ok: false, why: 'timed out', back: false, gen: 3 });
       g.mintConnected({ url: THERE, ok: false, why: 'timed out', back: false, gen: 3 });
-      check('this switch not answering is said once, and its "Now on" is kept for when it does',
+      check('this switch not answering is said once, and its answer is kept for when it does',
         g.toasts.filter(t => /is not answering yet/.test(t)).length === 1 && !!g._switchSay, JSON.stringify(g.toasts));
       g.mintConnected({ url: THERE, ok: true, gen: 3 });
-      check('and when it answers after all, "Now on" is said once',
-        g.toasts.filter(t => t === 'Now on mint.there').length === 1 && !g._switchSay, JSON.stringify(g.toasts));
+      check('and when it answers after all, no "Now on" is said and nothing waits',
+        !g.toasts.some(t => /^Now on/.test(t)) && !g._switchSay, JSON.stringify(g.toasts));
       const before = g.toasts.length;
       g.justSwitch(HERE); await wait(0);
       check('every switch starts with no "Now on" of an earlier one waiting', g._switchSay && g._switchSay.gen === 4 && g.toasts.length === before,
@@ -474,8 +474,8 @@ const touched = (W, what) => W.calls.some(c => c.indexOf(what) === 0);
     const old = wallet(), d = app(old);
     d.justSwitch(THERE);
     await wait(0);
-    check('a wallet without switchTo still connects, and says "Now on" at once',
-      touched(old, 'connect ' + THERE) && d.toasts.indexOf('Now on mint.there') >= 0, JSON.stringify(d.toasts));
+    check('a wallet without switchTo still connects, and says no "Now on"',
+      touched(old, 'connect ' + THERE) && !d.toasts.some(t => /^Now on/.test(t)), JSON.stringify(d.toasts));
     void againCalls;
   }
   // and the receive screen waits for a mint that has not answered, rather than spending a try

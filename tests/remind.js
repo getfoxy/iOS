@@ -6,8 +6,7 @@
  *   1  the wallet: nothing with no Cashu ID in use; with one, the phone is asked without iOS's question (`ask: false`) and
  *      "ok" turns it on with no card, "needs" asks for the card, "refused" ends the question; asked once, never again
  *   2  turning on names the fixed 15 days; refused leaves it off; off cancels; NOT NOW is remembered
- *   3  SETTINGS: REMIND ME AFTER 15 DAYS the first row of SETTINGS, only with an ID in use; a switch that shows its
- *      state; a tap turns it off (cancel) or on (iOS's question), and refused says where to turn notifications on
+ *   3  SETTINGS: no reminder row, with an ID in use or not (the keeper, 2026-11-08); it opens with FACE ID LOCK, SET PIN, BLUETOOTH TAP
  *   4  the card: REMIND YOU? with Foxy's words, TURN ON and NOT NOW; none when the question was answered or no ID is in use
  *
  * The real page over a stand-in wallet (as tests/cashu-id-ui.js), and the real wallet over a stand-in phone. Run
@@ -249,36 +248,15 @@ function remindStub(o) {
   const ROW = 'REMIND ME AFTER 15 DAYS';
 
   {
-    const W = remindStub({ eligible: true, on: true });
-    await fresh(W);
-    const row = V().menuItems.find((m) => m.label === ROW);
-    ok(row.hasSwitch === true && row.swX === '18px' && row.indent === '10px', 'a switch, on, a row of SETTINGS');
-    row.tap();
-    await settle();
-    ok(W.calls.said.off === 1 && W.calls.said.on === 0, 'a tap on an on switch turns it off, which cancels');
-    ok(V().menuItems.find((m) => m.label === ROW).swX === '0px', 'and the switch shows off');
-    ok(toasts.some((t) => /No reminder/.test(t)), 'with a word', toasts.join('|'));
-    V().menuItems.find((m) => m.label === ROW).tap();
-    await settle();
-    ok(W.calls.said.on === 1 && V().menuItems.find((m) => m.label === ROW).swX === '18px', 'a tap on an off switch turns it on');
-    ok(toasts.some((t) => /remind you after 15 days/.test(t)), 'and says so', toasts.join('|'));
-  }
-  {
-    const W = remindStub({ eligible: true, on: false, grant: false });
-    await fresh(W);
-    const L = labels();
-    ok(L.indexOf('PUSH NOTIFICATIONS') < 0 && L.indexOf(ROW) === L.indexOf('SETTINGS') + 1, 'REMIND ME AFTER 15 DAYS is the first row of SETTINGS', L.join(', '));
-    V().menuItems.find((m) => m.label === ROW).tap();
-    await settle();
-    ok(/NOTIFICATIONS ARE OFF/.test(card()) && /Settings/.test(card()), 'iOS said no: a card says where to turn notifications on', card());
-    ok(V().menuItems.find((m) => m.label === ROW).swX === '0px', 'the switch stays off');
-    press(A._blockedEl, 'OPEN SETTINGS');
-    ok(W.calls.said.settings === 1, 'OPEN SETTINGS goes to Foxy\'s page in Settings');
-  }
-  {
-    const W = remindStub({ eligible: false });
-    await fresh(W);
-    ok(labels().indexOf(ROW) < 0, 'no Cashu ID in use: no row');
+    // no row at all (the keeper, 2026-11-08), with a Cashu ID in use or without, on or off; SETTINGS opens with FACE ID LOCK, SET PIN, BLUETOOTH TAP
+    for (const st of [{ eligible: true, on: true }, { eligible: true, on: false }, { eligible: false }]) {
+      const W = remindStub(st);
+      await fresh(W);
+      const L = labels();
+      ok(L.indexOf(ROW) < 0 && L.indexOf('PUSH NOTIFICATIONS') < 0, 'no REMIND ME AFTER 15 DAYS row (' + JSON.stringify(st) + ')', L.join(', '));
+      const i = L.indexOf('SETTINGS');
+      ok(L[i + 1] === 'FACE ID LOCK' && /^(SET|REMOVE) PIN$/.test(L[i + 2]) && L[i + 3] === 'BLUETOOTH TAP', 'SETTINGS: FACE ID LOCK, SET PIN, BLUETOOTH TAP, then the rest', L.slice(i, i + 6).join(', '));
+    }
     const W2 = stubWallet();
     await fresh(W2);
     ok(labels().indexOf(ROW) < 0, 'a wallet with no such switch: no row');

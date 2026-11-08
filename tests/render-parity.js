@@ -101,13 +101,43 @@ function snapshot(w) {
     }
   }
   const clone = root.cloneNode(true);
-  for (const el of clone.querySelectorAll('*')) {
-    el.removeAttribute('data-dc-tpl');
+  for (const el of clone.querySelectorAll('*')) el.removeAttribute('data-dc-tpl');
+  return { clone, rules };
+}
+
+// each class that names a pressed style written as the style itself, the clone's HTML
+function shown(snap) {
+  if (typeof snap === 'string') return snap;
+  for (const el of snap.clone.querySelectorAll('*')) {
     if (el.getAttribute('class')) {
-      el.setAttribute('class', el.getAttribute('class').split(/\s+/).map((c) => (rules[c] ? 'pseudo' + rules[c] : c)).join(' '));
+      el.setAttribute('class', el.getAttribute('class').split(/\s+/).map((c) => (snap.rules[c] ? 'pseudo' + snap.rules[c] : c)).join(' '));
     }
   }
-  return clone.outerHTML;
+  return snap.clone.outerHTML;
+}
+
+// The new renderer keeps one class per distinct pressed style, so a bound style whose value comes out the same as a
+// fixed one elsewhere (a button with that very shadow written out) shares the fixed one's class, a real rule under
+// another name. Where the old renderer marks an element's pressed style as bound, the new one's real rule on the same
+// element is taken as that bound style; the rules it shares are kept for the check below.
+const sharedBound = [];
+function alignBound(o, n) {
+  if (typeof o === 'string' || typeof n === 'string') return;
+  const olds = [...o.clone.querySelectorAll('*')];
+  const news = [...n.clone.querySelectorAll('*')];
+  if (olds.length !== news.length) return;
+  n.rules.__shared = '{bound}';
+  for (let i = 0; i < olds.length; i++) {
+    const oc = (olds[i].getAttribute('class') || '').split(/\s+/);
+    if (!oc.some((c) => o.rules[c] === '{bound}')) continue;
+    const nc = (news[i].getAttribute('class') || '').split(/\s+/);
+    if (nc.some((c) => n.rules[c] === '{bound}')) continue;
+    const at = nc.findIndex((c) => Object.prototype.hasOwnProperty.call(n.rules, c) && c !== '__shared');
+    if (at < 0) continue;
+    sharedBound.push(n.rules[nc[at]]);
+    nc[at] = '__shared';
+    news[i].setAttribute('class', nc.join(' '));
+  }
 }
 
 function firstDifference(a, b) {
@@ -168,8 +198,11 @@ function firstDifference(a, b) {
       try { pages[k].w.__logic.setState(Object.assign({}, initial, patch)); } catch (e) { pages[k].errors.push(String(e)); }
     }
     await wait(60);
-    const a = snapshot(pages.old.w);
-    const b = snapshot(pages.new.w);
+    const oldSnap = snapshot(pages.old.w);
+    const newSnap = snapshot(pages.new.w);
+    alignBound(oldSnap, newSnap);
+    const a = shown(oldSnap);
+    const b = shown(newSnap);
     check(label, a === b, a === b ? '' : firstDifference(a, b));
   }
 
@@ -182,8 +215,9 @@ function firstDifference(a, b) {
   }
   check('bound pressed styles are real rules under the new renderer (' + bound.length + ')',
     // the email button's and at least one other, and every one a real rule
-    bound.length >= 2 && bound.every((t) => /box-shadow/.test(t) && !t.includes('{{')),
-    JSON.stringify(bound.slice(0, 3)));
+    // (a bound style that shares a fixed one's rule counts, as that rule)
+    bound.length + sharedBound.length >= 2 && bound.concat(sharedBound).every((t) => /box-shadow/.test(t) && !t.includes('{{')),
+    JSON.stringify(bound.concat(sharedBound).slice(0, 3)));
 
   let failed = 0;
   for (const r of results) {

@@ -1608,9 +1608,9 @@ comes back to it once the mint has said paid. (A move to another mint, and a ren
 A withdrawal of many pieces takes longer than a person holds a card. If the card
 leaves part way, what it signed is kept: it is in the phone, with an entry of its
 own, and the screen says **TAP THE CARD AGAIN**, how much came off and how much
-is left. TAP CARD takes the rest with the PIN already given, and IN YOUR WALLET
+is left. TAP CARD takes the rest with the PIN already given, and the green RECEIVED
 then says the whole amount (a withdrawal cut short takes the card's screen away, as what it knew of the card is out of date;
-one that goes on in the same sheet, with the card asked for again, does not). LATER ends the withdrawal; the rest stays on the card.
+one that goes on in the same sheet, with the card asked for again, does not; DONE on RECEIVED is the card's screen). LATER ends the withdrawal; the rest stays on the card.
 
 **A blocked card** shows BLOCKED on its face and a red line. Any reader in range
 can send three wrong PINs and block a card, so this is a known way to annoy a

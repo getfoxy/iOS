@@ -342,7 +342,7 @@
     console.log('[foxy] card: sheet cancelled, ' + (quiet ? 'not by the person' : tied ? 'a card was tied before' : 'no card was ever tied'));
     if (quiet || tied) return;
     this.stageScreen('cardLearn', {
-      art: 'card', still: true, title: 'FOXY CARD',
+      art: 'cardspin', title: 'FOXY CARD',
       body: 'A Foxy Card holds your ecash. Tap it to another phone to pay, with no phone of your own.',
       above: 'VISIT WEBSITE',
       aboveGo: () => { if (W && W.openCompany) W.openCompany('foxycard'); },
@@ -3466,7 +3466,7 @@
     this._lastPay = null;
     this.setState(p => ({
       screen: 'paid', stack: p.stack.concat([p.screen]),
-      payOut: true, paidSays: 'ON THE CARD', paidTo: 'ECASHCARD', paidPlace: null, paidUnit: u, paidAmount: went,
+      payOut: true, paidSays: 'ON THE CARD', paidTo: 'FOXY CARD', paidPlace: null, paidUnit: u, paidAmount: went,
       paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidConvert: false,
       recvResolved: true, recv: Object.assign({}, p.recv, { live: 'in' }),
     }));
@@ -4450,17 +4450,18 @@
     });
     const said = (r) => {
       this.haptic && this.haptic('success');
+      const got = took + this.fcAmt(r);
       /* The card's own screen is still up, and the card as it stands now is known (`r.card`: what the tap read of it less what it signed
        * for, or the card as the sheet that put its change back read it; for a mint that answered late, the same, from the error): the
-       * screen comes back with its balance counting down to it, and nothing is raised over it. */
-      if (r && r.card && this.fcWithdrew(r.card)) return;
+       * screen comes back with its balance counting down to it, under the success screen that ends the withdrawal. */
+      if (r && r.card && this.fcWithdrew(r.card)) { if (got > 0) this.fcWithdrawnScreen(got, u); return; }
       /* Otherwise (a withdrawal that was cut short took the screen away, or the card is not known) what the screen knew of the card is out
-       * of date, and is not shown as if it were current: the screen goes, and a card says what came off. */
+       * of date, and is not shown as if it were current: the screen goes, and the success screen says what came off. */
       this.fcGone();
-      const got = took + this.fcAmt(r);
+      if (got > 0) { this.fcWithdrawnScreen(got, u); return; }
       this.blockedCard('fc-out', {
         tone: 'ask', title: 'IN YOUR WALLET',
-        reason: (got > 0 ? this.fcSats(got, u) : 'The money') + ' from the card is in this phone now.',
+        reason: 'The money from the card is in this phone now.',
         shut: { label: 'DONE' },
       });
     };
@@ -4516,6 +4517,22 @@
         clearTimeout(this._fcResumeT);
         this._fcResumeT = setTimeout(() => this.fcWithdrawRun(sats ? ask : 0, pin, took, { rest: ask }, u), 2500);
       });
+  }
+
+  /* The end of a withdrawal that took money off the card: the app's own success screen, RECEIVED, with its flash, as money that
+   * arrives ends (12-receive.js), in the card's unit, ADDED TO the balance it went into. DONE there is where the withdrawal began. */
+  fcWithdrawnScreen(got, unit) {
+    const u = unit === 'usd' ? 'usd' : 'sat';
+    const n = Math.round(Number(got) || 0);
+    this._lastFee = 0;
+    this._lastPay = null;
+    this.setState(p => ({
+      screen: 'paid', stack: p.screen === 'paid' ? p.stack : p.stack.concat([p.screen]),
+      payOut: false, paidSays: 'RECEIVED', paidTo: '', paidPlace: null, paidUnit: u, paidAmount: n,
+      paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidConvert: false,
+      asset: 'BITCOIN', unit: 'SATS', amount: String(u === 'usd' ? 0 : n),
+      recvResolved: true, recv: Object.assign({}, p.recv, { live: 'in' }),
+    }));
   }
 
   /* A withdrawal finished with the card's own screen up for that card: it shows the card as it stands now, and its balance counts down to
@@ -7590,9 +7607,9 @@
     const shown = this.fcBalanceShown(fc, s);
     return {
       isFlashcard: on,
-      /* the screen's title: the card's name on this phone (NAME CARD), ECASHCARD for a card with none, and with no card; alone
+      /* the screen's title: the card's name on this phone (NAME CARD), FOXY CARD for a card with none, and with no card; alone
        * (how fresh the mint's word is, is in the card's HISTORY, `fcHistNotes`) */
-      fcTitle: (fc && fc.key && this.fcNameKept(fc.key)) || 'ECASHCARD',
+      fcTitle: (fc && fc.key && this.fcNameKept(fc.key)) || 'FOXY CARD',
       /* The room the card's picture leaves under itself for the lines that are under it (build/markup.html, `data-card-room`): the
        * card stands upright and is as tall as the screen leaves room for, 160px at the least, and 26px less for each line under it
        * (its 14px, and the 12px between). */

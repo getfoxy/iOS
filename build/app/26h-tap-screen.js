@@ -83,6 +83,11 @@
     shield: '<path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"></path><path d="M9 12l2 2 4-4"></path>',
     lock: '<rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path>',
   };
+  // the body's padding at the top of the screen: the usual one, and the one a screen with the card's picture on it has (the arrow's words above it)
+  FC_TAP_PAD = 'calc(max(54px, env(safe-area-inset-top)) + min(130px, 15vh)) 36px 0';
+  FC_TAP_PAD_CARD = 'calc(max(54px, env(safe-area-inset-top)) + 64px) 36px 0';
+  // the card's height on these screens: as tall as the screen leaves room for, and never under 160px or over 360px
+  FC_TAP_CARD_H = 'clamp(160px, calc(100vh - 540px), 360px)';
   // how long REMOVE is said after the card has signed, if the sheet has not been seen to go before then
   FC_TAP_REMOVE_MS = 1500;
   // the steps that mean the card is in the field, whether or not the phone has said so
@@ -254,6 +259,8 @@
     const f = this.fcTapFlow();
     const spec = { screen: k.scheme, amount: o.amount || '', amountSub: o.amountSub || '', hint: k.loop, dots: '', words: '', chip: null, solid: null, plain: null };
     const close = { label: 'CLOSE', go: () => this.fcTapClose() };
+    // a read shows the card turning while it is asked for (TAP TO READ) and while it is read (READING); not CARD LOST, the PIN or the check
+    spec.card = String(o.flow || '') === 'read' && (k.scheme === '1a' || k.scheme === '1c') && k.key !== 'pin';
     if (k.scheme === '1g') {
       spec.title = 'CARD LOST';
       spec.words = this.FC_TAP_WORDS.lost;
@@ -312,7 +319,9 @@
       + '<svg data-tp-move viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="animation:tpArrow 1.2s ease-in-out infinite"><path d="M6 14l6-6 6 6"></path></svg>'
       + '<span style="' + fig + ';font-weight:700;font-size:15px;letter-spacing:.08em">TAP CARD BEHIND THE TOP</span></div></div>'
       + '<div data-tp-body style="position:absolute;left:0;right:0;top:0;display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;'
-      + 'box-sizing:border-box;padding:calc(max(54px, env(safe-area-inset-top)) + min(130px, 15vh)) 36px 0">'
+      + 'box-sizing:border-box;padding:' + this.FC_TAP_PAD + '">'
+      // the card's picture, turning, where the flow is a read (`fcFamilyFill`, spec.card)
+      + '<div data-tp-art style="display:none;flex:none"></div>'
       + '<h1 style="margin:0;font-weight:800;font-size:34px;line-height:1.05;letter-spacing:.1em;white-space:nowrap"></h1>'
       + '<div data-tap-amount style="font-weight:800;font-size:76px;line-height:1;letter-spacing:-.04em;white-space:nowrap"></div>'
       + '<div data-tap-amount-sub style="margin-top:-4px;' + fig + ';font-weight:600;font-size:19px;opacity:.6"></div>'
@@ -353,6 +362,22 @@
     const hint = q('[data-tp-hint]');
     shown(hint, !!spec.hint);
     this.fcFamilyTitle(root, String(spec.title || ''));
+    /* The card's picture, turning, on a screen of a read (TAP TO READ, READING): put in once and kept, so it is not set back to the
+     * front by each look, and taken out where a look has none (CARD LOST, VERIFYING). */
+    const art = q('[data-tp-art]');
+    if (art) {
+      const on = !!spec.card;
+      if (on && !art.firstChild) {
+        art.innerHTML = this.fcCardStageHtml(this.FC_TAP_CARD_H);
+        this._fcSpinA = 0;
+        if (this._fcSpin) this._fcSpin.a = 0;
+      }
+      if (!on && art.firstChild) art.innerHTML = '';
+      art.style.display = on ? '' : 'none';
+      const body = q('[data-tp-body]');
+      if (body) body.style.padding = on ? this.FC_TAP_PAD_CARD : this.FC_TAP_PAD;
+      if (on && this.fcSpinOn) this.fcSpinOn();
+    }
     const amount = q('[data-tap-amount]');
     if (amount) { amount.textContent = spec.amount || ''; shown(amount, !!spec.amount); }
     const sub = q('[data-tap-amount-sub]');

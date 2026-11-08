@@ -1,4 +1,4 @@
-<!-- stage: 1c reading -->
+<!-- stage: 1g card lost on a read, no card shown -->
 <div id="dc-root">
 <div class="sc-host" data-sc-name="index">
 <div data-shell="1" data-static="1" style="position: fixed; inset: 0px; display: flex; box-sizing: border-box; background: rgb(17, 18, 20); padding: 28px; min-height: 100vh; align-items: center;">
@@ -520,7 +520,7 @@
 </div>
 </div>
 <!-- on document.body -->
-<div id="foxy-stage" data-stage="card" data-tp="1" style="position: fixed; inset: 0px; z-index: 2147483300; overflow: hidden; box-sizing: border-box; font-family: Sora, system-ui, sans-serif; animation: foxyIn .18s ease; background: linear-gradient(180deg, rgb(255, 154, 92) 0%, rgb(235, 106, 46) 60%, rgb(217, 86, 28) 100%); color: rgb(26, 10, 2);" data-look="keep" data-loop="0" data-scheme="1c">
+<div id="foxy-stage" data-stage="card" data-tp="1" style="position: fixed; inset: 0px; z-index: 2147483300; overflow: hidden; box-sizing: border-box; font-family: Sora, system-ui, sans-serif; animation: foxyIn .18s ease; background: linear-gradient(180deg, rgb(232, 80, 63) 0%, rgb(217, 58, 43) 60%, rgb(184, 42, 30) 100%); color: rgb(255, 255, 255);" data-look="again" data-loop="0" data-scheme="1g">
 <div data-tp-hint="" style="position: absolute; left: 0px; right: 0px; top: 0px; height: 110px; overflow: hidden; pointer-events: none; display: none;">
 <div style="position:absolute;left:0;right:0;top:max(28px, env(safe-area-inset-top));display:flex;flex-direction:column;align-items:center;gap:2px">
 <svg data-tp-move="" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="animation:tpArrow 1.2s ease-in-out infinite">
@@ -531,31 +531,34 @@
 </div>
 </div>
 <div data-tp-body="" style="position:absolute;left:0;right:0;top:0;display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;box-sizing:border-box;padding:calc(max(54px, env(safe-area-inset-top)) + min(130px, 15vh)) 36px 0">
-<h1 style="margin:0;font-weight:800;font-size:34px;line-height:1.05;letter-spacing:.1em;white-space:nowrap">READING</h1>
+<div data-tp-art="" style="flex: 0 0 auto; display: none;">
+</div>
+<h1 style="margin:0;font-weight:800;font-size:34px;line-height:1.05;letter-spacing:.1em;white-space:nowrap">CARD LOST</h1>
 <div data-tap-amount="" style="font-weight: 800; font-size: 76px; line-height: 1; letter-spacing: -0.04em; white-space: nowrap; display: none;">
 </div>
 <div data-tap-amount-sub="" style="margin-top: -4px; font-family: Figtree, Sora, system-ui, sans-serif; font-weight: 600; font-size: 19px; opacity: 0.6; display: none;">
 </div>
-<p data-tp-words="" style="margin: 22px 0px 0px; font-family: Figtree, Sora, system-ui, sans-serif; font-weight: 500; font-size: 19px; line-height: 1.45; text-wrap: balance; color: rgb(26, 10, 2); display: none;">
-</p>
-<div data-tp-chip="" style="margin-top: 6px; display: none; align-items: center; gap: 10px; padding: 12px 18px; border-radius: 999px; font-family: Figtree, Sora, system-ui, sans-serif; font-weight: 700; font-size: 15px; background: transparent;">
-<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex:none">
+<p data-tp-words="" style="margin: 22px 0px 0px; font-family: Figtree, Sora, system-ui, sans-serif; font-weight: 500; font-size: 19px; line-height: 1.45; text-wrap: balance; color: rgb(255, 233, 229);">The card moved away too soon. Hold it still behind the top of the phone.</p>
+<div data-tp-chip="" style="margin-top: 6px; align-items: center; gap: 10px; padding: 12px 18px; border-radius: 999px; font-family: Figtree, Sora, system-ui, sans-serif; font-weight: 700; font-size: 15px; background: rgba(255, 255, 255, 0.16);">
+<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex:none" data-icon="shield">
+<path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z">
+</path>
+<path d="M9 12l2 2 4-4">
+</path>
 </svg>
-<span>
-</span>
+<span>Your money is still on your card.</span>
 </div>
-<div data-tp-dots="" style="margin-top: 22px; gap: 10px;">
-<span data-tp-move="" style="width: 12px; height: 12px; border-radius: 50%; background: currentcolor; animation: tpDot 0.8s ease-in-out 0.00s infinite;">
+<div data-tp-dots="" style="margin-top: 22px; gap: 10px; display: none;">
+<span data-tp-move="" style="width: 12px; height: 12px; border-radius: 50%; background: currentcolor;">
 </span>
-<span data-tp-move="" style="width: 12px; height: 12px; border-radius: 50%; background: currentcolor; animation: tpDot 0.8s ease-in-out 0.12s infinite;">
+<span data-tp-move="" style="width: 12px; height: 12px; border-radius: 50%; background: currentcolor;">
 </span>
-<span data-tp-move="" style="width: 12px; height: 12px; border-radius: 50%; background: currentcolor; animation: tpDot 0.8s ease-in-out 0.24s infinite;">
+<span data-tp-move="" style="width: 12px; height: 12px; border-radius: 50%; background: currentcolor;">
 </span>
 </div>
 </div>
 <div data-tp-foot="1" style="position: absolute; left: 0px; right: 0px; bottom: 0px; display: flex; flex-direction: column; gap: 12px;">
-<div style="height: 58px; border-radius: 999px; box-sizing: border-box; display: none; align-items: center; justify-content: center; font-family: Sora, system-ui, sans-serif; font-weight: 800; font-size: 17px; letter-spacing: 0.08em; cursor: pointer; visibility: hidden; background: rgb(10, 10, 10); color: rgb(255, 255, 255);" data-tp-solid="1">
-</div>
-<div style="height: 58px; border-radius: 999px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-family: Sora, system-ui, sans-serif; font-weight: 800; font-size: 17px; letter-spacing: 0.08em; cursor: pointer; border: 2px solid; visibility: visible;" data-stage-button="1">CLOSE</div>
+<div style="height: 58px; border-radius: 999px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-family: Sora, system-ui, sans-serif; font-weight: 800; font-size: 17px; letter-spacing: 0.08em; cursor: pointer; visibility: visible; background: rgb(255, 255, 255); color: rgb(184, 42, 30);" data-tp-solid="1">TRY AGAIN</div>
+<div style="height: 58px; border-radius: 999px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-family: Sora, system-ui, sans-serif; font-weight: 800; font-size: 17px; letter-spacing: 0.08em; cursor: pointer; border: 2px solid; visibility: visible;" data-stage-button="1">CANCEL</div>
 </div>
 </div>

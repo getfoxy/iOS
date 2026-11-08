@@ -132,7 +132,7 @@ const uri = (sats) => 'bitcoin:' + ADDRESS + '?amount=' + (sats / 1e8).toFixed(8
     ok(holder.state.screen === 'ocConfirm' && holder.state.sendFrom === 'card' && holder.fcOutMode(),
        'a bitcoin address read in card mode reaches the on-chain confirmation, still in card mode', holder.state.screen);
     ok(labels.join() === 'DELIVERED TO,NETWORK,FROM,ARRIVES,FEE' && row('NETWORK').value === 'ON-CHAIN'
-       && row('FROM').value === 'ECASHCARD' && row('FROM').sub === 'm.test',
+       && row('FROM').value === 'FOXY CARD' && row('FROM').sub === 'm.test',
        'its rows: NETWORK ON-CHAIN, then FROM / FLASHCARD / the card’s mint, and no PAYING FROM', labels.join());
     ok(spec.amount === '$ 10.00' && spec.amountSub === '₿ 10,000', 'the amount, dollars first and the sats under', spec.amount + ' | ' + spec.amountSub);
     ok(row('FEE').value === 'UP TO $ 0.06' && row('FEE').sub === '₿ 64', 'the mint’s fee reserve as FEE, dollars first and the sats under', row('FEE').value + ' | ' + row('FEE').sub);

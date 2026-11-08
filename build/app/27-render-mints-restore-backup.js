@@ -7,8 +7,8 @@
      * CASHIER CODES with those that have ended under PAST. Null outside them. */
     const L = (sc === 'switchMint' && s.tillList && this.tillListVals) ? this.tillListVals() : null;
     /* The lists of mints are drawn as tiles (the keeper's design of 2026-11-06, "To which mint?"): the name large, its host, a rule,
-     * and under it what is held there. The till's lists of people and codes, and BANK ACCOUNT's exchanges, keep their rows. */
-    const tiles = !L && !s.bankPick;
+     * and under it what is held there. The till's lists of people and codes keep their rows; BANK ACCOUNT's exchanges are tiles too. */
+    const tiles = !L;
     /* A card's WITHDRAW TO (`wdPick`) and TRANSFER TO (`fcPick`): the card's own mint first, ticked, then the others, the line under
      * each rule what the crossing there costs where that is asked (26n-card-withdraw-to.js). A tap picks a mint, NEXT goes on. */
     const cardList = tiles && (!!s.wdPick || !!s.fcPick);

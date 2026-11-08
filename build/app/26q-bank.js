@@ -55,22 +55,24 @@
   // the list, through the one way into it, which clears every other question it can be asking
   bankList() { this.goSwitchMint({ bankPick: true }); }
 
-  /* The rows, in the list's own look (27-render-mints-restore-backup.js): each exchange with its site under its name, or
-   * the address kept there. */
+  /* The exchanges, drawn as the mint list's tiles (27-render-mints-restore-backup.js): the name large, its site or the address kept
+   * there under it, a ring and a tick on the exchange kept. No company's picture is drawn, only its name. */
   bankRows() {
     const W = window.FoxyWallet;
     const saved = W && W.bankSaved ? W.bankSaved() : null;
     const list = W && W.bankExchanges ? W.bankExchanges() : [];
-    const logos = { strike: 'gd-strike.jpg', river: 'gd-river.jpg', cashapp: 'gd-cashapp.jpg' };
-    const tints = { strike: '#1C1C1E', river: '#1E3A5F', cashapp: '#00A83E' };
     return list.map((x) => {
       const mine = !!saved && saved.ex === x.key;
       return {
         name: String(x.name).toUpperCase(), host: mine && saved.addr ? saved.addr : x.domain,
-        dim: '1', down: false, downText: '', initial: String(x.name).slice(0, 1).toUpperCase(), tint: tints[x.key] || '#5A5A5A',
-        logo: logos[x.key] ? "url('" + logos[x.key] + "')" : 'none',
-        here: false, notHere: true, text: '', ink: 'var(--acc-ink)', busy: false,
-        bg: 'var(--surface)', border: 'rgba(var(--ink-rgb),.12)',
+        big: String(x.name).toUpperCase(),
+        lineBal: false, lineWait: false, lineFee: false, balSym: false, balMain: '', balAbout: '', balAboutShown: false,
+        wait: '', fee: '', feeNote: '', feeNoteShown: false,
+        linePad: '16px', nameSize: '38px', hostSize: '17px', pad: '24px 22px', radius: '28px', gap: '18px',
+        edge: mine ? '2px' : '1px',
+        dim: '1', down: false, downText: '',
+        here: mine, notHere: !mine, text: '', ink: 'var(--acc-ink)', busy: false,
+        bg: mine ? 'rgba(var(--acc-rgb),.12)' : 'var(--surface)', border: mine ? 'var(--acc)' : 'rgba(var(--ink-rgb),.12)',
         tap: () => this.bankPick(x.key),
       };
     });

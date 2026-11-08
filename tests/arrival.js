@@ -64,7 +64,7 @@ async function firstRun(o) {
     gate.up = false;
     app._readyAt = Date.now();
     app.setState({ screen: 'home', stack: [] });
-    app.blockedCard('custody', { tone: 'warn', title: 'THE MINT HOLDS YOUR BITCOIN', reason: 'Ecash in this wallet is issued by a mint.' });
+    app.blockedCard('custody', { tone: 'warn', title: 'A NOTICE', reason: 'Some notice over home.' });
   };
   const custodyRead = () => app.dismissCard('custody');
   const holdAsked = () => app.offerHoldChoice();
@@ -90,7 +90,7 @@ async function firstRun(o) {
     r.boot();
     ok(ask() === 'keep', 'booted, the launch’s screens up: kept');
     r.ready();
-    ok(ask() === 'keep' && card(app) && card(app).title === 'THE MINT HOLDS YOUR BITCOIN', 'home, with the mint’s notice over it: kept');
+    ok(ask() === 'keep' && card(app) && card(app).title === 'A NOTICE', 'home, with the mint’s notice over it: kept');
     r.custodyRead();
     ok(ask() === 'keep', 'the notice read, the question of what to hold still to come: kept');
     r.holdAsked();

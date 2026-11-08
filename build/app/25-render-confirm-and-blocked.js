@@ -332,7 +332,7 @@
       curAskAbove: false, curAskBelow: !pf,
       // (the set-up's tiles stand alone, with nothing under them)
       // (PAY FROM has no line under its tiles either: the keeper, 2026-11-06)
-      curFootShown: !setUp && !pf,
+      curFootShown: !setUp && !pf && !(flow === 'receive' && !pick && !cc && !both && !cardFlow),
       curTilesOnly: setUp,
       curFoot: pf ? (this.pfFoot ? this.pfFoot() : '')
         : pick
@@ -345,7 +345,7 @@
         : cc ? String(cc.foot || '')
         : both ? 'DOLLARS or BITCOIN: the card holds that one, and ADD FUNDS never asks. BOTH: it holds either, and ADD FUNDS asks which each time.'
         : cardFlow ? 'A card holds one of them. To change it later, RESET the card and set it up again.'
-        : flow === 'receive' ? 'Asked once. After this, change it with the WALLET button on the invoice.'
+        : flow === 'receive' ? ''
         : 'Asked once. After this, change it with the WALLET button before you pay.',
       curBack: pf ? () => this.pfBack() : () => this.back(),
       curClose: pf ? () => this.pfClose() : () => this.setState({ screen: 'home', stack: [] }),

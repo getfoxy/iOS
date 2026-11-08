@@ -120,10 +120,59 @@
     this.setState(p => ({ screen: 'holdChoice', stack: p.stack.concat([p.screen]), holdPick: '' }));
   }
 
+  /* ---- the first run's last step: CURRENCIES --------------------------------
+   *
+   * After the words are made (the phone made the seed in this launch, the
+   * wallet's `seedMade`) or restored (`adoptRestoreMint`), and before home:
+   * the CURRENCIES screen, asked as a set-up step whatever the mint has said
+   * so far, its answer written as MENU › CURRENCIES writes it (`holdKeep`).
+   * Once answered, never again on the install (`FIRST_CURRENCIES`); backed
+   * out of, a restore asks it, and a later launch at a mint of two balances
+   * asks as ever (`offerHoldChoice`). Never where a choice is already kept or
+   * the mint is known to issue one currency. A restore that
+   * found money in dollars and in bitcoin asks nothing: both are kept, as a
+   * choice of one would leave the other's money to swap. */
+  FIRST_CURRENCIES = 'foxy.currencies.firstRun';
+
+  // after the boot's seed read, and as the mint answers: a seed the phone made in this launch is a first run
+  firstRunAfterSeed() {
+    const W = window.FoxyWallet;
+    let made = false;
+    try { made = !!(W && W.seedMade && W.seedMade()); } catch (e) { made = false; }
+    return made ? this.firstRunCurrencies('made') : false;
+  }
+
+  /* `why`: 'made' or 'restored'; `found`, for a restore: { sat, usd }, whether money was found in each. True where the
+   * question went up. */
+  firstRunCurrencies(why, found) {
+    const W = window.FoxyWallet;
+    if (!W || !W.setWalletChoice || this.state.till) return false;
+    try { if (localStorage.getItem(this.FIRST_CURRENCIES)) return false; } catch (e) { return false; }
+    if (this.walletChoiceNow().hold) return false;
+    let units = [];
+    try { units = (W.mintUnits && W.mintUnits()) || []; } catch (e) { units = []; }
+    if (Array.isArray(units) && units.length === 1) return false;
+    if (why === 'restored' && found && found.sat && found.usd) {
+      if (this.holdSave('both', '', true)) {
+        this.firstRunAnswered();
+        console.log('[foxy] first run: a restore found dollars and bitcoin; both kept, nothing asked');
+      }
+      return false;
+    }
+    console.log('[foxy] first run (' + (why === 'restored' ? 'words restored' : 'words made') + '): asking which currencies to use');
+    this.setState({ screen: 'holdChoice', stack: [], holdPick: '', holdFirst: true });
+    return true;
+  }
+
+  // the first run's question answered, here or by a restore: never asked as a set-up step again
+  firstRunAnswered() {
+    try { localStorage.setItem(this.FIRST_CURRENCIES, String(Date.now())); } catch (e) {}
+  }
+
   /* Back from the question: not answered, so it is asked again next launch. */
   holdLater() {
     this._holdLater = true;
-    this.setState({ screen: 'home', stack: [], holdPick: '' });
+    this.setState({ screen: 'home', stack: [], holdPick: '', holdFirst: false });
   }
 
   holdDone() {
@@ -147,9 +196,10 @@
   /* The choice written, and home. False where the wallet would not keep it (said in a toast). */
   holdKeep(hold, noKept) {
     if (!this.holdSave(hold, '', noKept)) return false;
+    if (this.state.holdFirst) this.firstRunAnswered();
     // chosen: home, not the menu again (01-ui-basics.js `menuReturnWatch`)
     if (this.menuReturnDrop) this.menuReturnDrop();
-    this.setState({ screen: 'home', stack: [], holdPick: '', holdSwap: '' });
+    this.setState({ screen: 'home', stack: [], holdPick: '', holdSwap: '', holdFirst: false });
     this.refreshBalance();
     return true;
   }
@@ -289,9 +339,12 @@
     });
   }
 
-  chooseProtection(mode) {
+  /* `then`, where given (SET A LOCK FIRST's USE FACE ID, 26m-till.js `tillGate`): told true once the answer is kept, false where
+   * it was not, and it decides what comes next in place of the menu and the hold question. */
+  chooseProtection(mode, then) {
     const W = window.FoxyWallet;
-    if (!W || !W.setSeedProtection) return;
+    const after = typeof then === 'function' ? then : null;
+    if (!W || !W.setSeedProtection) { if (after) after(false); return; }
     W.setSeedProtection(mode).then(() => {
       // what they answered, which openSeedForVisit reads on every wake
       if (W.secureChoice) W.secureChoice(mode);
@@ -299,12 +352,14 @@
        * locks the screen as well as the seed. */
       this.toast(mode === 'none' ? 'Foxy is not protected.' : 'Face ID now locks Foxy.');
       this.forceUpdate();
+      if (after) { after(true); return; }
       // and then, at a mint with two balances, what to hold, if it has not been asked
       if (this.offerHoldChoice) this.offerHoldChoice();
       // answered from the menu's FACE ID LOCK: the menu again, unless the hold question went up (01-ui-basics.js)
       if (this.menuReturnSettle) this.menuReturnSettle();
     }, e => {
       this.toast(W.reason ? W.reason(e) : 'That could not be changed.', true);
+      if (after) { after(false); return; }
       if (this.menuReturnSettle) this.menuReturnSettle();
     });
   }

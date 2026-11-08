@@ -225,7 +225,7 @@ async function run() {
     // SEND's tile
     const markup = fs.readFileSync(path.join(ROOT, 'build', 'markup.html'), 'utf8');
     const tile = markup.indexOf('sc-camel-on-click="{{ goBank }}"');
-    ok(tile > 0 && markup.indexOf('>BANK ACCOUNT</div>', tile) > tile && markup.indexOf('{{ clBankOn }}') > 0, 'SEND has a BANK ACCOUNT tile, after ECASHCARD');
+    ok(tile > 0 && markup.indexOf('>BANK ACCOUNT</div>', tile) > tile && markup.indexOf('{{ clBankOn }}') > 0, 'SEND has a BANK ACCOUNT tile, after FOXY CARD');
     const send = method('renderSend(c) {');
     ok(/clBankOn: !cardOut/.test(send) && /goBank: \(\) => this\.bankStart\(\)/.test(send) && /clBankDim: off \? '0\.38' : '1'/.test(send),
        'not when paying from a card, dimmed offline, and it opens BANK ACCOUNT');
@@ -238,8 +238,13 @@ async function run() {
     const rows = a.bankRows();
     ok(rows.map((r) => r.name).join(',') === 'STRIKE,RIVER,CASH APP' && rows.map((r) => r.host).join(',') === 'strike.me,river.com,cash.app',
        'its rows: STRIKE, RIVER, CASH APP, each with its site under it', rows.map((r) => r.name + ' ' + r.host).join(' | '));
-    ok(rows.every((r) => /^url\('gd-/.test(r.logo) && r.notHere && !r.here), 'with the exchange’s picture, in the list’s look');
+    ok(rows.every((r) => r.logo === undefined && !/gd-|\.jpg/.test(JSON.stringify(rows))), 'no company’s picture or mark on any row');
+    ok(rows.every((r) => r.big === r.name && r.nameSize === '38px' && r.radius === '28px' && r.notHere && !r.here && r.edge === '1px'),
+       'drawn as the mint list’s tiles: the name large, no tick on any when none is kept');
+    ok(!fs.existsSync(path.join(ROOT, 'Web/gd-river.jpg')) && !fs.existsSync(path.join(ROOT, 'Web/gd-strike.jpg'))
+       && !fs.existsSync(path.join(ROOT, 'Web/gd-cashapp.jpg')) && !fs.existsSync(path.join(ROOT, 'Web/gd-flash.jpg')), 'the company pictures are not in the bundle');
     const mints = method('renderMints(c) {');
+    ok(/const tiles = !L;/.test(mints), 'the exchanges are drawn as tiles, not the plain rows');
     ok(/s\.bankPick \? 'BANK ACCOUNT'/.test(mints) && /'Trade your Foxy balance for dollars with one of these exchanges\.'/.test(mints)
        && /if \(s\.bankPick\) return this\.bankRows/.test(mints) && /mintPickers: [^\n]*&& !s\.bankPick,/.test(mints),
        'the list is titled BANK ACCOUNT, says what it is for, and offers no mint to add');

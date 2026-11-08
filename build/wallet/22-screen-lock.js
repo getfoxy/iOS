@@ -122,6 +122,9 @@
       });
     },
 
+    /* Whether the phone made this wallet's seed in this launch (nativeReady): true from then until the page closes. */
+    seedMade: function () { return seedMadeNow; },
+
     /* For the tests of native secrets (tests/run.js): how many secrets from
      * the phone the page holds, and a restore fetch into that cache. */
     _secretsHeld: function () { return secretCache.size; },

@@ -12,9 +12,9 @@ them:
   icon) and the files whose origin `Web/VENDOR.md` gives as not recorded are
   here so the app builds as it ships. Nothing in this repository licenses them
   for any other use.
-- The Cash App, Strike, River and Flash app icons on the GET DOLLARS screen
-  belong to those companies and are their trademarks. They are shown to name
-  those apps, and no connection with or endorsement by any of them is implied.
+- BANK ACCOUNT names Strike, River and Cash App in plain text, with none of their
+  pictures or marks. The names are those companies' trademarks, shown to name
+  them, and no connection with or endorsement by any of them is implied.
 - The fonts with a recorded licence keep it (`Web/VENDOR.md`).
 
 The chip card's applet is a separate repository, https://github.com/getfoxy/card,

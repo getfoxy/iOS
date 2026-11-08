@@ -374,8 +374,7 @@ Two things worth knowing about that "when":
   SatSymbol font, the two "Flash bolt" icons and the artwork in `Web/` (the
   sprite sheets, the fur textures, the intro video and its stills) carry no
   author or licence; two of the images carry a C2PA manifest that says only
-  that the file passed through Claude's file handling, and the four GET DOLLARS
-  icons are other companies' trademarks, used to name their apps. Each is
+  that the file passed through Claude's file handling. Each is
   pinned by hash (`Web/VENDOR.md`, "Fonts, images and icons").
 - **The native binary a person installs is not checked against these sources.**
   The page now is: the app hashes the files it staged and shows the first twelve

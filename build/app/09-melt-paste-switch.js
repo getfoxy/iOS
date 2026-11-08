@@ -213,9 +213,7 @@
         this.tookToken(r);
         this.settleAnimate('btc');
         this.noteReceived();
-        // no banner: the pill counting up is the confirmation. A switched mint
-        // is worth saying out loud, though — the wallet moved under them.
-        if (r.switched) this.toast('Now on ' + r.host);
+        // no banner: the pill counting up is the confirmation, and a switched mint is not announced.
       });
     }).catch(e => { this.hideMelt(); this.claimFailed(e, null); });
     });
@@ -440,7 +438,7 @@
     // Connecting takes a second or two over Tor, and until now the row gave no
     // sign it had been tapped at all.
     this.setState({ switchBusy: true, mintBusy: String(url).replace(/\/+$/, '') });
-    // an earlier switch's "Now on" is not this one's to say (`mintConnected` matches by the switch, review 7)
+    // an earlier switch's answer is not this one's to say (`mintConnected` matches by the switch, review 7)
     this._switchSay = null;
     const back = this.state.mintReturn;
     // asked before connecting, which adds it to the list
@@ -460,13 +458,12 @@
         this.setState({ screen: 'history', stack: ['home'], histMint: '' });
         this.loadHistory();
       }
-      /* Still being asked: what waits for its answer is said when it comes (`mintConnected`), this switch's own
-       * toast and a first visit's seed check among them. */
+      /* Still being asked: what waits for its answer is done when it comes (`mintConnected`), a first visit's seed
+       * check among them. */
       if (w && w.pending) {
         this._switchSay = { url: String(url).replace(/\/+$/, ''), host, firstTime: !usedBefore, gen: w.gen };
         return;
       }
-      this.toast('Now on ' + host);
       if (!usedBefore) this.sweepNewMint(url, host);
     }).catch(e => {
       this.setState({ switchBusy: false, mintBusy: '' });
@@ -477,7 +474,7 @@
   /* A mint switched to at once has answered, or has not (the wallet's `onMintConnected`): { url, ok, why, back }.
    *
    * Answered: the balance and history are read again from the wallet that answered, the shield's ring stops, the
-   * switch's "Now on" is said, and a mint new to this phone has its seed check. Not: the phone stays on it, from the
+   * a mint new to this phone has its seed check. Not: the phone stays on it, from the
    * keys on file, and the shield says it is not answering; it is asked again behind the screen, as a launch's wallet
    * from storage is (`connectForRealOnceOnline`). A switch with no keys on file goes back where it was (`back`). */
   mintConnected(ev) {
@@ -485,7 +482,7 @@
     const e = ev || {};
     const strip = u => String(u || '').replace(/\/+$/, '');
     /* This switch's own answer, by the switch (`gen`), not by its mint: going back to a mint and away again is two
-     * switches. Kept through NOT ANSWERING, so "Now on" is said once when it does answer. */
+     * switches. Kept through NOT ANSWERING, so its first-visit check is done once when it does answer. */
     const own = this._switchSay;
     const say = own && (own.gen != null || e.gen != null ? own.gen === e.gen : strip(own.url) === strip(e.url)) ? own : null;
     if (say && (e.ok || e.back)) this._switchSay = null;
@@ -498,7 +495,6 @@
       // the mint's own keys now: sats a dollars wallet was paid can be swapped into dollars
       if (this.convertOnReturn) this.convertOnReturn();
       if (say) {
-        this.toast('Now on ' + host);
         if (say.firstTime) this.sweepNewMint(say.url, host);
       }
       return;
@@ -687,20 +683,15 @@
     });
   }
 
-  /* Tell them who holds the bitcoin, once per mint.
-   *
-   * Cashu is custodial: the mint holds the sats and the wallet holds claims
-   * on them. Nothing in this app said so, and a balance on screen looks the
-   * same either way. Shown before any money exists, and remembered — this is
-   * a thing to understand once, not a warning to dismiss daily. */
   /* Is the wallet pointed at a mint that issues worthless ecash? */
   onTestMint() {
     const host = (this.mintHost() || '').toLowerCase();
     return host.indexOf('testnut.cashu.space') >= 0;
   }
 
+  /* A mint that issues worthless ecash says so. The notice that the mint holds the bitcoin is gone: it was shown once per
+   * mint and gated nothing. */
   custodyNotice() {
-    const W = window.FoxyWallet;
     if (this.onTestMint()) {
       this.blockedCard('testmint', {
         tone: 'warn',
@@ -709,24 +700,7 @@
           + 'It exists so the app can be tested without spending real money. '
           + 'Do not send anything here expecting to get it back.',
       });
-      return;
     }
-    const host = this.mintName() || 'this mint';
-    let told = {};
-    try { told = JSON.parse(localStorage.getItem('foxy.custody.told') || '{}'); } catch (e) {}
-    if (told[host]) return;
-    told[host] = true;
-    try { localStorage.setItem('foxy.custody.told', JSON.stringify(told)); } catch (e) {}
-
-    this.blockedCard('custody', {
-      tone: 'warn',
-      title: 'THE MINT HOLDS YOUR BITCOIN',
-      reason: 'Ecash in this wallet is issued by ' + host + '. You are trusting '
-        + 'that mint to back it with bitcoin until you move your money to '
-        + 'another bitcoin lightning wallet. If it goes offline or refuses to '
-        + 'pay out, there is no one to appeal to. Hold only what you can '
-        + 'afford to lose.',
-    });
   }
 
   /* No passcode on the phone. The rule is Face ID, else the passcode, and
@@ -749,12 +723,14 @@
 
   walletReady(w) {
     /* Home, unless the till is open: a mint answering again is not a way out of it, and the screen it is on stays
-     * (26m-till.js). */
+     * (26m-till.js). Nor over the first run's CURRENCIES, which is a step before home (10-pin.js, `firstRunCurrencies`), nor the till's
+     * ACCEPT TIPS?, a step of opening it (26p-till-tips.js). */
     this.setState(Object.assign({
       walletLive: true,
       walletSearching: false,
       walletErr: '',
-    }, this.state.till ? {} : {
+    }, (this.state.till || (this.state.holdFirst && this.state.screen === 'holdChoice')
+      || (this.state.screen === 'tillTips' && this._tillTipsFlow)) ? {} : {
       screen: 'home',
       stack: [],
     }));
@@ -787,10 +763,12 @@
         return null;
       }).catch(() => { this._locksPrimed = false; });
     }
-    // and, the first time on any mint, say who is holding the money
+    // and, on a test mint, that its ecash is worth nothing
     setTimeout(() => this.custodyNotice(), 900);
     // and, where there is no passcode, that nothing but an alert guards the seed
     setTimeout(() => this.passcodeNotice(), 1000);
+    // a first run whose seed the phone made only at this connect: which currencies to use (10-pin.js)
+    if (this.firstRunAfterSeed) this.firstRunAfterSeed();
     // and last, at a mint with two balances, what to hold (10-pin.js)
     setTimeout(() => { if (this.offerHoldChoice) this.offerHoldChoice(); }, 1300);
     // and money a card is owed from a payment it made from this phone, until a tap puts it on (26f-flashcard.js)

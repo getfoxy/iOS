@@ -654,9 +654,9 @@
         // the till's OTHER tip (26p-till-tips.js)
         : s.flow === 'tillTip' ? 'How much is the tip?'
         : 'How much to send?',
-      // a swap's rate, under the question, before anything is typed (26i-swap.js, `swapRateLine`)
-      swapRateLine: s.flow === 'swap' && this.swapRateLine ? this.swapRateLine() : '',
-      swapRateShown: !!(s.flow === 'swap' && this.swapRateLine && this.swapRateLine()),
+      // a swap's rate is no longer drawn under the question (the keeper, 2026-11-08): the confirmation says it (26i-swap.js)
+      swapRateLine: '',
+      swapRateShown: false,
       // what a till cap is, in a plain line under the question (26j-till-caps.js, `tillCapNote`)
       amountNote: s.flow === 'tillCap' && this.tillCapNote ? this.tillCapNote()
         // and on a till's SET AMOUNT at more than one mint, where it is (26m-till.js, `tillWhereLine`)

@@ -734,18 +734,41 @@
    * on the document, since the screens' markup binds clicks only. */
   FC_SPIN = { auto: 24, perPx: 0.57, keep: 0.94, rest: 1600, gone: 60 };
 
+  /* The card also turns on three screens drawn over the app as a stage (`#foxy-stage`): TAP TO READ and READING, and the screen a
+   * tapped card opens to the site (`fcCardStageHtml`). A stage that holds the turntable is the screen then, whatever the app's own
+   * screen is under it. */
+  fcSpinStageUp() {
+    return typeof document !== 'undefined' && !!document.querySelector('#foxy-stage [data-card-stage="1"]');
+  }
+
+  // what is up over that stage, by name, or '': any other fixed element on the page (the PIN pad, a card), as `cardTapOver` has it
+  fcSpinOverStage() {
+    const lockPad = this._pinLocked ? this._pinEl : null;
+    const kids = document.body ? Array.prototype.slice.call(document.body.children) : [];
+    for (let i = 0; i < kids.length; i++) {
+      const n = /** @type {any} */ (kids[i]);
+      if (!n || n === lockPad || n.tagName === 'INPUT' || n.tagName === 'TEXTAREA') continue;
+      const id = String(n.id || '');
+      if (id === 'foxy-stage' || id === 'dc-root' || id === 'foxy-get-dollars' || id.indexOf('ftg-') === 0) continue;
+      if (n.style && n.style.position === 'fixed') return id || 'an overlay';
+    }
+    return '';
+  }
+
   // whether the turning card is on screen with nothing over it: the welcome or the card's screen, no menu, no lock, no sheet or stage
   fcSpinLive() {
     const s = this.state || {};
+    if (typeof document !== 'undefined' && document.hidden) return false;
+    // (on a stage's own turntable the tap that stage belongs to is not "over" it; the menu is under it; a lock or another overlay is over it)
+    if (this.fcSpinStageUp()) return !this._pinLocked && !this.fcSpinOverStage();
     if (s.screen !== 'fcWelcome' && s.screen !== 'flashcard') return false;
     if (s.open0 || this._pinLocked || (this._fcTaps || 0) > 0) return false;
-    if (typeof document !== 'undefined' && document.hidden) return false;
     return !(this.cardTapOver && this.cardTapOver()) && !(this.cardFlowBusy && this.cardFlowBusy());
   }
 
   // on every render: the turntable runs where its screen is drawn (`drawn`), and stops for good, the angle forgotten, where not
   fcSpinSync(drawn) {
-    if (drawn) { this.fcSpinOn(); return; }
+    if (drawn || this.fcSpinStageUp()) { this.fcSpinOn(); return; }
     if (this._fcSpin && this._fcSpin.stop) this._fcSpin.stop();
     this.fcSpinUnpark();
     this._fcSpinA = 0;
@@ -772,7 +795,7 @@
     // (a static preview, a review page, shows the card still, as such pages run no loops)
     if (this._fcSpin || typeof document === 'undefined' || typeof window === 'undefined' || (this.props && this.props.startStatic)) return;
     const s0 = this.state || {};
-    if (s0.screen !== 'fcWelcome' && s0.screen !== 'flashcard') { this.fcSpinUnpark(); return; }
+    if (s0.screen !== 'fcWelcome' && s0.screen !== 'flashcard' && !this.fcSpinStageUp()) { this.fcSpinUnpark(); return; }
     if (!this.fcSpinLive()) { this.fcSpinPark(); return; }
     this.fcSpinUnpark();
     const doc = /** @type {any} */ (document);
@@ -782,7 +805,7 @@
     const sp = /** @type {any} */ ({ a: Number(this._fcSpinA) || 0, vel: 0, drag: null, held: 0, last: Date.now(), miss: 0, stop: null });
     this._fcSpin = sp;
     const still = () => { try { return !!(win.matchMedia && win.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; } };
-    const spinEl = () => doc.querySelector('[data-card-stage="1"] [data-card-spin]');
+    const spinEl = () => doc.querySelector('#foxy-stage [data-card-stage="1"] [data-card-spin]') || doc.querySelector('[data-card-stage="1"] [data-card-spin]');
     const paint = () => { const el = spinEl(); if (el) el.style.transform = 'rotateY(' + sp.a.toFixed(2) + 'deg)'; };
     const onStage = (e) => !!(e && e.target && e.target.closest && e.target.closest('[data-card-stage="1"]'));
     const xOf = (e) => Number((e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX) || 0;
@@ -836,6 +859,29 @@
     // (a card that went on from where it stood is drawn there at once)
     if (sp.a) paint();
     next(tick);
+  }
+
+  /* The card's picture on its turntable as a string, for the screens drawn over the app as a stage (TAP TO READ, READING, and the
+   * screen a tapped card opens to the site): the same stage, turntable, portrait and dark back as the card's own screen
+   * (build/markup.html, `data-card-stage`), in the design a card not yet met is shown in. `h` is the card's height as CSS. It turns
+   * by itself and by hand (`fcSpinOn`), from the front each time it is put up. */
+  fcCardStageHtml(h) {
+    const ch = '--ch:' + h;
+    return '<div data-card-stage="1" style="' + ch + ';flex:none;position:relative;perspective:1100px">'
+      + '<div data-card-spin style="position:relative;transform-style:preserve-3d">'
+      + '<div data-card-portrait data-card-design="' + this.FC_SETUP_DESIGN + '" style="' + ch + ';flex:none;position:relative;height:var(--ch);'
+      + 'width:calc(var(--ch) * 54 / 85.6);border-radius:calc(var(--ch) * 3.18 / 85.6);overflow:hidden;'
+      + 'box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 2px 0 rgba(255,255,255,.05),0 16px 34px rgba(0,0,0,.6)">'
+      + '<div data-card-picture style="position:absolute;inset:0;background:url(img/card-fx1-portrait.jpg) center/cover no-repeat"></div></div>'
+      + '<div data-card-back aria-hidden="true" style="position:absolute;left:0;top:0;width:100%;height:100%;box-sizing:border-box;'
+      + 'border-radius:calc(var(--ch) * 3.18 / 85.6);background:linear-gradient(150deg,#2E2F32,#121315);'
+      + 'box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 2px 0 rgba(255,255,255,.05),0 16px 34px rgba(0,0,0,.6);'
+      + 'transform:rotateY(180deg);backface-visibility:hidden;-webkit-backface-visibility:hidden;display:flex;flex-direction:column;'
+      + 'align-items:center;justify-content:center;gap:calc(var(--ch) * .035)">'
+      + '<svg viewBox="0 0 236.5 366" style="height:calc(var(--ch) * .2);width:calc(var(--ch) * .129);display:block;opacity:.9">'
+      + '<path d="M81.1,364.6c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8L37.9,56.1c4.3-20.8,21.7-34.8,42.9-34.2,14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#050505"></path><path d="M103,355c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8L59.7,46.4c4.3-20.8,21.7-34.8,42.9-34.2,14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#5C5C5C"></path><path d="M124.1,342.8c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8,32.1-112C85.2,13.5,102.6-.5,123.8,0c14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#C9C9C9"></path></svg>'
+      + '<div style="font-family:Sora,sans-serif;font-weight:800;font-size:calc(var(--ch) * .06);letter-spacing:.3em;margin-right:-.3em;color:#C9C9C9">FOXY</div>'
+      + '</div></div></div>';
   }
 
   /* The bindings of the three (build/markup.html): the welcome and CARD LIMITS share one block, the card's picture between a title

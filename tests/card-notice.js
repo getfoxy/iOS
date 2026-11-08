@@ -237,12 +237,16 @@ const hist = (v) => v.fcMenuItems.filter((m) => m.label === 'HISTORY')[0] || {};
     holder.fcWithdrawRun(500, '1234', 0, undefined, 'sat');
     await until('the 500 to come off', () => !(holder._fcTaps > 0) && card.balance() <= 2000 - 500 && !!holder.state.fc && holder.state.fc.check && holder.state.fc.check !== 'asking', 20000);
     await settle();
+    holder.setState({ screen: 'flashcard', stack: [] });   // (DONE on the green RECEIVED that ended it)
+    await settle();
     ok(vals(holder).fcMenuRingInk === RED && holder.fcHistNotes(holder.state.fc)[0].kind === 'spent', '6  a typed withdrawal leaves the spent pieces on the card: still red, the red row first',
        JSON.stringify(holder.state.fc && holder.state.fc.check));
     card.tap();
     holder.fcWithdrawRun(0, '1234', 0, undefined, 'sat');
     await until('everything to come off', () => !(holder._fcTaps > 0) && card.balance() === 0 && !!holder.state.fc && holder.state.fc.balance === 0, 20000);
     await settle(); await settle();
+    holder.setState({ screen: 'flashcard', stack: [] });
+    await settle();
     v = vals(holder);
     ok(v.fcMenuRing === 'none' && v.fcMenuRingInk === 'transparent' && !holder.fcHistNotes(holder.state.fc).some((r) => r.kind === 'spent') && hist(v).glow === 'none',
        '6  WITHDRAW ALL lets the spent pieces go: the ring stops, HISTORY is plain, and there is no red row', JSON.stringify([v.fcMenuRingInk, holder.state.fc.check]));

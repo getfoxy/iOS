@@ -289,9 +289,9 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     let v = V();
     ok(asked === true && v.mintTitle === 'WITHDRAW TO' && v.mintNowLine === 'This card is at ' + A.mintNameOf(FORGE) + '. Other mints cost a Lightning fee.',
        'WITHDRAW TO, and the line under it', JSON.stringify([v.mintTitle, v.mintNowLine]));
-    ok(v.mintRows[0].host === 'forge.flashapp.me' && v.mintRows[0].here && !v.mintRows[0].lineFee && !v.mintRows[0].lineWait && !v.mintRows[0].lineBal
+    ok(v.mintRows[0].host === 'forge.flashapp.me' && v.mintRows[0].here && v.mintRows[0].lineFee && v.mintRows[0].fee === 'FREE ON FORGE' && !v.mintRows[0].lineWait && !v.mintRows[0].lineBal
        && v.mintRows[0].bg === 'rgba(var(--acc-rgb),.12)' && v.mintRows[0].edge === '2px',
-       'the card’s own mint first: ticked, filled, a 2px accent edge, no line', JSON.stringify(v.mintRows[0]));
+       'the card’s own mint first: ticked, filled, a 2px accent edge, FREE ON FORGE under its rule', JSON.stringify(v.mintRows[0]));
     ok(v.mintRows.slice(1).every((r) => r.lineWait && r.wait === 'CALCULATING…' && !r.lineFee), 'the others CALCULATING… while they are asked',
        JSON.stringify(v.mintRows.map((r) => r.wait)));
     toasts = [];
@@ -362,12 +362,12 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     ok(!V().mintNowShown, 'on a mint: no line');
   }
 
-  // ---- 5. the lists that are not of mints keep their rows ------------------------------------------------------------
+  // ---- 5. BANK ACCOUNT lists the exchanges as the same tiles (the keeper, 2026-11-08) -----------------------------------
   {
     A.goSwitchMint({ bankPick: true });
     await settle();
     const v = V();
-    ok(v.mintTilesShown === false && v.mintRowsShown === true, 'BANK ACCOUNT keeps its rows', JSON.stringify([v.mintTitle]));
+    ok(v.mintTitle === 'BANK ACCOUNT' && v.mintTilesShown === true, 'BANK ACCOUNT draws the exchanges as mint tiles', JSON.stringify([v.mintTitle, v.mintTilesShown]));
   }
 
   // ---- 6. the currency tiles: DOLLARS in frost, BITCOIN in orange, BOTH split, each sign faint, the word 40px --------

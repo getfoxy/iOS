@@ -729,10 +729,10 @@
       contactAll: this.contactRows(),
       contactLetter: (this.contactRows()[0] || {}).ini || '',
       contactRecents: this.contactRows().slice(0, 3),
-      // ADD A CASHU ID and SCAN A CASHU ID, on the empty CONTACTS (26o-cashu-id.js); not offered where the wallet cannot
-      // read an ID, nor SCAN where it cannot scan
+      // PASTE A CASHU ID and SCAN A CASHU ID, on the empty CONTACTS (26o-cashu-id.js); not offered where the wallet
+      // cannot read an ID, nor SCAN where it cannot scan. PASTE reads the clipboard.
       ctAddShown: !!(window.FoxyWallet && window.FoxyWallet.cashuIdCheck),
-      ctAddGo: () => this.cidPasteAsk(),
+      ctAddGo: () => this.cidClipboardAdd(),
       ctScanShown: !!(window.FoxyWallet && window.FoxyWallet.cashuIdCheck && window.FoxyWallet.scan),
       ctScanGo: () => this.cidScanAsk(),
       /* A contact is paid at a Lightning address, which offline can be neither

@@ -425,10 +425,10 @@ async function mount() {
     A.goSwap();
     A.renderVals().swapNextGo();
     await settle();
-    ok(probe.calls === 1 && /How much to swap\? Checking the rate…/.test(text()), 'SET AMOUNT, the probe out: "Checking the rate…" under the question', text().slice(0, 200));
+    ok(probe.calls === 1 && /How much to swap\?/.test(text()) && !/Checking the rate|RATE ₿|MARKET PRICE/.test(text()), 'SET AMOUNT, the probe out: the question alone, no rate line under it (the keeper, 2026-11-08)', text().slice(0, 200));
     probe.hold();
     await settle();
-    ok(/How much to swap\? FORGE’S RATE ₿ 1 = \$ 81,500/.test(text()), 'its answer: FORGE’S RATE ₿ 1 = $ 81,500 there', text().slice(0, 200));
+    ok(/How much to swap\?/.test(text()) && !/RATE ₿|MARKET PRICE/.test(text()) && !A.renderVals().swapRateShown, 'its answer: still no rate line there, nor Forge’s rate', text().slice(0, 200));
     // the probe refused, and the mint with no rate: the market price, said to be the market's
     st.rate = 0;
     w.FoxyWallet.swapProbe = () => { probe.calls += 1; return Promise.reject(new Error('the mint did not answer')); };
@@ -437,7 +437,10 @@ async function mount() {
     A.goSwap();
     A.renderVals().swapNextGo();
     await settle();
-    ok(/How much to swap\? MARKET PRICE ₿ 1 = \$ 82,601/.test(text()) && !toasts.length, 'a probe that failed: MARKET PRICE ₿ 1 = $ 82,601, and nothing said about it', text().slice(0, 200));
+    ok(/How much to swap\?/.test(text()) && !/RATE ₿|MARKET PRICE/.test(text()) && !toasts.length, 'a probe that failed: no market price line either, and nothing said about it', text().slice(0, 200));
+    A.setState({ screen: 'swap', stack: ['home'] });
+    ok(A.renderVals().swapFoot === '' && !/before anything moves/.test(text()), 'the swap screen has no line about the rate and the fee before anything moves', text().slice(0, 300));
+    A.setState({ screen: 'amount', stack: ['home'] });
     A.setState({ flow: '' });
     ok(!A.renderVals().swapRateShown, 'and no rate line outside a swap');
     A.setState({ flow: 'swap' });

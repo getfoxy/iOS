@@ -355,12 +355,12 @@
      * and TOTAL, each with its figure. Only while the wallet has limits to show. */
     const capRows = this.tillCapRows ? this.tillCapRows(MENU_ICON.receive, shut) : [];
     const settingRows = /** @type {any[]} */ ([]).concat(
-      // REMIND ME AFTER 15 DAYS, the first row of SETTINGS (26o-remind.js): only with a Cashu ID in use
-      this.remindMenuRow ? this.remindMenuRow(sw) : [],
+      // FACE ID, SET PIN, then BLUETOOTH TAP (the keeper, 2026-11-08). The reminder after 15 days away has no row: it stays as it was
+      // by default, asked once when a Cashu ID is in use (26o-remind.js, `remindMaybeAsk`).
+      [faceRow, pinRow],
       /* Whether an invoice goes on the air by itself. A switch, and the drawer stays open so it can be seen to move. */
       [Object.assign({ label: 'BLUETOOTH TAP', path: MENU_ICON.change,
         tap: () => { this.tapAutoSet(!tapAuto); this.setState({ menuTick: (this.state.menuTick || 0) + 1 }); } }, sw(tapAuto))],
-      [pinRow, faceRow],
       [
         { label: 'BACKUP', path: MENU_ICON.backup, tap: shut(() => this.showSeedOnPhone(false)) },
         /* The phone's own screens, straight over home: no Foxy screen before RESTORE A WALLET or after YOUR SEED PHRASE. */
@@ -477,6 +477,7 @@
       ...this.renderFlashcard(c),
       ...this.renderCardScreens(c),
       ...this.renderCardName(c),
+      ...this.renderTillTips(c),
       ...this.renderBank(c),
       ...this.renderNewMint(c),
       ...this.renderRestore(c),

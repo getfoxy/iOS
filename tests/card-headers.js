@@ -164,7 +164,8 @@ for (const [cond, title, sub] of SCREENS) {
 
   // the values: a turntable on the welcome only
   const wheel = part('26j-card-wheel.js');
-  const sigs = ['renderCardScreens(c) {', 'fcWelcomeCard(s) {', 'fcSpinOn() {', 'fcSpinLive() {', 'fcSpinSync(drawn) {', 'fcSpinPark() {', 'fcSpinUnpark() {'];
+  const sigs = ['renderCardScreens(c) {', 'fcWelcomeCard(s) {', 'fcSpinOn() {', 'fcSpinLive() {', 'fcSpinSync(drawn) {', 'fcSpinPark() {', 'fcSpinUnpark() {',
+    'fcSpinStageUp() {', 'fcSpinOverStage() {'];
   const src = sigs.map((sig) => lift(wheel, sig)).filter(Boolean).join(',\n');
   const dom = new JSDOM('<body></body>', { pretendToBeVisual: true });
   global.window = dom.window;

@@ -374,6 +374,76 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     clearTimeout(A._holdT);
   }
 
+  // ---- 3b. the first run: CURRENCIES as a set-up step, before home, once --------------------------
+  {
+    const FLAG = 'foxy.currencies.firstRun';
+    const unflag = () => { try { w.localStorage.removeItem(FLAG); } catch (e) {} };
+    unflag();
+    // a seed already on the phone: no set-up step
+    const W0 = twoWallet({ sat: 0, usd: 0 });
+    W0.seedMade = () => false;
+    await fresh(W0);
+    eq([A.firstRunAfterSeed(), A.state.screen], [false, 'home'], 'first run: a seed already there asks nothing');
+    // the words made in this launch: CURRENCIES, with nothing under it, before home
+    const W = twoWallet({ sat: 0, usd: 0 });
+    W.seedMade = () => true;
+    await fresh(W);
+    ok(A.firstRunAfterSeed() === true, 'first run: the words made, the step goes up');
+    await settle();
+    ok(A.state.screen === 'holdChoice' && A.state.stack.length === 0 && /CURRENCIES/.test(textOf(w)) && /LAST STEP/.test(textOf(w)),
+      'first run: the CURRENCIES screen as the last set-up step, nothing under it', A.state.screen + ' ' + JSON.stringify(A.state.stack));
+    eq(V().holdRows.map((h) => h.name), ['DOLLARS', 'BITCOIN', 'BOTH'], 'first run: Dollars / Bitcoin / Both');
+    // the mint answering meanwhile does not take it down
+    A.walletReady({ name: 'forge.example.com' });
+    await settle();
+    eq(A.state.screen, 'holdChoice', 'first run: the mint answering leaves the question up');
+    V().holdRows[1].tap();
+    V().holdDone();
+    await settle();
+    eq([W.rec.sets.pop(), W.st.choice.hold, A.state.screen], [{ hold: 'bitcoin' }, 'bitcoin', 'home'], 'first run: DONE keeps the choice as CURRENCIES does; home');
+    clearTimeout(A._holdT);
+    // not asked again: not this launch, and not on a later one with no choice on file
+    eq([A.firstRunAfterSeed(), A.state.screen], [false, 'home'], 'first run: asked once');
+    const W1 = twoWallet({ sat: 0, usd: 0 });
+    W1.seedMade = () => true;
+    await fresh(W1);
+    eq([A.firstRunAfterSeed(), A.state.screen], [false, 'home'], 'first run: once for the install, even with no choice on file');
+    // a choice already kept, or a mint known to issue one currency: nothing asked
+    unflag();
+    const W2 = twoWallet({ choice: { hold: 'dollars' } });
+    W2.seedMade = () => true;
+    await fresh(W2);
+    eq([A.firstRunAfterSeed(), A.state.screen], [false, 'home'], 'first run: a choice already kept asks nothing');
+    const W3 = twoWallet({ units: ['sat'] });
+    W3.seedMade = () => true;
+    await fresh(W3);
+    eq([A.firstRunAfterSeed(), A.state.screen], [false, 'home'], 'first run: a mint of one currency asks nothing');
+    // backed out of at the first run: words restored later ask it, as for words made
+    unflag();
+    const W4 = twoWallet({ sat: 0, usd: 0 });
+    W4.seedMade = () => true;
+    await fresh(W4);
+    A.firstRunAfterSeed(); await settle();
+    V().holdBack(); await settle();
+    eq([A.state.screen, W4.rec.sets.length], ['home', 0], 'first run backed out of: home, nothing written');
+    W4.st.sat = 1200;
+    ok(A.firstRunCurrencies('restored', { sat: true, usd: false }) === true && A.state.screen === 'holdChoice',
+      'then words restored with bitcoin only: CURRENCIES is asked');
+    A.holdLater();
+    await settle();
+    // the launch's own what-to-hold question, timed 1.3 s after a mint answers (09-melt-paste-switch.js `walletReady`), left
+    // to pass while the question is put off, so it cannot go up under the next case
+    await new Promise((go) => setTimeout(go, 1500));
+    // a restore that found dollars and bitcoin: both kept, nothing asked
+    unflag();
+    const W5 = twoWallet({ sat: 1200, usd: 300 });
+    await fresh(W5);
+    ok(A.firstRunCurrencies('restored', { sat: true, usd: true }) === false && A.state.screen === 'home'
+      && W5.st.choice.hold === 'both', 'restored with dollars and bitcoin: both kept, nothing asked', JSON.stringify([A.state.screen, W5.st.choice]));
+    eq(A.firstRunCurrencies('made'), false, 'and not asked after it');
+    unflag();
+  }
+
   // ---- 4. CURRENCY at every receive and send; nothing remembered (the owner, 2026-10-22) -------
   {
     const W = twoWallet({ choice: { hold: 'both' } });

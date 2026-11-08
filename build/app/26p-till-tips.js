@@ -2,8 +2,10 @@
    *
    * The wallet's half is 08f-till-tips.js. Here, every screen one the app has:
    *
-   *   ACCEPT TIPS? .......... a card (`blockedCard`), YES / NO, after the till's opening steps (the lock, the mints, the
-   *                           default mint, the default currency) and for each new CASHIER CODE, the till's answer first.
+   *   ACCEPT TIPS? .......... a screen of the set-up family ('tillTips': its title beside the back button, the divider, the
+   *                           line under it), YES / NO, after the till's opening steps (the lock, the mints, the default
+   *                           mint, the default currency) and for each new CASHIER CODE, the till's answer first. Its back
+   *                           button is walking away from the question.
    *   TIPS GO TO ............ a card: MYSELF, ONE PERSON, GROUP.
    *   ONE PERSON ............ the SWITCH MINT list (`tillList` 'person'): the Cashu ID contacts, PASTE A CASHU ID (a card
    *                           with a field) and SCAN A CASHU ID; an ID that is not a contact is named first, on the
@@ -49,14 +51,18 @@
   // ---- the questions: ACCEPT TIPS?, TIPS GO TO, ONE PERSON, GROUP ----
 
   /* Asks for an answer, the till's `def` first where it had one, and gives it to `done`; `cancel` where the person walks away
-   * (taps outside a card, or backs off the first). */
+   * (backs off ACCEPT TIPS?). */
   tillTipsAsk(def, done, cancel) {
     const d = def && def.on ? def : null;
-    this._tillTipsFlow = { def: d, done: typeof done === 'function' ? done : () => {}, cancel: typeof cancel === 'function' ? cancel : () => {} };
+    const s = this.state || {};
+    this._tillTipsFlow = { def: d, done: typeof done === 'function' ? done : () => {}, cancel: typeof cancel === 'function' ? cancel : () => {},
+      // the list under the screen (CASHIER CODES), drawn again as it was when the screen comes off
+      under: s.screen === 'switchMint' ? (s.tillList || false) : false };
     this.tillTipsAskYes();
   }
 
-  // a card that calls `cancel` where it closes with no answer
+  /* A card over ACCEPT TIPS? (TIPS GO TO, and the person's own cards): closed with no answer, ACCEPT TIPS? is still there to
+   * answer; off it, walking away. */
   tillTipsCard(kind, spec) {
     let answered = false;
     const mark = (fn) => (...a) => { answered = true; if (fn) fn(...a); };
@@ -67,24 +73,53 @@
       pills: (spec.pills || []).map((p) => Object.assign({}, p, { tap: mark(p.tap) })),
       onClose: () => setTimeout(() => {
         if (answered || this._tillTipsFlow !== flow || !flow) return;
-        this._tillTipsFlow = null;
-        console.log('[foxy] till: the tips question was left unanswered');
-        flow.cancel();
+        if (this.state.screen === 'tillTips') return;
+        this.tillTipsCancel();
       }, 0),
     });
     this.blockedCard(kind, over);
   }
 
+  // ACCEPT TIPS?, the screen: pushed once, and there under the cards that follow it
   tillTipsAskYes() {
     const f = this._tillTipsFlow;
     if (!f) return;
-    this.tillTipsCard('tillTipsAsk', {
-      tone: 'ask', title: 'ACCEPT TIPS?',
-      reason: 'Payers see $1, $2, $5 and OTHER beside the amount. The tip is part of the one payment.',
-      chip: f.def ? 'Now: ' + this.tillTipsWords(f.def) : '',
-      retry: 'YES', go: () => this.tillTipsAskTo(),
-      shut: { label: 'NO', pill: true, tap: () => this.tillTipsDone({ on: false, to: 'self', ids: [] }) },
-    });
+    if (this.state.screen === 'tillTips') return;
+    // (the till's answer, said under the line where it had one)
+    this.setState((p) => ({ screen: 'tillTips', stack: p.stack.concat([p.screen]), tillTipsDef: f.def || null }));
+  }
+
+  // the screen off, back to what was under it (the list it was asked over drawn again)
+  tillTipsLeave(flow) {
+    const under = flow ? flow.under : false;
+    this.setState((p) => (p.screen !== 'tillTips' ? null : {
+      screen: (p.stack || []).length ? p.stack[p.stack.length - 1] : 'home', stack: (p.stack || []).slice(0, -1),
+      tillList: under || false,
+    }));
+  }
+
+  // walked away from: the screen off, and the flow told
+  tillTipsCancel() {
+    const f = this._tillTipsFlow;
+    if (!f) return false;
+    this._tillTipsFlow = null;
+    console.log('[foxy] till: the tips question was left unanswered');
+    this.tillTipsLeave(f);
+    f.cancel();
+    return true;
+  }
+
+  /** @param {RenderContext} c */
+  renderTillTips(c) {
+    const { s, sc } = c;
+    const on = sc === 'tillTips';
+    return {
+      isTillTips: on,
+      ttReason: 'Payers see $1, $2, $5 and OTHER beside the amount. The tip is part of the one payment.',
+      ttNow: on && s.tillTipsDef ? 'Now: ' + this.tillTipsWords(s.tillTipsDef) : '',
+      ttYes: () => { if (this._tillTipsFlow) this.tillTipsAskTo(); },
+      ttNo: () => { if (this._tillTipsFlow) this.tillTipsDone({ on: false, to: 'self', ids: [] }); },
+    };
   }
 
   tillTipsAskTo() {
@@ -111,8 +146,9 @@
     const why = (W && W.tillTipsProblem) ? W.tillTipsProblem(tips) : '';
     if (why) { this.toast(why, true); return false; }
     this._tillTipsFlow = null;
-    // off ONE PERSON or GROUP, where the answer was given there (CASHIER CODES, under them, stays)
+    // off ONE PERSON or GROUP, where the answer was given there, and off ACCEPT TIPS? under them
     if (this.state.tillList === 'person' || this.state.tillList === 'group') this.tillListLeave();
+    this.tillTipsLeave(f);
     f.done(tips);
     return true;
   }

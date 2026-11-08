@@ -1,35 +1,10 @@
   /* ---- REMIND ME AFTER 15 DAYS (08i-remind.js, Reminder.swift) ----
    *
    * Only on a phone whose Cashu ID is in use. The first time it is, a card asks once (`remindAskCard`) and says why;
-   * TURN ON has iOS ask its own question, NOT NOW leaves the switch in SETTINGS for later. Notifications already allowed
-   * for payments turn it on with no card. The switch is the first row of SETTINGS. */
-
-  // the row in SETTINGS: [the row], or [] with no ID in use. `sw` is the menu's own switch look.
-  remindMenuRow(sw) {
-    const W = window.FoxyWallet;
-    if (!W || !W.remindView) return [];
-    const v = W.remindView() || {};
-    if (!v.eligible) return [];
-    return [Object.assign({ label: 'REMIND ME AFTER 15 DAYS', path: 'M12 6v6l4 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z',
-      tap: () => this.remindTap() }, sw(v.on === true))];
-  }
+   * TURN ON has iOS ask its own question. Notifications already allowed for payments turn it on with no card. There is
+   * no switch in SETTINGS (the keeper, 2026-11-08): it stays as this default has it. */
 
   remindPaint() { this.setState({ menuTick: (this.state.menuTick || 0) + 1 }); }
-
-  remindTap() {
-    const W = window.FoxyWallet;
-    if (!W || !W.remindView || this._remindBusy) return;
-    if ((W.remindView() || {}).on === true) {
-      this._remindBusy = true;
-      Promise.resolve(W.remindTurnOff()).then(() => {
-        this._remindBusy = false;
-        this.remindPaint();
-        this.toast('No reminder.');
-      });
-      return;
-    }
-    this.remindOn();
-  }
 
   remindOn() {
     const W = window.FoxyWallet;

@@ -975,15 +975,13 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(pad(holder).title === 'ENTER PIN TO WITHDRAW' && pad(holder).cta === 'WITHDRAW ALL', 'then: ENTER PIN TO WITHDRAW', pad(holder).cta);
   pad(holder).type('4321');
   await until('the money to be in the wallet', () => c.balance() === 0 && !!holder.state.fc && holder.state.fc.balance === 0);
-  const wdFigures = [];
-  const wdSampling = setInterval(() => wdFigures.push(Number(vals(holder).fcBalance.replace(/[^\d]/g, ''))), 30);
   await until('the count to end', () => !holder.state.fcRoll);
-  clearInterval(wdSampling);
   await settle();
-  ok(c.balance() === 0 && (await H.W.balanceSats()) === hadBefore + onCard && holder.state.screen === 'flashcard' && !card(holder) && !pad(holder) && vals(holder).fcBalance === '₿ 0',
-     'all of it is in the phone, though the limit was 700 a day: the holder’s phone lifted it in the same tap. The card was let go once it had signed and is not read again, so the screen is brought up to date from what the tap knew: it stays on the card, and no card is raised over it', vals(holder).fcBalance);
-  ok(wdFigures[0] > 0 && wdFigures.every((f, i) => i === 0 || f <= wdFigures[i - 1]) && wdFigures[wdFigures.length - 1] === 0 && new Set(wdFigures).size > 5,
-     'and its balance counted down from what it held to nothing, and never went up', wdFigures.join(' '));
+  ok(c.balance() === 0 && (await H.W.balanceSats()) === hadBefore + onCard && holder.state.screen === 'paid' && holder.state.paidSays === 'RECEIVED' && holder.state.paidAmount === onCard && !holder.state.payOut && !card(holder) && !pad(holder),
+     'all of it is in the phone, though the limit was 700 a day: the holder’s phone lifted it in the same tap. The card was let go once it had signed and is not read again, so the screen is brought up to date from what the tap knew, and the green RECEIVED ends the withdrawal with no card raised over it', holder.state.screen + ' / ' + holder.state.paidSays);
+  holder.setState({ screen: 'flashcard', stack: [] });   // (DONE on it: back where the withdrawal began)
+  await settle();
+  ok(holder.state.screen === 'flashcard' && vals(holder).fcBalance === '₿ 0', 'DISMISS: the card’s screen, its balance at nothing', holder.state.screen + ' / ' + vals(holder).fcBalance);
   ok(c.state.record.limit === 700, 'and the limit is back as it was when the card left the phone', String(c.state.record.limit));
   ok(c.sent.filter((a) => /^b034/.test(a)).length === 2, 'having been lifted and put back, with this phone’s proof, in the one tap');
   /* The phone signs a limit only against the keeper's yes, given before the card is held up (NativeSeedBridge.swift): the
@@ -1020,9 +1018,12 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     pad(holder).type('4321');
     await counted(holder, 700, 'the 300 to be off the card');
     await settle();
-    ok(holder.state.screen === 'flashcard' && !card(holder) && c.balance() === 700 && H.W.cardOwed().length === 0 && H.sheet.indexOf('again: Hold for change.') >= 0 && vals(holder).fcBalance === '₿ 700',
-       'a typed amount that needs change: the card is let go once it has signed, its change goes back in the same sheet, and the screen is the card’s, at 700, with nothing raised over it',
-       H.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / ') + ' | ' + vals(holder).fcBalance);
+    ok(holder.state.screen === 'paid' && holder.state.paidSays === 'RECEIVED' && holder.state.paidAmount === 300 && !card(holder) && c.balance() === 700 && H.W.cardOwed().length === 0 && H.sheet.indexOf('again: Hold for change.') >= 0,
+       'a typed amount that needs change: the card is let go once it has signed, its change goes back in the same sheet, and the green RECEIVED says the 300, with no card raised over it',
+       H.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / ') + ' | ' + holder.state.screen + ' / ' + holder.state.paidAmount);
+    holder.setState({ screen: 'flashcard', stack: [] });
+    await settle();
+    ok(vals(holder).fcBalance === '₿ 700', 'and DONE on it is the card’s screen, at 700', vals(holder).fcBalance);
     const shown = holder._fcCard;
     c.tap();
     const real = await H.W.cardLook(c, { mine: true });
@@ -1107,8 +1108,11 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const begins = H.sheet.filter((x) => /^begin:/.test(x));
     ok(begins.length === 1 && H.sheet.filter((x) => /^again:/.test(x)).join() === 'again: Hold for the rest.' && !pad(holder) && titlesW.length === 0 && !card(holder),
        'a withdrawal cut short keeps what came off, and the same sheet asks for the card again for the rest, with no PIN and no card to press, and none raised when it is done', H.sheet.filter((x) => /^(begin|again|end|error):/.test(x)).join(' / ') + ' | ' + titlesW.join(', '));
-    ok(c.balance() === 0 && (await H.W.balanceSats()) === had + 1500 && holder.state.screen === 'flashcard' && vals(holder).fcBalance === '₿ 0' && c.state.record.limit === 700 && H.W.cardOwed().length === 0,
-       'and then all of it is in the phone, and the screen is the card’s, at nothing, and the card’s limit is back as it was', vals(holder).fcBalance + ' / ' + c.state.record.limit);
+    ok(c.balance() === 0 && (await H.W.balanceSats()) === had + 1500 && holder.state.screen === 'paid' && holder.state.paidSays === 'RECEIVED' && holder.state.paidAmount === 1500 && !holder.state.payOut && c.state.record.limit === 700 && H.W.cardOwed().length === 0,
+       'and then all of it is in the phone, and the green RECEIVED says so (the keeper, 2026-11-08), and the card’s limit is back as it was', holder.state.screen + ' / ' + holder.state.paidSays + ' / ' + c.state.record.limit);
+    holder.setState({ screen: 'flashcard', stack: [] });
+    await settle();
+    ok(holder.state.screen === 'flashcard' && vals(holder).fcBalance === '₿ 0', 'DISMISS: the card’s screen, at nothing', holder.state.screen + ' / ' + vals(holder).fcBalance);
 
     // the sheet for the rest reads no card: TAP THE CARD AGAIN, with what came off so far, and TAP CARD for the rest
     c.tap();
@@ -1135,11 +1139,12 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     c.tap();
     card(holder).press('TAP CARD');
     ok(!pad(holder), 'the tap for the rest asks no PIN again: it is the same withdrawal');
-    await until('the rest to be in the wallet', () => card(holder) && card(holder).title === 'IN YOUR WALLET');
+    await until('the rest to be in the wallet', () => holder.state.screen === 'paid' && holder.state.paidSays === 'RECEIVED');
     await settle();
-    ok(c.balance() === 0 && (await H.W.balanceSats()) === had2 + 1500 && card(holder).reason === '₿1,500 from the card is in this phone now.',
-       'and then all of it is in the phone, said as the whole', card(holder).reason);
-    card(holder).press('DONE');
+    ok(c.balance() === 0 && (await H.W.balanceSats()) === had2 + 1500 && holder.state.paidAmount === 1500,
+       'and then all of it is in the phone, said as the whole on the green RECEIVED', String(holder.state.paidAmount));
+    holder.setState({ screen: 'flashcard', stack: [] });
+    await settle();
     holder.blockedCard = shownW;
   }
 
@@ -2181,8 +2186,10 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(!pad(owner), 'withdrawing from it asks for no PIN either: there is none');
     await counted(owner, 1500, 'the money to be in the wallet');
     await settle();
-    ok((await H2.W.balanceSats()) - haveBefore === 500 && n.sent.filter((a) => /^b040/.test(a)).length === 0 && !card(owner) && owner.state.screen === 'flashcard',
-       'and 500 came off the card with no PIN sent, and the screen is the card’s, at 1,500, with nothing raised over it', String((await H2.W.balanceSats()) - haveBefore));
+    ok((await H2.W.balanceSats()) - haveBefore === 500 && n.sent.filter((a) => /^b040/.test(a)).length === 0 && !card(owner) && owner.state.screen === 'paid' && owner.state.paidSays === 'RECEIVED' && owner.state.paidAmount === 500,
+       'and 500 came off the card with no PIN sent, the green RECEIVED says so, with no card raised over it', String((await H2.W.balanceSats()) - haveBefore));
+    owner.setState({ screen: 'flashcard', stack: [] });
+    await settle();
     {
       // what the screen says is what the card says when it is read, of a card of 128 places and a typed amount
       const shown = owner._fcCard;
@@ -3408,7 +3415,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     v = vals(a);
     ok(v.fcTitle === 'LUNCH' && v.fcVerifiedShown === undefined, 'the card screen’s title is its name, alone: the Verified words are in its HISTORY', v.fcTitle);
     a.setState({ fc: { key: stranger, setUp: true, hasRecord: true, pin: 'none', unit: 'sat', balance: 0, count: 0 } });
-    ok(vals(a).fcTitle === 'ECASHCARD', 'a card with no name keeps ECASHCARD');
+    ok(vals(a).fcTitle === 'FOXY CARD', 'a card with no name keeps FOXY CARD');
     // home's history rows, where a card is named (16-history-lists.js `txWho`)
     const hist = fs.readFileSync(path.join(__dirname, '..', 'build', 'app', '16-history-lists.js'), 'utf8');
     const lift = (sig) => { const from = hist.indexOf('\n  ' + sig) + 1; return hist.slice(from, hist.indexOf('\n  }\n', from) + 4); };
@@ -3527,7 +3534,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       a.fcWithdrawPin(0);
       ok(a.pins.length === 1 && a.state.screen === 'amount' && !a.state.wdPick && a.asked.length === 0, 'WITHDRAW TO: a phone with one mint is asked nothing; ALL OF IT goes to the PIN', JSON.stringify(a.state.screen));
     }
-    // three: the list, the card's mint first at NO FEE, the others asked what the crossing costs
+    // three: the list, the card's mint first at FREE ON <MINT>, the others asked what the crossing costs
     {
       const a = phone([CARD, MB, MAC], { fees: { [MB]: 42, [MAC]: 7 } });
       a.fcWithdrawPin(0);
@@ -3537,8 +3544,8 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
          'ALL OF IT with other mints on the phone: the SWITCH MINT list, WITHDRAW TO, before the PIN and before anything comes off', JSON.stringify({ sc: a.state.screen, t: v.mintTitle }));
       ok(a.asked.length === 2 && a.asked.every((x) => x.from === CARD && x.q.quoteOnly && x.sats === 3000) && a.asked.map((x) => x.q.to).sort().join() === [MAC, MB].sort().join(),
          'each other mint is asked what the crossing costs, from the card\u2019s mint, for what the card holds; nothing paid', JSON.stringify(a.asked));
-      ok(v.mintRows[0].host === 'forge.test' && v.mintRows[0].text === 'NO FEE' && v.mintRows.slice(1).every((r) => r.text === 'CALCULATING\u2026'),
-         'the card\u2019s own mint first at NO FEE, the others CALCULATING\u2026', v.mintRows.map((r) => r.host + ' ' + r.text).join(' / '));
+      ok(v.mintRows[0].host === 'forge.test' && v.mintRows[0].text === 'FREE ON FORGE' && v.mintRows[0].fee === 'FREE ON FORGE' && v.mintRows[0].lineFee === true && v.mintRows.slice(1).every((r) => r.text === 'CALCULATING\u2026'),
+         'the card\u2019s own mint first at FREE ON FORGE, the others CALCULATING\u2026', v.mintRows.map((r) => r.host + ' ' + r.text).join(' / '));
       a.later[MB]();
       await settle();
       v = list(a);

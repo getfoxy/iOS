@@ -615,7 +615,7 @@
       this._preSettle = this.balNow();
       return W.receiveToken(t).then(r => {
         this.hideMelt();
-        if (r.switched) { this.walletReady({ name: r.host }); this.toast('Now on ' + r.host); }
+        if (r.switched) this.walletReady({ name: r.host });
         this.tookToken(r);
         this.announceTaken(r);
         this.refreshBalance();
@@ -2698,7 +2698,6 @@
         this.keptOfflineSaid(r);
         this.settleAnimate('btc');
         this.noteReceived();
-        if (r.switched) this.toast('Now on ' + r.host);
       }).catch(e => {
         this.receivingDown();
         /* Retry with the token already in hand. It used to retry by calling
@@ -2784,9 +2783,7 @@
         this.announceTaken(r);
         this.settleAnimate('btc');
         this.noteReceived();
-        // no banner: the pill counting up is the confirmation. A switched mint
-        // is worth saying out loud, though — the wallet moved under them.
-        if (r.switched) this.toast('Now on ' + r.host);
+        // no banner: the pill counting up is the confirmation, and a switched mint is not announced.
       });
     }).catch(e => { this.receivingDown(); this.claimFailed(e, () => this.scanEcashToken()); });
   }

@@ -178,7 +178,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     holder.setState((p) => ({ screen: 'sendHow', stack: p.stack.concat([p.screen]), flow: 'send', sendFrom: '' }));
     update();
     const v = sendVals();
-    ok(!holder.fcOutMode() && rowsShown(v).join() === 'PASTE,SEND ECASH,CONTACTS,TYPE,ECASHCARD,BANK ACCOUNT', 'home’s SEND is as it was: PASTE, SEND ECASH, CONTACTS, TYPE, FLASHCARD and BANK ACCOUNT', rowsShown(v).join());
+    ok(!holder.fcOutMode() && rowsShown(v).join() === 'PASTE,SEND ECASH,CONTACTS,TYPE,FOXY CARD,BANK ACCOUNT', 'home’s SEND is as it was: PASTE, SEND ECASH, CONTACTS, TYPE, FLASHCARD and BANK ACCOUNT', rowsShown(v).join());
   }
 
   /* ---- 4: an invoice pasted in card mode, to the confirmation ------------------------------------------------- */
@@ -193,7 +193,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     const from = spec.rows.find((r) => r.label === 'FROM') || {};
     ok(holder.state.screen === 'sendConfirm' && holder.state.sendFrom === 'card' && holder.fcOutMode(), 'a pasted invoice reaches its confirmation, still in card mode');
     // (the design: DELIVERED TO, then NETWORK / FROM / ARRIVES / FEE two by two, FROM saying FLASHCARD and nothing under it)
-    ok(labels.join() === 'DELIVERED TO,NETWORK,FROM,ARRIVES,FEE' && spec.rows.slice(1).every((r) => r.basis === '50%') && from.value === 'ECASHCARD' && from.sub === '',
+    ok(labels.join() === 'DELIVERED TO,NETWORK,FROM,ARRIVES,FEE' && spec.rows.slice(1).every((r) => r.basis === '50%') && from.value === 'FOXY CARD' && from.sub === '',
        'with FROM / FLASHCARD after NETWORK, in a grid of four with ARRIVES and FEE', labels.join() + ' | ' + from.value + ' ' + from.sub);
     const feeRow = spec.rows.find((r) => r.label === 'FEE') || {};
     ok(spec.cta === 'NEXT' && !spec.ctaBusy && feeRow.value === '~₿ 10' && feeRow.sub === '' && !feeRow.sub2Shown && spec.secondary.label === 'ADD A NOTE',
@@ -397,7 +397,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     await until('the address to be looked up and its fee quoted', () => holder.state.quotedFee != null);
     update();
     const s2 = holder.confirmSpec();
-    ok(s2.cta === 'NEXT' && s2.rows.some((r) => r.label === 'FROM' && r.value === 'ECASHCARD'), 'its confirmation has the FROM row and NEXT', s2.cta);
+    ok(s2.cta === 'NEXT' && s2.rows.some((r) => r.label === 'FROM' && r.value === 'FOXY CARD'), 'its confirmation has the FROM row and NEXT', s2.cta);
     s2.go();
     await sentDone();
     await tapsDone();
@@ -447,7 +447,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     ok(holder.state.sendFrom === '' && !holder.fcOutMode(), 'home from SEND MONEY ends card mode');
     holder.setState((p) => ({ screen: 'sendHow', stack: p.stack.concat([p.screen]), flow: 'send', sendFrom: '' }));
     update();
-    ok(rowsShown(sendVals()).join() === 'PASTE,SEND ECASH,CONTACTS,TYPE,ECASHCARD,BANK ACCOUNT', 'and home’s SEND afterwards is this phone’s, with no WITHDRAW', rowsShown(sendVals()).join());
+    ok(rowsShown(sendVals()).join() === 'PASTE,SEND ECASH,CONTACTS,TYPE,FOXY CARD,BANK ACCOUNT', 'and home’s SEND afterwards is this phone’s, with no WITHDRAW', rowsShown(sendVals()).join());
     ok(c.balance() === before && H.W.cardOwed().length === 0 && H.W.cardTaken().length === 0 && outsHeld().length === 0, 'nothing came off the card');
   }
 
@@ -757,8 +757,8 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     holder.fcWithdrawPin(0);
     await until('the card to be emptied', () => c.balance() === 0 && !!holder.state.fc && holder.state.fc.balance === 0 && !holder.state.fcRoll);
     await settle();
-    ok(holder.state.screen === 'flashcard' && !card(holder) && (await H.W.balanceSats()) === had + onCard,
-       'ALL OF IT: the card’s money is in this phone and its screen counts down to nothing, with nothing raised over it, as the old tile did', String((await H.W.balanceSats()) - had));
+    ok(holder.state.screen === 'paid' && holder.state.paidSays === 'RECEIVED' && holder.state.paidAmount === onCard && !card(holder) && (await H.W.balanceSats()) === had + onCard,
+       'ALL OF IT: the card’s money is in this phone and the green RECEIVED says so, with no card raised over it', String((await H.W.balanceSats()) - had));
     ok(books().length === 0, 'the books add up', books().join(' / '));
   }
 
@@ -801,7 +801,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     const sp = two.confirmSpec();
     const labels = sp.rows.map((r) => r.label);
     ok(!sp.wallet && labels.indexOf('RATE') < 0 && labels.indexOf('PAYING FROM') < 0 && sp.cta === 'NEXT'
-       && sp.rows.some((r) => r.label === 'FROM' && r.value === 'ECASHCARD'),
+       && sp.rows.some((r) => r.label === 'FROM' && r.value === 'FOXY CARD'),
        'SEND from the card at a two-unit mint: FROM FLASHCARD and NEXT, with no WALLET button and no RATE row', labels.join() + ' | ' + sp.cta);
     ok(!two.state.feeQ && !!two._feeQuote && (two._feeQuote.unit === undefined || two._feeQuote.unit === 'sat'),
        'and its fee was asked once, in sats: no quote of both balances', JSON.stringify(two._feeQuote && { unit: two._feeQuote.unit, fee: two._feeQuote.feeReserve }));

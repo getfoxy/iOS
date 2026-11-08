@@ -855,8 +855,8 @@ function representative(logic) {
   add('two balances: settings', at('home', Object.assign({ open0: true }, TWO_LIVE),
     { wallet: TWO({ walletChoice: () => ({ hold: 'both', recv: '', send: '' }) }) }));
   // SETTINGS open with the two till caps (26j-till-caps.js): what one payer may hand this phone offline, and what it holds in all
-  // REMIND ME AFTER 15 DAYS (26o-remind.js `remindMenuRow`), the first row of SETTINGS, on
-  add('settings, remind me after 15 days', at('home', { open0: true },
+  // SETTINGS with a Cashu ID in use: FACE ID LOCK, SET PIN, BLUETOOTH TAP, no reminder row (26o-remind.js)
+  add('settings, a Cashu ID in use, no reminder row', at('home', { open0: true },
     { wallet: { remindView: () => ({ eligible: true, on: true }) } }));
   add('settings, what it takes offline', at('home', { open0: true },
     { wallet: { tillCaps: () => ({ payerSats: 66000, holdSats: 396000, promptSats: 198000, payerSet: false, holdSet: true }) } }));
@@ -864,6 +864,13 @@ function representative(logic) {
   add('two balances: what to hold, Dollars picked', at('holdChoice', Object.assign({ holdPick: 'dollars' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: what to hold, Bitcoin picked', at('holdChoice', Object.assign({ holdPick: 'bitcoin' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: what to hold, Both picked', at('holdChoice', Object.assign({ holdPick: 'both' }, TWO_LIVE), { wallet: TWO() }));
+  // the first run's last step (10-pin.js `firstRunCurrencies`): nothing chosen yet, nothing under it
+  add('first run: CURRENCIES before home, nothing picked', at('holdChoice', Object.assign({ holdPick: '', holdFirst: true }, TWO_LIVE),
+    { wallet: TWO({ walletChoice: () => ({ hold: '', recv: '', send: '' }) }) }));
+  // the till's ACCEPT TIPS? as a set-up screen (26p-till-tips.js `renderTillTips`)
+  add('tillTips, ACCEPT TIPS? as the till opens', at('tillTips', { stack: ['home'] }));
+  add('tillTips, ACCEPT TIPS? for a new cashier code, the till’s answer said', at('tillTips', { stack: ['switchMint'],
+    tillTipsDef: { on: true, to: 'group', ids: [{ name: 'Ana' }, { name: 'Ben' }] } }));
   add('two balances: CURRENCY before the first receive', at('currency', Object.assign({ currencyFlow: 'receive', currencyNext: 'amount' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: SET AMOUNT, a dollars receive', at('amount', Object.assign({ flow: 'receive', wallet: 'usd', unit: 'USD', amount: '5.00' }, TWO_LIVE), { wallet: TWO() }));
   // the same, with sats typed: asked as the cents they are worth, said under them
@@ -1202,7 +1209,6 @@ function cards() {
   add('card: claim failed, locked', (a) => a.claimFailed(new Error('P2PK: locked to another key')));
   add('card: claim failed, the network, again', (a) => a.claimFailed(new Error('timed out'), () => {}));
   add('card: claim failed, invalid signatures', (a) => a.claimFailed(new Error('DLEQ verification failed')));
-  add('card: the mint holds your bitcoin', (a, w) => { w.localStorage.removeItem('foxy.custody.told'); a.custodyNotice(); });
   add('card: a test mint', (a) => a.custodyNotice(), { wallet: { mintHost: () => 'testnut.cashu.space' } });
   add('card: mint not answering', (a, w) => {
     w.localStorage.setItem('foxy.cashu.proofs.' + OTHER, JSON.stringify([{ amount: 64 }, { amount: 8 }]));
@@ -1228,9 +1234,11 @@ function cards() {
   // the Cashu ID (26o-cashu-id.js): MY CASHU ID's code with SHARE, and the card a pasted one asks with
   const CID_TEXT = 'foxyid1' + 'A'.repeat(94);
   // tips at the till (26p-till-tips.js): the questions, a group row's share, a code's name, a code again with END, and END's ask
-  add('card: ACCEPT TIPS?', (a) => a.tillTipsAsk(null, () => {}, () => {}));
-  add('card: ACCEPT TIPS?, the till’s answer said', (a) => a.tillTipsAsk({ on: true, to: 'group', ids: [{ name: 'Ana' }, { name: 'Ben' }] }, () => {}, () => {}));
+  // (ACCEPT TIPS? itself is a screen now: with the screens, 'tillTips')
   add('card: TIPS GO TO', (a) => { a.tillTipsAsk(null, () => {}, () => {}); a.tillTipsAskTo(); });
+  // POINT OF SALE with no lock: SET A LOCK FIRST, with CREATE PIN and USE FACE ID (26m-till.js `tillGate`)
+  add('card: SET A LOCK FIRST, with CREATE PIN and USE FACE ID', (a) => a.tillGate(() => {}, 'To open the till.'),
+    { wallet: { screenLocked: () => false, pinIsSet: () => false, pinSet() {}, setSeedProtection: () => Promise.resolve() } });
   add('card: PASTE A CASHU ID', (a) => a.tillIdPaste());
   add('card: a share of the group', (a) => { a.setState({ tillGroup: [{ id: 'g1', nostr: '1'.repeat(64), name: 'Ana', pct: 60 }] }); a.tillGroupRow('g1'); });
   add('card: NAME THIS CODE?', (a) => a.tillCodeAdd());
@@ -1292,7 +1300,13 @@ function cards() {
   add('stage: 1a tap to load', behind({ flow: 'load', amount: '$1.00' }));
   add('stage: 1c receiving', behind({ flow: 'load', amount: '$1.00' }, (a) => link(a, 'connected')));
   add('stage: 1d charging', behind({ flow: 'load', amount: '$1.00' }, (a) => { a.FC_TAP_REMOVE_MS = 3600 * 1000; link(a, 'connected'); a.fcStage('checking'); }));
-  add('stage: 1c reading', behind({ flow: 'read', amount: '' }, (a) => link(a, 'connected')));
+  // a read shows the card turning, asked for and while it is read; CARD LOST and the check do not
+  add('stage: 1a tap to read, the card turning', behind({ flow: 'read', amount: '' }));
+  add('stage: 1c reading, the card turning', behind({ flow: 'read', amount: '' }, (a) => link(a, 'connected')));
+  add('stage: 1g card lost on a read, no card shown', behind({ flow: 'read', amount: '' }, (a) => { link(a, 'connected'); link(a, 'lost'); }));
+  // the screen a tapped card opens to the site, its picture the card on its turntable
+  add('stage: FOXY CARD, visit the website, the card turning', (a) => a.stageScreen('cardLearn', { art: 'cardspin', title: 'FOXY CARD',
+    body: 'A Foxy Card holds your ecash. Tap it to another phone to pay, with no phone of your own.', above: 'VISIT WEBSITE', aboveGo() {}, button: 'DONE' }));
   add('stage: 1a tap to withdraw', behind({ flow: 'withdraw' }));
   add('stage: 1a tap to set up', behind({ flow: 'setup', amount: '' }));
   add('stage: checking a card payment', (a) => { a.fcChecking('card-x', { paying: true, taken: true, tapAmount: '$15.25' }); clearTimeout(a._fcCheckT); },

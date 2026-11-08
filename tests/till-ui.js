@@ -8,7 +8,8 @@
  * the keeper's key and sent to the keeper, and leaves with no PIN. The wallet's half is tests/till-wallet.js; this is the
  * screens over a stand-in wallet:
  *
- *   1  the gate: no lock says SET A LOCK FIRST; a face that says yes goes through; a PIN, wrong and then right
+ *   1  the gate: no lock says SET A LOCK FIRST with CREATE PIN and USE FACE ID (the SET PIN and FACE ID LOCK set-ups, then
+ *      on into POS mode, not the menu) and CANCEL; a face that says yes goes through; a PIN, wrong and then right
  *   2  POINT OF SALE and CASHIER CODE are rows under SETTINGS, and only there
  *   3  the keeper's till: SET AMOUNT in receive, its X and HISTORY, no menu, no scan, no paste, no balance, no home
  *   4  every road home ends at the till's SET AMOUNT: closeReceive, dismissPending, PAID's DISMISS, a card's CLOSE, Back with
@@ -153,6 +154,9 @@ function stubWallet(o) {
     biometric(reason, passcode) { calls.biometric.push([reason, passcode]); return Promise.resolve(opt.faceSays); },
     pinAttempt: (pin) => ({ ok: !!opt.pin && pin === opt.pin, waitMs: 0 }),
     pinCheck: (pin) => !!opt.pin && pin === opt.pin,
+    // the set-up flows SET PIN and FACE ID LOCK (10-pin.js `pinSetup`, `chooseProtection`)
+    pinSet(pin) { calls.pinSets = (calls.pinSets || []).concat([String(pin)]); opt.pin = String(pin); },
+    setSeedProtection(mode) { calls.protects = (calls.protects || []).concat([mode]); if (mode === 'device') opt.face = true; return Promise.resolve(); },
     reason: (e) => String((e && e.message) || e),
     unitName: (u) => String(u).toUpperCase(),
     balances: () => [{ unit: 'sat', amount: 50000, mint: MINT }],
@@ -328,10 +332,22 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     press(pad, 'CONTINUE');
     await settle();
   };
+  // a set-up pad, whose button says NEXT
+  const typePinAs = async (pin, cta) => {
+    const pad = A._pinEl;
+    for (const d of String(pin)) {
+      const k = Array.prototype.slice.call(pad.querySelectorAll('div')).filter((x) => x.textContent === d && x.children.length === 1)[0];
+      if (k) k.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+    }
+    press(pad, cta);
+    await settle();
+  };
   const pinUp = () => !!(A._pinEl && A._pinEl.parentNode);
-  // ACCEPT TIPS?, as the till opens: answered NO, or left for the scenario to answer (26p-till-tips.js)
-  const tipsAsked = () => /ACCEPT TIPS\?/.test(card());
-  const noTips = async () => { if (tipsAsked()) { press(A._blockedEl, 'NO'); await settle(); } };
+  // ACCEPT TIPS?, as the till opens, a screen of its own: answered NO, or left for the scenario to answer (26p-till-tips.js)
+  const tipsEl = () => w.document.querySelector('[data-till-tips]');
+  const tipsText = () => (tipsEl() ? tipsEl().textContent : '');
+  const tipsAsked = () => A.state.screen === 'tillTips' && /ACCEPT TIPS\?/.test(tipsText()) && !card();
+  const noTips = async () => { if (tipsAsked()) { press(tipsEl(), 'NO'); await settle(); } };
   const stage = () => w.document.getElementById('foxy-stage');
   const fresh = async (W, state) => {
     w.FoxyWallet = W;
@@ -374,8 +390,83 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     A.tillGate(() => { through += 1; }, 'To open the till.');
     await settle();
     ok(/SET A LOCK FIRST/.test(card()), 'no lock: SET A LOCK FIRST', card().slice(0, 60));
-    ok(/SETTINGS > SET PIN or FACE ID LOCK/.test(card()), 'and where to set one');
+    const btns = () => Array.prototype.slice.call(A._blockedEl.querySelectorAll('div')).filter((d) => !d.children.length).map((d) => d.textContent);
+    const b = btns();
+    ok(b.indexOf('CREATE PIN') >= 0 && b.indexOf('USE FACE ID') >= 0 && b.indexOf('CANCEL') >= 0 && b.indexOf('CANCEL') > b.indexOf('USE FACE ID')
+      && b.indexOf('USE FACE ID') > b.indexOf('CREATE PIN'), 'with CREATE PIN, USE FACE ID and CANCEL', JSON.stringify(b));
     eq(through, 0, 'and nothing opens');
+    press(A._blockedEl, 'CANCEL');
+    await settle();
+    ok(!card() && !pinUp() && through === 0, 'CANCEL: nothing opens and nothing is set');
+  }
+  {
+    // CREATE PIN: SET PIN's own set-up, and once the PIN is set, on to what the lock stood in front of
+    const W = stubWallet({});
+    await fresh(W);
+    let through = 0;
+    A.tillGate(() => { through += 1; }, 'To open the till.');
+    await settle();
+    press(A._blockedEl, 'CREATE PIN');
+    await settle();
+    ok(pinUp() && /CHOOSE A PIN/.test(A._pinEl.textContent), 'CREATE PIN: SET PIN’s CHOOSE A PIN', pinUp() ? A._pinEl.textContent.slice(0, 40) : card());
+    await typePinAs('1357', 'NEXT');
+    ok(pinUp() && /ENTER IT AGAIN/.test(A._pinEl.textContent), 'then ENTER IT AGAIN');
+    await typePinAs('1357', 'NEXT');
+    ok(/IF YOU FORGET THIS PIN/.test(card()) && through === 0, 'then IF YOU FORGET THIS PIN, nothing opened yet', card().slice(0, 60));
+    press(A._blockedEl, 'SET THE PIN');
+    await settle();
+    ok((W.calls.pinSets || []).join() === '1357' && through === 1, 'SET THE PIN: the PIN kept, and straight on, no second ask', JSON.stringify([W.calls.pinSets, through]));
+  }
+  {
+    // CREATE PIN given up: nothing opens
+    const W = stubWallet({});
+    await fresh(W);
+    let through = 0;
+    A.tillGate(() => { through += 1; }, 'To open the till.');
+    await settle();
+    press(A._blockedEl, 'CREATE PIN');
+    await settle();
+    press(A._pinEl, 'CANCEL');
+    await settle();
+    ok(!pinUp() && through === 0 && !(W.calls.pinSets || []).length, 'CREATE PIN given up: no PIN and nothing opens');
+  }
+  {
+    // USE FACE ID: FACE ID LOCK's own set-up, then on
+    const W = stubWallet({});
+    await fresh(W);
+    let through = 0;
+    A.tillGate(() => { through += 1; }, 'To open the till.');
+    await settle();
+    press(A._blockedEl, 'USE FACE ID');
+    await settle();
+    ok((W.calls.protects || []).join() === 'device' && through === 1 && !pinUp(), 'USE FACE ID: FACE ID LOCK turned on, and straight on', JSON.stringify([W.calls.protects, through]));
+  }
+  {
+    // from the menu: POINT OF SALE with no lock, CREATE PIN, and the person lands in POS mode, not the menu
+    const W = stubWallet({});
+    await fresh(W, { open0: true });
+    V().menuItems.find((m) => m.label === 'POINT OF SALE').tap();
+    await settle();
+    ok(/SET A LOCK FIRST/.test(card()), 'MENU > POINT OF SALE with no lock: SET A LOCK FIRST');
+    press(A._blockedEl, 'CREATE PIN'); await settle();
+    await typePinAs('2468', 'NEXT');
+    await typePinAs('2468', 'NEXT');
+    press(A._blockedEl, 'SET THE PIN'); await settle();
+    ok(tipsAsked() && !A.state.open0, 'the PIN set: on to the till’s opening, not the menu', JSON.stringify([A.state.screen, A.state.open0, card().slice(0, 30)]));
+    await noTips();
+    ok(A.state.till && A.state.till.role === 'keeper' && tillAmount() && !A.state.open0, 'and in POS mode', JSON.stringify([A.state.screen, !!A.state.till, A.state.open0]));
+    await settle(); await wait(50);
+    ok(!A.state.open0, 'with no menu over it');
+  }
+  {
+    const W = stubWallet({});
+    await fresh(W, { open0: true });
+    V().menuItems.find((m) => m.label === 'POINT OF SALE').tap();
+    await settle();
+    press(A._blockedEl, 'USE FACE ID'); await settle();
+    ok(tipsAsked() && !A.state.open0, 'USE FACE ID from the menu: on to the till’s opening', JSON.stringify([A.state.screen, A.state.open0]));
+    await noTips();
+    ok(A.state.till && tillAmount() && !A.state.open0, 'and in POS mode');
   }
   {
     const W = stubWallet({ face: true, faceSays: 'yes' });
@@ -1081,11 +1172,11 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     W.walletChoice = () => ({ hold: 'both' });
     await fresh(W, { balUsdCents: 1234 });
     A.tillOpen(); await settle(); await noTips();
-    ok(!A.state.till && A.state.screen === 'currency' && A.state.currencyFlow === 'card' && A.state.curCard && A.state.curCard.question === 'DEFAULT CURRENCY'
+    ok(!A.state.till && A.state.screen === 'currency' && A.state.currencyFlow === 'card' && A.state.curCard && A.state.curCard.question === 'WHICH DO YOU PREFER TO RECEIVE?'
        && W.calls.keeperOpens.length === 1,
        'holding both at a mint of both: DEFAULT CURRENCY is asked once the wallet is told of the till, and no till yet', JSON.stringify([A.state.screen, A.state.till, A.state.curCard, W.calls.keeperOpens.length]));
     let cv = V();
-    ok(cv.curQuestion === 'DEFAULT CURRENCY' && Array.isArray(cv.curCards) && cv.curCards.length === 2 && cv.curCards.every((c) => !c.tagShown)
+    ok(cv.curQuestion === 'WHICH DO YOU PREFER TO RECEIVE?' && Array.isArray(cv.curCards) && cv.curCards.length === 2 && cv.curCards.every((c) => !c.tagShown)
        && cv.curCards[0].balance === '$ 12.34' && /^\$ /.test(cv.curCards[1].balance),
        'with this phone’s balances at the default on it, and nothing greyed', JSON.stringify((cv.curCards || []).map((c) => [c.name, c.balance, c.tag])));
     ok(/QR invoice is made in it/.test(JSON.stringify(A.state.curCard.foot)), 'and the foot says what it decides', A.state.curCard.foot);
@@ -1366,7 +1457,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     mr().tillNext(); await settle();
     ok(A.state.tillPick === 'default' && !(A.state.curCard && A.state.curCard.question), '(set-up) DEFAULT MINT first, nothing of the currency yet', JSON.stringify([A.state.tillPick, A.state.curCard]));
     mr().mintRows.filter((x) => x.host === 'forge.example.com')[0].tap(); await settle(); await settle(); await noTips();
-    ok(!A.state.till && A.state.screen === 'currency' && A.state.curCard && A.state.curCard.question === 'DEFAULT CURRENCY' && W.calls.keeperOpens.length === 1,
+    ok(!A.state.till && A.state.screen === 'currency' && A.state.curCard && A.state.curCard.question === 'WHICH DO YOU PREFER TO RECEIVE?' && W.calls.keeperOpens.length === 1,
        'a set whose default issues both, holding both: DEFAULT CURRENCY after DEFAULT MINT', JSON.stringify([A.state.screen, A.state.till, A.state.curCard && A.state.curCard.question]));
     A.currencyPick('usd'); await settle(); await settle(); await noTips();
     ok(A.state.till && A.state.till.unit === 'both' && A.state.till.main === 'usd' && A.state.till.mints.length === 2 && tillAmount(),
@@ -1672,18 +1763,33 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
       if (f) f.value = text;
       press(A._blockedEl, label); await settle();
     };
-    const pressCard = async (label) => { press(A._blockedEl, label); await settle(); };
+    // a card's button, or where no card has it, the ACCEPT TIPS? screen's
+    const pressCard = async (label) => { if (!press(A._blockedEl, label)) press(tipsEl(), label); await settle(); };
     const mr = () => A.renderMints({ s: A.state, sc: 'switchMint' });
     const openTill = async (W) => { await fresh(W); A.tillOpen(); await settle(); };
 
     // 20a: YES, MYSELF
     let W = stubWallet({ pin: '2468' });
     await openTill(W);
-    ok(tipsAsked() && /YES/.test(card()) && /NO/.test(card()) && /\$1, \$2, \$5 and OTHER/.test(card()), '20a ACCEPT TIPS?: YES or NO, and what payers will see', card());
+    ok(tipsAsked() && /YES/.test(tipsText()) && /NO/.test(tipsText()) && /\$1, \$2, \$5 and OTHER/.test(tipsText()), '20a ACCEPT TIPS?: YES or NO, and what payers will see', tipsText());
+    {
+      // a screen of the set-up family, not a card: its title beside the back button, then the divider, then the line
+      const el = tipsEl();
+      const head = el && el.children[0];
+      const round = head && head.querySelector('svg');
+      const title = head && Array.prototype.slice.call(head.querySelectorAll('div')).find((d) => d.textContent === 'ACCEPT TIPS?');
+      const rule = el && el.children[1];
+      ok(!card() && !!round && !!title && !!rule && /height: ?1px/.test(rule.getAttribute('style'))
+        && /\$1, \$2, \$5 and OTHER/.test(el.children[2].textContent), 'ACCEPT TIPS? is a full screen: title beside the back button, divider, the line under it',
+        JSON.stringify([!!card(), !!round, !!title, rule && rule.getAttribute('style'), el && el.children[2] && el.children[2].textContent]));
+    }
     await pressCard('YES');
     ok(/TIPS GO TO/.test(card()) && /MYSELF/.test(card()) && /ONE PERSON/.test(card()) && /GROUP/.test(card()), 'YES: TIPS GO TO, MYSELF, ONE PERSON, GROUP', card());
     await pressCard('BACK');
     ok(tipsAsked(), 'BACK off TIPS GO TO: ACCEPT TIPS? again');
+    await pressCard('YES');
+    A._blockedEl.dispatchEvent(new w.MouseEvent('click', { bubbles: true })); await settle(); await settle();
+    ok(tipsAsked() && !A.state.till, 'TIPS GO TO closed with no answer: ACCEPT TIPS? still there to answer');
     await pressCard('YES'); await pressCard('MYSELF');
     ok(A.state.till && tillAmount() && JSON.stringify(A.state.till.tips) === JSON.stringify({ on: true, to: 'self', ids: [] }) && W.calls.tipsSet.length === 1,
       'MYSELF: the till opens, its tips to the keeper, kept with the till', JSON.stringify(A.state.till && A.state.till.tips));
@@ -1691,8 +1797,9 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     // walked away from: no till, the wallet's record let go
     W = stubWallet({ pin: '2468' });
     await openTill(W);
-    A._blockedEl.dispatchEvent(new w.MouseEvent('click', { bubbles: true })); await settle(); await settle();
-    ok(!A.state.till && W.calls.keeperCloses === 1 && W.calls.tipsSet.length === 0, 'ACCEPT TIPS? closed with no answer: no till, the wallet told to let go', JSON.stringify([A.state.screen, W.calls.keeperCloses]));
+    A.back(); await settle(); await settle();
+    ok(!A.state.till && W.calls.keeperCloses === 1 && W.calls.tipsSet.length === 0 && A.state.screen === 'home',
+      'back off ACCEPT TIPS?: no till, the wallet told to let go, home', JSON.stringify([A.state.screen, W.calls.keeperCloses]));
 
     // ONE PERSON: a contact
     W = stubWallet({ pin: '2468' });
@@ -1916,7 +2023,12 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     rm.tillNext(); await settle();
     ok(/NAME THIS CODE\?/.test(card()), 'ADD A CASHIER: a name for its row first');
     await typeInCard('Front', 'NEXT');
-    ok(tipsAsked() && /Now: Tips to Ana/.test(card()), 'then ACCEPT TIPS?, the till’s answer said', card());
+    ok(tipsAsked() && /Now: Tips to Ana/.test(tipsText()), 'then ACCEPT TIPS?, the till’s answer said', JSON.stringify([A.state.screen, tipsText(), card()]));
+    A.back(); await settle();
+    ok(A.state.screen === 'switchMint' && A.state.tillList === 'codes' && mr().mintTitle === 'CASHIER CODES' && W.calls.passOpts.length === 0 && !!A.state.till,
+      'back off it: CASHIER CODES again, no code made, the till as it was', JSON.stringify([A.state.screen, A.state.tillList]));
+    mr().tillNext(); await settle();
+    await typeInCard('Front', 'NEXT');
     await pressCard('NO'); await settle(); await settle();
     let po = W.calls.passOpts.slice(-1)[0];
     ok(po && po.fresh === true && po.label === 'Front' && po.tips && po.tips.on === false && stage() && stage().getAttribute('data-stage') === 'tillPass' && /No tips/.test(stage().textContent),

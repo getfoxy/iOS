@@ -68,9 +68,10 @@ ok(/const free = \(\) => \{[^\n]*this\.fcSpinOn\(\)/.test(lift(flash, 'fcTap(o, 
 
 /* ---- the turntable on the card's screen, driven ----------------------------------------------------------------------------- */
 const wheel = part('26j-card-wheel.js');
-const sigs = ['renderCardScreens(c) {', 'fcWelcomeCard(s) {', 'fcSpinOn() {', 'fcSpinLive() {', 'fcSpinSync(drawn) {', 'fcSpinPark() {', 'fcSpinUnpark() {'];
+const sigs = ['renderCardScreens(c) {', 'fcWelcomeCard(s) {', 'fcSpinOn() {', 'fcSpinLive() {', 'fcSpinSync(drawn) {', 'fcSpinPark() {', 'fcSpinUnpark() {', 'fcSpinStageUp() {', 'fcSpinOverStage() {', 'fcCardStageHtml(h) {'];
+const famSigs = ['fcFamilyFill(root, spec) {', 'fcFamilyTitle(root, text) {'];
 const family = lift(part('26h-tap-screen.js'), 'fcFamilyBuild(kind) {');
-const src = sigs.map((sig) => lift(wheel, sig)).filter(Boolean).concat([lift(flash, 'cardTapOver() {'), lift(flash, 'fcSwipeFrom(target) {'), family]).filter(Boolean).join(',\n');
+const src = sigs.map((sig) => lift(wheel, sig)).filter(Boolean).concat([lift(flash, 'cardTapOver() {'), lift(flash, 'fcSwipeFrom(target) {'), family].concat(famSigs.map((sig) => lift(part('26h-tap-screen.js'), sig)))).filter(Boolean).join(',\n');
 const dom = new JSDOM('<body></body>', { pretendToBeVisual: true });
 global.window = dom.window;
 global.document = dom.window.document;
@@ -81,7 +82,7 @@ Object.defineProperty(dom.window.document, 'hidden', { configurable: true, get: 
 let app = null;
 try {
   app = Object.assign(new Function('return {' + src + '}')(), {
-    FC_SPIN: { auto: 24, perPx: 0.57, keep: 0.94, rest: 0, gone: 60 }, FC_SETUP_DESIGN: 'FX1', FC_SPEED_CHIPS: [1, 2, 5],
+    FC_SPIN: { auto: 24, perPx: 0.57, keep: 0.94, rest: 0, gone: 60 }, FC_SETUP_DESIGN: 'FX1', FC_TAP_SCREENS: { '1a': { bg: '', ink: '' } }, FC_TAP_ICONS: {}, FC_TAP_PAD: '90px 36px 0px', FC_TAP_PAD_CARD: '40px 36px 0px', FC_TAP_CARD_H: '200px', FC_SPEED_CHIPS: [1, 2, 5],
     fcDesignOf: () => 'FX1', fcLimitRows: () => [], fcLostRows: () => [], back() {}, cardFlowBusy: () => false,
     hideStage() { const o = document.getElementById('foxy-stage'); if (o) o.remove(); },
     state: { screen: 'flashcard', fc: { key: 'k', setUp: true } },
@@ -210,6 +211,69 @@ const drawn = () => app.renderCardScreens({ s: app.state, sc: app.state.screen }
     const offCard = document.querySelector('[data-shield]');
     ok(app.fcSwipeFrom(onCard) === false && app.fcSwipeFrom(document.querySelector('[data-card-stage="1"] [data-card-back]')) === false && !!offCard && app.fcSwipeFrom(offCard) === true,
        'a finger that starts on the card screen’s turning card, either face, is never the swipe home; one that starts on the money card under it still is');
+  }
+
+  /* ---- the same turntable on the stages: TAP TO READ, READING, and the screen a tapped card opens to the site ------------------ */
+  {
+    const tap = part('26h-tap-screen.js');
+    ok(/spec\.card = String\(o\.flow \|\| ''\) === 'read' && \(k\.scheme === '1a' \|\| k\.scheme === '1c'\) && k\.key !== 'pin'/.test(lift(tap, 'fcTapSpec(k) {')),
+       'a read shows the card on its asking (TAP TO READ) and its contact (READING), and no other flow, CARD LOST, the PIN or the check does');
+    ok(/art: 'cardspin'/.test(lift(flash, 'fcCancelled(own, e) {')) && /o\.art === 'cardspin' \? this\.fcCardStageHtml/.test(lift(part('26e-loaders.js'), 'stageScreen(kind, o) {')),
+       'the screen a tapped card opens to the site puts the turning card where its drawing was');
+    document.body.innerHTML = '';
+    app.state = { screen: 'home' };
+    app._fcSpinA = 0;
+    // READING: a tap is under way (`_fcTaps`), and the stage is the tap's own screen
+    app._fcTaps = 1;
+    const root = app.fcFamilyBuild('card');
+    app.fcFamilyFill(root, { screen: '1a', title: 'TAP TO READ', card: true });
+    const art = root.querySelector('[data-tp-art]');
+    const stageSpin = root.querySelector('[data-card-stage="1"] [data-card-spin]');
+    ok(!!art && art.style.display !== 'none' && !!stageSpin && !!root.querySelector('[data-card-portrait][data-card-design="FX1"] [data-card-picture]') && !!root.querySelector('[data-card-back]'),
+       'the screen holds the card on a turntable: its portrait in the design a new card is shown in, and its dark back');
+    ok(root.querySelector('[data-tp-body]').style.padding === '40px 36px 0px', 'the screen makes room for it at the top');
+    await wait(120);
+    const stageAngle = () => { const m = /rotateY\((-?[\d.]+)deg\)/.exec(stageSpin.style.transform || ''); return m ? Number(m[1]) : NaN; };
+    const t0 = stageAngle();
+    ok(!!app._fcSpin && t0 > 0, 'the card on the stage turns by itself, with the app’s own screen elsewhere and a tap under way', String(t0));
+    // a finger turns it
+    const pic = root.querySelector('[data-card-picture]');
+    fire(pic, 'pointerdown', 100);
+    fire(pic, 'pointermove', 160);
+    const dragged = stageAngle();
+    fire(pic, 'pointerup', 160);
+    ok(dragged - t0 > 20, 'a finger dragged across it turns it by hand', JSON.stringify([t0, dragged]));
+    // the PIN pad (or any other overlay) over it stops it, and its going lets it turn on
+    const pad = document.createElement('div');
+    pad.style.position = 'fixed';
+    document.body.appendChild(pad);
+    await wait(80);
+    const held = stageAngle();
+    await wait(80);
+    ok(app._fcSpin === null && stageAngle() === held, 'an overlay over the stage stops it', JSON.stringify([app._fcSpin === null, held, stageAngle()]));
+    pad.remove();
+    await wait(120);
+    ok(!!app._fcSpin && stageAngle() > held, 'and when it goes, the card turns on from where it stood', JSON.stringify([held, stageAngle()]));
+    // a look with no card (CARD LOST, the check) takes it out, and the usual padding returns
+    app.fcFamilyFill(root, { screen: '1g', title: 'CARD LOST', card: false });
+    ok(!root.querySelector('[data-card-stage]') && root.querySelector('[data-tp-art]').style.display === 'none' && root.querySelector('[data-tp-body]').style.padding === '90px 36px 0px',
+       'a look that has no card takes it away and gives the room back');
+    app.fcFamilyFill(root, { screen: '1a', title: 'TAP TO READ', card: true });
+    ok(!!root.querySelector('[data-card-stage="1"]'), 'and the next look that has one puts it back');
+    // the stage gone, the loop ends and nothing is left on the page
+    root.remove();
+    await wait(200);
+    ok(app._fcSpin === null && !app._fcSpinWake, 'the stage gone, it stops for good with every listener taken off', JSON.stringify([app._fcSpin === null, !app._fcSpinWake]));
+    app._fcTaps = 0;
+    // Foxy put away
+    document.body.innerHTML = '';
+    const r2 = document.createElement('div'); r2.id = 'foxy-stage'; r2.style.position = 'fixed'; r2.innerHTML = app.fcCardStageHtml('200px'); document.body.appendChild(r2);
+    hidden = true;
+    app.fcSpinOn();
+    ok(app._fcSpin === null, 'with Foxy put away it does not turn');
+    hidden = false;
+    r2.remove();
+    await wait(60);
   }
   console.log('\n' + (failed ? failed + ' failed' : 'all card spin checks pass'));
   process.exit(failed ? 1 : 0);

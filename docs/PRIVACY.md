@@ -82,7 +82,7 @@ Three exceptions leave Foxy's Tor:
   through Foxy's own Tor. Orbot hands Foxy an access key through the
   clipboard; Foxy reads it once you have asked Orbot for it, clears the
   clipboard and stores the key in the keychain.
-- The GET DOLLARS links (Cash App, Strike, River and Flash) open in your
+- The links that open an exchange's site (Cash App, Strike and River) open in your
   iPhone's browser, outside Foxy. Those companies' own privacy policies apply
   there.
 
@@ -136,7 +136,7 @@ Three exceptions leave Foxy's Tor:
   "You have not opened Foxy in 15 days. A payment may be waiting for you.",
   is set for 15 days after you last had Foxy
   open and set again each time you open or leave it. It is made on the phone and
-  sent by nobody. REMIND ME AFTER 15 DAYS in SETTINGS turns it off.
+  sent by nobody. Notifications are turned off in iOS's own Settings for Foxy.
 - **Clipboard.** When you copy a sensitive value, such as an ecash token, Foxy
   marks it local to this device so it stays off Universal Clipboard, and iOS
   removes it 120 seconds later. Foxy reads the clipboard when you paste.

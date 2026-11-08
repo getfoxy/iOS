@@ -276,6 +276,8 @@ const eq = (got, want, what) =>
     await ctx.W.connect('https://m.test', { remember: true });
     if (ctx.asked('seedCreate') !== 1) return 'seedCreate asks: ' + ctx.asked('seedCreate') + ', wanted 1';
     if (!ctx.phone.keychain.words) return 'the phone has no seed';
+    // a first run, which the app's set-up asks which currencies to use on
+    if (!ctx.W.seedMade || ctx.W.seedMade() !== true) return 'seedMade does not say the seed was made in this launch';
     const opts = ctx.built[ctx.built.length - 1];
     if (!opts.bip39seed || !opts.outputDataCreator) return 'the wallet was built without the placeholder and the phone\'s creator';
     return eq(opts.secretsPolicy, 'deterministic', 'secrets policy');
@@ -285,6 +287,7 @@ const eq = (got, want, what) =>
     const ctx = phone(WORDS);
     await ctx.W.connect('https://m.test', { remember: true });
     if (ctx.asked('seedCreate') || ctx.asked('seedMigrate') || ctx.asked('seedAdopt')) return 'asked: ' + ctx.phone.asks.map(a => a.action).join();
+    if (!ctx.W.seedMade || ctx.W.seedMade() !== false) return 'seedMade says a seed already there was made now';
     const opts = ctx.built[ctx.built.length - 1];
     return opts.bip39seed && opts.outputDataCreator ? null : 'the wallet was built without the seed';
   });

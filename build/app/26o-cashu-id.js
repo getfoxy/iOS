@@ -96,9 +96,29 @@
     });
   }
 
-  /* ADD A CASHU ID and SCAN A CASHU ID, on the empty CONTACTS: the ID is read as a pasted or scanned one
+  /* PASTE A CASHU ID and SCAN A CASHU ID, on the empty CONTACTS: the ID is read as a pasted or scanned one
    * is (`cidAddAsk`), which goes on to NAME THIS CONTACT?. */
   cidPasteAsk() { this.cidPasteCard('cidPaste', (text) => this.cidAddAsk(text)); }
+
+  /* PASTE A CASHU ID, tapped: the clipboard read through the bridge, as home's PASTE reads it (iOS asks its paste
+   * question there), and the first foxyid1 string on it straight to NAME THIS CONTACT?. A clipboard with none is
+   * THAT WON'T WORK; a page with no clipboard to read gets the card with a field. */
+  cidClipboardAdd() {
+    const W = window.FoxyWallet;
+    if (!W || !W.clipboard) { this.cidPasteAsk(); return; }
+    Promise.resolve(W.clipboard()).then((text) => {
+      const m = /foxyid1[A-Za-z0-9_-]+/.exec(String(text || ''));
+      if (!m) {
+        this.blockedCard('cidBad', {
+          tone: 'warn', title: 'THAT WON\u2019T WORK',
+          reason: String(text || '').trim() ? 'That is not a Cashu ID.' : 'Nothing on the clipboard.',
+          chip: 'Ask them to share it again.',
+        });
+        return;
+      }
+      this.cidAddAsk(m[0]);
+    }).catch(() => this.toast('Could not read the clipboard.', true));
+  }
 
   cidScanAsk() {
     const W = window.FoxyWallet;

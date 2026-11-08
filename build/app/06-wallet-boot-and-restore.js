@@ -267,6 +267,8 @@
          * refused is a screen the person is looking at either way. */
         const G = window.FoxyGate;
         if (G && G.introGo) G.introGo();
+        // a first run: which currencies to use, before home (10-pin.js)
+        if (this.firstRunAfterSeed) this.firstRunAfterSeed();
         return r;
       })
       .then(() => this._gateThenBoot())
@@ -941,6 +943,10 @@
       this.walletReady({ name: (w && w.name) || row.host });
       // other units are named in their own, never added to the sat total
       const inUnits = keep.reduce((a, r) => a.concat(this.rowUnits(r)), []);
+      // words restored on a phone that never answered which currencies to use: asked now, before home (10-pin.js)
+      if (this.firstRunCurrencies) {
+        this.firstRunCurrencies('restored', { sat: total > 0, usd: inUnits.some((u) => u.unit === 'usd' && Number(u.amount) > 0) });
+      }
       this.toast((keep.length > 1
         ? 'Restored ' + this.group(total) + ' sats across ' + keep.length + ' mints'
         : 'Restored on ' + row.host)

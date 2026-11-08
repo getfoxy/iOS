@@ -414,10 +414,6 @@ Each of the following has a version column, which is empty where nothing says.
 |---|---|---|---|---|---|
 | `Web/foxy-sheet.webp` (1,751,366 B) | lossy WebP, 3360×3120: the send animation's sprite sheet (`Web/foxy-send-progress.js`): 174 frames of a cartoon red fox running on grass, fourteen across and thirteen down, each frame 240×240 | **origin not recorded** (C2PA below) | — | **not recorded** | `fb38cb859810c60efda24f7f1e4ce3c49b321fcd85dc13fcd3cafd2d1b4c10a9` |
 | `Web/foxy-fur.webp` (65,776 B) | lossy WebP, 800×532: an orange fox-fur texture behind the orange buttons (`build/markup.html`) | **origin not recorded** (C2PA below) | — | **not recorded** | `b9a1c1e11785c5a45a58e6098418e16ee01afaefadc1b3e109ecf3a6e26d4684` |
-| `Web/gd-cashapp.jpg` (7,489 B) | JPEG, 256×256: the Cash App app icon on the GET DOLLARS screen (`build/app/26e-loaders.js`) | Apple's App Store image server (`is1-ssl.mzstatic.com`), the icon of `com.squareup.cash` | — | **the trademark and artwork of Block, Inc.**; used to name their app, with no licence from them | `5a5a80358e280999bdb2bf3337c806669a9c04198756024efa819cac38a56b56` |
-| `Web/gd-strike.jpg` (7,889 B) | JPEG, 256×256: the Strike app icon on the GET DOLLARS screen (`build/app/26e-loaders.js`) | Apple's App Store image server (`is1-ssl.mzstatic.com`), the icon of `com.jackmallers.Strike` | — | **the trademark and artwork of Zap Solutions, Inc**; used to name their app, with no licence from them | `b74180a13af2ab7c9d010a7390c25f90ad7579bb8945353582b402f012a668b0` |
-| `Web/gd-river.jpg` (11,207 B) | JPEG, 256×256: the River app icon on the GET DOLLARS screen (`build/app/26e-loaders.js`) | Apple's App Store image server (`is1-ssl.mzstatic.com`), the icon of `com.river.riverapp` | — | **the trademark and artwork of River Financial Inc.**; used to name their app, with no licence from them | `abb80efc41313717d7136e66cbbda99255d09f71bf8f01dbc88c7401937bedee` |
-| `Web/gd-flash.jpg` (8,530 B) | JPEG, 256×256: the Flash app icon on the GET DOLLARS screen (`build/app/26e-loaders.js`) | Apple's App Store image server (`is1-ssl.mzstatic.com`), the icon of `com.lnflash` | — | **the trademark and artwork of Island Bitcoin LLC**; used to name their app, with no licence from them | `e07ffc030a1dc9cebbadc668c9ad3e89bf6c88d358deb563f9ed9e0b67db7cfb` |
 
 **Metadata inside the images.** Only `foxy-fur.webp` and `foxy-sheet.webp`
 carry a C2PA manifest, a WebP `C2PA` chunk of 5,759 bytes with the same content
@@ -429,8 +425,7 @@ files passed through Claude's file handling; it does not say who made the
 pictures, from what, or under what terms. The other images carry no C2PA
 manifest. None of the images has XMP or an ICC profile. The two PNGs have an
 `sRGB` chunk and a 56-byte `eXIf` chunk holding the pixel dimensions.
-`snow-fur.jpg` and the four `gd-*.jpg` icons have JFIF, a small EXIF block
-(resolution and dimensions, and in the icons a short comment string) and a
+`snow-fur.jpg` has JFIF, a small EXIF block (resolution and dimensions) and a
 Photoshop `APP13` block. `risk-grain.jpg` has JFIF only, and `foxy-rider.webp`
 has none.
 

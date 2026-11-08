@@ -2,7 +2,7 @@
    *
    * WITHDRAW, ALL OF IT, on a phone that uses more than one mint (2026-11-03: "it should ask me which mint I want to withdraw it to,
    * showing the cheapest first"). Before anything comes off the card, the SWITCH MINT list, as the till's set list is drawn on it,
-   * titled WITHDRAW TO: the card's own mint first, at NO FEE, where the money comes off as it always has; then each other mint this
+   * titled WITHDRAW TO: the card's own mint first, FREE ON <MINT>, where the money comes off as it always has; then each other mint this
    * phone uses (`tillMints`), with what the crossing there costs, asked of both mints the way a transfer between this phone's mints
    * is (`transferQuote`, `quoteOnly`: an invoice at the far mint and the card's mint's fee quote for it, nothing paid), the cheapest
    * first as the answers come in. A phone with one mint is asked nothing.
@@ -78,7 +78,7 @@
     return 'This card is at ' + at + '. Other mints cost a Lightning fee.';
   }
 
-  /* The rows, in the list's tiles (`row`, 27-render-mints-restore-backup.js): the card's mint first with no line under its rule, then
+  /* The rows, in the list's tiles (`row`, 27-render-mints-restore-backup.js): the card's mint first with FREE ON <MINT> under its rule, then
    * the others the cheapest first, those still being asked after them, and those that cannot be reached last, greyed. Under each
    * other's rule what the crossing costs (FEE $0.05), CALCULATING… while it is asked, or NOT AVAILABLE. A tap picks one, the
    * tick on it (`fcWdSel`); NEXT takes it (`fcListNext`). Nothing picked, the card's own mint is. */
@@ -98,8 +98,10 @@
       if (d) return d;
       return order(a) === 0 ? (q(a).rank - q(b).rank) : 0;
     });
-    const none = { lineBal: false, lineWait: false, lineFee: false, fee: '', feeNote: '', feeNoteShown: false, wait: '' };
-    return [Object.assign(row(cardRow, sel === strip(w.card)), none, { text: 'NO FEE', tap: () => this.fcWdSel(cardRow.url) })]
+    // the card's own mint says FREE ON <MINT>, in the line the other tiles show their fee in
+    const free = 'FREE ON ' + String(this.mintNameOf(w.card) || cardRow.name || '').toUpperCase();
+    const own = { lineBal: false, lineWait: false, lineFee: true, fee: free, feeNote: '', feeNoteShown: false, wait: '', ink: 'var(--acc-ink)' };
+    return [Object.assign(row(cardRow, sel === strip(w.card)), own, { text: free, tap: () => this.fcWdSel(cardRow.url) })]
       .concat(others.map((m) => {
         const base = row(m, sel === strip(m.url));
         return Object.assign(base, this.fcFeeLine(q(m), w.unit, base), { tap: () => this.fcWdSel(m.url) });

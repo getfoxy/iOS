@@ -432,7 +432,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     till.dismissPaid();
     /* Sats the screen was told of, with no amount typed: the figure is what it was told, not the keypad's nothing. Money put on
      * a card at the tap after the one that was cut short (`fcWriteDone`, from Home) came up as ON THE CARD $0.00 for ₿3,254. */
-    till.setState({ screen: 'paid', stack: ['home'], amount: '', unit: 'USD', payOut: true, paidSays: 'ON THE CARD', paidTo: 'ECASHCARD', paidUnit: 'sat', paidAmount: 3254, recvResolved: true });
+    till.setState({ screen: 'paid', stack: ['home'], amount: '', unit: 'USD', payOut: true, paidSays: 'ON THE CARD', paidTo: 'FOXY CARD', paidUnit: 'sat', paidAmount: 3254, recvResolved: true });
     {
       const pv = paidVals(till);
       const shown = pv.paidHeadline + ' ' + pv.paidHeadlineSub;
@@ -847,9 +847,11 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     await until('the money to come off', () => !!holder.state.fc && holder.state.fc.balance === has - 300 && !holder.state.fcRoll && !(holder._fcTaps > 0));
     await settle();
     const wd = history(H).filter((e) => e.unit === 'usd' && e.dir === 'in' && e.memo === 'from card')[0];
-    ok(usd(H) - usdBefore > 290 && usd(H) - usdBefore <= 300 && wd && (H.W.tagsFor(wd.hash) || {}).to === 'card' && holder.state.screen === 'flashcard',
+    ok(usd(H) - usdBefore > 290 && usd(H) - usdBefore <= 300 && wd && (H.W.tagsFor(wd.hash) || {}).to === 'card' && holder.state.screen === 'paid' && holder.state.paidSays === 'RECEIVED',
        '$3.00 off the card into this phone’s dollars, less the mint’s fee, as the holder’s own move (not announced)', JSON.stringify({ usd: usd(H) - usdBefore }));
-    ok(!card(holder), 'and nothing is raised over the card’s screen: its balance counts down', card(holder) && card(holder).all);
+    ok(!card(holder), 'and no card is raised over it: the green RECEIVED ends the withdrawal', card(holder) && card(holder).all);
+    holder.setState({ screen: 'flashcard', stack: [] });
+    await settle();
     shut(holder);
     booksGood('WITHDRAW', H);
   }

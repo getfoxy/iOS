@@ -151,7 +151,7 @@ only:
 | `-FoxyTorStall auth` | Every reply to Tor's control authentication is dropped until RESTART TOR or RETRY is tapped: a hang a phone once showed, on demand (§5h) |
 | `-FoxyTorStall listener` | The TCP control port is treated as refused once, as iOS leaves it after reclaiming a suspended app's sockets, so the recovery runs on demand (§5i) |
 | `-FoxyFirstDepth N` | A card's first load is cut N deep (1 to 8; 1, one binary set, is the default) for this run, for §23g |
-| `-FoxyReminderMinutes N` | The reminder after 15 days away (REMIND ME AFTER 15 DAYS) is set for N minutes (at least 1) instead of 15 days, so it can be seen to fire: allow it, leave Foxy, wait N minutes |
+| `-FoxyReminderMinutes N` | The reminder after 15 days away is set for N minutes (at least 1) instead of 15 days, so it can be seen to fire: allow it, leave Foxy, wait N minutes |
 | `-FoxyKeychainTest YES` | At launch, checks the keychain rules on scratch entries — a different seed refused without replace, the Orbot key stored — and logs `[keychaintest]` lines. It only reads the wallet's own seed |
 
 ### Driving Foxy from outside (deep links)
@@ -1266,14 +1266,13 @@ with `-FoxyReminderMinutes 2`.
 1. Open MENU → MY CASHU ID, close it, put Foxy away and bring it back. **Pass:** no card over the code; at the return a card says "Foxy can remind you after 15 days away, so a payment
    waiting for you is not missed." with TURN ON and NOT NOW. (If notifications were already allowed for payments, no
    card: the switch is simply on.)
-2. TURN ON. **Pass:** iOS asks its own notification question once; MENU → SETTINGS shows REMIND ME AFTER 15 DAYS, the first
-   row of SETTINGS, on.
+2. TURN ON. **Pass:** iOS asks its own notification question once; MENU → SETTINGS has no reminder row (it opens with FACE ID LOCK,
+   SET PIN, BLUETOOTH TAP).
 3. Put Foxy away and wait 2 minutes. **Pass:** a notification "You have not opened Foxy in 15 days. A payment may be waiting
    for you." Tapping it opens Foxy.
 4. Open Foxy, leave it again after one minute, and wait 90 seconds. **Pass:** nothing yet (each coming and going starts the
    wait again); it comes 2 minutes after the last.
-5. Turn REMIND ME AFTER 15 DAYS off and put Foxy away. **Pass:** nothing arrives. Turn it on again: iOS is not asked twice.
-6. A phone with no Cashu ID in use. **Pass:** no REMIND ME AFTER 15 DAYS row and no card.
+5. A phone with no Cashu ID in use. **Pass:** no card.
 
 #### 13s. Home's MY CASHU ID button, and a contact from the menu
 
@@ -1644,7 +1643,7 @@ and load it), a phone whose build carries the NFC entitlement
    is still counting pieces. **Pass:** TAP THE CARD AGAIN says how much came off
    into the phone and how much is left; HISTORY has an entry, From card, for
    what came off (the screen has left the card: its figures are out of date); TAP CARD asks no PIN and
-   takes the rest; IN YOUR WALLET says the whole amount.
+   takes the rest; the green RECEIVED says the whole amount.
 7. **A card with no room.** On a card with fewer than five places free (load
    it in many small amounts until the card is full), ADD FUNDS and type any
    amount. **Pass:** the figure is red, the line under it reads MORE THAN THE
@@ -2495,6 +2494,36 @@ only.*
    bin. **Pass:** NOT REMOVED, saying an invoice there is not paid or
    collected; nothing moved.
 
+#### 22r. Four set-up flows from the 2026-11-08 walkthrough
+
+1. **PASTE A CASHU ID on an empty CONTACTS.** *A Foxy with no contacts; a second Foxy's MY CASHU ID copied with SHARE >
+   Copy.* MENU > CONTACTS. **Pass:** NO CONTACTS YET!, PASTE A CASHU ID and SCAN A CASHU ID, and no round search button at
+   the bottom left. Tap PASTE A CASHU ID. **Pass:** iOS asks to allow the paste (Allow Paste); then NAME THIS CONTACT? at
+   once, with no field to paste into. SAVE as Ana. **Pass:** Ana is on CONTACTS and the search button is back. With text
+   on the clipboard that is not a Cashu ID (copy an invoice), delete Foxy's contacts again or use a fresh wallet: **Pass:**
+   THAT WON’T WORK, `That is not a Cashu ID.`; with the paste refused at the iOS prompt, THAT WON’T WORK, `Nothing on the
+   clipboard.`
+2. **SET A LOCK FIRST sets the lock.** *A Foxy with no PIN and FACE ID LOCK off.* MENU > POINT OF SALE. **Pass:** SET A
+   LOCK FIRST with CREATE PIN, USE FACE ID and CANCEL. CANCEL: the menu again, nothing set. Again, CREATE PIN: CHOOSE A
+   PIN, ENTER IT AGAIN, IF YOU FORGET THIS PIN, SET THE PIN. **Pass:** `PIN set`, then the till's opening (the mint list
+   where there are two, then ACCEPT TIPS?), not the menu, and after NO the till's SET AMOUNT titled POS MODE. Close the
+   till, MENU > SET PIN > REMOVE PIN, then POINT OF SALE, USE FACE ID. **Pass:** Face ID asks, `Face ID now locks Foxy.`,
+   then the till's opening as above. Given up at the Face ID prompt: home, no till.
+3. **ACCEPT TIPS? is a screen.** In either opening above. **Pass:** ACCEPT TIPS? is a full screen: the title beside the
+   round back button, the line under the title, the words `Payers see $1, $2, $5 and OTHER beside the amount.`, YES and NO
+   at the bottom. Back: no till. YES: TIPS GO TO over it; BACK on that card or a tap outside it leaves ACCEPT TIPS?
+   to answer. On CASHIER CODES, ADD A CASHIER, a name, NEXT: **Pass:** the same screen with `Now: ` and the till's answer;
+   back returns to CASHIER CODES with no new code.
+4. **The first run asks which currencies.** *Delete Foxy (test money only, words written down) and install it again.*
+   Open Foxy. **Pass:** before the home screen is used, CURRENCIES with LAST STEP and Dollars / Bitcoin / Both, nothing
+   picked, no screen under it; the home screen does not take its place when the mint answers. Pick Bitcoin, DONE. **Pass:**
+   home with one bitcoin pill; quit and reopen: not asked again; MENU > CURRENCIES shows Bitcoin chosen. Again on a fresh
+   install, back off the first run's CURRENCIES, then MENU > RESTORE with words that hold sats only: **Pass:** after the
+   restore, CURRENCIES is asked. Once more, backed out, with words that hold dollars and bitcoin: **Pass:** nothing asked,
+   both pills on home.
+   `sh tools/pull-device-log.sh`: `first run (words made): asking which currencies to use`, or for the second,
+   `a restore found dollars and bitcoin; both kept, nothing asked`.
+
 ## Getting a log off somebody else's phone
 
 `tools/pull-device-log.sh` needs a Debug build and a cable. A person running a
@@ -2531,7 +2560,7 @@ been used on a phone. Update the table when a section is run.
 | Run on a device, passed | §1, §5a, §5f, §5g, §5h, §5i, §14a, §14b, §21a (all traffic is Tor; the control run with CONTINUE UNPROTECTED is not done), §22b |
 | Run on a device, in part | §4 (each transport connects; a payment through each is not run), §5b (long returns reconnect, including the recovery from a reclaimed control listener; the 30 minute return on cellular with the phone locked is not recorded), §14c (a pasted phrase stayed on the clipboard; fixed in code, not re-run), §17 (the card and the token work and three faults it found are fixed; run it again) |
 | Simulator only | §8, §10, §11, §12 (the keychain test, not 12b to 12d), §16, §19 (steps 1, 3 and 4), §20 (steps 1 and 4), §21b (the mechanism; the 4-to-5-second claim is not tested), §21c, §21e (steps 1 and 2), §21f (step 1), §21g (steps 1 and 2) |
-| Not run | §2, §3, §5d, §5e, §6, §7, §9, §12b, §12c, §12d, §13a to §13j, §14d, §14e, §15, §18, §21d, §21h, §22a, §22c, §22d, §22e, §22f, §22g, §22h, §22i, §22j, §22k, §23e |
+| Not run | §2, §3, §5d, §5e, §6, §7, §9, §12b, §12c, §12d, §13a to §13j, §14d, §14e, §15, §18, §21d, §21h, §22a, §22c, §22d, §22e, §22f, §22g, §22h, §22i, §22j, §22k, §22r, §23e |
 
 ## The confirmations and PAY FROM as drawn (2026-11-06)
 

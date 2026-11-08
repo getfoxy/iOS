@@ -473,7 +473,7 @@ class Component extends DCLogic {
         : held ? 'CHECKING…' : 'UNKNOWN',
         out ? { half: true } : { half: true, sub: s.quotedFee != null ? cfig(s.quotedFee).sub : '', sub2: 'You pay the mint\u2019s fees' }),
     ].filter(Boolean);
-    if (out) rows.splice(2, 0, this.cfRow('FROM', 'ECASHCARD', { half: true }));
+    if (out) rows.splice(2, 0, this.cfRow('FROM', 'FOXY CARD', { half: true }));
     /* A dollar card paying a bitcoin invoice: the mint's own rate, read off its quote in dollars. It is said under the amount, as the price
      * every payment from a card is worked out at is, "(at $ 81,967 per bitcoin)" (the shell puts the brackets round it): the mint's for a
      * dollar card, this phone's for a bitcoin card (the design, where it was a RATE row). */
@@ -2556,6 +2556,8 @@ class Component extends DCLogic {
          * refused is a screen the person is looking at either way. */
         const G = window.FoxyGate;
         if (G && G.introGo) G.introGo();
+        // a first run: which currencies to use, before home (10-pin.js)
+        if (this.firstRunAfterSeed) this.firstRunAfterSeed();
         return r;
       })
       .then(() => this._gateThenBoot())
@@ -3230,6 +3232,10 @@ class Component extends DCLogic {
       this.walletReady({ name: (w && w.name) || row.host });
       // other units are named in their own, never added to the sat total
       const inUnits = keep.reduce((a, r) => a.concat(this.rowUnits(r)), []);
+      // words restored on a phone that never answered which currencies to use: asked now, before home (10-pin.js)
+      if (this.firstRunCurrencies) {
+        this.firstRunCurrencies('restored', { sat: total > 0, usd: inUnits.some((u) => u.unit === 'usd' && Number(u.amount) > 0) });
+      }
       this.toast((keep.length > 1
         ? 'Restored ' + this.group(total) + ' sats across ' + keep.length + ' mints'
         : 'Restored on ' + row.host)
@@ -3855,7 +3861,7 @@ class Component extends DCLogic {
       this._preSettle = this.balNow();
       return W.receiveToken(t).then(r => {
         this.hideMelt();
-        if (r.switched) { this.walletReady({ name: r.host }); this.toast('Now on ' + r.host); }
+        if (r.switched) this.walletReady({ name: r.host });
         this.tookToken(r);
         this.announceTaken(r);
         this.refreshBalance();
@@ -5938,7 +5944,6 @@ class Component extends DCLogic {
         this.keptOfflineSaid(r);
         this.settleAnimate('btc');
         this.noteReceived();
-        if (r.switched) this.toast('Now on ' + r.host);
       }).catch(e => {
         this.receivingDown();
         /* Retry with the token already in hand. It used to retry by calling
@@ -6024,9 +6029,7 @@ class Component extends DCLogic {
         this.announceTaken(r);
         this.settleAnimate('btc');
         this.noteReceived();
-        // no banner: the pill counting up is the confirmation. A switched mint
-        // is worth saying out loud, though — the wallet moved under them.
-        if (r.switched) this.toast('Now on ' + r.host);
+        // no banner: the pill counting up is the confirmation, and a switched mint is not announced.
       });
     }).catch(e => { this.receivingDown(); this.claimFailed(e, () => this.scanEcashToken()); });
   }
@@ -6695,9 +6698,7 @@ class Component extends DCLogic {
         this.tookToken(r);
         this.settleAnimate('btc');
         this.noteReceived();
-        // no banner: the pill counting up is the confirmation. A switched mint
-        // is worth saying out loud, though — the wallet moved under them.
-        if (r.switched) this.toast('Now on ' + r.host);
+        // no banner: the pill counting up is the confirmation, and a switched mint is not announced.
       });
     }).catch(e => { this.hideMelt(); this.claimFailed(e, null); });
     });
@@ -6922,7 +6923,7 @@ class Component extends DCLogic {
     // Connecting takes a second or two over Tor, and until now the row gave no
     // sign it had been tapped at all.
     this.setState({ switchBusy: true, mintBusy: String(url).replace(/\/+$/, '') });
-    // an earlier switch's "Now on" is not this one's to say (`mintConnected` matches by the switch, review 7)
+    // an earlier switch's answer is not this one's to say (`mintConnected` matches by the switch, review 7)
     this._switchSay = null;
     const back = this.state.mintReturn;
     // asked before connecting, which adds it to the list
@@ -6942,13 +6943,12 @@ class Component extends DCLogic {
         this.setState({ screen: 'history', stack: ['home'], histMint: '' });
         this.loadHistory();
       }
-      /* Still being asked: what waits for its answer is said when it comes (`mintConnected`), this switch's own
-       * toast and a first visit's seed check among them. */
+      /* Still being asked: what waits for its answer is done when it comes (`mintConnected`), a first visit's seed
+       * check among them. */
       if (w && w.pending) {
         this._switchSay = { url: String(url).replace(/\/+$/, ''), host, firstTime: !usedBefore, gen: w.gen };
         return;
       }
-      this.toast('Now on ' + host);
       if (!usedBefore) this.sweepNewMint(url, host);
     }).catch(e => {
       this.setState({ switchBusy: false, mintBusy: '' });
@@ -6959,7 +6959,7 @@ class Component extends DCLogic {
   /* A mint switched to at once has answered, or has not (the wallet's `onMintConnected`): { url, ok, why, back }.
    *
    * Answered: the balance and history are read again from the wallet that answered, the shield's ring stops, the
-   * switch's "Now on" is said, and a mint new to this phone has its seed check. Not: the phone stays on it, from the
+   * a mint new to this phone has its seed check. Not: the phone stays on it, from the
    * keys on file, and the shield says it is not answering; it is asked again behind the screen, as a launch's wallet
    * from storage is (`connectForRealOnceOnline`). A switch with no keys on file goes back where it was (`back`). */
   mintConnected(ev) {
@@ -6967,7 +6967,7 @@ class Component extends DCLogic {
     const e = ev || {};
     const strip = u => String(u || '').replace(/\/+$/, '');
     /* This switch's own answer, by the switch (`gen`), not by its mint: going back to a mint and away again is two
-     * switches. Kept through NOT ANSWERING, so "Now on" is said once when it does answer. */
+     * switches. Kept through NOT ANSWERING, so its first-visit check is done once when it does answer. */
     const own = this._switchSay;
     const say = own && (own.gen != null || e.gen != null ? own.gen === e.gen : strip(own.url) === strip(e.url)) ? own : null;
     if (say && (e.ok || e.back)) this._switchSay = null;
@@ -6980,7 +6980,6 @@ class Component extends DCLogic {
       // the mint's own keys now: sats a dollars wallet was paid can be swapped into dollars
       if (this.convertOnReturn) this.convertOnReturn();
       if (say) {
-        this.toast('Now on ' + host);
         if (say.firstTime) this.sweepNewMint(say.url, host);
       }
       return;
@@ -7169,20 +7168,15 @@ class Component extends DCLogic {
     });
   }
 
-  /* Tell them who holds the bitcoin, once per mint.
-   *
-   * Cashu is custodial: the mint holds the sats and the wallet holds claims
-   * on them. Nothing in this app said so, and a balance on screen looks the
-   * same either way. Shown before any money exists, and remembered — this is
-   * a thing to understand once, not a warning to dismiss daily. */
   /* Is the wallet pointed at a mint that issues worthless ecash? */
   onTestMint() {
     const host = (this.mintHost() || '').toLowerCase();
     return host.indexOf('testnut.cashu.space') >= 0;
   }
 
+  /* A mint that issues worthless ecash says so. The notice that the mint holds the bitcoin is gone: it was shown once per
+   * mint and gated nothing. */
   custodyNotice() {
-    const W = window.FoxyWallet;
     if (this.onTestMint()) {
       this.blockedCard('testmint', {
         tone: 'warn',
@@ -7191,24 +7185,7 @@ class Component extends DCLogic {
           + 'It exists so the app can be tested without spending real money. '
           + 'Do not send anything here expecting to get it back.',
       });
-      return;
     }
-    const host = this.mintName() || 'this mint';
-    let told = {};
-    try { told = JSON.parse(localStorage.getItem('foxy.custody.told') || '{}'); } catch (e) {}
-    if (told[host]) return;
-    told[host] = true;
-    try { localStorage.setItem('foxy.custody.told', JSON.stringify(told)); } catch (e) {}
-
-    this.blockedCard('custody', {
-      tone: 'warn',
-      title: 'THE MINT HOLDS YOUR BITCOIN',
-      reason: 'Ecash in this wallet is issued by ' + host + '. You are trusting '
-        + 'that mint to back it with bitcoin until you move your money to '
-        + 'another bitcoin lightning wallet. If it goes offline or refuses to '
-        + 'pay out, there is no one to appeal to. Hold only what you can '
-        + 'afford to lose.',
-    });
   }
 
   /* No passcode on the phone. The rule is Face ID, else the passcode, and
@@ -7231,12 +7208,14 @@ class Component extends DCLogic {
 
   walletReady(w) {
     /* Home, unless the till is open: a mint answering again is not a way out of it, and the screen it is on stays
-     * (26m-till.js). */
+     * (26m-till.js). Nor over the first run's CURRENCIES, which is a step before home (10-pin.js, `firstRunCurrencies`), nor the till's
+     * ACCEPT TIPS?, a step of opening it (26p-till-tips.js). */
     this.setState(Object.assign({
       walletLive: true,
       walletSearching: false,
       walletErr: '',
-    }, this.state.till ? {} : {
+    }, (this.state.till || (this.state.holdFirst && this.state.screen === 'holdChoice')
+      || (this.state.screen === 'tillTips' && this._tillTipsFlow)) ? {} : {
       screen: 'home',
       stack: [],
     }));
@@ -7269,10 +7248,12 @@ class Component extends DCLogic {
         return null;
       }).catch(() => { this._locksPrimed = false; });
     }
-    // and, the first time on any mint, say who is holding the money
+    // and, on a test mint, that its ecash is worth nothing
     setTimeout(() => this.custodyNotice(), 900);
     // and, where there is no passcode, that nothing but an alert guards the seed
     setTimeout(() => this.passcodeNotice(), 1000);
+    // a first run whose seed the phone made only at this connect: which currencies to use (10-pin.js)
+    if (this.firstRunAfterSeed) this.firstRunAfterSeed();
     // and last, at a mint with two balances, what to hold (10-pin.js)
     setTimeout(() => { if (this.offerHoldChoice) this.offerHoldChoice(); }, 1300);
     // and money a card is owed from a payment it made from this phone, until a tap puts it on (26f-flashcard.js)
@@ -7780,10 +7761,59 @@ class Component extends DCLogic {
     this.setState(p => ({ screen: 'holdChoice', stack: p.stack.concat([p.screen]), holdPick: '' }));
   }
 
+  /* ---- the first run's last step: CURRENCIES --------------------------------
+   *
+   * After the words are made (the phone made the seed in this launch, the
+   * wallet's `seedMade`) or restored (`adoptRestoreMint`), and before home:
+   * the CURRENCIES screen, asked as a set-up step whatever the mint has said
+   * so far, its answer written as MENU › CURRENCIES writes it (`holdKeep`).
+   * Once answered, never again on the install (`FIRST_CURRENCIES`); backed
+   * out of, a restore asks it, and a later launch at a mint of two balances
+   * asks as ever (`offerHoldChoice`). Never where a choice is already kept or
+   * the mint is known to issue one currency. A restore that
+   * found money in dollars and in bitcoin asks nothing: both are kept, as a
+   * choice of one would leave the other's money to swap. */
+  FIRST_CURRENCIES = 'foxy.currencies.firstRun';
+
+  // after the boot's seed read, and as the mint answers: a seed the phone made in this launch is a first run
+  firstRunAfterSeed() {
+    const W = window.FoxyWallet;
+    let made = false;
+    try { made = !!(W && W.seedMade && W.seedMade()); } catch (e) { made = false; }
+    return made ? this.firstRunCurrencies('made') : false;
+  }
+
+  /* `why`: 'made' or 'restored'; `found`, for a restore: { sat, usd }, whether money was found in each. True where the
+   * question went up. */
+  firstRunCurrencies(why, found) {
+    const W = window.FoxyWallet;
+    if (!W || !W.setWalletChoice || this.state.till) return false;
+    try { if (localStorage.getItem(this.FIRST_CURRENCIES)) return false; } catch (e) { return false; }
+    if (this.walletChoiceNow().hold) return false;
+    let units = [];
+    try { units = (W.mintUnits && W.mintUnits()) || []; } catch (e) { units = []; }
+    if (Array.isArray(units) && units.length === 1) return false;
+    if (why === 'restored' && found && found.sat && found.usd) {
+      if (this.holdSave('both', '', true)) {
+        this.firstRunAnswered();
+        console.log('[foxy] first run: a restore found dollars and bitcoin; both kept, nothing asked');
+      }
+      return false;
+    }
+    console.log('[foxy] first run (' + (why === 'restored' ? 'words restored' : 'words made') + '): asking which currencies to use');
+    this.setState({ screen: 'holdChoice', stack: [], holdPick: '', holdFirst: true });
+    return true;
+  }
+
+  // the first run's question answered, here or by a restore: never asked as a set-up step again
+  firstRunAnswered() {
+    try { localStorage.setItem(this.FIRST_CURRENCIES, String(Date.now())); } catch (e) {}
+  }
+
   /* Back from the question: not answered, so it is asked again next launch. */
   holdLater() {
     this._holdLater = true;
-    this.setState({ screen: 'home', stack: [], holdPick: '' });
+    this.setState({ screen: 'home', stack: [], holdPick: '', holdFirst: false });
   }
 
   holdDone() {
@@ -7807,9 +7837,10 @@ class Component extends DCLogic {
   /* The choice written, and home. False where the wallet would not keep it (said in a toast). */
   holdKeep(hold, noKept) {
     if (!this.holdSave(hold, '', noKept)) return false;
+    if (this.state.holdFirst) this.firstRunAnswered();
     // chosen: home, not the menu again (01-ui-basics.js `menuReturnWatch`)
     if (this.menuReturnDrop) this.menuReturnDrop();
-    this.setState({ screen: 'home', stack: [], holdPick: '', holdSwap: '' });
+    this.setState({ screen: 'home', stack: [], holdPick: '', holdSwap: '', holdFirst: false });
     this.refreshBalance();
     return true;
   }
@@ -7949,9 +7980,12 @@ class Component extends DCLogic {
     });
   }
 
-  chooseProtection(mode) {
+  /* `then`, where given (SET A LOCK FIRST's USE FACE ID, 26m-till.js `tillGate`): told true once the answer is kept, false where
+   * it was not, and it decides what comes next in place of the menu and the hold question. */
+  chooseProtection(mode, then) {
     const W = window.FoxyWallet;
-    if (!W || !W.setSeedProtection) return;
+    const after = typeof then === 'function' ? then : null;
+    if (!W || !W.setSeedProtection) { if (after) after(false); return; }
     W.setSeedProtection(mode).then(() => {
       // what they answered, which openSeedForVisit reads on every wake
       if (W.secureChoice) W.secureChoice(mode);
@@ -7959,12 +7993,14 @@ class Component extends DCLogic {
        * locks the screen as well as the seed. */
       this.toast(mode === 'none' ? 'Foxy is not protected.' : 'Face ID now locks Foxy.');
       this.forceUpdate();
+      if (after) { after(true); return; }
       // and then, at a mint with two balances, what to hold, if it has not been asked
       if (this.offerHoldChoice) this.offerHoldChoice();
       // answered from the menu's FACE ID LOCK: the menu again, unless the hold question went up (01-ui-basics.js)
       if (this.menuReturnSettle) this.menuReturnSettle();
     }, e => {
       this.toast(W.reason ? W.reason(e) : 'That could not be changed.', true);
+      if (after) { after(false); return; }
       if (this.menuReturnSettle) this.menuReturnSettle();
     });
   }
@@ -16662,12 +16698,12 @@ class Component extends DCLogic {
      * and TOTAL, each with its figure. Only while the wallet has limits to show. */
     const capRows = this.tillCapRows ? this.tillCapRows(MENU_ICON.receive, shut) : [];
     const settingRows = /** @type {any[]} */ ([]).concat(
-      // REMIND ME AFTER 15 DAYS, the first row of SETTINGS (26o-remind.js): only with a Cashu ID in use
-      this.remindMenuRow ? this.remindMenuRow(sw) : [],
+      // FACE ID, SET PIN, then BLUETOOTH TAP (the keeper, 2026-11-08). The reminder after 15 days away has no row: it stays as it was
+      // by default, asked once when a Cashu ID is in use (26o-remind.js, `remindMaybeAsk`).
+      [faceRow, pinRow],
       /* Whether an invoice goes on the air by itself. A switch, and the drawer stays open so it can be seen to move. */
       [Object.assign({ label: 'BLUETOOTH TAP', path: MENU_ICON.change,
         tap: () => { this.tapAutoSet(!tapAuto); this.setState({ menuTick: (this.state.menuTick || 0) + 1 }); } }, sw(tapAuto))],
-      [pinRow, faceRow],
       [
         { label: 'BACKUP', path: MENU_ICON.backup, tap: shut(() => this.showSeedOnPhone(false)) },
         /* The phone's own screens, straight over home: no Foxy screen before RESTORE A WALLET or after YOUR SEED PHRASE. */
@@ -16784,6 +16820,7 @@ class Component extends DCLogic {
       ...this.renderFlashcard(c),
       ...this.renderCardScreens(c),
       ...this.renderCardName(c),
+      ...this.renderTillTips(c),
       ...this.renderBank(c),
       ...this.renderNewMint(c),
       ...this.renderRestore(c),
@@ -17684,9 +17721,9 @@ class Component extends DCLogic {
         // the till's OTHER tip (26p-till-tips.js)
         : s.flow === 'tillTip' ? 'How much is the tip?'
         : 'How much to send?',
-      // a swap's rate, under the question, before anything is typed (26i-swap.js, `swapRateLine`)
-      swapRateLine: s.flow === 'swap' && this.swapRateLine ? this.swapRateLine() : '',
-      swapRateShown: !!(s.flow === 'swap' && this.swapRateLine && this.swapRateLine()),
+      // a swap's rate is no longer drawn under the question (the keeper, 2026-11-08): the confirmation says it (26i-swap.js)
+      swapRateLine: '',
+      swapRateShown: false,
       // what a till cap is, in a plain line under the question (26j-till-caps.js, `tillCapNote`)
       amountNote: s.flow === 'tillCap' && this.tillCapNote ? this.tillCapNote()
         // and on a till's SET AMOUNT at more than one mint, where it is (26m-till.js, `tillWhereLine`)
@@ -19501,7 +19538,7 @@ class Component extends DCLogic {
       curAskAbove: false, curAskBelow: !pf,
       // (the set-up's tiles stand alone, with nothing under them)
       // (PAY FROM has no line under its tiles either: the keeper, 2026-11-06)
-      curFootShown: !setUp && !pf,
+      curFootShown: !setUp && !pf && !(flow === 'receive' && !pick && !cc && !both && !cardFlow),
       curTilesOnly: setUp,
       curFoot: pf ? (this.pfFoot ? this.pfFoot() : '')
         : pick
@@ -19514,7 +19551,7 @@ class Component extends DCLogic {
         : cc ? String(cc.foot || '')
         : both ? 'DOLLARS or BITCOIN: the card holds that one, and ADD FUNDS never asks. BOTH: it holds either, and ADD FUNDS asks which each time.'
         : cardFlow ? 'A card holds one of them. To change it later, RESET the card and set it up again.'
-        : flow === 'receive' ? 'Asked once. After this, change it with the WALLET button on the invoice.'
+        : flow === 'receive' ? ''
         : 'Asked once. After this, change it with the WALLET button before you pay.',
       curBack: pf ? () => this.pfBack() : () => this.back(),
       curClose: pf ? () => this.pfClose() : () => this.setState({ screen: 'home', stack: [] }),
@@ -20283,10 +20320,10 @@ class Component extends DCLogic {
       contactAll: this.contactRows(),
       contactLetter: (this.contactRows()[0] || {}).ini || '',
       contactRecents: this.contactRows().slice(0, 3),
-      // ADD A CASHU ID and SCAN A CASHU ID, on the empty CONTACTS (26o-cashu-id.js); not offered where the wallet cannot
-      // read an ID, nor SCAN where it cannot scan
+      // PASTE A CASHU ID and SCAN A CASHU ID, on the empty CONTACTS (26o-cashu-id.js); not offered where the wallet
+      // cannot read an ID, nor SCAN where it cannot scan. PASTE reads the clipboard.
       ctAddShown: !!(window.FoxyWallet && window.FoxyWallet.cashuIdCheck),
-      ctAddGo: () => this.cidPasteAsk(),
+      ctAddGo: () => this.cidClipboardAdd(),
       ctScanShown: !!(window.FoxyWallet && window.FoxyWallet.cashuIdCheck && window.FoxyWallet.scan),
       ctScanGo: () => this.cidScanAsk(),
       /* A contact is paid at a Lightning address, which offline can be neither
@@ -21097,7 +21134,7 @@ class Component extends DCLogic {
       this.cfRow('FEE', s.ocErr ? 'UNKNOWN' : pick ? 'UP TO ' + this.money(pick.fee).main : 'CHECKING…',
         out && pick && !s.ocErr ? { half: true, sub: this.money(pick.fee).sub, sub2: 'You pay the mint\u2019s fees' } : { half: true, sub2: 'You pay the mint\u2019s fees' }),
     ].filter(Boolean);
-    if (out) rows.splice(2, 0, this.cfRow('FROM', 'ECASHCARD', { half: true, sub: String(this.mintNameOf(s.fc.mint) || '') }));
+    if (out) rows.splice(2, 0, this.cfRow('FROM', 'FOXY CARD', { half: true, sub: String(this.mintNameOf(s.fc.mint) || '') }));
     const many = !!(plan && plan.options.length > 1);
     /* Once the quote is in: can the balance cover the payout and its fees?
      *
@@ -25319,8 +25356,9 @@ class Component extends DCLogic {
           + '<span style="font-weight:800;font-size:19px;letter-spacing:-.01em;white-space:nowrap">' + esc(r.value) + '</span></div>').join('')
         + '</div>' : '';
     // (`still`: the picture without its breathing, for a screen that is read and not waited at)
-    let art = this.STAGE_ART[o.art] || '';
-    if (o.still) art = art.replace(/animation:[^;"]*;?/g, '');
+    // ('cardspin': the card's picture on its turntable, 26j-card-wheel.js `fcCardStageHtml`)
+    let art = o.art === 'cardspin' ? this.fcCardStageHtml('clamp(160px, calc(100vh - 620px), 340px)') : (this.STAGE_ART[o.art] || '');
+    if (o.still && o.art !== 'cardspin') art = art.replace(/animation:[^;"]*;?/g, '');
     root.innerHTML =
       '<div style="position:absolute;left:50%;top:44%;width:420px;height:420px;border-radius:50%;'
       + 'background:radial-gradient(circle, rgba(255,255,255,.75) 0%, rgba(255,255,255,0) 65%);'
@@ -25387,6 +25425,7 @@ class Component extends DCLogic {
     }
     root.appendChild(wrap);
     document.body.appendChild(root);
+    if (o.art === 'cardspin') { this._fcSpinA = 0; if (this._fcSpin) this._fcSpin.a = 0; if (this.fcSpinOn) this.fcSpinOn(); }
     if (this.syncPreview) this.syncPreview();
     console.log('[foxy] screen: ' + kind + (hasQr ? ', with a code of ' + String(o.qr).length + ' chars' : ''));
 
@@ -25635,64 +25674,8 @@ class Component extends DCLogic {
     document.body.appendChild(root);
   }
 
-  /* GET DOLLARS: informational, and deliberately nothing else.
-   *
-   * Four companies that take bitcoin and pay dollars to a bank. Foxy saves no
-   * username, looks nothing up and pays nobody from here — an earlier design
-   * did all three and every hole in it was one of those (a typo paying a
-   * stranger, an identity kept on the phone, a lookup over Tor that may be
-   * refused). The person makes an account there and comes back to SEND.
-   *
-   * A tile opens that company's site in the phone's browser, by name: the
-   * addresses themselves are on the native side (openCompany). The icons are
-   * each company's own, as the App Store shows them (Web/gd-*.jpg). */
-  showGetDollars() {
-    this.hideGetDollars();
-    const W = window.FoxyWallet;
-    const apps = [
-      { key: 'cashapp', icon: 'gd-cashapp.jpg', name: 'CASH APP', url: 'cash.app' },
-      { key: 'strike', icon: 'gd-strike.jpg', name: 'STRIKE', url: 'strike.me' },
-      { key: 'river', icon: 'gd-river.jpg', name: 'RIVER', url: 'river.com' },
-      { key: 'flash', icon: 'gd-flash.jpg', name: 'FLASH', url: 'getflash.io' },
-    ];
-    const root = document.createElement('div');
-    root.id = 'foxy-get-dollars';
-    root.style.cssText = 'position:fixed;inset:0;z-index:2147483200;display:flex;flex-direction:column;'
-      + 'box-sizing:border-box;padding:calc(34px + env(safe-area-inset-top)) 24px calc(28px + env(safe-area-inset-bottom));'
-      + 'background:var(--bg,#050505);color:rgb(var(--ink-rgb,255,255,255));'
-      + "font-family:Sora,system-ui,sans-serif;overflow-y:auto;animation:foxyIn .18s ease";
-    const para = 'margin:0;font-weight:500;font-size:18px;line-height:1.42;text-align:center;'
-      + 'color:rgba(var(--ink-rgb,255,255,255),.84)';
-    root.innerHTML = ''
-      + '<div style="text-align:center;font-weight:800;font-size:24px;letter-spacing:.01em">WITHDRAW TO BANK</div>'
-      + '<div style="flex:0 0 1px;height:1px;margin:20px 4px 0;background:rgba(var(--ink-rgb,255,255,255),.14)"></div>'
-      + '<p style="' + para + ';margin-top:24px">These apps let you sell your bitcoin and deposit dollars into your bank account.</p>'
-      + '<div style="margin:28px auto 0;display:grid;grid-template-columns:1fr 1fr;gap:22px 34px;width:fit-content">'
-      + apps.map(a => ''
-        + '<div data-gd="' + a.key + '" style="display:flex;flex-direction:column;align-items:center;gap:9px;cursor:pointer">'
-        + '<img alt="" src="' + a.icon + '" style="display:block;box-sizing:border-box;width:96px;height:96px;'
-        + 'border-radius:22px;border:1px solid rgba(var(--ink-rgb,255,255,255),.16);box-shadow:0 6px 16px rgba(0,0,0,.45)">'
-        + '<div style="font-weight:700;font-size:14px;letter-spacing:.04em;white-space:nowrap">' + a.name + '</div>'
-        + '<div style="margin-top:-4px;font-weight:500;font-size:13px;white-space:nowrap;color:rgba(var(--ink-rgb,255,255,255),.55)">' + a.url + '</div>'
-        + '</div>').join('')
-      + '</div>'
-      + '<p style="' + para + ';margin-top:28px">Create an account with one of them and ask your AI how to receive bitcoin and sell it for dollars on that app.</p>'
-      + '<div style="flex:1 1 auto;min-height:24px"></div>'
-      + '<div data-gd-close="1" style="flex:0 0 auto;height:58px;border-radius:30px;background:var(--acc);color:#050505;'
-      + 'display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;letter-spacing:.04em;cursor:pointer">CLOSE</div>';
-    root.addEventListener('click', (e) => {
-      const t = /** @type {any} */ (e && e.target);
-      if (!t || !t.closest) return;
-      if (t.closest('[data-gd-close]')) { this.hideGetDollars(); return; }
-      const hit = t.closest('[data-gd]');
-      if (hit && W && W.openCompany) {
-        this.haptic && this.haptic('tap');
-        W.openCompany(hit.getAttribute('data-gd'));
-      }
-    });
-    document.body.appendChild(root);
-  }
-
+  /* The screen that listed companies that pay dollars to a bank is gone (BANK ACCOUNT, 26q-bank.js, has the exchanges, without
+   * their pictures); what is left is the removal of its overlay, which other screens still ask for. */
   hideGetDollars() {
     const old = document.getElementById('foxy-get-dollars');
     if (old && old.parentNode) old.parentNode.removeChild(old);
@@ -26046,7 +26029,7 @@ class Component extends DCLogic {
     console.log('[foxy] card: sheet cancelled, ' + (quiet ? 'not by the person' : tied ? 'a card was tied before' : 'no card was ever tied'));
     if (quiet || tied) return;
     this.stageScreen('cardLearn', {
-      art: 'card', still: true, title: 'FOXY CARD',
+      art: 'cardspin', title: 'FOXY CARD',
       body: 'A Foxy Card holds your ecash. Tap it to another phone to pay, with no phone of your own.',
       above: 'VISIT WEBSITE',
       aboveGo: () => { if (W && W.openCompany) W.openCompany('foxycard'); },
@@ -29170,7 +29153,7 @@ class Component extends DCLogic {
     this._lastPay = null;
     this.setState(p => ({
       screen: 'paid', stack: p.stack.concat([p.screen]),
-      payOut: true, paidSays: 'ON THE CARD', paidTo: 'ECASHCARD', paidPlace: null, paidUnit: u, paidAmount: went,
+      payOut: true, paidSays: 'ON THE CARD', paidTo: 'FOXY CARD', paidPlace: null, paidUnit: u, paidAmount: went,
       paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidConvert: false,
       recvResolved: true, recv: Object.assign({}, p.recv, { live: 'in' }),
     }));
@@ -30154,17 +30137,18 @@ class Component extends DCLogic {
     });
     const said = (r) => {
       this.haptic && this.haptic('success');
+      const got = took + this.fcAmt(r);
       /* The card's own screen is still up, and the card as it stands now is known (`r.card`: what the tap read of it less what it signed
        * for, or the card as the sheet that put its change back read it; for a mint that answered late, the same, from the error): the
-       * screen comes back with its balance counting down to it, and nothing is raised over it. */
-      if (r && r.card && this.fcWithdrew(r.card)) return;
+       * screen comes back with its balance counting down to it, under the success screen that ends the withdrawal. */
+      if (r && r.card && this.fcWithdrew(r.card)) { if (got > 0) this.fcWithdrawnScreen(got, u); return; }
       /* Otherwise (a withdrawal that was cut short took the screen away, or the card is not known) what the screen knew of the card is out
-       * of date, and is not shown as if it were current: the screen goes, and a card says what came off. */
+       * of date, and is not shown as if it were current: the screen goes, and the success screen says what came off. */
       this.fcGone();
-      const got = took + this.fcAmt(r);
+      if (got > 0) { this.fcWithdrawnScreen(got, u); return; }
       this.blockedCard('fc-out', {
         tone: 'ask', title: 'IN YOUR WALLET',
-        reason: (got > 0 ? this.fcSats(got, u) : 'The money') + ' from the card is in this phone now.',
+        reason: 'The money from the card is in this phone now.',
         shut: { label: 'DONE' },
       });
     };
@@ -30220,6 +30204,22 @@ class Component extends DCLogic {
         clearTimeout(this._fcResumeT);
         this._fcResumeT = setTimeout(() => this.fcWithdrawRun(sats ? ask : 0, pin, took, { rest: ask }, u), 2500);
       });
+  }
+
+  /* The end of a withdrawal that took money off the card: the app's own success screen, RECEIVED, with its flash, as money that
+   * arrives ends (12-receive.js), in the card's unit, ADDED TO the balance it went into. DONE there is where the withdrawal began. */
+  fcWithdrawnScreen(got, unit) {
+    const u = unit === 'usd' ? 'usd' : 'sat';
+    const n = Math.round(Number(got) || 0);
+    this._lastFee = 0;
+    this._lastPay = null;
+    this.setState(p => ({
+      screen: 'paid', stack: p.screen === 'paid' ? p.stack : p.stack.concat([p.screen]),
+      payOut: false, paidSays: 'RECEIVED', paidTo: '', paidPlace: null, paidUnit: u, paidAmount: n,
+      paidAsked: 0, paidAskedSats: 0, paidAskOwn: false, paidConvert: false,
+      asset: 'BITCOIN', unit: 'SATS', amount: String(u === 'usd' ? 0 : n),
+      recvResolved: true, recv: Object.assign({}, p.recv, { live: 'in' }),
+    }));
   }
 
   /* A withdrawal finished with the card's own screen up for that card: it shows the card as it stands now, and its balance counts down to
@@ -33294,9 +33294,9 @@ class Component extends DCLogic {
     const shown = this.fcBalanceShown(fc, s);
     return {
       isFlashcard: on,
-      /* the screen's title: the card's name on this phone (NAME CARD), ECASHCARD for a card with none, and with no card; alone
+      /* the screen's title: the card's name on this phone (NAME CARD), FOXY CARD for a card with none, and with no card; alone
        * (how fresh the mint's word is, is in the card's HISTORY, `fcHistNotes`) */
-      fcTitle: (fc && fc.key && this.fcNameKept(fc.key)) || 'ECASHCARD',
+      fcTitle: (fc && fc.key && this.fcNameKept(fc.key)) || 'FOXY CARD',
       /* The room the card's picture leaves under itself for the lines that are under it (build/markup.html, `data-card-room`): the
        * card stands upright and is as tall as the screen leaves room for, 160px at the least, and 26px less for each line under it
        * (its 14px, and the 12px between). */
@@ -33699,6 +33699,11 @@ class Component extends DCLogic {
     shield: '<path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"></path><path d="M9 12l2 2 4-4"></path>',
     lock: '<rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path>',
   };
+  // the body's padding at the top of the screen: the usual one, and the one a screen with the card's picture on it has (the arrow's words above it)
+  FC_TAP_PAD = 'calc(max(54px, env(safe-area-inset-top)) + min(130px, 15vh)) 36px 0';
+  FC_TAP_PAD_CARD = 'calc(max(54px, env(safe-area-inset-top)) + 64px) 36px 0';
+  // the card's height on these screens: as tall as the screen leaves room for, and never under 160px or over 360px
+  FC_TAP_CARD_H = 'clamp(160px, calc(100vh - 540px), 360px)';
   // how long REMOVE is said after the card has signed, if the sheet has not been seen to go before then
   FC_TAP_REMOVE_MS = 1500;
   // the steps that mean the card is in the field, whether or not the phone has said so
@@ -33870,6 +33875,8 @@ class Component extends DCLogic {
     const f = this.fcTapFlow();
     const spec = { screen: k.scheme, amount: o.amount || '', amountSub: o.amountSub || '', hint: k.loop, dots: '', words: '', chip: null, solid: null, plain: null };
     const close = { label: 'CLOSE', go: () => this.fcTapClose() };
+    // a read shows the card turning while it is asked for (TAP TO READ) and while it is read (READING); not CARD LOST, the PIN or the check
+    spec.card = String(o.flow || '') === 'read' && (k.scheme === '1a' || k.scheme === '1c') && k.key !== 'pin';
     if (k.scheme === '1g') {
       spec.title = 'CARD LOST';
       spec.words = this.FC_TAP_WORDS.lost;
@@ -33928,7 +33935,9 @@ class Component extends DCLogic {
       + '<svg data-tp-move viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="animation:tpArrow 1.2s ease-in-out infinite"><path d="M6 14l6-6 6 6"></path></svg>'
       + '<span style="' + fig + ';font-weight:700;font-size:15px;letter-spacing:.08em">TAP CARD BEHIND THE TOP</span></div></div>'
       + '<div data-tp-body style="position:absolute;left:0;right:0;top:0;display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;'
-      + 'box-sizing:border-box;padding:calc(max(54px, env(safe-area-inset-top)) + min(130px, 15vh)) 36px 0">'
+      + 'box-sizing:border-box;padding:' + this.FC_TAP_PAD + '">'
+      // the card's picture, turning, where the flow is a read (`fcFamilyFill`, spec.card)
+      + '<div data-tp-art style="display:none;flex:none"></div>'
       + '<h1 style="margin:0;font-weight:800;font-size:34px;line-height:1.05;letter-spacing:.1em;white-space:nowrap"></h1>'
       + '<div data-tap-amount style="font-weight:800;font-size:76px;line-height:1;letter-spacing:-.04em;white-space:nowrap"></div>'
       + '<div data-tap-amount-sub style="margin-top:-4px;' + fig + ';font-weight:600;font-size:19px;opacity:.6"></div>'
@@ -33969,6 +33978,22 @@ class Component extends DCLogic {
     const hint = q('[data-tp-hint]');
     shown(hint, !!spec.hint);
     this.fcFamilyTitle(root, String(spec.title || ''));
+    /* The card's picture, turning, on a screen of a read (TAP TO READ, READING): put in once and kept, so it is not set back to the
+     * front by each look, and taken out where a look has none (CARD LOST, VERIFYING). */
+    const art = q('[data-tp-art]');
+    if (art) {
+      const on = !!spec.card;
+      if (on && !art.firstChild) {
+        art.innerHTML = this.fcCardStageHtml(this.FC_TAP_CARD_H);
+        this._fcSpinA = 0;
+        if (this._fcSpin) this._fcSpin.a = 0;
+      }
+      if (!on && art.firstChild) art.innerHTML = '';
+      art.style.display = on ? '' : 'none';
+      const body = q('[data-tp-body]');
+      if (body) body.style.padding = on ? this.FC_TAP_PAD_CARD : this.FC_TAP_PAD;
+      if (on && this.fcSpinOn) this.fcSpinOn();
+    }
     const amount = q('[data-tap-amount]');
     if (amount) { amount.textContent = spec.amount || ''; shown(amount, !!spec.amount); }
     const sub = q('[data-tap-amount-sub]');
@@ -35059,8 +35084,8 @@ class Component extends DCLogic {
       swapBackGo: () => this.back(),
       swapCloseGo: () => this.setState(p => ({ screen: p.stack.indexOf('flashcard') >= 0 ? 'flashcard' : 'home', stack: [] })),
       swapNextGo: () => this.swapToAmount(),
-      swapFoot: !on ? '' : this.offlineNow() ? 'Swapping needs the mint.'
-        : 'At ' + this.swapRateWho() + '. You see the rate and the fee before anything moves.',
+      // (no line under the tiles but the offline one: the rate and the fee are on the confirmation, 2026-11-08)
+      swapFoot: !on ? '' : this.offlineNow() ? 'Swapping needs the mint.' : '',
       swapNextBg: canGo ? 'var(--acc)' : 'rgba(var(--ink-rgb),.14)',
       swapNextFur: canGo ? FUR_CTA : 'none,none,none',
       swapNextInk: canGo ? '#fff' : 'rgba(var(--ink-rgb),.4)',
@@ -35808,18 +35833,41 @@ class Component extends DCLogic {
    * on the document, since the screens' markup binds clicks only. */
   FC_SPIN = { auto: 24, perPx: 0.57, keep: 0.94, rest: 1600, gone: 60 };
 
+  /* The card also turns on three screens drawn over the app as a stage (`#foxy-stage`): TAP TO READ and READING, and the screen a
+   * tapped card opens to the site (`fcCardStageHtml`). A stage that holds the turntable is the screen then, whatever the app's own
+   * screen is under it. */
+  fcSpinStageUp() {
+    return typeof document !== 'undefined' && !!document.querySelector('#foxy-stage [data-card-stage="1"]');
+  }
+
+  // what is up over that stage, by name, or '': any other fixed element on the page (the PIN pad, a card), as `cardTapOver` has it
+  fcSpinOverStage() {
+    const lockPad = this._pinLocked ? this._pinEl : null;
+    const kids = document.body ? Array.prototype.slice.call(document.body.children) : [];
+    for (let i = 0; i < kids.length; i++) {
+      const n = /** @type {any} */ (kids[i]);
+      if (!n || n === lockPad || n.tagName === 'INPUT' || n.tagName === 'TEXTAREA') continue;
+      const id = String(n.id || '');
+      if (id === 'foxy-stage' || id === 'dc-root' || id === 'foxy-get-dollars' || id.indexOf('ftg-') === 0) continue;
+      if (n.style && n.style.position === 'fixed') return id || 'an overlay';
+    }
+    return '';
+  }
+
   // whether the turning card is on screen with nothing over it: the welcome or the card's screen, no menu, no lock, no sheet or stage
   fcSpinLive() {
     const s = this.state || {};
+    if (typeof document !== 'undefined' && document.hidden) return false;
+    // (on a stage's own turntable the tap that stage belongs to is not "over" it; the menu is under it; a lock or another overlay is over it)
+    if (this.fcSpinStageUp()) return !this._pinLocked && !this.fcSpinOverStage();
     if (s.screen !== 'fcWelcome' && s.screen !== 'flashcard') return false;
     if (s.open0 || this._pinLocked || (this._fcTaps || 0) > 0) return false;
-    if (typeof document !== 'undefined' && document.hidden) return false;
     return !(this.cardTapOver && this.cardTapOver()) && !(this.cardFlowBusy && this.cardFlowBusy());
   }
 
   // on every render: the turntable runs where its screen is drawn (`drawn`), and stops for good, the angle forgotten, where not
   fcSpinSync(drawn) {
-    if (drawn) { this.fcSpinOn(); return; }
+    if (drawn || this.fcSpinStageUp()) { this.fcSpinOn(); return; }
     if (this._fcSpin && this._fcSpin.stop) this._fcSpin.stop();
     this.fcSpinUnpark();
     this._fcSpinA = 0;
@@ -35846,7 +35894,7 @@ class Component extends DCLogic {
     // (a static preview, a review page, shows the card still, as such pages run no loops)
     if (this._fcSpin || typeof document === 'undefined' || typeof window === 'undefined' || (this.props && this.props.startStatic)) return;
     const s0 = this.state || {};
-    if (s0.screen !== 'fcWelcome' && s0.screen !== 'flashcard') { this.fcSpinUnpark(); return; }
+    if (s0.screen !== 'fcWelcome' && s0.screen !== 'flashcard' && !this.fcSpinStageUp()) { this.fcSpinUnpark(); return; }
     if (!this.fcSpinLive()) { this.fcSpinPark(); return; }
     this.fcSpinUnpark();
     const doc = /** @type {any} */ (document);
@@ -35856,7 +35904,7 @@ class Component extends DCLogic {
     const sp = /** @type {any} */ ({ a: Number(this._fcSpinA) || 0, vel: 0, drag: null, held: 0, last: Date.now(), miss: 0, stop: null });
     this._fcSpin = sp;
     const still = () => { try { return !!(win.matchMedia && win.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; } };
-    const spinEl = () => doc.querySelector('[data-card-stage="1"] [data-card-spin]');
+    const spinEl = () => doc.querySelector('#foxy-stage [data-card-stage="1"] [data-card-spin]') || doc.querySelector('[data-card-stage="1"] [data-card-spin]');
     const paint = () => { const el = spinEl(); if (el) el.style.transform = 'rotateY(' + sp.a.toFixed(2) + 'deg)'; };
     const onStage = (e) => !!(e && e.target && e.target.closest && e.target.closest('[data-card-stage="1"]'));
     const xOf = (e) => Number((e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX) || 0;
@@ -35910,6 +35958,29 @@ class Component extends DCLogic {
     // (a card that went on from where it stood is drawn there at once)
     if (sp.a) paint();
     next(tick);
+  }
+
+  /* The card's picture on its turntable as a string, for the screens drawn over the app as a stage (TAP TO READ, READING, and the
+   * screen a tapped card opens to the site): the same stage, turntable, portrait and dark back as the card's own screen
+   * (build/markup.html, `data-card-stage`), in the design a card not yet met is shown in. `h` is the card's height as CSS. It turns
+   * by itself and by hand (`fcSpinOn`), from the front each time it is put up. */
+  fcCardStageHtml(h) {
+    const ch = '--ch:' + h;
+    return '<div data-card-stage="1" style="' + ch + ';flex:none;position:relative;perspective:1100px">'
+      + '<div data-card-spin style="position:relative;transform-style:preserve-3d">'
+      + '<div data-card-portrait data-card-design="' + this.FC_SETUP_DESIGN + '" style="' + ch + ';flex:none;position:relative;height:var(--ch);'
+      + 'width:calc(var(--ch) * 54 / 85.6);border-radius:calc(var(--ch) * 3.18 / 85.6);overflow:hidden;'
+      + 'box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 2px 0 rgba(255,255,255,.05),0 16px 34px rgba(0,0,0,.6)">'
+      + '<div data-card-picture style="position:absolute;inset:0;background:url(img/card-fx1-portrait.jpg) center/cover no-repeat"></div></div>'
+      + '<div data-card-back aria-hidden="true" style="position:absolute;left:0;top:0;width:100%;height:100%;box-sizing:border-box;'
+      + 'border-radius:calc(var(--ch) * 3.18 / 85.6);background:linear-gradient(150deg,#2E2F32,#121315);'
+      + 'box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 2px 0 rgba(255,255,255,.05),0 16px 34px rgba(0,0,0,.6);'
+      + 'transform:rotateY(180deg);backface-visibility:hidden;-webkit-backface-visibility:hidden;display:flex;flex-direction:column;'
+      + 'align-items:center;justify-content:center;gap:calc(var(--ch) * .035)">'
+      + '<svg viewBox="0 0 236.5 366" style="height:calc(var(--ch) * .2);width:calc(var(--ch) * .129);display:block;opacity:.9">'
+      + '<path d="M81.1,364.6c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8L37.9,56.1c4.3-20.8,21.7-34.8,42.9-34.2,14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#050505"></path><path d="M103,355c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8L59.7,46.4c4.3-20.8,21.7-34.8,42.9-34.2,14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#5C5C5C"></path><path d="M124.1,342.8c-11.8-3.1-21.4-11.1-26.8-22-5.1-10.1-6-22.6-1.5-33.1l15.3-33,17.8-37.6c.3-.7-.1-1.6-.4-2.1s-1-.9-1.9-.9h-40.8c-9,0-17.4-2.6-24.7-7.9-5-3.6-9.1-8.1-12.3-13.4-5.6-9.4-7.3-21.3-4.3-31.8l4.3-14.8,32.1-112C85.2,13.5,102.6-.5,123.8,0c14.7.4,28.3,8.2,35.6,21,5.7,10,6.7,21.9,3.5,32.9l-6.6,22.7-15.4,51.9c-.2.8-.3,1.5.2,2.1s1,1.1,1.9,1.1h53.6c5.7,0,11,1.7,16,4,13.5,6.2,22.4,19.3,23.8,34,.8,8.4-.9,16.3-4.6,23.7l-8.2,17.8-50.5,108.9c-8.4,18.2-29.3,27.9-48.8,22.7Z" fill="#C9C9C9"></path></svg>'
+      + '<div style="font-family:Sora,sans-serif;font-weight:800;font-size:calc(var(--ch) * .06);letter-spacing:.3em;margin-right:-.3em;color:#C9C9C9">FOXY</div>'
+      + '</div></div></div>';
   }
 
   /* The bindings of the three (build/markup.html): the welcome and CARD LIMITS share one block, the card's picture between a title
@@ -37182,18 +37253,37 @@ class Component extends DCLogic {
 
   /* The lock in front of opening the till, closing it and showing a cashier code: Face ID where FACE ID LOCK is on,
    * else the PIN pad, as the launch's lock asks (10-pin.js, `pinLock`). A phone with no lock is told to set one first: a till
-   * anybody can close is a phone anybody can walk off into SEND with. `why` is the pad's line under its title. */
+   * anybody can close is a phone anybody can walk off into SEND with. `why` is the pad's line under its title. The card
+   * sets one there: CREATE PIN is SET PIN's set-up and USE FACE ID is FACE ID LOCK's (10-pin.js, `pinSetup`,
+   * `chooseProtection`), and a lock set through either goes straight on to what it stood in front of (POS mode, from the
+   * menu's POINT OF SALE), the lock just set being the person's own proof. Given up, nothing opens. */
   tillGate(then, why) {
     const W = window.FoxyWallet;
     const go = typeof then === 'function' ? then : () => {};
     const pinSet = !!(W && W.pinIsSet && W.pinIsSet());
     const face = !!(W && W.faceLock && W.faceLock() && W.biometric);
     if (!W || !W.screenLocked || !W.screenLocked() || (!pinSet && !face)) {
-      this.blockedCard('tillNoLock', {
+      // a lock being set here ends at the till, or at home where it is given up: not the menu again
+      const setting = () => { if (this.menuReturnDrop) this.menuReturnDrop(); };
+      const pills = [];
+      if (W && W.setSeedProtection) {
+        pills.push({ label: 'USE FACE ID', tap: () => {
+          setting();
+          this.chooseProtection('device', (done) => { if (done) go(); });
+        } });
+      }
+      this.blockedCard('tillNoLock', Object.assign({
         tone: 'warn', title: 'SET A LOCK FIRST',
         reason: 'The till opens and closes behind Face ID or a PIN, so a phone handed to someone else cannot leave it.',
-        chip: 'SETTINGS > SET PIN or FACE ID LOCK.',
-      });
+        pills: pills, pillsFirst: true,
+        shut: { label: 'CANCEL' },
+      }, W && W.pinSet ? {
+        retry: 'CREATE PIN',
+        go: () => {
+          setting();
+          this.pinSetup((done) => { if (done && W.pinIsSet && W.pinIsSet()) go(); });
+        },
+      } : {}));
       return;
     }
     // given up from the menu's POINT OF SALE: the menu again (01-ui-basics.js `menuReturnSettle`)
@@ -37383,7 +37473,7 @@ class Component extends DCLogic {
   tillAskMain(def, mints, moved) {
     this._tillMainAsk = { def: def, moved: !!moved };
     this.fcPickUnit({
-      question: 'DEFAULT CURRENCY',
+      question: 'WHICH DO YOU PREFER TO RECEIVE?',
       foot: 'The QR invoice is made in it, and a payment from a mint you did not pick lands in it. A tap pays in either.',
       bal: null, short: { usd: '', sat: '' }, why: '',
     }, (u) => {
@@ -37400,6 +37490,8 @@ class Component extends DCLogic {
     const s = this.state || {};
     // the tips' lists and CASHIER CODES (26p-till-tips.js, `tillListBack`)
     if (this.tillListBack && this.tillListBack()) return true;
+    // off ACCEPT TIPS?: the question walked away from (26p-till-tips.js, `tillTipsCancel`)
+    if (s.screen === 'tillTips') { if (!(this.tillTipsCancel && this.tillTipsCancel())) this.setState((p) => ({ screen: (p.stack || []).length ? p.stack[p.stack.length - 1] : 'home', stack: (p.stack || []).slice(0, -1) })); return true; }
     // the tip's own SET AMOUNT: back to the receive screen, the tip as it was
     if (s.screen === 'amount' && s.flow === 'tillTip' && this.tillTipOtherSet) { this.tillTipOtherSet(null); return true; }
     if (s.screen === 'switchMint' && s.tillPick === 'default') { this.setState({ tillPick: 'set' }); return true; }
@@ -37871,9 +37963,9 @@ class Component extends DCLogic {
      * And in either role a card paying in its other currency (dollars for a bitcoin invoice) shows the total the holder
      * agrees to first (`fcOtherAgree`, `fcOuConfirm`): the payer pays the fee and sees it. Thrown out, no card could pay a
      * till across currencies (review, card-in-till); its TAP CARD and its back return to the till's receive screen. */
-    // (and the till's own lists, CASHIER CODES among them, and the tip's SET AMOUNT: 26p-till-tips.js)
+    // (and the till's own lists, CASHIER CODES among them, the tip's SET AMOUNT, and ACCEPT TIPS? while it asks: 26p-till-tips.js)
     const kept = (this.TILL_SCREENS.indexOf(s.screen) >= 0 && (s.screen !== 'amount' || s.flow === 'receive' || s.flow === 'tillTip'))
-      || (s.screen === 'switchMint' && !!s.tillList);
+      || (s.screen === 'switchMint' && !!s.tillList) || (s.screen === 'tillTips' && !!this._tillTipsFlow);
     if (!kept && !(s.till.role === 'keeper' && s.screen === 'fcXmConfirm') && s.screen !== 'fcOuConfirm') {
       console.log('[foxy] till: ' + s.screen + ' is not a screen the till has; back to its SET AMOUNT');
       this.setState(this.homeState());
@@ -37981,7 +38073,7 @@ class Component extends DCLogic {
    *
    * WITHDRAW, ALL OF IT, on a phone that uses more than one mint (2026-11-03: "it should ask me which mint I want to withdraw it to,
    * showing the cheapest first"). Before anything comes off the card, the SWITCH MINT list, as the till's set list is drawn on it,
-   * titled WITHDRAW TO: the card's own mint first, at NO FEE, where the money comes off as it always has; then each other mint this
+   * titled WITHDRAW TO: the card's own mint first, FREE ON <MINT>, where the money comes off as it always has; then each other mint this
    * phone uses (`tillMints`), with what the crossing there costs, asked of both mints the way a transfer between this phone's mints
    * is (`transferQuote`, `quoteOnly`: an invoice at the far mint and the card's mint's fee quote for it, nothing paid), the cheapest
    * first as the answers come in. A phone with one mint is asked nothing.
@@ -38057,7 +38149,7 @@ class Component extends DCLogic {
     return 'This card is at ' + at + '. Other mints cost a Lightning fee.';
   }
 
-  /* The rows, in the list's tiles (`row`, 27-render-mints-restore-backup.js): the card's mint first with no line under its rule, then
+  /* The rows, in the list's tiles (`row`, 27-render-mints-restore-backup.js): the card's mint first with FREE ON <MINT> under its rule, then
    * the others the cheapest first, those still being asked after them, and those that cannot be reached last, greyed. Under each
    * other's rule what the crossing costs (FEE $0.05), CALCULATING… while it is asked, or NOT AVAILABLE. A tap picks one, the
    * tick on it (`fcWdSel`); NEXT takes it (`fcListNext`). Nothing picked, the card's own mint is. */
@@ -38077,8 +38169,10 @@ class Component extends DCLogic {
       if (d) return d;
       return order(a) === 0 ? (q(a).rank - q(b).rank) : 0;
     });
-    const none = { lineBal: false, lineWait: false, lineFee: false, fee: '', feeNote: '', feeNoteShown: false, wait: '' };
-    return [Object.assign(row(cardRow, sel === strip(w.card)), none, { text: 'NO FEE', tap: () => this.fcWdSel(cardRow.url) })]
+    // the card's own mint says FREE ON <MINT>, in the line the other tiles show their fee in
+    const free = 'FREE ON ' + String(this.mintNameOf(w.card) || cardRow.name || '').toUpperCase();
+    const own = { lineBal: false, lineWait: false, lineFee: true, fee: free, feeNote: '', feeNoteShown: false, wait: '', ink: 'var(--acc-ink)' };
+    return [Object.assign(row(cardRow, sel === strip(w.card)), own, { text: free, tap: () => this.fcWdSel(cardRow.url) })]
       .concat(others.map((m) => {
         const base = row(m, sel === strip(m.url));
         return Object.assign(base, this.fcFeeLine(q(m), w.unit, base), { tap: () => this.fcWdSel(m.url) });
@@ -38376,9 +38470,29 @@ class Component extends DCLogic {
     });
   }
 
-  /* ADD A CASHU ID and SCAN A CASHU ID, on the empty CONTACTS: the ID is read as a pasted or scanned one
+  /* PASTE A CASHU ID and SCAN A CASHU ID, on the empty CONTACTS: the ID is read as a pasted or scanned one
    * is (`cidAddAsk`), which goes on to NAME THIS CONTACT?. */
   cidPasteAsk() { this.cidPasteCard('cidPaste', (text) => this.cidAddAsk(text)); }
+
+  /* PASTE A CASHU ID, tapped: the clipboard read through the bridge, as home's PASTE reads it (iOS asks its paste
+   * question there), and the first foxyid1 string on it straight to NAME THIS CONTACT?. A clipboard with none is
+   * THAT WON'T WORK; a page with no clipboard to read gets the card with a field. */
+  cidClipboardAdd() {
+    const W = window.FoxyWallet;
+    if (!W || !W.clipboard) { this.cidPasteAsk(); return; }
+    Promise.resolve(W.clipboard()).then((text) => {
+      const m = /foxyid1[A-Za-z0-9_-]+/.exec(String(text || ''));
+      if (!m) {
+        this.blockedCard('cidBad', {
+          tone: 'warn', title: 'THAT WON\u2019T WORK',
+          reason: String(text || '').trim() ? 'That is not a Cashu ID.' : 'Nothing on the clipboard.',
+          chip: 'Ask them to share it again.',
+        });
+        return;
+      }
+      this.cidAddAsk(m[0]);
+    }).catch(() => this.toast('Could not read the clipboard.', true));
+  }
 
   cidScanAsk() {
     const W = window.FoxyWallet;
@@ -38696,35 +38810,10 @@ class Component extends DCLogic {
   /* ---- REMIND ME AFTER 15 DAYS (08i-remind.js, Reminder.swift) ----
    *
    * Only on a phone whose Cashu ID is in use. The first time it is, a card asks once (`remindAskCard`) and says why;
-   * TURN ON has iOS ask its own question, NOT NOW leaves the switch in SETTINGS for later. Notifications already allowed
-   * for payments turn it on with no card. The switch is the first row of SETTINGS. */
-
-  // the row in SETTINGS: [the row], or [] with no ID in use. `sw` is the menu's own switch look.
-  remindMenuRow(sw) {
-    const W = window.FoxyWallet;
-    if (!W || !W.remindView) return [];
-    const v = W.remindView() || {};
-    if (!v.eligible) return [];
-    return [Object.assign({ label: 'REMIND ME AFTER 15 DAYS', path: 'M12 6v6l4 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z',
-      tap: () => this.remindTap() }, sw(v.on === true))];
-  }
+   * TURN ON has iOS ask its own question. Notifications already allowed for payments turn it on with no card. There is
+   * no switch in SETTINGS (the keeper, 2026-11-08): it stays as this default has it. */
 
   remindPaint() { this.setState({ menuTick: (this.state.menuTick || 0) + 1 }); }
-
-  remindTap() {
-    const W = window.FoxyWallet;
-    if (!W || !W.remindView || this._remindBusy) return;
-    if ((W.remindView() || {}).on === true) {
-      this._remindBusy = true;
-      Promise.resolve(W.remindTurnOff()).then(() => {
-        this._remindBusy = false;
-        this.remindPaint();
-        this.toast('No reminder.');
-      });
-      return;
-    }
-    this.remindOn();
-  }
 
   remindOn() {
     const W = window.FoxyWallet;
@@ -38773,8 +38862,10 @@ class Component extends DCLogic {
    *
    * The wallet's half is 08f-till-tips.js. Here, every screen one the app has:
    *
-   *   ACCEPT TIPS? .......... a card (`blockedCard`), YES / NO, after the till's opening steps (the lock, the mints, the
-   *                           default mint, the default currency) and for each new CASHIER CODE, the till's answer first.
+   *   ACCEPT TIPS? .......... a screen of the set-up family ('tillTips': its title beside the back button, the divider, the
+   *                           line under it), YES / NO, after the till's opening steps (the lock, the mints, the default
+   *                           mint, the default currency) and for each new CASHIER CODE, the till's answer first. Its back
+   *                           button is walking away from the question.
    *   TIPS GO TO ............ a card: MYSELF, ONE PERSON, GROUP.
    *   ONE PERSON ............ the SWITCH MINT list (`tillList` 'person'): the Cashu ID contacts, PASTE A CASHU ID (a card
    *                           with a field) and SCAN A CASHU ID; an ID that is not a contact is named first, on the
@@ -38820,14 +38911,18 @@ class Component extends DCLogic {
   // ---- the questions: ACCEPT TIPS?, TIPS GO TO, ONE PERSON, GROUP ----
 
   /* Asks for an answer, the till's `def` first where it had one, and gives it to `done`; `cancel` where the person walks away
-   * (taps outside a card, or backs off the first). */
+   * (backs off ACCEPT TIPS?). */
   tillTipsAsk(def, done, cancel) {
     const d = def && def.on ? def : null;
-    this._tillTipsFlow = { def: d, done: typeof done === 'function' ? done : () => {}, cancel: typeof cancel === 'function' ? cancel : () => {} };
+    const s = this.state || {};
+    this._tillTipsFlow = { def: d, done: typeof done === 'function' ? done : () => {}, cancel: typeof cancel === 'function' ? cancel : () => {},
+      // the list under the screen (CASHIER CODES), drawn again as it was when the screen comes off
+      under: s.screen === 'switchMint' ? (s.tillList || false) : false };
     this.tillTipsAskYes();
   }
 
-  // a card that calls `cancel` where it closes with no answer
+  /* A card over ACCEPT TIPS? (TIPS GO TO, and the person's own cards): closed with no answer, ACCEPT TIPS? is still there to
+   * answer; off it, walking away. */
   tillTipsCard(kind, spec) {
     let answered = false;
     const mark = (fn) => (...a) => { answered = true; if (fn) fn(...a); };
@@ -38838,24 +38933,53 @@ class Component extends DCLogic {
       pills: (spec.pills || []).map((p) => Object.assign({}, p, { tap: mark(p.tap) })),
       onClose: () => setTimeout(() => {
         if (answered || this._tillTipsFlow !== flow || !flow) return;
-        this._tillTipsFlow = null;
-        console.log('[foxy] till: the tips question was left unanswered');
-        flow.cancel();
+        if (this.state.screen === 'tillTips') return;
+        this.tillTipsCancel();
       }, 0),
     });
     this.blockedCard(kind, over);
   }
 
+  // ACCEPT TIPS?, the screen: pushed once, and there under the cards that follow it
   tillTipsAskYes() {
     const f = this._tillTipsFlow;
     if (!f) return;
-    this.tillTipsCard('tillTipsAsk', {
-      tone: 'ask', title: 'ACCEPT TIPS?',
-      reason: 'Payers see $1, $2, $5 and OTHER beside the amount. The tip is part of the one payment.',
-      chip: f.def ? 'Now: ' + this.tillTipsWords(f.def) : '',
-      retry: 'YES', go: () => this.tillTipsAskTo(),
-      shut: { label: 'NO', pill: true, tap: () => this.tillTipsDone({ on: false, to: 'self', ids: [] }) },
-    });
+    if (this.state.screen === 'tillTips') return;
+    // (the till's answer, said under the line where it had one)
+    this.setState((p) => ({ screen: 'tillTips', stack: p.stack.concat([p.screen]), tillTipsDef: f.def || null }));
+  }
+
+  // the screen off, back to what was under it (the list it was asked over drawn again)
+  tillTipsLeave(flow) {
+    const under = flow ? flow.under : false;
+    this.setState((p) => (p.screen !== 'tillTips' ? null : {
+      screen: (p.stack || []).length ? p.stack[p.stack.length - 1] : 'home', stack: (p.stack || []).slice(0, -1),
+      tillList: under || false,
+    }));
+  }
+
+  // walked away from: the screen off, and the flow told
+  tillTipsCancel() {
+    const f = this._tillTipsFlow;
+    if (!f) return false;
+    this._tillTipsFlow = null;
+    console.log('[foxy] till: the tips question was left unanswered');
+    this.tillTipsLeave(f);
+    f.cancel();
+    return true;
+  }
+
+  /** @param {RenderContext} c */
+  renderTillTips(c) {
+    const { s, sc } = c;
+    const on = sc === 'tillTips';
+    return {
+      isTillTips: on,
+      ttReason: 'Payers see $1, $2, $5 and OTHER beside the amount. The tip is part of the one payment.',
+      ttNow: on && s.tillTipsDef ? 'Now: ' + this.tillTipsWords(s.tillTipsDef) : '',
+      ttYes: () => { if (this._tillTipsFlow) this.tillTipsAskTo(); },
+      ttNo: () => { if (this._tillTipsFlow) this.tillTipsDone({ on: false, to: 'self', ids: [] }); },
+    };
   }
 
   tillTipsAskTo() {
@@ -38882,8 +39006,9 @@ class Component extends DCLogic {
     const why = (W && W.tillTipsProblem) ? W.tillTipsProblem(tips) : '';
     if (why) { this.toast(why, true); return false; }
     this._tillTipsFlow = null;
-    // off ONE PERSON or GROUP, where the answer was given there (CASHIER CODES, under them, stays)
+    // off ONE PERSON or GROUP, where the answer was given there, and off ACCEPT TIPS? under them
     if (this.state.tillList === 'person' || this.state.tillList === 'group') this.tillListLeave();
+    this.tillTipsLeave(f);
     f.done(tips);
     return true;
   }
@@ -39406,22 +39531,24 @@ class Component extends DCLogic {
   // the list, through the one way into it, which clears every other question it can be asking
   bankList() { this.goSwitchMint({ bankPick: true }); }
 
-  /* The rows, in the list's own look (27-render-mints-restore-backup.js): each exchange with its site under its name, or
-   * the address kept there. */
+  /* The exchanges, drawn as the mint list's tiles (27-render-mints-restore-backup.js): the name large, its site or the address kept
+   * there under it, a ring and a tick on the exchange kept. No company's picture is drawn, only its name. */
   bankRows() {
     const W = window.FoxyWallet;
     const saved = W && W.bankSaved ? W.bankSaved() : null;
     const list = W && W.bankExchanges ? W.bankExchanges() : [];
-    const logos = { strike: 'gd-strike.jpg', river: 'gd-river.jpg', cashapp: 'gd-cashapp.jpg' };
-    const tints = { strike: '#1C1C1E', river: '#1E3A5F', cashapp: '#00A83E' };
     return list.map((x) => {
       const mine = !!saved && saved.ex === x.key;
       return {
         name: String(x.name).toUpperCase(), host: mine && saved.addr ? saved.addr : x.domain,
-        dim: '1', down: false, downText: '', initial: String(x.name).slice(0, 1).toUpperCase(), tint: tints[x.key] || '#5A5A5A',
-        logo: logos[x.key] ? "url('" + logos[x.key] + "')" : 'none',
-        here: false, notHere: true, text: '', ink: 'var(--acc-ink)', busy: false,
-        bg: 'var(--surface)', border: 'rgba(var(--ink-rgb),.12)',
+        big: String(x.name).toUpperCase(),
+        lineBal: false, lineWait: false, lineFee: false, balSym: false, balMain: '', balAbout: '', balAboutShown: false,
+        wait: '', fee: '', feeNote: '', feeNoteShown: false,
+        linePad: '16px', nameSize: '38px', hostSize: '17px', pad: '24px 22px', radius: '28px', gap: '18px',
+        edge: mine ? '2px' : '1px',
+        dim: '1', down: false, downText: '',
+        here: mine, notHere: !mine, text: '', ink: 'var(--acc-ink)', busy: false,
+        bg: mine ? 'rgba(var(--acc-rgb),.12)' : 'var(--surface)', border: mine ? 'var(--acc)' : 'rgba(var(--ink-rgb),.12)',
         tap: () => this.bankPick(x.key),
       };
     });
@@ -40391,8 +40518,8 @@ class Component extends DCLogic {
      * CASHIER CODES with those that have ended under PAST. Null outside them. */
     const L = (sc === 'switchMint' && s.tillList && this.tillListVals) ? this.tillListVals() : null;
     /* The lists of mints are drawn as tiles (the keeper's design of 2026-11-06, "To which mint?"): the name large, its host, a rule,
-     * and under it what is held there. The till's lists of people and codes, and BANK ACCOUNT's exchanges, keep their rows. */
-    const tiles = !L && !s.bankPick;
+     * and under it what is held there. The till's lists of people and codes keep their rows; BANK ACCOUNT's exchanges are tiles too. */
+    const tiles = !L;
     /* A card's WITHDRAW TO (`wdPick`) and TRANSFER TO (`fcPick`): the card's own mint first, ticked, then the others, the line under
      * each rule what the crossing there costs where that is asked (26n-card-withdraw-to.js). A tap picks a mint, NEXT goes on. */
     const cardList = tiles && (!!s.wdPick || !!s.fcPick);

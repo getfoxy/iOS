@@ -420,7 +420,9 @@ const BUSY_SCREENS = ['amount', 'bkStart', 'confirm', 'crossConfirm', 'depConfir
   // a Cashu ID payment being decided (26o-cashu-id.js)
   'cidConfirm',
   // SEND > BANK ACCOUNT's username or River's invoice being given (26q-bank.js)
-  'bankAsk'];
+  'bankAsk',
+  // ACCEPT TIPS? being answered while a till opens or a cashier code is made (26p-till-tips.js)
+  'tillTips'];
 
 /* What the page logs for a card tap (one line per outcome), taken off the console as it goes. */
 const cardLines = [];

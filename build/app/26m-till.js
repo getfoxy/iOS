@@ -100,18 +100,37 @@
 
   /* The lock in front of opening the till, closing it and showing a cashier code: Face ID where FACE ID LOCK is on,
    * else the PIN pad, as the launch's lock asks (10-pin.js, `pinLock`). A phone with no lock is told to set one first: a till
-   * anybody can close is a phone anybody can walk off into SEND with. `why` is the pad's line under its title. */
+   * anybody can close is a phone anybody can walk off into SEND with. `why` is the pad's line under its title. The card
+   * sets one there: CREATE PIN is SET PIN's set-up and USE FACE ID is FACE ID LOCK's (10-pin.js, `pinSetup`,
+   * `chooseProtection`), and a lock set through either goes straight on to what it stood in front of (POS mode, from the
+   * menu's POINT OF SALE), the lock just set being the person's own proof. Given up, nothing opens. */
   tillGate(then, why) {
     const W = window.FoxyWallet;
     const go = typeof then === 'function' ? then : () => {};
     const pinSet = !!(W && W.pinIsSet && W.pinIsSet());
     const face = !!(W && W.faceLock && W.faceLock() && W.biometric);
     if (!W || !W.screenLocked || !W.screenLocked() || (!pinSet && !face)) {
-      this.blockedCard('tillNoLock', {
+      // a lock being set here ends at the till, or at home where it is given up: not the menu again
+      const setting = () => { if (this.menuReturnDrop) this.menuReturnDrop(); };
+      const pills = [];
+      if (W && W.setSeedProtection) {
+        pills.push({ label: 'USE FACE ID', tap: () => {
+          setting();
+          this.chooseProtection('device', (done) => { if (done) go(); });
+        } });
+      }
+      this.blockedCard('tillNoLock', Object.assign({
         tone: 'warn', title: 'SET A LOCK FIRST',
         reason: 'The till opens and closes behind Face ID or a PIN, so a phone handed to someone else cannot leave it.',
-        chip: 'SETTINGS > SET PIN or FACE ID LOCK.',
-      });
+        pills: pills, pillsFirst: true,
+        shut: { label: 'CANCEL' },
+      }, W && W.pinSet ? {
+        retry: 'CREATE PIN',
+        go: () => {
+          setting();
+          this.pinSetup((done) => { if (done && W.pinIsSet && W.pinIsSet()) go(); });
+        },
+      } : {}));
       return;
     }
     // given up from the menu's POINT OF SALE: the menu again (01-ui-basics.js `menuReturnSettle`)
@@ -301,7 +320,7 @@
   tillAskMain(def, mints, moved) {
     this._tillMainAsk = { def: def, moved: !!moved };
     this.fcPickUnit({
-      question: 'DEFAULT CURRENCY',
+      question: 'WHICH DO YOU PREFER TO RECEIVE?',
       foot: 'The QR invoice is made in it, and a payment from a mint you did not pick lands in it. A tap pays in either.',
       bal: null, short: { usd: '', sat: '' }, why: '',
     }, (u) => {
@@ -318,6 +337,8 @@
     const s = this.state || {};
     // the tips' lists and CASHIER CODES (26p-till-tips.js, `tillListBack`)
     if (this.tillListBack && this.tillListBack()) return true;
+    // off ACCEPT TIPS?: the question walked away from (26p-till-tips.js, `tillTipsCancel`)
+    if (s.screen === 'tillTips') { if (!(this.tillTipsCancel && this.tillTipsCancel())) this.setState((p) => ({ screen: (p.stack || []).length ? p.stack[p.stack.length - 1] : 'home', stack: (p.stack || []).slice(0, -1) })); return true; }
     // the tip's own SET AMOUNT: back to the receive screen, the tip as it was
     if (s.screen === 'amount' && s.flow === 'tillTip' && this.tillTipOtherSet) { this.tillTipOtherSet(null); return true; }
     if (s.screen === 'switchMint' && s.tillPick === 'default') { this.setState({ tillPick: 'set' }); return true; }
@@ -789,9 +810,9 @@
      * And in either role a card paying in its other currency (dollars for a bitcoin invoice) shows the total the holder
      * agrees to first (`fcOtherAgree`, `fcOuConfirm`): the payer pays the fee and sees it. Thrown out, no card could pay a
      * till across currencies (review, card-in-till); its TAP CARD and its back return to the till's receive screen. */
-    // (and the till's own lists, CASHIER CODES among them, and the tip's SET AMOUNT: 26p-till-tips.js)
+    // (and the till's own lists, CASHIER CODES among them, the tip's SET AMOUNT, and ACCEPT TIPS? while it asks: 26p-till-tips.js)
     const kept = (this.TILL_SCREENS.indexOf(s.screen) >= 0 && (s.screen !== 'amount' || s.flow === 'receive' || s.flow === 'tillTip'))
-      || (s.screen === 'switchMint' && !!s.tillList);
+      || (s.screen === 'switchMint' && !!s.tillList) || (s.screen === 'tillTips' && !!this._tillTipsFlow);
     if (!kept && !(s.till.role === 'keeper' && s.screen === 'fcXmConfirm') && s.screen !== 'fcOuConfirm') {
       console.log('[foxy] till: ' + s.screen + ' is not a screen the till has; back to its SET AMOUNT');
       this.setState(this.homeState());
