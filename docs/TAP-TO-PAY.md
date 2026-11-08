@@ -7,7 +7,10 @@ pays, and that goes over Tor like anything else.
 The offer carries both ways of being paid, and the payer picks. **Two Foxys on
 the same mint pay with ecash**, and the ecash goes back over the same Bluetooth
 link a moment later: no Lightning route, no fee, no onion rendezvous, and the
-mint never sees a payment between two of its own users. On different mints the payer uses the Lightning invoice.
+mint never sees a payment between two of its own users. A payer on another mint
+that holds enough at the receiver's mint (in the request's unit) pays the same
+way, from that balance, on a visit to that mint, and comes home after: no fee
+(MONEY.md §12). Otherwise, on different mints the payer uses the Lightning invoice.
 The payer is never asked which — only the payer knows what mint it is on, so it
 decides without a question.
 
@@ -609,7 +612,8 @@ and on the air again.
 
 ## Two mints: both phones online, or no payment
 
-A tap between two phones on different mints is paid over Lightning, and
+A tap between two phones on different mints, where the payer holds too little at
+the receiver's mint to pay it there in ecash, is paid over Lightning, and
 only when both phones can reach their mints. With either one offline, the
 payer's phone stops at the offer: no price is discussed, no fee is asked
 for, nothing is asked of either mint. Both phones show the same card —

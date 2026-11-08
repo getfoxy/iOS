@@ -55,7 +55,7 @@ function load(opts) {
   }
 
   const s = w.document.createElement('script');
-  s.textContent = fs.readFileSync(path.join(ROOT, 'Web', 'foxy-wallet.js'), 'utf8');
+  s.textContent = fs.readFileSync(process.env.FOXY_WALLET_JS || path.join(ROOT, 'Web', 'foxy-wallet.js'), 'utf8');
   w.document.body.appendChild(s);
 
   const W = w.FoxyWallet;
@@ -155,7 +155,7 @@ function loadReal(opts) {
   // the suites' own switches (`_cashuIdLockS` and the like) are read only on a page that says it is a test's, as it loads
   if (!o.release) w.__foxyTestHooks = true;
   const s = w.document.createElement('script');
-  s.textContent = fs.readFileSync(path.join(ROOT, 'Web', 'foxy-wallet.js'), 'utf8');
+  s.textContent = fs.readFileSync(process.env.FOXY_WALLET_JS || path.join(ROOT, 'Web', 'foxy-wallet.js'), 'utf8');
   w.document.body.appendChild(s);
   const W = w.FoxyWallet;
   if (!W) throw new Error('foxy-wallet.js did not define FoxyWallet');
@@ -586,6 +586,10 @@ function fakeMint(w, opts) {
     if (p === '/v1/mint/quote/bolt11') {
       const unit = String(body.unit || 'sat');
       if (units.indexOf(unit) < 0) return no(11005, 'unit not supported');
+      // o.mintMin: the smallest invoice this mint makes in sats, as a mint whose Lightning node has a floor refuses less
+      if (unit === 'sat' && Number(o.mintMin) > 0 && Number(body.amount) < Number(o.mintMin)) {
+        return no(11006, 'Amount must be at least ' + Number(o.mintMin) + ' sat');
+      }
       // cashu-ts checks the quote's amount against the one it asked for
       const k = n + 1;
       // o.quoteAmountOff: a mint whose quote is for that much more than was asked (a rounding mint, or one that is wrong)
@@ -725,7 +729,9 @@ function fakeMint(w, opts) {
     if (p === '/v1/melt/quote/bolt11') {
       const unit = String(body.unit || 'sat');
       if (units.indexOf(unit) < 0) return no(11005, 'unit not supported');
-      const satReserve = o.satFeeReserve !== undefined && Number(o.satFeeReserve) >= 0 ? Number(o.satFeeReserve) : 10;
+      let satReserve = o.satFeeReserve !== undefined && Number(o.satFeeReserve) >= 0 ? Number(o.satFeeReserve) : 10;
+      // o.satFeeReservePpk: a reserve in proportion to the payment (parts per thousand, at least one sat), as many mints name it
+      if (Number(o.satFeeReservePpk) > 0) satReserve = Math.max(1, Math.ceil(priceIn(body.request, 'sat') * Number(o.satFeeReservePpk) / 1000));
       const q = { quote: quoteId(), amount: priceIn(body.request, unit), fee_reserve: unit === 'usd' ? (Number(o.usdFeeReserve) >= 0 && o.usdFeeReserve !== undefined ? Number(o.usdFeeReserve) : 2) : satReserve,
                   state: 'UNPAID', expiry: now() + (Number(o.meltTtl) > 0 ? Number(o.meltTtl) : 3600), request: body.request, unit: unit, payment_preimage: null };
       melts[q.quote] = q;

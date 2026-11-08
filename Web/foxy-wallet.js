@@ -125,6 +125,13 @@
     mints: 'foxy.cashu.mints',       // every mint this device has connected to
     mintsUsed: 'foxy.cashu.mints.used', // the same, never pruned: a switch back to one is not scanned
     mintsChosen: 'foxy.cashu.mints.chosen', // the mints the person chose (a switch, a pass of the lock), not a visit's
+    /* The mints the keeper removed from the list (SWITCH MINT's bin, 27-render-mints-restore-backup.js): a shipped mint is
+     * on every phone's list, so its removal is written here, and it stays off until it is chosen again (the gate) or money
+     * at it is taken (a visit). Not money: the pieces of a mint removed with too little to move stay in their pile. */
+    mintsHidden: 'foxy.cashu.mints.hidden',
+    /* A removed mint that money came back to (a receive or a take-back landing in its pile): on the list again, as a mint
+     * visited is, and not the phone's own until it is chosen through the gate, a shipped one too. */
+    mintsReturned: 'foxy.cashu.mints.returned',
     mintNodes: 'foxy.cashu.mint.nodes', // each mint's Lightning node, from invoices it made
     tokenWatch: 'foxy.cashu.token.watch', // tokens being watched until redeemed: Ys, amount, mint
     outtok: 'foxy.cashu.outtoken',   // a token made but not yet handed over
@@ -2834,10 +2841,49 @@
     if (!c) return;
     var l = mintsChosen();
     if (l.indexOf(c) < 0) save(K.mintsChosen, l.concat([c]));
+    // chosen again (the gate, a switch, a transfer to it): a mint the keeper had removed is on the list again, the phone's own
+    unhideMint(c);
+    var back = mintsReturned();
+    if (back.indexOf(c) >= 0) save(K.mintsReturned, back.filter(function (u) { return u !== c; }));
+  }
+
+  /* The removed mints money came back to (`K.mintsReturned`): shown, not chosen. */
+  function mintsReturned() {
+    var l = load(K.mintsReturned, []);
+    return Array.isArray(l) ? l.filter(function (u) { return typeof u === 'string' && u; }) : [];
+  }
+
+  /* The mints the keeper removed (`K.mintsHidden`), as `canonicalMint` writes them. */
+  function mintsHidden() {
+    var l = load(K.mintsHidden, []);
+    return Array.isArray(l) ? l.filter(function (u) { return typeof u === 'string' && u; }) : [];
+  }
+  function mintHidden(url) {
+    var c = canonicalMint(String(url || ''));
+    return !!c && mintsHidden().indexOf(c) >= 0;
+  }
+  /* Off the hidden record. `money`: because money landed in its pile, not because it was chosen: it shows as a mint
+   * visited does (on the list, `K.mintsReturned`), and is the phone's own only once chosen through the gate. */
+  function unhideMint(url, money) {
+    var c = canonicalMint(String(url || ''));
+    if (!c) return;
+    var l = mintsHidden();
+    if (l.indexOf(c) < 0) return;
+    save(K.mintsHidden, l.filter(function (u) { return u !== c; }));
+    if (money) {
+      var back = mintsReturned();
+      if (back.indexOf(c) < 0) save(K.mintsReturned, back.concat([c]));
+      var seen = load(K.mints, []);
+      if (!Array.isArray(seen)) seen = [];
+      if (!seen.some(function (u) { return canonicalMint(String(u || '')) === c; })) save(K.mints, seen.concat([c]));
+    }
+    console.log('[foxy] ' + hostOf(c) + ' is on the mint list again' + (money ? ': money landed there' : ''));
   }
 
   function rememberMint(url) {
     mintsChosen();
+    /* A mint the keeper removed stays hidden through a visit (a quote, a payment, PAY FROM): only choosing it or money landing
+     * in its pile shows it again (`chooseMint`, `addProofs`). */
     var used = load(K.mintsUsed, []);
     if (!Array.isArray(used)) used = [];
     // whether this wallet has ever been on it, which is what the answer says
@@ -3303,6 +3349,8 @@
   function addProofs(list, url, w, unit) {
     if (!list || !list.length) return;
     setProofs(proofs(url, unit).concat(list), url, w, unit);
+    // money landing at a mint the keeper removed (a take-back, a receive there): it shows again, not chosen (`unhideMint`)
+    if (mintHidden(url)) unhideMint(url, true);
   }
 
   function sumProofs(list) {
@@ -28328,6 +28376,146 @@
       if (c) save(K.mintsChosen, mintsChosen().filter(function (u) { return u !== c; }));
     },
 
+    /* Removing a mint from the list (SWITCH MINT's bin, 27-render-mints-restore-backup.js `mrTrash`). */
+
+    /* What still holds money at `url`, or is on its way there, in plain words: [] when nothing does. Each is a reason the
+     * mint is not removed yet: an invoice asked for and not yet paid or collected, a payment arriving and not yet swapped
+     * in, a card's load whose pieces are at it, a payment still routing, a
+     * transfer in flight from or to it, a payment being brought home from or to it, a swap between its two balances, an
+     * on-chain address there still watched, a payment to a Cashu ID still waiting to be collected, a till open at it, a
+     * cashier code that names it while the code lives, and a cashier's till at it. Local, and at once. */
+    mintRemoveHolds: function (url) {
+      var c = canonicalMint(String(url || ''));
+      if (!c) return [];
+      var at = function (u) { return !!u && canonicalMint(String(u)) === c; };
+      var now = Date.now();
+      var out = [];
+      var add = function (why) { if (out.indexOf(why) < 0) out.push(why); };
+      var tokenAt = function (text) {
+        var info = null;
+        try { info = FoxyWallet.tokenInfo(String(text || '')); } catch (e) { info = null; }
+        return !!(info && at(info.mint));
+      };
+      [K.quotes, K.quotesOld].forEach(function (key) {
+        var l = load(key, []);
+        (Array.isArray(l) ? l : []).forEach(function (q) {
+          if (!q || !at(q.mint)) return;
+          var live = q.unclaimed || !(Number(q.expiry) > 0) || Number(q.expiry) * 1000 > now;
+          if (live) add('An invoice there is not paid or collected yet.');
+        });
+      });
+      if (unclaimedIn('sat', c) > 0 || unclaimedIn('usd', c) > 0 || arrivingIn('sat', c) > 0 || arrivingIn('usd', c) > 0) {
+        add('A payment there is still arriving.');
+      }
+      /* A token sent from there and not claimed does not hold it (the keeper, 2026-11-07: "let it through"): it stays on its
+       * note, and the page names it (`mintUnclaimedSent`). A card's load does. */
+      var meta = load('foxy.txmeta', {}) || {};
+      Object.keys(meta).forEach(function (h) {
+        var m = meta[h];
+        if (!m || m.to !== 'card' || typeof m.token !== 'string' || !m.token || !tokenAt(m.token)) return;
+        add('A card holds money loaded from there.');
+      });
+      (load(K.melting, []) || []).forEach(function (h) { if (h && at(h.mint)) add('A payment from there is still going through.'); });
+      moveNotes().forEach(function (n) { if (at(n.from) || at(n.to)) add('A transfer from or to it is still in flight.'); });
+      carryJobs().forEach(function (j) { if (at(j.from) || at(j.home)) add('A payment is still being brought home from or to it.'); });
+      unitSwaps().forEach(function (r) { if (at(r.mint)) add('A swap between its two balances has not finished.'); });
+      converts().forEach(function (r) { if (at(r.mint)) add('A swap between its two balances has not finished.'); });
+      var watchFrom = now - ONCHAIN_WATCH_DAYS * 86400000;
+      (load(K.onchain, []) || []).forEach(function (r) {
+        if (r && at(r.mint) && Number(r.at) > watchFrom) add('An on-chain address there is still watched.');
+      });
+      (load(K.onchainOut, []) || []).forEach(function (r) { if (r && at(r.mint)) add('An on-chain payment from there has not confirmed.'); });
+      cidOutboxRows().forEach(function (r) { if (tokenAt(r.token)) add('A payment to a Cashu ID from there is not collected yet.'); });
+      var till = tillKeeperNow();
+      if (till && till.mints.some(at)) add('Your till is open at it.');
+      (load(K.tillPasses, []) || []).forEach(function (r) {
+        if (!r || !(Number(r.exp) * 1000 > now)) return;
+        if (at(r.mint) || (Array.isArray(r.mints) && r.mints.some(at))) add('A cashier code names it until the code ends.');
+      });
+      var cashier = tillCashierRaw();
+      if (cashier && cashier.pass && (at(cashier.pass.mint) || (cashier.pass.mints || []).some(at))) add('A cashier\u2019s till is open at it.');
+      return out;
+    },
+
+    /* The tokens sent from `url` that nobody has claimed yet (a card's loads aside), each on its note: { count, sat, usd }.
+     * They do not hold the mint on the list; the page names them before it is removed. */
+    mintUnclaimedSent: function (url) {
+      var c = canonicalMint(String(url || ''));
+      var out = { count: 0, sat: 0, usd: 0 };
+      if (!c) return out;
+      var seen = {};
+      var one = function (text) {
+        var t = String(text || '');
+        if (!t || seen[t]) return;
+        var info = null;
+        try { info = FoxyWallet.tokenInfo(t); } catch (e) { info = null; }
+        if (!info || canonicalMint(String(info.mint || '')) !== c) return;
+        seen[t] = true;
+        out.count += 1;
+        if ((unitOf(info.unit) || 'sat') === 'usd') out.usd += satsOf(info.amount) || 0;
+        else out.sat += Number(info.sats) || satsOf(info.amount) || 0;
+      };
+      var meta = load('foxy.txmeta', {}) || {};
+      Object.keys(meta).forEach(function (h) { var m = meta[h]; if (m && m.to !== 'card' && typeof m.token === 'string') one(m.token); });
+      var last = load(K.outtok, null);
+      if (last && typeof last.token === 'string') one(last.token);
+      return out;
+    },
+
+    /* Off the list: off `K.mints` and not chosen (`forgetMintFromList`), and hidden (`K.mintsHidden`), which keeps a
+     * shipped mint off too until it is chosen again through the gate or a connect takes money there. Nothing else is
+     * touched: the history rows at it stay, and so do any pieces left in its pile (too little to move). The page moves the
+     * phone off it first; a mint the phone is on, or is saved on, is refused. */
+    removeMint: function (url) {
+      var c = canonicalMint(String(url || ''));
+      if (!c) throw new Error('No mint to remove.');
+      if (canonicalMint(String(mintUrl || '')) === c || canonicalMint(String(load(K.mint, '') || '')) === c) {
+        throw new Error('Foxy is on ' + hostOf(c) + '. Move to another mint first.');
+      }
+      var seen = load(K.mints, []);
+      (Array.isArray(seen) ? seen : []).forEach(function (u) { if (canonicalMint(String(u || '')) === c) FoxyWallet.forgetMintFromList(u); });
+      FoxyWallet.forgetMintFromList(c);
+      var hid = mintsHidden();
+      if (hid.indexOf(c) < 0) mustSave(K.mintsHidden, hid.concat([c]));
+      console.log('[foxy] ' + hostOf(c) + ' removed from the mint list');
+      return true;
+    },
+
+    // the mints removed (`K.mintsHidden`), and whether one is
+    mintsHidden: function () { return mintsHidden(); },
+    mintHidden: function (url) { return mintHidden(url); },
+    // a removed mint money came back to: shown, and not the phone's own until chosen (`K.mintsReturned`)
+    mintReturned: function (url) { var c = canonicalMint(String(url || '')); return !!c && mintsReturned().indexOf(c) >= 0; },
+
+    /* A choice undone (a mint added for a removal that was then dropped): not chosen, off the list, and hidden again with
+     * `o.hide` (it had been removed before). Its pile, if any, untouched. Refused for the mint the phone is on or saved on. */
+    unchooseMint: function (url, o) {
+      var c = canonicalMint(String(url || ''));
+      if (!c) return false;
+      if (canonicalMint(String(mintUrl || '')) === c || canonicalMint(String(load(K.mint, '') || '')) === c) return false;
+      var seen = load(K.mints, []);
+      (Array.isArray(seen) ? seen : []).forEach(function (u) { if (canonicalMint(String(u || '')) === c) FoxyWallet.forgetMintFromList(u); });
+      FoxyWallet.forgetMintFromList(c);
+      if (o && o.hide) { var hid = mintsHidden(); if (hid.indexOf(c) < 0) save(K.mintsHidden, hid.concat([c])); }
+      return true;
+    },
+    /* A restore from words: every removed mint back on the list, so the scan looks at them as at any mint and money the
+     * words hold there, or left there at the removal, is found. Back as a mint visited is: on the list, not chosen. */
+    unhideAllMints: function () {
+      var hid = mintsHidden();
+      if (!hid.length) { save(K.mintsReturned, []); return; }
+      mintsChosen();
+      var seen = load(K.mints, []);
+      if (!Array.isArray(seen)) seen = [];
+      hid.forEach(function (c) {
+        if (!seen.some(function (u) { return canonicalMint(String(u || '')) === c; })) seen.push(c);
+      });
+      save(K.mints, seen);
+      save(K.mintsHidden, []);
+      // and the ones money came back to are chosen like the rest of the list, as a restore finds them
+      save(K.mintsReturned, []);
+    },
+
     saved: function () {
       var url = load(K.mint, '');
       return url ? { url: url } : null;
@@ -30225,10 +30413,32 @@
             if (pad) console.log('[foxy] transfer: padding by', pad,
                                  'so', want, 'still lands after', hostOf(to), 'takes its fee');
           }
+          /* The far mint refusing the invoice: is it the amount or the mint? Asked as `moveQuote` asks, with an invoice for a
+           * larger figure that is never paid and expires on its own. Refused as well, the first refusal stands. Made, the
+           * figure is asked for once more: a refusal that was a moment's (a backend that timed out) is gone, and that answer
+           * is the quote. Refused again, and under 1,000 sats, it is under that mint's smallest invoice: said so and marked
+           * (`foxyFloor`), so a mint's removal can call change too little to move there (26s-mint-remove.js `mrQuoteShort`).
+           * A figure of 1,000 sats or more refused twice is that refusal, as it came: no mint's floor is that high. */
+          var FLOOR_MOST = 1000;
+          var floorProbe = function (e) {
+            if (du !== 'sat') throw e;
+            var big = Math.max(FLOOR_MOST, issue * 4);
+            return withTimeout(dest.createMintQuoteBolt11(big), 15000, hostOf(to) + ' probe invoice').then(function () {
+              return withTimeout(createQuote(dest, issue, undefined, (moveLock = quoteLock(dest)))
+                .then(function (q) { if (moveLock) q.foxyLock = moveLock; return q; }),
+              25000, hostOf(to) + ' invoice').catch(function (e2) {
+                if (issue >= FLOOR_MOST) throw e2;
+                var floor = /** @type {Error & { foxyFloor?: number }} */ (new Error(hostOf(to) + ' will invoice ' + big
+                  + ' sats but not ' + issue + ', so it is the amount, not the node: ' + ((e2 && e2.message) || e2)));
+                floor.foxyFloor = issue;
+                throw floor;
+              });
+            }, function () { throw e; });
+          };
           var make = function () {
             return withTimeout(createQuote(dest, issue, undefined, (moveLock = quoteLock(dest)))
               .then(function (q) { if (moveLock) q.foxyLock = moveLock; return q; }),
-            25000, hostOf(to) + ' invoice');
+            25000, hostOf(to) + ' invoice').catch(floorProbe);
           };
           /* One invoice at the far mint for every source quoted for the same
            * payment (`o.landing`, the caller's for one run: PAY FROM asks each
@@ -37862,6 +38072,42 @@
       return sumProofs(load(K.proofs + '.' + url, []));
     },
 
+    /* Whether a mint charges nothing for spending its pieces in `unit` (sats where none is named), read from its keysets
+     * on file (`mintCacheFor`) with no request: true where no keyset of that unit there names a fee, false where one
+     * does, null where nothing of it is on file. A payment made there on a visit is judged before the visit by this: a
+     * mint that charges nothing is said to charge nothing, and one that does, or one not on file, is said to be told
+     * only there. */
+    piecesFreeAt: function (url, unit) {
+      var u = unitOf(unit || 'sat') || 'sat';
+      var c = canonicalMint(String(url || ''));
+      if (!c) return null;
+      var got = mintCacheFor(c) || mintCacheFor(String(url || '').replace(/\/+$/, ''));
+      var sets = (got && got.keys && Array.isArray(got.keys.keysets)) ? got.keys.keysets : [];
+      var mine = sets.filter(function (k) { return k && String(k.unit || 'sat').toLowerCase() === u; });
+      if (!mine.length) return null;
+      // (read as written: a fee of 0, or none, is the only free one; never coerced, as an amount from the library may not be)
+      return mine.every(function (k) { var f = k.input_fee_ppk; return f === undefined || f === null || String(f).trim() === '0'; });
+    },
+
+    /* The most a keyset of `unit` at that mint charges for one piece, in parts per thousand, from its keysets on file
+     * (`mintCacheFor`): 0 where none charges, null where nothing of it is on file. For sizing what a balance there must
+     * hold over an amount before it is counted as covering it on a visit (the app's `reqHeldAt`). */
+    pieceFeePpkAt: function (url, unit) {
+      var u = unitOf(unit || 'sat') || 'sat';
+      var c = canonicalMint(String(url || ''));
+      if (!c) return null;
+      var got = mintCacheFor(c) || mintCacheFor(String(url || '').replace(/\/+$/, ''));
+      var sets = (got && got.keys && Array.isArray(got.keys.keysets)) ? got.keys.keysets : [];
+      var mine = sets.filter(function (k) { return k && String(k.unit || 'sat').toLowerCase() === u; });
+      if (!mine.length) return null;
+      var most = 0;
+      mine.forEach(function (k) {
+        var f = k.input_fee_ppk === undefined || k.input_fee_ppk === null ? 0 : parseInt(String(k.input_fee_ppk), 10);
+        if (isFinite(f) && f > most) most = f;
+      });
+      return most;
+    },
+
     /* A mint as this wallet files it (`canonicalMint`), for the screens to
      * compare a request's mint with the ones held: a mint written with
      * capitals or :443 is the same mint, and `balanceAt` reads it only in
@@ -45350,4 +45596,4 @@
 /* GENERATED by tools/pack-index.py — do not edit. The build stamp: the sha256 of the joined
  * Web/foxy-wallet.js with this value blanked, the same as the page's meta foxy-wallet-stamp
  * (docs/BUILDING.md, "The build stamp"). */
-if (window.FoxyWallet) window.FoxyWallet.buildStamp = '2b0e9f8b3eed454fc0ee3bc841d614915db77e3d9294bcc12e7dfc1d380616d5';
+if (window.FoxyWallet) window.FoxyWallet.buildStamp = 'f8d16d4d7c771c074cbbf9307c4aad56cf8b966d04c6268b3137d33925aba551';

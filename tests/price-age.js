@@ -345,7 +345,7 @@ async function run() {
   {
     const stub = { sendShortfall: () => ({ short: false, fee: 0, need: 0, have: 0 }), mintUrl: MINT };
     const conf = (ageMs) => {
-      const a = app(stub, ['reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'requestSpec() {'], {
+      const a = app(stub, ['reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'reqHeldAt(req, amount) {', 'requestSpec() {'], {
         state: { screen: 'reqOffer', stack: [], req: { id: 'agreed-1', unit: 'sat', sats: 5000, mints: [MINT], transports: [], viaTap: true },
                  tapCode: '4242', tapQuoteFor: 'agreed-1', tapQuoteUsd: 500, tapQuoteRate: 100000, tapQuoteAgeMs: ageMs },
         money: (n) => ({ main: '\u20bf ' + n, sub: '' }), px: () => 0, peerRateRow: () => [{ label: 'PEER' }],
@@ -362,7 +362,7 @@ async function run() {
     const old = conf(2 * HOUR);
     ok(row(old, 'BITCOIN PRICE').sub === 'this phone\u2019s, seen 2 hours ago', 'two hours: the age under it', row(old, 'BITCOIN PRICE').sub);
     const other = (() => {
-      const a = app(stub, ['reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'requestSpec() {'], {
+      const a = app(stub, ['reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'reqHeldAt(req, amount) {', 'requestSpec() {'], {
         state: { screen: 'reqOffer', stack: [], req: { id: 'not-agreed', unit: 'sat', sats: 5000, mints: [MINT], transports: [], viaTap: true },
                  tapCode: '4242', tapQuoteFor: 'agreed-1', tapQuoteUsd: 500, tapQuoteRate: 100000, tapQuoteAgeMs: 0, balSats: 100000 },
         money: (n) => ({ main: '\u20bf ' + n, sub: '' }), px: () => 0, peerRateRow: () => [],
@@ -373,7 +373,7 @@ async function run() {
     })();
     ok(!row(other, 'FOR') && !row(other, 'BITCOIN PRICE'), 'and none of it on any other request', JSON.stringify(labels(other)));
     // a tap that gave nothing leaves no agreed price behind for a request of the same id later
-    const gone = app(stub, ['reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'requestSpec() {'], {
+    const gone = app(stub, ['reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'reqHeldAt(req, amount) {', 'requestSpec() {'], {
       state: { screen: 'reqOffer', stack: [], req: { id: 'agreed-1', unit: 'sat', sats: 5000, mints: [MINT], transports: [], viaTap: true },
                tapCode: '4242', tapQuoteFor: 'agreed-1', tapQuoteUsd: 500, tapQuoteRate: 100000, tapQuoteAgeMs: 0, balSats: 100000 },
       money: (n) => ({ main: '\u20bf ' + n, sub: '' }), px: () => 0, peerRateRow: () => [],

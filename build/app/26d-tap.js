@@ -1595,10 +1595,16 @@
       const want = Math.round(Number(r.amount) || 0);
       return have > 0 && (!(want > 0) || have >= want);
     };
-    const fit = [a, b].filter((r) => here(r) && covers(r));
+    /* Held at another mint one of them names, enough in its currency (`reqHeldAt`), where neither can be paid here: that
+     * one, paid there in ecash on a visit (`tapPayHeld`), with nothing converted. With a route only. */
+    const away = (r) => !this.offlineNow() && !!(this.reqHeldAt && this.reqHeldAt(r))
+      && (unitOf(r) !== 'usd' || !W.twoUnits || W.twoUnits(this.reqHeldAt(r)));
+    const fitHere = [a, b].filter((r) => here(r) && covers(r));
+    const fit = fitHere.length ? fitHere : [a, b].filter(away);
     const word = (r) => (unitOf(r) === 'usd' ? 'dollars' : 'bitcoin');
     if (fit.length === 1) {
-      console.log('[foxy] tap: a till offered dollars and bitcoin; paying in ' + word(fit[0]) + ', which this phone holds here');
+      console.log('[foxy] tap: a till offered dollars and bitcoin; paying in ' + word(fit[0]) + ', which this phone holds '
+        + (fitHere.length ? 'here' : 'at ' + this.reqHeldAt(fit[0])));
       return fit[0] === a ? main : other;
     }
     if (fit.length === 2) {
@@ -1661,7 +1667,10 @@
     const asksUsd = !!(!inv && !usdUnit && W.asksInDollars && W.asksInDollars(req0));
     /* Dollar ecash at another mint is not something Foxy moves: their invoice
      * is paid instead, and with no invoice it is refused in words. */
-    if (usdUnit && !sameMint && !inv) {
+    /* Held at a mint they name in the request's unit, enough for its figure (`reqHeldAt`): paid there in ecash on a
+     * visit (`tapPayHeld`), dollars too. Only with a route, as the visit needs one. */
+    const heldAt = (req0 && !sameMint && !this.offlineNow() && this.reqHeldAt) ? this.reqHeldAt(req0) : '';
+    if (usdUnit && !sameMint && !inv && !heldAt) {
       return { notSats: 'That request asks for dollars at a mint you do not use, and has no invoice to pay instead.',
                inv: '', req: '', sameMint: false, asksUsd: false, read: null, mints: [], crossable: false,
                theirRoute: null, asks: false, theirRate: 0, theirRateAt: 0, satsForUsd: false };
@@ -1670,6 +1679,7 @@
       + (req ? ' and a request for ' + (theirs.join(' ') || '(no mint named)') : ' and no request')
       + '; mine is ' + (W.mintUrl || '?')
       + ' — paying by ' + (sameMint ? 'ecash'
+          : heldAt ? 'ecash, from the balance held at ' + heldAt
           : this.offlineNow() ? 'neither: no route here, so their invoice is no use'
           : 'lightning'));
     /* A request at a mint this phone could move money to: one mint named, and
@@ -1962,6 +1972,8 @@
    */
   tapPayOffer(offer, sats) {
     const W = window.FoxyWallet;
+    // an ecash source kept for an earlier offer's PAY FROM is that offer's, never this one's (`tapPayHeld`)
+    this._tapHeld = null;
     /* Their price, where this phone has no current one of its own.
      *
      * A phone with no route is trusting the other one's bitcoin price for
@@ -2008,6 +2020,16 @@
      * of. Dropped here, once, rather than tested for at four separate gates. */
     const offline = this.offlineNow();
     const inv = offline ? '' : offer.inv;
+    /* Held at a mint they name, and not the one this phone is on: paid there in ecash, with no fee (`tapPayHeld`).
+     *
+     * `sameMint` is the mint this phone is on, and only that, so a payer on Forge holding a few thousand sats at Minibits, named
+     * a Minibits request beside an invoice, paid the invoice by Lightning: a melt at Minibits, and a fee, to send sats
+     * from Minibits to Minibits (the keeper, 2026-11-07). Any balance at a mint the request names that covers it in its
+     * unit pays it as ecash, the one at the mint the phone is on first (`reqHeldAt`). With a route only: offline,
+     * nothing here changes. */
+    const heldAt = (!offline && offer.read && this.reqHeldAt)
+      ? this.reqHeldAt(offer.read, offer.read.unit === 'usd' ? 0 : sats) : '';
+    if (heldAt && !this.requestHere({ mints: [heldAt] })) { this.tapPayHeld(offer, heldAt, inv, sats); return; }
     /* Same mint: pay with ecash and never mention Lightning.
      *
      * Paying a Lightning invoice made by the mint this phone pays from shows
@@ -2069,6 +2091,58 @@
     if (offer.crossable && stuck) { this.tapStuckAtMint(offer, stuck, sats); return; }
     if (!inv) { this.tapWrongMint(offer); return; }
     if (!this.acceptTarget(inv)) return;
+  }
+
+  /* A request at a mint this phone holds enough at, and is not on (`reqHeldAt`): paid there in ecash, on a visit made
+   * when PAY is pressed, and home again whichever way it ends (07-history-tokens-mints.js `makeTokenForRequest`, its
+   * `visit`; `crossComeHome`). The visit never chooses the mint (`remember: false`): what the mint gate keeps is untouched.
+   *
+   * With their invoice beside it and balances at other mints that could pay that invoice, PAY FROM asks which, as for any
+   * invoice (26l-pay-from.js `syncPayFrom`), with the ecash at their mint first, chosen, at no fee and no quote asked of
+   * it (`_tapHeld`); another mint's balance pays their invoice with its fee, as it always has. Otherwise the request's
+   * own confirmation opens at once, paid from that mint (`payAt`). */
+  tapPayHeld(offer, at, inv, sats) {
+    const W = window.FoxyWallet;
+    const read = offer.read || {};
+    const unit = read.unit === 'usd' ? 'usd' : 'sat';
+    const want = Math.round(Number(unit === 'usd' ? read.amount : (Number(sats) || read.sats)) || 0);
+    console.log('[foxy] tap: they named ' + at + '; paying there by ecash from the balance held');
+    const others = inv ? this.tapLnSources(inv, at, unit) : [];
+    if (others.length) {
+      console.log('[foxy] tap: ' + others.length + ' other balance' + (others.length === 1 ? '' : 's')
+        + ' could pay their invoice instead; PAY FROM asks, the ecash first');
+      this._tapHeld = { inv: String(inv), at: at, unit: unit, want: want, offer: offer };
+      if (!this.acceptTarget(inv)) this._tapHeld = null;
+      return;
+    }
+    this._tapHeld = null;
+    this.openRequest(offer.req, { viaTap: true, theirRoute: offer.theirRoute, asks: offer.asks, theirTill: offer.theirTill,
+      payAt: at, payUnit: unit });
+  }
+
+  /* The balances that could pay the invoice `inv` by Lightning, as PAY FROM counts them for an invoice (26l-pay-from.js
+   * `syncPayFrom`), less the one at `at` in `unit`, which pays in ecash instead. */
+  tapLnSources(inv, at, unit) {
+    const W = window.FoxyWallet;
+    if (!W || !W.balances || !W.quoteFeeAt || !W.quoteFee || !this.pfPiles) return [];
+    const sats = Math.round(Number(W.amountOf ? W.amountOf(inv) : 0) || 0);
+    if (!(sats > 0)) return [];
+    const here = this.pfHere();
+    const issues = (p) => p.unit === 'sat' || (p.mint === here ? this.twoUnitsOn() : !!(W.twoUnits && W.twoUnits(p.mint)));
+    const skip = this.pfMint(at);
+    return this.pfPiles().filter((p) => issues(p) && this.pfFace(p.have, p.unit, sats) && !(p.mint === skip && p.unit === unit));
+  }
+
+  /* The ecash at their mint chosen on PAY FROM (`tapPayHeld`): off the invoice's confirmation, and the request's own
+   * opens, paid from that mint. */
+  tapHeldGo(held) {
+    if (!held) return;
+    this._tapHeld = null;
+    const offer = held.offer;
+    console.log('[foxy] tap: paying ' + held.at + ' by ecash from the balance held there, not their invoice');
+    this.setState({ screen: 'home', stack: [] });
+    this.openRequest(offer.req, { viaTap: true, theirRoute: offer.theirRoute, asks: offer.asks, theirTill: offer.theirTill,
+      payAt: held.at, payUnit: held.unit });
   }
 
   /* A request at this phone's mint, in a unit this phone holds too little of.

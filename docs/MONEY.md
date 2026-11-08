@@ -1210,7 +1210,36 @@ the six-message handshake and what a listener nearby can learn are in
    key it carries (NUT-11), and hands the proofs straight over the link —
    padded to a multiple of 4096 bytes, so the size says little. No Lightning, no fee, and
    the mint never sees a payment between two of its own users. On a different
-   mint it pays the invoice as any wallet would.
+   mint it pays the invoice as any wallet would — unless it holds enough at a
+   mint the request names (below).
+
+**Any balance at a mint the request names pays it in ecash.** "The same mint"
+is not only the mint the phone is on. A payer on Forge holding a few thousand sats
+at Minibits, offered a Minibits request and invoice, paid the invoice by a melt
+at Minibits, with a fee, to send sats from Minibits to Minibits: the offer was
+read as another mint's because `sameMint` compared the request with the mint
+the phone was on (the keeper, 2026-11-07). Now, with a route, a balance at a
+mint the request names that covers the amount in the request's unit (sats for
+a sat request, dollars for a dollar one) pays the request in ecash
+(`reqHeldAt`, `tapPayHeld`): the mint the phone is on first where it
+qualifies, else a named mint whose keysets on file charge nothing for its
+pieces (`piecesFreeAt`), then the one holding the most. A mint whose keysets
+charge covers the amount only with that fee and a margin over it
+(`pieceFeePpkAt`: twice the pieces the amount makes and four more, at its
+dearest keyset), so a balance of exactly the amount there is not offered and
+then found short on the visit. It is paid on a visit to that
+mint, connected with `remember: false` when PAY is pressed, so the mint gate's
+record of chosen mints is untouched, and the phone comes home to its saved
+mint after, whichever way the payment ends (`makeTokenForRequest`'s visit,
+`crossComeHome`). Where other balances could pay the invoice too, PAY FROM
+asks, the ecash at the named mint first and chosen, with no melt quote asked of
+it and its fee said as none where the mint's keysets on file name no fee for
+its pieces (`piecesFreeAt`; FEE NOT KNOWN YET otherwise); another mint's
+balance pays the invoice with its own melt fee, as before. A till's two
+requests follow the same rule (`tapPickOfTwo`). Lightning is used only where no
+balance at a named mint covers it. A payer with no route, and either phone
+offline across two mints (`tapOfflineCross`), are as they were.
+`tests/tap-held-mint.js`.
 5. The receiver takes it exactly as §11 above: written down first, then
    redeemed. A payment the link cannot carry falls back to the request's own
    onion transport rather than being lost.
@@ -1794,6 +1823,70 @@ nothing is added and the screen stays. A link names no mint (`applyDeepLink`
 takes home, send, receive, token, split and nfc; the card's address names
 none), and a bare mint address scanned or pasted at home is not read as
 anything, so neither adds one. `tests/mint-gate.js`.
+
+**Removing a mint from the list moves its money first** (`26s-mint-remove.js`,
+the keeper's words of 2026-11-07). SWITCH MINT's pencil (top right) puts a bin
+on each tile; a tile then switches nothing, and leaving the screen leaves edit
+mode. A bin on a mint holding nothing asks one line (REMOVE <MINT>?). A bin on
+a mint holding sats, dollars or both opens TRANSFER's own "to" step (TO WHICH
+MINT?, the other mints and ADD A MINT, past the gate as ever; a mint added
+there is the destination, not a switch: `mrAddTo`), and the mint
+picked goes straight to TRANSFER's confirmation for all of it: in sats the
+whole pile is quoted and the quote's own `foxyFits` gives what the fee leaves
+room for; in dollars, the sats the pile comes to at the price, stepped down in
+proportion until the quote fits (`mrPickTo`, `mrQuoteShort`). A mint holding
+both moves its sats and then its dollars, one confirmation each (`mrMoved`,
+`mrNextLeg`); dollars are first sized at the phone's price and quoted again at
+the mint's own rate from that quote (`mrQuoted`), so the pile, not the
+difference between two prices, is what moves; dollars to a mint without
+dollars land as bitcoin with TRANSFER's note. What a melt's unused reserve
+hands back as change is moved again while a quote says it fits, three moves
+of each balance at most, each with its confirmation ("₿ 998 came back as
+change"). The mint comes off the list only after the last move lands; a move
+that fails or is cancelled removes nothing, and its error is TRANSFER's (TRY
+AGAIN, CANCEL), never a way to remove the mint. The phone stays on the mint it was
+on (`connectBack`), unless that was the one removed: then it is at the mint the
+money went to, saved there (`moveRun`). What a quote proves cannot be moved
+(the wallet's quote answering with what fits, `foxyFits`, and nothing fitting
+beside the fee; or, on a change move only, the far mint refusing a figure under
+1,000 sats twice while it invoices a larger one, `foxyFloor`, the wallet's probe
+in `transferQuote`, which asks the figure once more after the probe so a
+moment's refusal heals into the quote; change under one mint's smallest
+invoice is offered to another mint on the phone that takes it first; on the
+first move a floor is TRANSFER's error; any other refusal, a mint not reached or its Lightning down,
+proves nothing and is TRANSFER's error) does
+not hold the mint on the list: it stays in its pile at that mint, untouched,
+and the one-line REMOVE <MINT>? names it with the figure and the reason; REMOVE
+asks every refusal again before the mint goes (`mrRemoveNow`, `mrDrop`, money
+still moving waited for ten seconds before the phone is moved off it), so an
+invoice made or a till opened meanwhile stops it, the phone saved where it was. Refused,
+with the reason and nothing moved (`mintRemoveHolds`, `mrRefusal`): the only
+mint on the list; an invoice there not yet paid or collected (an expired,
+unpaid one holds nothing); a payment there still arriving; a card's load whose pieces are there; a payment from
+there still routing; a transfer, a carry home or a swap between its balances in
+flight; an on-chain address there still watched or a payout not confirmed; a
+Cashu ID payment from there not collected; a till open at it, a cashier code
+that names it while the code lives, or a cashier's till at it; anything else
+moving money now. A token sent from there that nobody has claimed does not
+hold it (the keeper's answer, 2026-11-07): it stays on its note, RECLAIM as
+ever, and the confirmation, the one-line question and the notice name it with
+its figure (`mintUnclaimedSent`, `mrSentLine`). Removed (`removeMint`) is off `foxy.cashu.mints`, off the
+chosen record, and on `foxy.cashu.mints.hidden`, which keeps a shipped mint off
+every list (`allMints`) and off the phone (`mintOnPhone`) until it is chosen
+again through the gate (ADD A MINT, asked as for any mint) or money lands in
+its pile (a take-back or a receive there, `addProofs`), which brings it back
+onto the list as a mint visited is (`foxy.cashu.mints.returned`): shown with
+its pile as it was, and the phone's own, a shipped one too, only once chosen
+through the gate. A visit alone (a quote, a payment, a carry) leaves it hidden,
+and PAY FROM and the line of other balances leave its pile out (`pfPiles`,
+`otherUnitsLine`). A mint added at TO WHICH MINT? for a removal that is then
+dropped is let go again (`mrUndoAdd`, the wallet's `unchooseMint`); one that was
+already listed or chosen (its address typed again) is left as it was. Back from
+the removal's confirmation is TO WHICH MINT? again, its tiles destinations;
+after a move has landed, back ends the removal as CANCEL does. The history rows at it stay, and HISTORY's mint list still offers a
+removed mint, greyed, REMOVED under its name, with what is left there, so its
+books stay in sight. A restore from words puts every removed mint back on the
+list (`unhideAllMints`) so the scan looks at it. `tests/mint-remove.js`.
 
 **One payment, one entry, whichever door it came by.** A token this phone
 already holds, or has already swapped in, is turned away at a scan and over

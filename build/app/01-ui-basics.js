@@ -184,12 +184,16 @@ class Component extends DCLogic {
       bankPick: false, histPick: false,
       // nor a mint picked on an earlier card's WITHDRAW TO or TRANSFER TO (26n-card-withdraw-to.js, `fcListNext`)
       mintSel: '',
+      // nor a removal's TO WHICH MINT?, nor edit mode, which opens off (26s-mint-remove.js)
+      mrMint: '', mrEdit: false,
     }, extra || {}));
   }
   back() {
     /* the till being opened: back off DEFAULT MINT is its set list again; off the set list, the opening stops (26m-till.js,
      * `tillOpenBack`) */
     if (this.tillOpenBack && this.tillOpenBack()) return;
+    // a removal's TO WHICH MINT?: the list in edit mode again; off the list, edit mode ends (26s-mint-remove.js `mrBack`)
+    if (this.mrBack && this.mrBack()) return;
     // a card's set-up asking an amount: back is a step back in it, or out of it (26j-card-wheel.js, `fcSuAmountBack`)
     if (this.fcSuAmountBack && this.fcSuAmountBack()) return;
     // 24HR LIMIT from CARD LIMITS: NO PIN AMOUNT again (26j-card-wheel.js, `fcLimitTxBack`)

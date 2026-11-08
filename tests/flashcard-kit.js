@@ -17,6 +17,8 @@ const EXPLORERS = { mempool: 'mempoolhqx4isw62xs7abwphsq7ldayuidyx2v2oethdhhj6ml
 const MINT = 'https://m.test';
 // a second mint, for a card that is moved from one to another (`page({ second: true })`)
 const MINT2 = 'https://n.test';
+// a third, for a list of three mints (`page({ third: true })`)
+const MINT3 = 'https://o.test';
 const OTHER_WORDS = 'legal winner thank year wave sausage worth useful legal winner thank yellow';
 
 /* A page as it ships, its bridge answered by a phone that holds `words` and by
@@ -31,6 +33,7 @@ function page(o) {
   if (!phone.gate) phone.gate = cardGate();
   let mint = null;
   let mint2 = null;
+  let mint3 = null;
   let ctx = null;
   const reply = (w, id, text, err) => setTimeout(() => w.FoxyWallet._scanResult(id, text, err), 0);
   /* What the phone's link reports to the page as a tap goes on (Foxy/Flashcard/CardLink.swift: connected, say, lost, end),
@@ -57,7 +60,7 @@ function page(o) {
         ctx.circuits.push({ path: new URL(m.url).pathname, circuit: m.circuit || '', at: Date.now() });
         if (ctx.deaf) return reply(w, m.id, null, 'The Internet connection appears to be offline');
         // by the address asked: the second mint's requests are the second mint's
-        const at = (mint2 && new URL(m.url).origin === MINT2) ? mint2 : mint;
+        const at = (mint2 && new URL(m.url).origin === MINT2) ? mint2 : (mint3 && new URL(m.url).origin === MINT3) ? mint3 : mint;
         /* A swap whose request goes silent (`ctx.hang(message)`): { reach, answerAfter | failAfter } says whether the mint gets the
          * request and does what it asks, and then when the bridge hears the real answer, late, or the transport's own failure
          * (it gave up). With neither, never. Falsy: the swap goes as any other. */
@@ -151,6 +154,7 @@ function page(o) {
       // keys and quote numbers of its own, as two real mints have (`units2`: the units it issues, as `units` for the first; `mintOpts2`: any other)
       if (opts.second) mint2 = opts.sharedMint2 || fakeMint(w, Object.assign({}, opts.mintOpts2 || {},
         { p2pk: true, fill: 9, quoteFrom: 5000, feePpk: opts.feePpk2, versionByte: opts.versionByte2, units: opts.units2 }));
+      if (opts.third) mint3 = fakeMint(w, Object.assign({}, opts.mintOpts3 || {}, { p2pk: true, fill: 11, quoteFrom: 9000 }));
     },
   });
   ctx.deaf = !!opts.deaf;
@@ -170,6 +174,7 @@ function page(o) {
   ctx.refusedAfterEnd = 0;
   ctx.mint = mint;
   ctx.mint2 = mint2;
+  ctx.mint3 = mint3;
   ctx.phone = phone;
   ctx.W._nodeProbeDelay = [86400000, 86400000];
   return ctx;
@@ -274,5 +279,5 @@ const history = (c) => JSON.parse(c.storage.getItem('foxy.cashu.log') || '[]');
 /* What a call rejected with: its `card` kind, or its message. */
 const why = (p) => p.then(() => 'went through', (e) => (e && e.card) || (e && e.message) || String(e));
 
-module.exports = { deepFirstLoads, uncappedTaps, heightOf, page, funded, newCard, binaryLoad, settle, history, why, MINT, MINT2, OTHER_WORDS, PHONE_WORDS,
+module.exports = { deepFirstLoads, uncappedTaps, heightOf, page, funded, newCard, binaryLoad, settle, history, why, MINT, MINT2, MINT3, OTHER_WORDS, PHONE_WORDS,
                     EXPLORERS, CHEAP, mineHeader, hashOfHeader, tipIs, sha256d, targetOfBits };

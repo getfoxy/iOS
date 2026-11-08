@@ -780,8 +780,11 @@
      * at the mint that issues it, with no price anywhere. Only at the mint this
      * phone is on, and only where that mint holds dollars: dollar ecash is not
      * moved between mints. */
+    /* Or at another mint it names where this phone holds enough dollars (`reqHeldAt`), paid there on a visit
+     * (`makeTokenForRequest`), as sats held at a mint a request names are. */
     if (req.unit === 'usd') {
-      if (!(this.twoUnitsOn && this.twoUnitsOn()) || !this.requestHere(req)) {
+      const awayUsd = !!(this.reqHeldAt && this.reqHeldAt(req) && !this.requestHere({ mints: [this.reqHeldAt(req)] }));
+      if (!awayUsd && (!(this.twoUnitsOn && this.twoUnitsOn()) || !this.requestHere(req))) {
         this.toast('That request asks for dollar ecash at a mint where you hold no dollars.', true);
         return;
       }
@@ -833,6 +836,14 @@
       note: '', noteDraft: '' }, unitPick));
     /* With enough at more than one mint: which pays, before the offer (PAY FROM, 26l-pay-from.js), the request's own
      * mint first and chosen. Nothing is said to the phone in hand yet: this phone may hold enough elsewhere. */
+    /* Paid at a mint it names where this phone holds enough, chosen before the offer (`opts.payAt`, a tap's ecash at
+     * their mint: 26d-tap.js `tapPayHeld`): the source written as PAY FROM writes one, so the offer is judged and paid
+     * there (`reqPayMint`, `pfReqSource`), and nothing more is asked. */
+    if (opts && opts.payAt && this.reqMints(req).indexOf(this.reqCanon(opts.payAt)) >= 0) {
+      this.setState({ payFromFlow: 'req', payFromList: [], payFromPick: '', payFromAsk: '', payFromTapped: false,
+        payFromReopen: false, payMint: this.reqCanon(opts.payAt), payUnit: opts.payUnit === 'usd' ? 'usd' : 'sat' });
+      return;
+    }
     if (this.pfRequest && this.pfRequest(req)) return;
     // a payer that cannot cover it tells the phone it is touching, before the offer is looked at
     this.tellPayerShort(req);
@@ -869,10 +880,12 @@
     return out;
   }
 
-  /* The mint a request is paid at: the one chosen for it on PAY FROM where that is one it names; else the one the
-   * phone is on, where it names that; else the first it names where this phone holds enough; else the first, its
-   * default, which a crossing goes to. A till of two mints was paid at its first only, so a payer holding 1,000 at
-   * its second was offered a Lightning crossing into the first (review, payer-cross). '' where it names none. */
+  /* The mint a request is paid at: the one chosen for it on PAY FROM where that is one it names; else one it names where
+   * this phone holds enough in its unit (`reqHeldAt`: the phone's own first, else the one holding most); else the one the
+   * phone is on, where it names that; else the first, its default, which a crossing goes to. A till of two mints was paid
+   * at its first only, so a payer holding 1,000 at its second was offered a Lightning crossing into the first (review,
+   * payer-cross); and a request naming the mint the phone is on was paid there even where the phone held too little
+   * there and enough at another mint it names. '' where it names none. */
   reqPayMint(req) {
     const W = window.FoxyWallet;
     const listed = this.reqMints(req);
@@ -880,14 +893,60 @@
     const s = this.state || {};
     const chosen = (s.payFromFlow === 'req' && s.payMint) ? this.reqCanon(s.payMint) : '';
     if (chosen && listed.indexOf(chosen) >= 0) return chosen;
+    const held = this.reqHeldAt ? this.reqHeldAt(req) : '';
+    if (held) return held;
     const here = W && W.mintHost ? this.reqCanon('https://' + W.mintHost()) : '';
     if (here && listed.indexOf(here) >= 0) return here;
-    const need = Math.round(Number(req && req.sats) || 0);
-    if (req && req.unit !== 'usd' && need > 0 && W && W.balanceAt) {
-      const has = listed.filter((m) => Number(W.balanceAt(m)) >= need)[0];
-      if (has) return has;
-    }
     return listed[0];
+  }
+
+  /* A mint this request names where this phone holds enough to pay it in its own unit, on its face (sats for a request
+   * in sats, dollars for one in dollars; the fee for the pieces is the mint's to say): the mint the phone is on where it
+   * is one, else the one holding the most. Paid there in ecash, with no Lightning and no fee of Foxy's, on a visit where
+   * it is not the phone's own (`makeTokenForRequest`). `amount`, where the request carries none of its own (sats agreed
+   * over a tap). '' where none holds enough, or the request names no mint or no amount. */
+  /* What a balance at `m` must hold over `need` in `unit` to cover it there on a visit: nothing at a mint whose keysets
+   * on file charge nothing for its pieces (or that has none on file, judged on its face and told on the visit); at one
+   * that charges, that fee for the pieces spent and the receiver's own swap, at the dearest of its keysets
+   * (`pieceFeePpkAt`), counted for twice the pieces the amount makes and four more. Held at exactly the amount, it was
+   * chosen, and the visit found it short and offered a crossing from home. */
+  reqHeldMargin(m, need, unit) {
+    const W = window.FoxyWallet;
+    let f = 0;
+    try { f = (W && W.pieceFeePpkAt) ? W.pieceFeePpkAt(m, unit === 'usd' ? 'usd' : 'sat') : 0; } catch (e) { f = 0; }
+    if (!(f > 0)) return 0;
+    let b = 0;
+    let v = Math.max(0, Math.round(Number(need) || 0));
+    while (v > 0) { b += v % 2; v = Math.floor(v / 2); }
+    return Math.ceil(2 * (b + 4) * f / 1000);
+  }
+
+  reqHeldAt(req, amount) {
+    const W = window.FoxyWallet;
+    if (!req || !W) return '';
+    const listed = this.reqMints(req);
+    if (!listed.length) return '';
+    const usd = req.unit === 'usd';
+    if (req.unit && req.unit !== 'sat' && !usd) return '';
+    const need = Math.round(Number(amount) || Number(usd ? req.amount : req.sats) || 0);
+    if (!(need > 0)) return '';
+    const have = (m) => {
+      try {
+        if (!usd) return W.balanceAt ? Math.round(Number(W.balanceAt(m)) || 0) : 0;
+        return W.balanceOf ? Math.round(Number(W.balanceOf('usd', m)) || 0) : 0;
+      } catch (e) { return 0; }
+    };
+    const unit = usd ? 'usd' : 'sat';
+    const margin = (m) => (this.reqHeldMargin ? this.reqHeldMargin(m, need, unit) : 0);
+    const free = (m) => { try { return !!(W.piecesFreeAt && W.piecesFreeAt(m, unit) === true); } catch (e) { return false; } };
+    const here = W.mintHost ? this.reqCanon('https://' + W.mintHost()) : '';
+    const held = listed.map((m) => ({ m: m, n: have(m) })).filter((x) => x.n >= need + margin(x.m));
+    if (!held.length) return '';
+    if (here && held.some((x) => x.m === here)) return here;
+    /* A mint that charges nothing for its pieces before one that does or may, then the most held: the larger balance at a
+     * mint that charges was given the ecash, and a free mint that covered it too was offered only as a melt, with a fee. */
+    held.sort((a, b) => ((free(b.m) ? 1 : 0) - (free(a.m) ? 1 : 0)) || (b.n - a.n));
+    return held[0].m;
   }
 
   /* A payer that cannot cover a payment over the link says so to the phone it
@@ -908,6 +967,9 @@
     const amount = (req ? (req.unit === 'usd' ? Math.max(0, Math.round(Number(req.amount) || 0)) : req.sats) : 0);
     if (!req || !req.viaTap || !(amount > 0) || !W || !W.sendShortfall || !W.tapQuote) return;
     if (!this.requestHere(req)) return;
+    // paid at another mint it names, where this phone holds enough (`reqPayMint`): this mint's balance is not the question
+    const paidAt = this.reqPayMint ? this.reqPayMint(req) : '';
+    if (paidAt && !this.requestHere({ mints: [paidAt] })) return;
     let lack = null;
     try {
       const locked = !!(req.lockTo && !(this.offlineNow && this.offlineNow()));

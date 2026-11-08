@@ -1536,6 +1536,11 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
       W.twoUnits = () => true; W.mintUnits = () => ['sat', 'usd'];
       W.walletChoice = () => ({ hold: hold || '' });
       W.mintUrl = mint;
+      /* What is held is held at the payer's mint alone: a balance at a mint the till names pays its request in ecash
+       * there (`reqHeldAt`), so a stand-in that held 50,000 at every mint was a payer at all of them. */
+      const at = (m) => !m || String(m).replace(/\/+$/, '') === mint;
+      W.balanceAt = (m) => (at(m) ? sats : 0);
+      W.balanceOf = (u, m) => (at(m) ? (u === 'usd' ? cents : sats) : 0);
       await fresh(W, { balUsdCents: cents, balSats: sats });
     };
     await payer(KEEPER_MINT, 1000, 0);

@@ -136,7 +136,7 @@ async function run() {
   {
     const stub = { sendShortfall: () => ({ short: false, fee: 0, need: 0, have: 0 }), mintUrl: 'https://m.test' };
     const conf = (state, extra) => {
-      const a = app(stub, ['reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'requestSpec() {'], Object.assign({
+      const a = app(stub, ['reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'reqHeldAt(req, amount) {', 'requestSpec() {'], Object.assign({
         peerRateRow: () => [], connecting: () => false, requestNeedsRoute: () => false, offlineNow: () => false,
         mintName: () => 'Forge', requestHere: () => true, heldBlocks: () => '', unitBalance: () => 0,
         editSendNote() {}, makeTokenForRequest() {},
@@ -157,7 +157,7 @@ async function run() {
       'sats for sats at this mint: dollars first as ever, no line, and no FEE row: no Foxy fee, nothing said',
       plain.amount + ' ' + JSON.stringify(plain.rows.map((r) => r.label)));
     const feeStub = { sendShortfall: () => ({ short: false, fee: 2, need: 5002, have: 100000 }), mintUrl: 'https://m.test' };
-    const a2 = app(feeStub, ['reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'requestSpec() {'], {
+    const a2 = app(feeStub, ['reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'reqHeldAt(req, amount) {', 'requestSpec() {'], {
       peerRateRow: () => [], connecting: () => false, requestNeedsRoute: () => false, offlineNow: () => false,
       mintName: () => 'Forge', requestHere: () => true, heldBlocks: () => '', unitBalance: () => 0, editSendNote() {}, makeTokenForRequest() {},
     });

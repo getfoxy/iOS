@@ -74,6 +74,7 @@ check "two doors"      1 node tests/two-doors.js
 check "scan twice"     1 node tests/scan-twice.js
 check "scan cross mint" 1 node tests/scan-cross-mint.js
 check "pay from"       1 node tests/pay-from.js
+check "tap held mint"  1 node tests/tap-held-mint.js
 check "confirmations and pay from, as drawn" 1 node tests/confirm-screens.js
 check "attack 11-01"    1 node tests/attack-2026-11-01.js
 check "attack 11-01 r2" 1 node tests/attack-2026-11-01-round2.js
@@ -238,6 +239,7 @@ check "two balances, screens" 1 node tests/two-balances-screens.js
 check "mint tiles"     1 node tests/mint-tiles.js
 check "mint names"     1 node tests/mint-names.js
 check "mint gate"      1 node tests/mint-gate.js
+check "mint remove"    1 node tests/mint-remove.js
 check "two balances, send quote" 1 node tests/send-quote-first.js
 check "two balances, swap" 1 node tests/two-balances-swap.js
 check "swap, its requests" 1 node tests/swap-run.js

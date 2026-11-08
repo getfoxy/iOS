@@ -20,7 +20,7 @@
     this._trWas = window.FoxyWallet.mintUrl || '';
     this.setState(p => ({
       screen: 'switchMint', stack: p.stack.concat([p.screen]),
-      trStep: 'from', trFrom: '', trTo: '', trUnit: 'sat', trSats: 0, trPlan: null, trFee: null, trErr: '', fcPick: false, wdPick: false, bankPick: false, tillPick: false, histPick: false,
+      trStep: 'from', trFrom: '', trTo: '', trUnit: 'sat', trSats: 0, trPlan: null, trFee: null, trErr: '', mrMint: '', mrEdit: false, fcPick: false, wdPick: false, bankPick: false, tillPick: false, histPick: false,
     }));
   }
 
@@ -66,6 +66,8 @@
 
   /* TRANSFER TO's mint, past the lock: the keypad. */
   trPickTo(mint) {
+    // a mint being removed moves all of it: no keypad (26s-mint-remove.js `mrPickTo`)
+    if (this.state.mrMint && this.mrPickTo) { this.mrPickTo(mint); return; }
     const dollars = this.state.trUnit === 'usd';
     this.setState(p => ({
       trTo: mint, trStep: '',
@@ -145,10 +147,14 @@
         return W.transferQuote(trFrom, trSats, this.state.trUnit === 'usd' ? { unit: 'usd' } : undefined);
       })
       .then(plan => {
+        // a removal's dollars, quoted again at the mint's own rate where the first figure left some behind (26s-mint-remove.js)
+        if (this.state.mrMint && this.mrQuoted && this.mrQuoted(plan)) return;
         this.setState({ trQuoting: false, trPlan: plan, trFee: plan.feeSats });
       })
       .catch(e => {
         if (e && e.left) { this.setState({ trQuoting: false }); return; }
+        // a removal asks again for what fits, or asks about what is too little to move (26s-mint-remove.js `mrQuoteShort`)
+        if (this.state.mrMint && this.mrQuoteShort && this.mrQuoteShort(e)) return;
         // what would have fitted, when the fee is the only thing in the way
         this.setState({ trQuoting: false, trErr: W.reason(e),
                         trFits: (e && e.foxyFits) || 0 });
@@ -198,6 +204,8 @@
         hash: 'move-' + (plan.mintQuote ? plan.mintQuote.quote : Date.now()),
         to: to, force: true,
       });
+      // a removal: the next balance, or the mint off the list once nothing is left (26s-mint-remove.js `mrMoved`)
+      if (this.state.mrMint && this.mrMoved) this.mrMoved();
     }).catch(e => {
       if (fox) this.foxEnd('trMove', false); else this.hideMelt();
       this.setState({ trBusy: false, trErr: W.reason(e) });
@@ -211,7 +219,9 @@
   trCancel() {
     const W = window.FoxyWallet;
     const back = this._trWas;
-    this.setState({ screen: 'home', stack: [], trPlan: null, trStep: '', trErr: '', trBusy: false });
+    // a removal dropped: a mint added for it let go again (26s-mint-remove.js `mrUndoAdd`)
+    if (this.state.mrMint && this.mrUndoAdd) this.mrUndoAdd();
+    this.setState({ screen: 'home', stack: [], trPlan: null, trStep: '', trErr: '', trBusy: false, mrMint: '', mrDustWhy: {} });
     /* Home as every other exit goes (09-melt-paste-switch.js `homeAgain`): after the quote's connect where it is still out,
      * and counted as the way home until it lands. */
     if (this.homeAgain) { this.homeAgain(); return; }
@@ -296,8 +306,8 @@
       title: 'CONFIRMATION',
       amountLabel: 'MOVING',
       amount: this.money(sats).main,
-      subtitle: fee == null ? '' : 'Up to ' + this.money(sats + fee).main + ' leaves '
-        + (this.mintNameOf(s.trFrom) || 'the other mint'),
+      subtitle: [fee == null ? '' : 'Up to ' + this.money(sats + fee).main + ' leaves '
+        + (this.mintNameOf(s.trFrom) || 'the other mint') + '.', this.mrConfirmLine ? this.mrConfirmLine() : ''].filter(Boolean).join(' '),
       amountSub: this.money(sats).sub,
       rows: rows,
       secondary: { label: 'CANCEL', go: () => this.trCancel() },
@@ -346,7 +356,8 @@
       title: 'CONFIRMATION',
       amountLabel: 'MOVING',
       amount: this.unitFigure(sats, 'sat'),
-      subtitle: out == null ? '' : 'Up to ' + this.unitFigure(out, 'usd') + ' leaves ' + (this.mintNameOf(s.trFrom) || 'the other mint'),
+      subtitle: [out == null ? '' : 'Up to ' + this.unitFigure(out, 'usd') + ' leaves ' + (this.mintNameOf(s.trFrom) || 'the other mint') + '.',
+        this.mrConfirmLine ? this.mrConfirmLine() : ''].filter(Boolean).join(' '),
       amountSub: out == null ? '' : this.unitFigure(out, 'usd'),
       rows: rows,
       secondary: { label: 'CANCEL', go: () => this.trCancel() },

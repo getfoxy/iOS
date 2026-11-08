@@ -220,10 +220,49 @@
     if (!c) return;
     var l = mintsChosen();
     if (l.indexOf(c) < 0) save(K.mintsChosen, l.concat([c]));
+    // chosen again (the gate, a switch, a transfer to it): a mint the keeper had removed is on the list again, the phone's own
+    unhideMint(c);
+    var back = mintsReturned();
+    if (back.indexOf(c) >= 0) save(K.mintsReturned, back.filter(function (u) { return u !== c; }));
+  }
+
+  /* The removed mints money came back to (`K.mintsReturned`): shown, not chosen. */
+  function mintsReturned() {
+    var l = load(K.mintsReturned, []);
+    return Array.isArray(l) ? l.filter(function (u) { return typeof u === 'string' && u; }) : [];
+  }
+
+  /* The mints the keeper removed (`K.mintsHidden`), as `canonicalMint` writes them. */
+  function mintsHidden() {
+    var l = load(K.mintsHidden, []);
+    return Array.isArray(l) ? l.filter(function (u) { return typeof u === 'string' && u; }) : [];
+  }
+  function mintHidden(url) {
+    var c = canonicalMint(String(url || ''));
+    return !!c && mintsHidden().indexOf(c) >= 0;
+  }
+  /* Off the hidden record. `money`: because money landed in its pile, not because it was chosen: it shows as a mint
+   * visited does (on the list, `K.mintsReturned`), and is the phone's own only once chosen through the gate. */
+  function unhideMint(url, money) {
+    var c = canonicalMint(String(url || ''));
+    if (!c) return;
+    var l = mintsHidden();
+    if (l.indexOf(c) < 0) return;
+    save(K.mintsHidden, l.filter(function (u) { return u !== c; }));
+    if (money) {
+      var back = mintsReturned();
+      if (back.indexOf(c) < 0) save(K.mintsReturned, back.concat([c]));
+      var seen = load(K.mints, []);
+      if (!Array.isArray(seen)) seen = [];
+      if (!seen.some(function (u) { return canonicalMint(String(u || '')) === c; })) save(K.mints, seen.concat([c]));
+    }
+    console.log('[foxy] ' + hostOf(c) + ' is on the mint list again' + (money ? ': money landed there' : ''));
   }
 
   function rememberMint(url) {
     mintsChosen();
+    /* A mint the keeper removed stays hidden through a visit (a quote, a payment, PAY FROM): only choosing it or money landing
+     * in its pile shows it again (`chooseMint`, `addProofs`). */
     var used = load(K.mintsUsed, []);
     if (!Array.isArray(used)) used = [];
     // whether this wallet has ever been on it, which is what the answer says
@@ -689,6 +728,8 @@
   function addProofs(list, url, w, unit) {
     if (!list || !list.length) return;
     setProofs(proofs(url, unit).concat(list), url, w, unit);
+    // money landing at a mint the keeper removed (a take-back, a receive there): it shows again, not chosen (`unhideMint`)
+    if (mintHidden(url)) unhideMint(url, true);
   }
 
   function sumProofs(list) {

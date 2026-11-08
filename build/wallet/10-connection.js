@@ -99,6 +99,146 @@
       if (c) save(K.mintsChosen, mintsChosen().filter(function (u) { return u !== c; }));
     },
 
+    /* Removing a mint from the list (SWITCH MINT's bin, 27-render-mints-restore-backup.js `mrTrash`). */
+
+    /* What still holds money at `url`, or is on its way there, in plain words: [] when nothing does. Each is a reason the
+     * mint is not removed yet: an invoice asked for and not yet paid or collected, a payment arriving and not yet swapped
+     * in, a card's load whose pieces are at it, a payment still routing, a
+     * transfer in flight from or to it, a payment being brought home from or to it, a swap between its two balances, an
+     * on-chain address there still watched, a payment to a Cashu ID still waiting to be collected, a till open at it, a
+     * cashier code that names it while the code lives, and a cashier's till at it. Local, and at once. */
+    mintRemoveHolds: function (url) {
+      var c = canonicalMint(String(url || ''));
+      if (!c) return [];
+      var at = function (u) { return !!u && canonicalMint(String(u)) === c; };
+      var now = Date.now();
+      var out = [];
+      var add = function (why) { if (out.indexOf(why) < 0) out.push(why); };
+      var tokenAt = function (text) {
+        var info = null;
+        try { info = FoxyWallet.tokenInfo(String(text || '')); } catch (e) { info = null; }
+        return !!(info && at(info.mint));
+      };
+      [K.quotes, K.quotesOld].forEach(function (key) {
+        var l = load(key, []);
+        (Array.isArray(l) ? l : []).forEach(function (q) {
+          if (!q || !at(q.mint)) return;
+          var live = q.unclaimed || !(Number(q.expiry) > 0) || Number(q.expiry) * 1000 > now;
+          if (live) add('An invoice there is not paid or collected yet.');
+        });
+      });
+      if (unclaimedIn('sat', c) > 0 || unclaimedIn('usd', c) > 0 || arrivingIn('sat', c) > 0 || arrivingIn('usd', c) > 0) {
+        add('A payment there is still arriving.');
+      }
+      /* A token sent from there and not claimed does not hold it (the keeper, 2026-11-07: "let it through"): it stays on its
+       * note, and the page names it (`mintUnclaimedSent`). A card's load does. */
+      var meta = load('foxy.txmeta', {}) || {};
+      Object.keys(meta).forEach(function (h) {
+        var m = meta[h];
+        if (!m || m.to !== 'card' || typeof m.token !== 'string' || !m.token || !tokenAt(m.token)) return;
+        add('A card holds money loaded from there.');
+      });
+      (load(K.melting, []) || []).forEach(function (h) { if (h && at(h.mint)) add('A payment from there is still going through.'); });
+      moveNotes().forEach(function (n) { if (at(n.from) || at(n.to)) add('A transfer from or to it is still in flight.'); });
+      carryJobs().forEach(function (j) { if (at(j.from) || at(j.home)) add('A payment is still being brought home from or to it.'); });
+      unitSwaps().forEach(function (r) { if (at(r.mint)) add('A swap between its two balances has not finished.'); });
+      converts().forEach(function (r) { if (at(r.mint)) add('A swap between its two balances has not finished.'); });
+      var watchFrom = now - ONCHAIN_WATCH_DAYS * 86400000;
+      (load(K.onchain, []) || []).forEach(function (r) {
+        if (r && at(r.mint) && Number(r.at) > watchFrom) add('An on-chain address there is still watched.');
+      });
+      (load(K.onchainOut, []) || []).forEach(function (r) { if (r && at(r.mint)) add('An on-chain payment from there has not confirmed.'); });
+      cidOutboxRows().forEach(function (r) { if (tokenAt(r.token)) add('A payment to a Cashu ID from there is not collected yet.'); });
+      var till = tillKeeperNow();
+      if (till && till.mints.some(at)) add('Your till is open at it.');
+      (load(K.tillPasses, []) || []).forEach(function (r) {
+        if (!r || !(Number(r.exp) * 1000 > now)) return;
+        if (at(r.mint) || (Array.isArray(r.mints) && r.mints.some(at))) add('A cashier code names it until the code ends.');
+      });
+      var cashier = tillCashierRaw();
+      if (cashier && cashier.pass && (at(cashier.pass.mint) || (cashier.pass.mints || []).some(at))) add('A cashier\u2019s till is open at it.');
+      return out;
+    },
+
+    /* The tokens sent from `url` that nobody has claimed yet (a card's loads aside), each on its note: { count, sat, usd }.
+     * They do not hold the mint on the list; the page names them before it is removed. */
+    mintUnclaimedSent: function (url) {
+      var c = canonicalMint(String(url || ''));
+      var out = { count: 0, sat: 0, usd: 0 };
+      if (!c) return out;
+      var seen = {};
+      var one = function (text) {
+        var t = String(text || '');
+        if (!t || seen[t]) return;
+        var info = null;
+        try { info = FoxyWallet.tokenInfo(t); } catch (e) { info = null; }
+        if (!info || canonicalMint(String(info.mint || '')) !== c) return;
+        seen[t] = true;
+        out.count += 1;
+        if ((unitOf(info.unit) || 'sat') === 'usd') out.usd += satsOf(info.amount) || 0;
+        else out.sat += Number(info.sats) || satsOf(info.amount) || 0;
+      };
+      var meta = load('foxy.txmeta', {}) || {};
+      Object.keys(meta).forEach(function (h) { var m = meta[h]; if (m && m.to !== 'card' && typeof m.token === 'string') one(m.token); });
+      var last = load(K.outtok, null);
+      if (last && typeof last.token === 'string') one(last.token);
+      return out;
+    },
+
+    /* Off the list: off `K.mints` and not chosen (`forgetMintFromList`), and hidden (`K.mintsHidden`), which keeps a
+     * shipped mint off too until it is chosen again through the gate or a connect takes money there. Nothing else is
+     * touched: the history rows at it stay, and so do any pieces left in its pile (too little to move). The page moves the
+     * phone off it first; a mint the phone is on, or is saved on, is refused. */
+    removeMint: function (url) {
+      var c = canonicalMint(String(url || ''));
+      if (!c) throw new Error('No mint to remove.');
+      if (canonicalMint(String(mintUrl || '')) === c || canonicalMint(String(load(K.mint, '') || '')) === c) {
+        throw new Error('Foxy is on ' + hostOf(c) + '. Move to another mint first.');
+      }
+      var seen = load(K.mints, []);
+      (Array.isArray(seen) ? seen : []).forEach(function (u) { if (canonicalMint(String(u || '')) === c) FoxyWallet.forgetMintFromList(u); });
+      FoxyWallet.forgetMintFromList(c);
+      var hid = mintsHidden();
+      if (hid.indexOf(c) < 0) mustSave(K.mintsHidden, hid.concat([c]));
+      console.log('[foxy] ' + hostOf(c) + ' removed from the mint list');
+      return true;
+    },
+
+    // the mints removed (`K.mintsHidden`), and whether one is
+    mintsHidden: function () { return mintsHidden(); },
+    mintHidden: function (url) { return mintHidden(url); },
+    // a removed mint money came back to: shown, and not the phone's own until chosen (`K.mintsReturned`)
+    mintReturned: function (url) { var c = canonicalMint(String(url || '')); return !!c && mintsReturned().indexOf(c) >= 0; },
+
+    /* A choice undone (a mint added for a removal that was then dropped): not chosen, off the list, and hidden again with
+     * `o.hide` (it had been removed before). Its pile, if any, untouched. Refused for the mint the phone is on or saved on. */
+    unchooseMint: function (url, o) {
+      var c = canonicalMint(String(url || ''));
+      if (!c) return false;
+      if (canonicalMint(String(mintUrl || '')) === c || canonicalMint(String(load(K.mint, '') || '')) === c) return false;
+      var seen = load(K.mints, []);
+      (Array.isArray(seen) ? seen : []).forEach(function (u) { if (canonicalMint(String(u || '')) === c) FoxyWallet.forgetMintFromList(u); });
+      FoxyWallet.forgetMintFromList(c);
+      if (o && o.hide) { var hid = mintsHidden(); if (hid.indexOf(c) < 0) save(K.mintsHidden, hid.concat([c])); }
+      return true;
+    },
+    /* A restore from words: every removed mint back on the list, so the scan looks at them as at any mint and money the
+     * words hold there, or left there at the removal, is found. Back as a mint visited is: on the list, not chosen. */
+    unhideAllMints: function () {
+      var hid = mintsHidden();
+      if (!hid.length) { save(K.mintsReturned, []); return; }
+      mintsChosen();
+      var seen = load(K.mints, []);
+      if (!Array.isArray(seen)) seen = [];
+      hid.forEach(function (c) {
+        if (!seen.some(function (u) { return canonicalMint(String(u || '')) === c; })) seen.push(c);
+      });
+      save(K.mints, seen);
+      save(K.mintsHidden, []);
+      // and the ones money came back to are chosen like the rest of the list, as a restore finds them
+      save(K.mintsReturned, []);
+    },
+
     saved: function () {
       var url = load(K.mint, '');
       return url ? { url: url } : null;

@@ -334,10 +334,32 @@
             if (pad) console.log('[foxy] transfer: padding by', pad,
                                  'so', want, 'still lands after', hostOf(to), 'takes its fee');
           }
+          /* The far mint refusing the invoice: is it the amount or the mint? Asked as `moveQuote` asks, with an invoice for a
+           * larger figure that is never paid and expires on its own. Refused as well, the first refusal stands. Made, the
+           * figure is asked for once more: a refusal that was a moment's (a backend that timed out) is gone, and that answer
+           * is the quote. Refused again, and under 1,000 sats, it is under that mint's smallest invoice: said so and marked
+           * (`foxyFloor`), so a mint's removal can call change too little to move there (26s-mint-remove.js `mrQuoteShort`).
+           * A figure of 1,000 sats or more refused twice is that refusal, as it came: no mint's floor is that high. */
+          var FLOOR_MOST = 1000;
+          var floorProbe = function (e) {
+            if (du !== 'sat') throw e;
+            var big = Math.max(FLOOR_MOST, issue * 4);
+            return withTimeout(dest.createMintQuoteBolt11(big), 15000, hostOf(to) + ' probe invoice').then(function () {
+              return withTimeout(createQuote(dest, issue, undefined, (moveLock = quoteLock(dest)))
+                .then(function (q) { if (moveLock) q.foxyLock = moveLock; return q; }),
+              25000, hostOf(to) + ' invoice').catch(function (e2) {
+                if (issue >= FLOOR_MOST) throw e2;
+                var floor = /** @type {Error & { foxyFloor?: number }} */ (new Error(hostOf(to) + ' will invoice ' + big
+                  + ' sats but not ' + issue + ', so it is the amount, not the node: ' + ((e2 && e2.message) || e2)));
+                floor.foxyFloor = issue;
+                throw floor;
+              });
+            }, function () { throw e; });
+          };
           var make = function () {
             return withTimeout(createQuote(dest, issue, undefined, (moveLock = quoteLock(dest)))
               .then(function (q) { if (moveLock) q.foxyLock = moveLock; return q; }),
-            25000, hostOf(to) + ' invoice');
+            25000, hostOf(to) + ' invoice').catch(floorProbe);
           };
           /* One invoice at the far mint for every source quoted for the same
            * payment (`o.landing`, the caller's for one run: PAY FROM asks each

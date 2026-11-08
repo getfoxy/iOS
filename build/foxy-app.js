@@ -186,12 +186,16 @@ class Component extends DCLogic {
       bankPick: false, histPick: false,
       // nor a mint picked on an earlier card's WITHDRAW TO or TRANSFER TO (26n-card-withdraw-to.js, `fcListNext`)
       mintSel: '',
+      // nor a removal's TO WHICH MINT?, nor edit mode, which opens off (26s-mint-remove.js)
+      mrMint: '', mrEdit: false,
     }, extra || {}));
   }
   back() {
     /* the till being opened: back off DEFAULT MINT is its set list again; off the set list, the opening stops (26m-till.js,
      * `tillOpenBack`) */
     if (this.tillOpenBack && this.tillOpenBack()) return;
+    // a removal's TO WHICH MINT?: the list in edit mode again; off the list, edit mode ends (26s-mint-remove.js `mrBack`)
+    if (this.mrBack && this.mrBack()) return;
     // a card's set-up asking an amount: back is a step back in it, or out of it (26j-card-wheel.js, `fcSuAmountBack`)
     if (this.fcSuAmountBack && this.fcSuAmountBack()) return;
     // 24HR LIMIT from CARD LIMITS: NO PIN AMOUNT again (26j-card-wheel.js, `fcLimitTxBack`)
@@ -3013,7 +3017,8 @@ class Component extends DCLogic {
       // a mint nobody shipped: no logo, and its host stands in for a name unless it is a test mint or has said its own
       out.push({ url: url, name: this.mintKnownName(url) || strip(url), host: strip(url), logo: '', tint: '#5A5A5A' });
     });
-    return out;
+    // and none the keeper removed (26s-mint-remove.js; the wallet's `mintHidden`), a shipped one among them
+    return (W && W.mintHidden) ? out.filter(m => !W.mintHidden(m.url)) : out;
   }
 
   knownMints() {
@@ -3070,6 +3075,10 @@ class Component extends DCLogic {
     this._rsCandidates.add(candidate);
     this.setState({ rsCandidate: candidate });
     this.forgetRestoreCandidates(candidate);     // an earlier one, never adopted
+    /* Words to restore: every mint the keeper removed is back on the list, the shipped ones too, so the scan looks at them
+     * as at any mint (26s-mint-remove.js). */
+    const W = window.FoxyWallet;
+    if (W && W.unhideAllMints) W.unhideAllMints();
     this.scanSeedRows(false, { candidate: candidate });
   }
 
@@ -4011,8 +4020,11 @@ class Component extends DCLogic {
      * at the mint that issues it, with no price anywhere. Only at the mint this
      * phone is on, and only where that mint holds dollars: dollar ecash is not
      * moved between mints. */
+    /* Or at another mint it names where this phone holds enough dollars (`reqHeldAt`), paid there on a visit
+     * (`makeTokenForRequest`), as sats held at a mint a request names are. */
     if (req.unit === 'usd') {
-      if (!(this.twoUnitsOn && this.twoUnitsOn()) || !this.requestHere(req)) {
+      const awayUsd = !!(this.reqHeldAt && this.reqHeldAt(req) && !this.requestHere({ mints: [this.reqHeldAt(req)] }));
+      if (!awayUsd && (!(this.twoUnitsOn && this.twoUnitsOn()) || !this.requestHere(req))) {
         this.toast('That request asks for dollar ecash at a mint where you hold no dollars.', true);
         return;
       }
@@ -4064,6 +4076,14 @@ class Component extends DCLogic {
       note: '', noteDraft: '' }, unitPick));
     /* With enough at more than one mint: which pays, before the offer (PAY FROM, 26l-pay-from.js), the request's own
      * mint first and chosen. Nothing is said to the phone in hand yet: this phone may hold enough elsewhere. */
+    /* Paid at a mint it names where this phone holds enough, chosen before the offer (`opts.payAt`, a tap's ecash at
+     * their mint: 26d-tap.js `tapPayHeld`): the source written as PAY FROM writes one, so the offer is judged and paid
+     * there (`reqPayMint`, `pfReqSource`), and nothing more is asked. */
+    if (opts && opts.payAt && this.reqMints(req).indexOf(this.reqCanon(opts.payAt)) >= 0) {
+      this.setState({ payFromFlow: 'req', payFromList: [], payFromPick: '', payFromAsk: '', payFromTapped: false,
+        payFromReopen: false, payMint: this.reqCanon(opts.payAt), payUnit: opts.payUnit === 'usd' ? 'usd' : 'sat' });
+      return;
+    }
     if (this.pfRequest && this.pfRequest(req)) return;
     // a payer that cannot cover it tells the phone it is touching, before the offer is looked at
     this.tellPayerShort(req);
@@ -4100,10 +4120,12 @@ class Component extends DCLogic {
     return out;
   }
 
-  /* The mint a request is paid at: the one chosen for it on PAY FROM where that is one it names; else the one the
-   * phone is on, where it names that; else the first it names where this phone holds enough; else the first, its
-   * default, which a crossing goes to. A till of two mints was paid at its first only, so a payer holding 1,000 at
-   * its second was offered a Lightning crossing into the first (review, payer-cross). '' where it names none. */
+  /* The mint a request is paid at: the one chosen for it on PAY FROM where that is one it names; else one it names where
+   * this phone holds enough in its unit (`reqHeldAt`: the phone's own first, else the one holding most); else the one the
+   * phone is on, where it names that; else the first, its default, which a crossing goes to. A till of two mints was paid
+   * at its first only, so a payer holding 1,000 at its second was offered a Lightning crossing into the first (review,
+   * payer-cross); and a request naming the mint the phone is on was paid there even where the phone held too little
+   * there and enough at another mint it names. '' where it names none. */
   reqPayMint(req) {
     const W = window.FoxyWallet;
     const listed = this.reqMints(req);
@@ -4111,14 +4133,60 @@ class Component extends DCLogic {
     const s = this.state || {};
     const chosen = (s.payFromFlow === 'req' && s.payMint) ? this.reqCanon(s.payMint) : '';
     if (chosen && listed.indexOf(chosen) >= 0) return chosen;
+    const held = this.reqHeldAt ? this.reqHeldAt(req) : '';
+    if (held) return held;
     const here = W && W.mintHost ? this.reqCanon('https://' + W.mintHost()) : '';
     if (here && listed.indexOf(here) >= 0) return here;
-    const need = Math.round(Number(req && req.sats) || 0);
-    if (req && req.unit !== 'usd' && need > 0 && W && W.balanceAt) {
-      const has = listed.filter((m) => Number(W.balanceAt(m)) >= need)[0];
-      if (has) return has;
-    }
     return listed[0];
+  }
+
+  /* A mint this request names where this phone holds enough to pay it in its own unit, on its face (sats for a request
+   * in sats, dollars for one in dollars; the fee for the pieces is the mint's to say): the mint the phone is on where it
+   * is one, else the one holding the most. Paid there in ecash, with no Lightning and no fee of Foxy's, on a visit where
+   * it is not the phone's own (`makeTokenForRequest`). `amount`, where the request carries none of its own (sats agreed
+   * over a tap). '' where none holds enough, or the request names no mint or no amount. */
+  /* What a balance at `m` must hold over `need` in `unit` to cover it there on a visit: nothing at a mint whose keysets
+   * on file charge nothing for its pieces (or that has none on file, judged on its face and told on the visit); at one
+   * that charges, that fee for the pieces spent and the receiver's own swap, at the dearest of its keysets
+   * (`pieceFeePpkAt`), counted for twice the pieces the amount makes and four more. Held at exactly the amount, it was
+   * chosen, and the visit found it short and offered a crossing from home. */
+  reqHeldMargin(m, need, unit) {
+    const W = window.FoxyWallet;
+    let f = 0;
+    try { f = (W && W.pieceFeePpkAt) ? W.pieceFeePpkAt(m, unit === 'usd' ? 'usd' : 'sat') : 0; } catch (e) { f = 0; }
+    if (!(f > 0)) return 0;
+    let b = 0;
+    let v = Math.max(0, Math.round(Number(need) || 0));
+    while (v > 0) { b += v % 2; v = Math.floor(v / 2); }
+    return Math.ceil(2 * (b + 4) * f / 1000);
+  }
+
+  reqHeldAt(req, amount) {
+    const W = window.FoxyWallet;
+    if (!req || !W) return '';
+    const listed = this.reqMints(req);
+    if (!listed.length) return '';
+    const usd = req.unit === 'usd';
+    if (req.unit && req.unit !== 'sat' && !usd) return '';
+    const need = Math.round(Number(amount) || Number(usd ? req.amount : req.sats) || 0);
+    if (!(need > 0)) return '';
+    const have = (m) => {
+      try {
+        if (!usd) return W.balanceAt ? Math.round(Number(W.balanceAt(m)) || 0) : 0;
+        return W.balanceOf ? Math.round(Number(W.balanceOf('usd', m)) || 0) : 0;
+      } catch (e) { return 0; }
+    };
+    const unit = usd ? 'usd' : 'sat';
+    const margin = (m) => (this.reqHeldMargin ? this.reqHeldMargin(m, need, unit) : 0);
+    const free = (m) => { try { return !!(W.piecesFreeAt && W.piecesFreeAt(m, unit) === true); } catch (e) { return false; } };
+    const here = W.mintHost ? this.reqCanon('https://' + W.mintHost()) : '';
+    const held = listed.map((m) => ({ m: m, n: have(m) })).filter((x) => x.n >= need + margin(x.m));
+    if (!held.length) return '';
+    if (here && held.some((x) => x.m === here)) return here;
+    /* A mint that charges nothing for its pieces before one that does or may, then the most held: the larger balance at a
+     * mint that charges was given the ecash, and a free mint that covered it too was offered only as a melt, with a fee. */
+    held.sort((a, b) => ((free(b.m) ? 1 : 0) - (free(a.m) ? 1 : 0)) || (b.n - a.n));
+    return held[0].m;
   }
 
   /* A payer that cannot cover a payment over the link says so to the phone it
@@ -4139,6 +4207,9 @@ class Component extends DCLogic {
     const amount = (req ? (req.unit === 'usd' ? Math.max(0, Math.round(Number(req.amount) || 0)) : req.sats) : 0);
     if (!req || !req.viaTap || !(amount > 0) || !W || !W.sendShortfall || !W.tapQuote) return;
     if (!this.requestHere(req)) return;
+    // paid at another mint it names, where this phone holds enough (`reqPayMint`): this mint's balance is not the question
+    const paidAt = this.reqPayMint ? this.reqPayMint(req) : '';
+    if (paidAt && !this.requestHere({ mints: [paidAt] })) return;
     let lack = null;
     try {
       const locked = !!(req.lockTo && !(this.offlineNow && this.offlineNow()));
@@ -6690,7 +6761,8 @@ class Component extends DCLogic {
   otherUnitsLine() {
     const W = window.FoxyWallet;
     if (!W || typeof W.balances !== 'function') return '';
-    const list = W.balances().filter(b => b.unit !== 'sat');
+    // (not a removed mint's: HISTORY's mint list shows those, 26s-mint-remove.js)
+    const list = W.balances().filter(b => b.unit !== 'sat' && !(W.mintHidden && W.mintHidden(b.mint)));
     if (!list.length) return '';
     return 'Also ' + list.map(b => this.unitMoney(b.amount, b.unit) + ' in ' + this.unitLabel(b.unit)
       + ' ecash at ' + String(b.mint).replace(/^https?:\/\//, '')).join(', ') + '.';
@@ -6839,6 +6911,8 @@ class Component extends DCLogic {
     const W = window.FoxyWallet;
     const host = String(url).replace(/^https?:\/\//, '');
     if (this.state.switchBusy) return;
+    // ADD A MINT on a removal's TO WHICH MINT?: the mint added is where the money goes, not a switch (26s-mint-remove.js `mrAddTo`)
+    if (this.state.mrMint && this.state.trStep === 'to' && this.mrAddTo) { this.mrAddTo(url); return; }
     // a background sweep holding the proof lock is waited for, a few seconds, rather than refused (`switchAfterSweep`)
     if (!waited && this.switchAfterSweep(url, () => this.justSwitch(url, true))) return;
     // a payment or claim in progress finishes at the mint it started on
@@ -7061,7 +7135,9 @@ class Component extends DCLogic {
       : String(u || '').trim().replace(/\/+$/, ''));
     const want = canon(url);
     if (!want) return false;
-    if ((this.DEFAULT_MINTS || []).some(m => canon(m.url) === want)) return true;
+    // a shipped mint the keeper removed is not, until it is chosen again (26s-mint-remove.js; the wallet's `mintHidden`)
+    if ((this.DEFAULT_MINTS || []).some(m => canon(m.url) === want) && !(W && W.mintHidden && W.mintHidden(url))
+      && !(W && W.mintReturned && W.mintReturned(url))) return true;
     return !!(W && W.mintChosen && W.mintChosen(url));
   }
 
@@ -18879,18 +18955,24 @@ class Component extends DCLogic {
     const want = paidAt;
     const judgeAt = src ? src.mint : want;
     const atHere = !judgeAt || this.requestHere({ mints: [judgeAt] });
-    const thereHas = (!atHere && !usdReq && W && W.balanceAt) ? Math.round(Number(W.balanceAt(judgeAt)) || 0) : null;
+    // what is held there in the request's unit: dollars where it asks for dollars (`reqHeldAt`)
+    const thereHas = atHere || !W ? null
+      : usdReq ? (W.balanceOf ? Math.round(Number(W.balanceOf('usd', judgeAt)) || 0) : null)
+      : (W.balanceAt ? Math.round(Number(W.balanceAt(judgeAt)) || 0) : null);
     let lack = null;
     if (sats > 0 && W && W.sendShortfall && !(src && src.plan) && !swapSrc) {
       if (atHere || ((thereHas == null || thereHas < sats) && !src)) {
         lack = usdReq ? W.sendShortfall(sats, { unit: 'usd', locked: lockedNow }) : W.sendShortfall(sats, { locked: lockedNow });
       } else if (thereHas != null && thereHas >= sats) {
         // paid there, on a visit: what that mint charges for the pieces is known once there
-        lack = { short: false, need: sats, have: thereHas, fee: 0, there: true };
+        /* paid there, on a visit: what that mint charges for the pieces is known once there, unless its keysets on file
+         * say it charges nothing (`piecesFreeAt`), which is said as no fee */
+        const free = !!(W.piecesFreeAt && W.piecesFreeAt(judgeAt, usdReq ? 'usd' : 'sat') === true);
+        lack = { short: false, need: sats, have: thereHas, fee: 0, there: true, free: free };
       } else {
         const name = this.pfName ? this.pfName(judgeAt) : judgeAt;
         lack = { short: true, need: sats, have: thereHas || 0, fee: 0, there: true,
-          why: 'You hold ' + this.money(thereHas || 0).main + ' at ' + name + '. This needs ' + this.money(sats).main + '.' };
+          why: 'You hold ' + fig(thereHas || 0).main + ' at ' + name + '. This needs ' + fig(sats).main + '.' };
       }
     }
     /* Waiting on a connection that is on its way.
@@ -18944,7 +19026,10 @@ class Component extends DCLogic {
       : fig(n));
     const rows = (byTap ? [] : [this.cfRow('DELIVERED TO', to, siteHost ? { sub: siteHost } : undefined)]).concat([
       // (the source chosen on PAY FROM, its mint and balance: 26l-pay-from.js)
-      this.cfRow('PAYING FROM', src && this.pfLabel ? this.pfLabel(src.mint, src.unit || 'sat') : (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
+      // (or the mint it is paid at on a visit, where this phone holds enough: `reqHeldAt`)
+      this.cfRow('PAYING FROM', src && this.pfLabel ? this.pfLabel(src.mint, src.unit || 'sat')
+        : (lack && lack.there && judgeAt && this.pfLabel) ? this.pfLabel(judgeAt, usdReq ? 'usd' : 'sat')
+        : (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
       this.cfRow('NETWORK', 'CASHU', { half: true }),
       // not in the accent: the accent on this screen belongs to the code, and
       // two orange things is one too many to look at
@@ -18968,7 +19053,7 @@ class Component extends DCLogic {
     const swapQ = swapSrc && swapSrc.q ? swapSrc.q : null;
     /* Paid on a visit to a mint this phone holds money at: what that mint charges for the pieces is known only there
      * (`lack.there`), so the fee is not said to be nothing. */
-    const feeThere = !!(lack && lack.there && !(src && (src.plan || src.swap)));
+    const feeThere = !!(lack && lack.there && !lack.free && !(src && (src.plan || src.swap)));
     // what leaves, as PAYING says it and PAY's figure: the amount and the fee, or the swap's whole, in the unit that leaves
     const payingText = !sats ? 'ANY AMOUNT' : held ? 'CHECKING…'
       /* the swap covers what is missing (`pfSwapSource`): what leaves is the other balance's whole for the swap, and the
@@ -20295,7 +20380,7 @@ class Component extends DCLogic {
     this._trWas = window.FoxyWallet.mintUrl || '';
     this.setState(p => ({
       screen: 'switchMint', stack: p.stack.concat([p.screen]),
-      trStep: 'from', trFrom: '', trTo: '', trUnit: 'sat', trSats: 0, trPlan: null, trFee: null, trErr: '', fcPick: false, wdPick: false, bankPick: false, tillPick: false, histPick: false,
+      trStep: 'from', trFrom: '', trTo: '', trUnit: 'sat', trSats: 0, trPlan: null, trFee: null, trErr: '', mrMint: '', mrEdit: false, fcPick: false, wdPick: false, bankPick: false, tillPick: false, histPick: false,
     }));
   }
 
@@ -20341,6 +20426,8 @@ class Component extends DCLogic {
 
   /* TRANSFER TO's mint, past the lock: the keypad. */
   trPickTo(mint) {
+    // a mint being removed moves all of it: no keypad (26s-mint-remove.js `mrPickTo`)
+    if (this.state.mrMint && this.mrPickTo) { this.mrPickTo(mint); return; }
     const dollars = this.state.trUnit === 'usd';
     this.setState(p => ({
       trTo: mint, trStep: '',
@@ -20420,10 +20507,14 @@ class Component extends DCLogic {
         return W.transferQuote(trFrom, trSats, this.state.trUnit === 'usd' ? { unit: 'usd' } : undefined);
       })
       .then(plan => {
+        // a removal's dollars, quoted again at the mint's own rate where the first figure left some behind (26s-mint-remove.js)
+        if (this.state.mrMint && this.mrQuoted && this.mrQuoted(plan)) return;
         this.setState({ trQuoting: false, trPlan: plan, trFee: plan.feeSats });
       })
       .catch(e => {
         if (e && e.left) { this.setState({ trQuoting: false }); return; }
+        // a removal asks again for what fits, or asks about what is too little to move (26s-mint-remove.js `mrQuoteShort`)
+        if (this.state.mrMint && this.mrQuoteShort && this.mrQuoteShort(e)) return;
         // what would have fitted, when the fee is the only thing in the way
         this.setState({ trQuoting: false, trErr: W.reason(e),
                         trFits: (e && e.foxyFits) || 0 });
@@ -20473,6 +20564,8 @@ class Component extends DCLogic {
         hash: 'move-' + (plan.mintQuote ? plan.mintQuote.quote : Date.now()),
         to: to, force: true,
       });
+      // a removal: the next balance, or the mint off the list once nothing is left (26s-mint-remove.js `mrMoved`)
+      if (this.state.mrMint && this.mrMoved) this.mrMoved();
     }).catch(e => {
       if (fox) this.foxEnd('trMove', false); else this.hideMelt();
       this.setState({ trBusy: false, trErr: W.reason(e) });
@@ -20486,7 +20579,9 @@ class Component extends DCLogic {
   trCancel() {
     const W = window.FoxyWallet;
     const back = this._trWas;
-    this.setState({ screen: 'home', stack: [], trPlan: null, trStep: '', trErr: '', trBusy: false });
+    // a removal dropped: a mint added for it let go again (26s-mint-remove.js `mrUndoAdd`)
+    if (this.state.mrMint && this.mrUndoAdd) this.mrUndoAdd();
+    this.setState({ screen: 'home', stack: [], trPlan: null, trStep: '', trErr: '', trBusy: false, mrMint: '', mrDustWhy: {} });
     /* Home as every other exit goes (09-melt-paste-switch.js `homeAgain`): after the quote's connect where it is still out,
      * and counted as the way home until it lands. */
     if (this.homeAgain) { this.homeAgain(); return; }
@@ -20571,8 +20666,8 @@ class Component extends DCLogic {
       title: 'CONFIRMATION',
       amountLabel: 'MOVING',
       amount: this.money(sats).main,
-      subtitle: fee == null ? '' : 'Up to ' + this.money(sats + fee).main + ' leaves '
-        + (this.mintNameOf(s.trFrom) || 'the other mint'),
+      subtitle: [fee == null ? '' : 'Up to ' + this.money(sats + fee).main + ' leaves '
+        + (this.mintNameOf(s.trFrom) || 'the other mint') + '.', this.mrConfirmLine ? this.mrConfirmLine() : ''].filter(Boolean).join(' '),
       amountSub: this.money(sats).sub,
       rows: rows,
       secondary: { label: 'CANCEL', go: () => this.trCancel() },
@@ -20621,7 +20716,8 @@ class Component extends DCLogic {
       title: 'CONFIRMATION',
       amountLabel: 'MOVING',
       amount: this.unitFigure(sats, 'sat'),
-      subtitle: out == null ? '' : 'Up to ' + this.unitFigure(out, 'usd') + ' leaves ' + (this.mintNameOf(s.trFrom) || 'the other mint'),
+      subtitle: [out == null ? '' : 'Up to ' + this.unitFigure(out, 'usd') + ' leaves ' + (this.mintNameOf(s.trFrom) || 'the other mint') + '.',
+        this.mrConfirmLine ? this.mrConfirmLine() : ''].filter(Boolean).join(' '),
       amountSub: out == null ? '' : this.unitFigure(out, 'usd'),
       rows: rows,
       secondary: { label: 'CANCEL', go: () => this.trCancel() },
@@ -22972,10 +23068,16 @@ class Component extends DCLogic {
       const want = Math.round(Number(r.amount) || 0);
       return have > 0 && (!(want > 0) || have >= want);
     };
-    const fit = [a, b].filter((r) => here(r) && covers(r));
+    /* Held at another mint one of them names, enough in its currency (`reqHeldAt`), where neither can be paid here: that
+     * one, paid there in ecash on a visit (`tapPayHeld`), with nothing converted. With a route only. */
+    const away = (r) => !this.offlineNow() && !!(this.reqHeldAt && this.reqHeldAt(r))
+      && (unitOf(r) !== 'usd' || !W.twoUnits || W.twoUnits(this.reqHeldAt(r)));
+    const fitHere = [a, b].filter((r) => here(r) && covers(r));
+    const fit = fitHere.length ? fitHere : [a, b].filter(away);
     const word = (r) => (unitOf(r) === 'usd' ? 'dollars' : 'bitcoin');
     if (fit.length === 1) {
-      console.log('[foxy] tap: a till offered dollars and bitcoin; paying in ' + word(fit[0]) + ', which this phone holds here');
+      console.log('[foxy] tap: a till offered dollars and bitcoin; paying in ' + word(fit[0]) + ', which this phone holds '
+        + (fitHere.length ? 'here' : 'at ' + this.reqHeldAt(fit[0])));
       return fit[0] === a ? main : other;
     }
     if (fit.length === 2) {
@@ -23038,7 +23140,10 @@ class Component extends DCLogic {
     const asksUsd = !!(!inv && !usdUnit && W.asksInDollars && W.asksInDollars(req0));
     /* Dollar ecash at another mint is not something Foxy moves: their invoice
      * is paid instead, and with no invoice it is refused in words. */
-    if (usdUnit && !sameMint && !inv) {
+    /* Held at a mint they name in the request's unit, enough for its figure (`reqHeldAt`): paid there in ecash on a
+     * visit (`tapPayHeld`), dollars too. Only with a route, as the visit needs one. */
+    const heldAt = (req0 && !sameMint && !this.offlineNow() && this.reqHeldAt) ? this.reqHeldAt(req0) : '';
+    if (usdUnit && !sameMint && !inv && !heldAt) {
       return { notSats: 'That request asks for dollars at a mint you do not use, and has no invoice to pay instead.',
                inv: '', req: '', sameMint: false, asksUsd: false, read: null, mints: [], crossable: false,
                theirRoute: null, asks: false, theirRate: 0, theirRateAt: 0, satsForUsd: false };
@@ -23047,6 +23152,7 @@ class Component extends DCLogic {
       + (req ? ' and a request for ' + (theirs.join(' ') || '(no mint named)') : ' and no request')
       + '; mine is ' + (W.mintUrl || '?')
       + ' — paying by ' + (sameMint ? 'ecash'
+          : heldAt ? 'ecash, from the balance held at ' + heldAt
           : this.offlineNow() ? 'neither: no route here, so their invoice is no use'
           : 'lightning'));
     /* A request at a mint this phone could move money to: one mint named, and
@@ -23339,6 +23445,8 @@ class Component extends DCLogic {
    */
   tapPayOffer(offer, sats) {
     const W = window.FoxyWallet;
+    // an ecash source kept for an earlier offer's PAY FROM is that offer's, never this one's (`tapPayHeld`)
+    this._tapHeld = null;
     /* Their price, where this phone has no current one of its own.
      *
      * A phone with no route is trusting the other one's bitcoin price for
@@ -23385,6 +23493,16 @@ class Component extends DCLogic {
      * of. Dropped here, once, rather than tested for at four separate gates. */
     const offline = this.offlineNow();
     const inv = offline ? '' : offer.inv;
+    /* Held at a mint they name, and not the one this phone is on: paid there in ecash, with no fee (`tapPayHeld`).
+     *
+     * `sameMint` is the mint this phone is on, and only that, so a payer on Forge holding a few thousand sats at Minibits, named
+     * a Minibits request beside an invoice, paid the invoice by Lightning: a melt at Minibits, and a fee, to send sats
+     * from Minibits to Minibits (the keeper, 2026-11-07). Any balance at a mint the request names that covers it in its
+     * unit pays it as ecash, the one at the mint the phone is on first (`reqHeldAt`). With a route only: offline,
+     * nothing here changes. */
+    const heldAt = (!offline && offer.read && this.reqHeldAt)
+      ? this.reqHeldAt(offer.read, offer.read.unit === 'usd' ? 0 : sats) : '';
+    if (heldAt && !this.requestHere({ mints: [heldAt] })) { this.tapPayHeld(offer, heldAt, inv, sats); return; }
     /* Same mint: pay with ecash and never mention Lightning.
      *
      * Paying a Lightning invoice made by the mint this phone pays from shows
@@ -23446,6 +23564,58 @@ class Component extends DCLogic {
     if (offer.crossable && stuck) { this.tapStuckAtMint(offer, stuck, sats); return; }
     if (!inv) { this.tapWrongMint(offer); return; }
     if (!this.acceptTarget(inv)) return;
+  }
+
+  /* A request at a mint this phone holds enough at, and is not on (`reqHeldAt`): paid there in ecash, on a visit made
+   * when PAY is pressed, and home again whichever way it ends (07-history-tokens-mints.js `makeTokenForRequest`, its
+   * `visit`; `crossComeHome`). The visit never chooses the mint (`remember: false`): what the mint gate keeps is untouched.
+   *
+   * With their invoice beside it and balances at other mints that could pay that invoice, PAY FROM asks which, as for any
+   * invoice (26l-pay-from.js `syncPayFrom`), with the ecash at their mint first, chosen, at no fee and no quote asked of
+   * it (`_tapHeld`); another mint's balance pays their invoice with its fee, as it always has. Otherwise the request's
+   * own confirmation opens at once, paid from that mint (`payAt`). */
+  tapPayHeld(offer, at, inv, sats) {
+    const W = window.FoxyWallet;
+    const read = offer.read || {};
+    const unit = read.unit === 'usd' ? 'usd' : 'sat';
+    const want = Math.round(Number(unit === 'usd' ? read.amount : (Number(sats) || read.sats)) || 0);
+    console.log('[foxy] tap: they named ' + at + '; paying there by ecash from the balance held');
+    const others = inv ? this.tapLnSources(inv, at, unit) : [];
+    if (others.length) {
+      console.log('[foxy] tap: ' + others.length + ' other balance' + (others.length === 1 ? '' : 's')
+        + ' could pay their invoice instead; PAY FROM asks, the ecash first');
+      this._tapHeld = { inv: String(inv), at: at, unit: unit, want: want, offer: offer };
+      if (!this.acceptTarget(inv)) this._tapHeld = null;
+      return;
+    }
+    this._tapHeld = null;
+    this.openRequest(offer.req, { viaTap: true, theirRoute: offer.theirRoute, asks: offer.asks, theirTill: offer.theirTill,
+      payAt: at, payUnit: unit });
+  }
+
+  /* The balances that could pay the invoice `inv` by Lightning, as PAY FROM counts them for an invoice (26l-pay-from.js
+   * `syncPayFrom`), less the one at `at` in `unit`, which pays in ecash instead. */
+  tapLnSources(inv, at, unit) {
+    const W = window.FoxyWallet;
+    if (!W || !W.balances || !W.quoteFeeAt || !W.quoteFee || !this.pfPiles) return [];
+    const sats = Math.round(Number(W.amountOf ? W.amountOf(inv) : 0) || 0);
+    if (!(sats > 0)) return [];
+    const here = this.pfHere();
+    const issues = (p) => p.unit === 'sat' || (p.mint === here ? this.twoUnitsOn() : !!(W.twoUnits && W.twoUnits(p.mint)));
+    const skip = this.pfMint(at);
+    return this.pfPiles().filter((p) => issues(p) && this.pfFace(p.have, p.unit, sats) && !(p.mint === skip && p.unit === unit));
+  }
+
+  /* The ecash at their mint chosen on PAY FROM (`tapPayHeld`): off the invoice's confirmation, and the request's own
+   * opens, paid from that mint. */
+  tapHeldGo(held) {
+    if (!held) return;
+    this._tapHeld = null;
+    const offer = held.offer;
+    console.log('[foxy] tap: paying ' + held.at + ' by ecash from the balance held there, not their invoice');
+    this.setState({ screen: 'home', stack: [] });
+    this.openRequest(offer.req, { viaTap: true, theirRoute: offer.theirRoute, asks: offer.asks, theirTill: offer.theirTill,
+      payAt: held.at, payUnit: held.unit });
   }
 
   /* A request at this phone's mint, in a unit this phone holds too little of.
@@ -36044,7 +36214,9 @@ class Component extends DCLogic {
     try { all = (W && W.balances) ? W.balances() : []; } catch (e) { all = []; }
     // a test mint's ecash is worth nothing: it is never a balance to pay from (decided)
     return (Array.isArray(all) ? all : []).filter((b) => b && (b.unit === 'sat' || b.unit === 'usd') && Number(b.amount) > 0
-      && String(b.mint || '').toLowerCase().indexOf('testnut.cashu.space') < 0)
+      && String(b.mint || '').toLowerCase().indexOf('testnut.cashu.space') < 0
+      // nor a mint the keeper removed from the list (26s-mint-remove.js): its pile waits there until it is added again
+      && !(W && W.mintHidden && W.mintHidden(b.mint)))
       .map((b) => ({ mint: this.pfMint(b.mint), unit: b.unit, have: Math.round(Number(b.amount) || 0) }));
   }
 
@@ -36340,9 +36512,19 @@ class Component extends DCLogic {
     const here = this.pfHere();
     // dollars only where the mint issues them
     const issues = (p) => p.unit === 'sat' || (p.mint === here ? this.twoUnitsOn() : !!(W.twoUnits && W.twoUnits(p.mint)));
-    const piles = this.pfPiles().filter((p) => issues(p) && this.pfFace(p.have, p.unit, sats));
-    if (!piles.some((p) => p.mint !== here)) return false;
-    const list = piles.map((p) => this.pfEntry(p, { pref: p.mint === here }));
+    /* A tap whose request names a mint this phone holds enough at (26d-tap.js `tapPayHeld`, `_tapHeld`): that balance
+     * pays the request in ecash, first and chosen, at no fee and with no melt quote asked of it, and every other pays
+     * their invoice with its fee, as before. */
+    const bare = (x) => String(x || '').trim().replace(/^lightning:/i, '').toLowerCase();
+    const th = (this._tapHeld && ask.inv && bare(this._tapHeld.inv) === bare(ask.inv)) ? this._tapHeld : null;
+    let piles = this.pfPiles().filter((p) => issues(p) && this.pfFace(p.have, p.unit, sats));
+    if (th) piles = piles.filter((p) => !(p.mint === this.pfMint(th.at) && p.unit === th.unit));
+    if (!th && !piles.some((p) => p.mint !== here)) return false;
+    const held = th ? [this.pfEntry({ mint: this.pfMint(th.at), unit: th.unit, have: this.pfHeldHave(th) }, {
+      ecash: true, pref: true, cost: th.want, fee: 0, rank: -1, ok: true,
+      feeThere: !this.pfFreeThere(th.at, th.unit) })] : [];
+    const list = held.concat(piles.map((p) => this.pfEntry(p, { pref: p.mint === here })));
+    if (th && list.length === 1) { this.tapHeldGo(th); return true; }
     const show = list.length > 1;
     const key = ask.key;
     const found = Promise.resolve().then(() => (ask.addr ? W.lookupLnurl(ask.addr, ask.sats) : { pr: ask.inv }));
@@ -36355,13 +36537,25 @@ class Component extends DCLogic {
     const one = show ? null : list[0];
     this.pfOpen('send', list, {
       show: show, ask: 'Pay ' + this.sendAmountText() + ' from', quote: quote,
-      go: (e, shown) => this.pfSendGo(e, shown),
+      go: (e, shown) => (e.ecash ? this.tapHeldGo(th) : this.pfSendGo(e, shown)),
       none: () => this.pfSendGo(null, true),
-      cancel: () => this.setState({ screen: 'home', stack: [] }),
+      cancel: () => {
+        // a tap's other phone is told the payment is not coming
+        if (th && W.tapQuote) W.tapQuote(JSON.stringify({ gaveUp: 'The payer cancelled.' })).catch(() => {});
+        if (th) this._tapHeld = null;
+        this.setState({ screen: 'home', stack: [] });
+      },
       // the one source, chosen in the same breath: the confirmation is drawn from it, and asks nothing of this mint
       patch: one ? { payMint: one.mint, payUnit: one.unit, wallet: one.unit, walletAuto: false, walletTapped: true } : null,
     });
     return true;
+  }
+
+  /* What a tap's ecash source holds (`_tapHeld`): its pile, in its unit. */
+  pfHeldHave(th) {
+    const m = this.pfMint(th.at);
+    const p = this.pfPiles().filter((x) => x.mint === m && x.unit === th.unit)[0];
+    return p ? p.have : 0;
   }
 
   /* This mint's own quote for one of its balances, in the shape another mint's comes in (`quoteFeeAt`), and kept whole
@@ -36497,6 +36691,15 @@ class Component extends DCLogic {
 
   // ---- a Cashu request ----
 
+  /* A mint this phone is not on that charges nothing for spending its pieces in `unit`, by its keysets on file (the
+   * wallet's `piecesFreeAt`): ecash paid there on a visit costs nothing, and its tile says so (the keeper, 2026-11-07:
+   * paid from Minibits to Minibits, "was there a fee, why? should not have been"). False where it charges, or where
+   * nothing of it is on file: its fee is then told only there. */
+  pfFreeThere(mint, unit) {
+    const W = window.FoxyWallet;
+    try { return !!(W && W.piecesFreeAt && W.piecesFreeAt(mint, unit === 'usd' ? 'usd' : 'sat') === true); } catch (e) { return false; }
+  }
+
   /* PAY FROM before a request's confirmation (07-history-tokens-mints.js `openRequest`): the request's own mint with no
    * fee, first among equals, and every other mint's sats by the crossing, each quoted at once. Sats only: dollars do not
    * cross between mints, and a request in dollars is paid from the dollars at its own mint or not at all. Not with no
@@ -36517,7 +36720,13 @@ class Component extends DCLogic {
     const need = Math.round(Number(req.sats) || 0);
     if (!want || !(need > 0)) return swap ? this.pfReqOpen(req, [swap], '', this.money(need).main) : false;
     const here = this.pfHere();
-    const piles = this.pfPiles().filter((p) => p.unit === 'sat' && p.have >= need);
+    /* The one it is paid at when nothing is chosen (`reqHeldAt`): a free mint before one that charges, and a mint that
+     * charges counted as covering only with its fee and a margin (`reqHeldMargin`). PAY FROM ticks that one first, so
+     * what is ticked is what `reqPayMint` judges and PAY spends: a tile whose fee is not known yet ranked 0 like a free
+     * one, the request's listing order decided, and a fee mint named first was ticked over a free mint named after it. */
+    const heldAt = this.reqHeldAt ? this.reqHeldAt(req) : '';
+    const over = (p) => ((listed.indexOf(p.mint) >= 0 && this.reqHeldMargin) ? this.reqHeldMargin(p.mint, need, 'sat') : 0);
+    const piles = this.pfPiles().filter((p) => p.unit === 'sat' && p.have >= need + over(p));
     if (piles.length < (swap ? 1 : 2)) return swap ? this.pfReqOpen(req, piles.map((p) => this.pfEntry(p)).concat([swap]), want, this.money(need).main) : false;
     const list = piles.map((p) => {
       if (listed.indexOf(p.mint) < 0) return this.pfEntry(p);
@@ -36528,8 +36737,12 @@ class Component extends DCLogic {
           ? W.sendShortfall(need, { locked: !!(req.lockTo && !this.offlineNow()) }) : null;
       } catch (x) { lack = null; }
       const fee = lack ? Math.max(0, Number(lack.fee) || 0) : 0;
-      // (paid there on a visit, its mint's fee for the pieces is known only there: `feeThere`, and the tile does not say none)
-      return this.pfEntry(p, { pref: true, cost: need + fee, fee: fee, rank: fee, ok: !(lack && lack.short), feeThere: p.mint !== here,
+      /* (paid there on a visit, its mint's fee for the pieces is known only there: `feeThere`, and the tile does not say
+       * none; unless its keysets on file say it charges nothing, `pfFreeThere`, when the tile says no fee) */
+      const freeThere = p.mint === here || !!(this.pfFreeThere && this.pfFreeThere(p.mint, 'sat'));
+      // ranked: the one it is paid at first, then by fee, a mint that charges (or may) after a free one of the same fee
+      const rank = p.mint === heldAt ? -1 : freeThere ? fee : fee + 1;
+      return this.pfEntry(p, { pref: true, cost: need + fee, fee: fee, rank: rank, ok: !(lack && lack.short), feeThere: !freeThere,
         why: lack && lack.short ? String(lack.why || '') : '', tag: lack && lack.short ? 'NOT ENOUGH' : '' });
     });
     return this.pfReqOpen(req, swap ? list.concat([swap]) : list, want, this.money(need).main);
@@ -36752,7 +36965,7 @@ class Component extends DCLogic {
     if (piles.length < 2) return false;
     const ready = this._crossReady;
     const list = piles.map((p) => (p.mint === to
-      ? this.pfEntry(p, { pref: true, cost: want, fee: 0, rank: 0, ok: true, feeThere: p.mint !== this.pfHere() })
+      ? this.pfEntry(p, { pref: true, cost: want, fee: 0, rank: 0, ok: true, feeThere: p.mint !== this.pfHere() && !(this.pfFreeThere && this.pfFreeThere(p.mint, 'sat')) })
       : this.pfEntry(p)));
     const quote = (e) => {
       const same = !!(ready && ready.sats === want && ready.to === to && ready.from === e.mint);
@@ -39717,6 +39930,458 @@ class Component extends DCLogic {
     if (landed && this.foxDone(kind)) return;
     if (this.hideStage) this.hideStage(kind);
   }
+  /* ---- removing a mint from the list ----------------------------------------
+   *
+   * The keeper's words (2026-11-07): a pencil at the top right of SWITCH MINT turns on a bin by each mint; a bin asks where
+   * the balance goes, the fee is confirmed, and the mint leaves the list.
+   *
+   *   pencil ............ edit mode (`mrEdit`): a bin on each tile, the pencil a tick that leaves it; a tile tapped switches
+   *                       nothing; leaving the screen leaves edit mode (`mrBack`, `goSwitchMint`)
+   *   bin, no balance ... REMOVE <MINT>? (`mrAskEmpty`), and it is removed (`mrRemoveNow`)
+   *   bin, a balance .... TO WHICH MINT? (TRANSFER's "to" step, `mrMint` set), then TRANSFER's confirmation with the fee for all
+   *                       of it (`mrPickTo`: the whole pile quoted, stepped down to what the fee leaves room for), then the
+   *                       move; a mint holding sats and dollars moves the sats first and then the dollars, one confirmation
+   *                       each; what a move's fee hands back as change is moved again while a quote says it fits, two more
+   *                       moves at most (`mrNextLeg`). What a quote proves cannot move (less than the fee, under a mint's
+   *                       smallest invoice) stays in its pile at that mint until the mint is added again (the keeper's
+   *                       rule, 2026-11-07: `mrDust`); the one-line question names it, and REMOVE removes the mint, every
+   *                       refusal asked again first (`mrDrop`). Any other error is TRANSFER's: TRY AGAIN or CANCEL, nothing
+   *                       removed.
+   *   ADD A MINT ........ on TO WHICH MINT?, the mint added is the destination (`mrAddTo`, through `justSwitch`)
+   *   sent tokens ....... one sent from there and not claimed does not hold it; it stays on its note, said (`mrSentLine`)
+   *   refusals .......... the only mint on the list, money still arriving or on its way there (the wallet's
+   *                       `mintRemoveHolds`), something else moving money now (`mrRefusal`)
+   *
+   * Removed is the wallet's `removeMint`: off the list, not chosen, and hidden, so a shipped mint stays off until it is chosen
+   * again through the gate (09-melt-paste-switch.js `mintOnPhone`). Its history rows stay, and HISTORY's mint list still offers
+   * it (27-render-mints-restore-backup.js, `mrRemovedMints`). */
+
+  // the pencil, and the tick that ends it
+  mrEditToggle() { this.setState(p => ({ mrEdit: !p.mrEdit })); }
+
+  /* Back off SWITCH MINT, off its TO WHICH MINT? while a removal asks it, or off the removal's confirmation. From the
+   * confirmation: TO WHICH MINT? again, a tile there a destination as before (the mint added there let go, `mrUndoAdd`), home
+   * where a quote visited another mint. From TO WHICH MINT?: the list in edit mode again, the removal ended. Off the list,
+   * edit mode ends. True where the step was undone here. */
+  mrBack() {
+    const s = this.state || {};
+    // after a move has landed, back from the next confirmation ends the removal as CANCEL does, the mint still on the list
+    if (s.screen === 'trConfirm' && s.mrMint && !s.trBusy && (s.mrLegs || []).length) { this.trCancel(); return true; }
+    if (s.screen === 'trConfirm' && s.mrMint && !s.trBusy) {
+      this.mrUndoAdd();
+      this.setState(p => ({ trStep: 'to', trTo: '', mrTo: '', trPlan: null, trFee: null, trErr: '', trSats: 0,
+        screen: (p.stack || []).length ? p.stack[p.stack.length - 1] : 'switchMint', stack: (p.stack || []).slice(0, -1) }));
+      if (this.homeAgain) this.homeAgain();
+      return true;
+    }
+    if (s.screen !== 'switchMint') return false;
+    if (s.mrMint && s.trStep === 'to') {
+      this.mrUndoAdd();
+      // the question was opened over the list in edit mode (`mrMoveStart`, through `goSwitchMint`): that list again
+      this.setState(p => ({ mrMint: '', trStep: '', trFrom: '', trTo: '', trUnit: 'sat', mrEdit: true,
+        screen: (p.stack || []).length ? p.stack[p.stack.length - 1] : 'switchMint', stack: (p.stack || []).slice(0, -1) }));
+      if (this.homeAgain) this.homeAgain();
+      return true;
+    }
+    if (s.mrEdit) this.setState({ mrEdit: false });
+    return false;
+  }
+
+  /* A mint added at TO WHICH MINT? (`mrAddTo`) and the removal not carried out to it: not chosen, and off the list again
+   * (hidden again where it had been removed before), so a dropped removal adds no mint. Nothing where none was added, or
+   * once money landed there. */
+  mrUndoAdd() {
+    const W = window.FoxyWallet;
+    const a = this._mrAdded;
+    this._mrAdded = null;
+    if (!a || !W || !W.unchooseMint) return;
+    // after the trip home the way out starts (a quote visited it, and the phone is let go of only once it is off it)
+    const go = () => {
+      if (W.unchooseMint(a.url, { hide: a.wasHidden })) console.log('[foxy] remove: ' + this.mintNameOf(a.url) + ', added for it, let go again');
+    };
+    Promise.resolve().then(() => this._homeGoing || this._trQuoteGoing || null).then(go, go);
+  }
+
+  /* What is at a mint in the units a move can carry: { sat, usd }, and `other` (a unit Foxy does not move). */
+  mrHeld(url) {
+    const pile = this.mintPile(url);
+    const held = this.trHeldAt(url);
+    const other = (pile.units || []).filter(b => b && b.unit !== 'usd' && b.unit !== 'sat' && Number(b.amount) > 0).length;
+    return { sat: held.sat, usd: held.usd, other: other };
+  }
+
+  mrName(url) { return (this.mintNameOf(url) || 'that mint').toUpperCase(); }
+
+  mrSame(a, b) {
+    const W = window.FoxyWallet;
+    const c = (u) => ((W && W.canonicalMint) ? String(W.canonicalMint(u) || '') : String(u || '').trim().replace(/\/+$/, ''));
+    return !!c(a) && c(a) === c(b);
+  }
+
+  /* Why a mint cannot be removed now, in plain words, or ''. */
+  mrRefusal(url) {
+    const W = window.FoxyWallet;
+    const name = this.mintNameOf(url) || 'That mint';
+    const others = this.allMints().filter(m => !this.mrSame(m.url, url));
+    if (!others.length) return name + ' is the only mint on your list. Add another mint before removing it.';
+    if (this.moneyBusy && this.moneyBusy()) return 'Something else is moving money right now. Try again in a moment.';
+    const holds = (W && W.mintRemoveHolds) ? W.mintRemoveHolds(url) : [];
+    if (holds.length) return name + ' stays on your list for now. ' + holds.join(' ');
+    if (this.mrHeld(url).other) return name + ' holds money in a currency Foxy cannot move. Spend it there first.';
+    return '';
+  }
+
+  mrRefuse(why) {
+    this.blockedCard('mintRemove', { tone: 'warn', title: 'NOT REMOVED', reason: why, chip: 'Nothing was moved or removed.' });
+  }
+
+  // a bin
+  mrTrash(url) {
+    const no = this.mrRefusal(url);
+    if (no) { console.log('[foxy] remove ' + this.mintNameOf(url) + ': refused (' + no + ')'); this.mrRefuse(no); return; }
+    const held = this.mrHeld(url);
+    if (!(held.sat > 0) && !(held.usd > 0)) { this.mrAskEmpty(url); return; }
+    this.mrMoveStart(url);
+  }
+
+  /* The mint the phone goes to when the one it is on is removed: the one picked, else the first other mint on the phone. */
+  mrNextMint(url, picked) {
+    if (picked && !this.mrSame(picked, url)) return picked;
+    const others = this.allMints().filter(m => !this.mrSame(m.url, url));
+    const own = others.filter(m => this.mintOnPhone(m.url));
+    return ((own[0] || others[0]) || {}).url || '';
+  }
+
+  // is the phone on it, or saved on it
+  mrOnIt(url) {
+    const W = window.FoxyWallet;
+    const saved = (W && W.saved && W.saved()) || {};
+    return this.mrSame(W && W.mintUrl, url) || this.mrSame(saved.url, url);
+  }
+
+  /* Nothing there, or nothing that can be moved: one line, and it goes. What a quote proved cannot be moved is named, with the
+   * reason it gave (`mrDustWhy`), and stays at the mint until it is added again. CANCEL ends a removal under way as
+   * TRANSFER's CANCEL does, nothing removed. */
+  mrAskEmpty(url, picked) {
+    const onIt = this.mrOnIt(url);
+    const next = onIt ? this.mrNextMint(url, picked) : '';
+    const left = this.mrLeftText(url);
+    const name = this.mintNameOf(url) || 'that mint';
+    const whys = Object.keys(this.state.mrDustWhy || {}).map(k => this.state.mrDustWhy[k]);
+    const floored = Object.keys(this.state.mrFloorAt || {}).length;
+    const why = whys.indexOf('floor') >= 0 ? ' It is less than the smallest amount '
+      + (floored > 1 ? 'any of your other mints' : (this.mintNameOf(picked) || 'the other mint')) + ' takes.'
+      : whys.indexOf('fee') >= 0 ? ' It is less than the fee to move it.' : '';
+    const lines = [left ? left + ' stays at ' + this.mrName(url) + ' until you add it again.' + why : '',
+      this.mrSentLine(url),
+      onIt ? 'Foxy moves to ' + (this.mintNameOf(next) || 'another mint') + '.' : '', left ? '' : 'Its history stays on this phone.'];
+    this.blockedCard('mintRemove', {
+      tone: 'ask',
+      title: 'REMOVE ' + this.mrName(url) + '?',
+      reason: lines.filter(Boolean).join(' '),
+      retry: 'REMOVE', go: () => this.mrRemoveLeaving(url, next),
+      shut: { label: 'CANCEL', tap: () => { if (this.state.mrMint) this.trCancel(); } },
+    });
+    console.log('[foxy] remove ' + name + ': asked' + (left ? ', ' + left + ' too little to move' : ''));
+  }
+
+  /* Off the list now: the phone moved off it first where it is on it (`next`, past the gate where that mint is not the
+   * phone's yet), or back to its own mint where a quote visited another. */
+  mrRemoveNow(url, next, n) {
+    const W = window.FoxyWallet;
+    /* Money still moving is waited for first, ten seconds at most, and nothing moves the phone meanwhile; then every refusal
+     * is asked again before the phone leaves the mint, and refused, it stays where it is. */
+    const tries = n || 0;
+    if (this.moneyBusy && this.moneyBusy() && tries < 40) { setTimeout(() => this.mrRemoveNow(url, next, tries + 1), 250); return; }
+    const no = this.mrRefusal(url);
+    // refused: home as TRANSFER's CANCEL goes, where a quote visited the other mint; the phone saved where it was
+    if (no) { this.mrRefuse(no); if (this.homeAgain) this.homeAgain(); return; }
+    if (!this.mrOnIt(url)) {
+      Promise.resolve(this.homeAgain ? this.homeAgain() : null).then(() => this.mrDrop(url), () => this.mrDrop(url));
+      return;
+    }
+    const to = this.mrNextMint(url, next);
+    if (!to) { this.mrRefuse(this.mrRefusal(url) || 'There is no other mint to move to.'); return; }
+    const go = () => W.connect(to).then(() => { this.walletReady && this.walletReady({ name: this.mintNameOf(to) }); this.mrDrop(url); },
+      (e) => { this.toast(W.reason(e), true); });
+    if (this.mintGate) this.mintGate(to, go, 'To add this mint.'); else go();
+  }
+
+  /* Off the list (the wallet's `removeMint`). Anything left there stays in its pile, and the notice says where it shows:
+   * HISTORY's mint list, under REMOVED, until the mint is added again. */
+  mrDrop(url, n) {
+    const W = window.FoxyWallet;
+    /* Every refusal asked again right before it goes (an invoice made, a till opened, a code made while the question sat):
+     * money still moving is waited for, ten seconds at most, and then refuses like the rest. Refused, nothing is removed. */
+    const tries = n || 0;
+    if (this.moneyBusy && this.moneyBusy() && tries < 40) { setTimeout(() => this.mrDrop(url, tries + 1), 250); return; }
+    const no = this.mrRefusal(url);
+    if (no) {
+      console.log('[foxy] remove ' + this.mintNameOf(url) + ': refused at the last step (' + no + ')');
+      this.setState({ mrMint: '', mrLegs: [], mrDustWhy: {} });
+      this.mrRefuse(no);
+      return;
+    }
+    try { W.removeMint(url); } catch (e) { this.toast(W.reason(e), true); return; }
+    this._mrAdded = null;
+    this.setState({ mrMint: '', mrLegs: [], mrDustWhy: {} });
+    const left = this.mrLeftText(url);
+    const sent = this.mrSentLine(url);
+    if (left || sent) {
+      this.blockedCard('mintRemoved', {
+        tone: 'ask', title: this.mrName(url) + ' REMOVED',
+        reason: [left ? left + ' stays at ' + this.mrName(url) + ' until you add it again. HISTORY still lists it with its mints.' : '', sent]
+          .filter(Boolean).join(' '),
+      });
+    } else this.toast(this.mintNameOf(url) + ' is off your list.');
+    if (this.refreshBalance) this.refreshBalance();
+    if (this.loadHistory) this.loadHistory();
+  }
+
+  /* A balance: TO WHICH MINT?, TRANSFER's own "to" step, its list the other mints. The sats first where it holds both. */
+  mrMoveStart(url) {
+    const W = window.FoxyWallet;
+    if (!W || !W.transferQuote) return;
+    if (this.refuseSwitchWhileBusy()) return;
+    this._trWas = W.mintUrl || '';
+    this._mrTries = 0;
+    this._mrAdded = null;
+    const held = this.mrHeld(url);
+    this.goSwitchMint({
+      mrMint: url, mrEdit: false, mrTo: '', mrLegs: [], mrDustWhy: {},
+      trStep: 'to', trFrom: url, trTo: '', trUnit: held.sat > 0 ? 'sat' : 'usd', trSats: 0, trPlan: null, trFee: null, trErr: '',
+    });
+  }
+
+  /* The mint it goes to, past the gate (`trPick`): TRANSFER's confirmation for all of it, no keypad. In sats, the whole pile
+   * is asked and the quote's own answer (`foxyFits`) gives what the fee leaves room for; in dollars, the sats the pile comes
+   * to at the phone's price as a first guess, then at the mint's own rate from that quote (`mrQuoted`), stepped down in
+   * proportion where it does not fit (`mrQuoteShort`). */
+  mrPickTo(mint) {
+    const s = this.state;
+    const held = this.mrHeld(s.mrMint);
+    const dollars = s.trUnit === 'usd';
+    let sats = held.sat;
+    if (dollars) {
+      const px = this.px ? Number(this.px()) || 0 : 0;
+      if (!(px > 0)) { this.toast('Foxy has no bitcoin price yet to move dollars at. Try again in a moment.', true); return; }
+      sats = Math.floor(held.usd / 100 / px * 1e8);
+    }
+    this._mrTries = 0;
+    this.setState(p => ({
+      trTo: mint, mrTo: mint, trStep: '',
+      screen: 'trConfirm', stack: p.screen === 'trConfirm' ? p.stack : p.stack.concat([p.screen]),
+      trSats: sats, trPlan: null, trFee: null, trErr: '', trFits: 0, cfMore: '',
+    }));
+    if (!(sats > 0)) { this.mrDust('fee'); return; }
+    this.mrWhenFree(() => this.quoteTransfer());
+  }
+
+  /* After a move, the next one's quote waits for the wallet to let go of what the last held (`moneyBusy`): a few seconds at
+   * most, and dropped if the removal was left meanwhile. */
+  mrWhenFree(go, n) {
+    const tries = n || 0;
+    if (!this.state.mrMint) return;
+    if (!(this.moneyBusy && this.moneyBusy()) || tries >= 40) { go(); return; }
+    setTimeout(() => this.mrWhenFree(go, tries + 1), 250);
+  }
+
+  /* A quote for all of it refused for want of room for the fee: asked again for what fits (four times at most). What the
+   * quote proves cannot move (nothing fits beside the fee, or under the far mint's smallest invoice): too little to move
+   * (`mrDust`). Any other refusal is TRANSFER's error, with TRY AGAIN and CANCEL. True where it was handled here. */
+  mrQuoteShort(e) {
+    const s = this.state;
+    if (!s.mrMint || !e || e.left) return false;
+    const fits = Number(e.foxyFits) || 0;
+    const need = Number(e.foxyNeed) || 0, have = Number(e.foxyHave) || 0;
+    /* The far mint will invoice a larger figure but not this one: under its smallest invoice (the wallet's probe, `foxyFloor`).
+     * Change after a move goes to another mint on the phone that takes it, if one does (each asked in turn); under every
+     * one's smallest invoice it is too little to move. On the first move a floor is TRANSFER's error, and the keeper's pick
+     * is not changed. */
+    const floor = !!(e && e.foxyFloor) || /so it is the amount/.test(String((e && e.message) || ''));
+    // only change is dust by a floor: the first move's refusal is TRANSFER's error, the pile is not too little to move
+    if (floor && !(s.mrLegs || []).length) return false;
+    if (floor) {
+      this.setState({ trQuoting: false });
+      const tried = Object.assign({}, s.mrFloorAt || {}, { [String(s.trTo || '').replace(/\/+$/, '')]: true });
+      const other = (s.mrLegs || []).length ? this.allMints().find(m => !this.mrSame(m.url, s.mrMint) && !tried[String(m.url).replace(/\/+$/, '')]
+        && this.mintOnPhone(m.url)) : null;
+      this.setState({ mrFloorAt: tried });
+      if (other) {
+        console.log('[foxy] remove: ' + this.mintNameOf(s.trTo) + ' will not take so little; asking ' + this.mintNameOf(other.url));
+        this.mrPickTo(other.url);
+        return true;
+      }
+      this.mrDust('floor');
+      return true;
+    }
+    /* Only an answer about the fee says anything about what fits (`foxyFits`, set by the wallet's quote with the figures);
+     * any other refusal (a mint not reached, its Lightning down, a quote that failed) proves nothing: TRANSFER's error. */
+    if (e.foxyFits === undefined) return false;
+    let less = 0;
+    if (s.trUnit !== 'usd') less = fits > 0 && fits < s.trSats ? fits : 0;
+    else if (need > 0 && have > 0 && need > have) less = Math.min(s.trSats - 1, Math.floor(s.trSats * have / need) - 1);
+    this._mrTries = (this._mrTries || 0) + 1;
+    if (less > 0 && this._mrTries <= 4) {
+      this.setState({ trQuoting: false });
+      this.trMoveLess(less);
+      return true;
+    }
+    // stepped down four times and still short: not proved too little, TRANSFER's error
+    if (less > 0) return false;
+    this.setState({ trQuoting: false });
+    this.mrDust('fee');
+    return true;
+  }
+
+  /* A removal's dollars quoted: what leaves (`gross`) should be the pile, less no more than the mint's own fee on it. The
+   * first figure was the phone's price; the quote carries the mint's, so a pile left short by the difference is quoted again
+   * at it, three times at most. True where it asked again. */
+  mrQuoted(plan) {
+    const s = this.state;
+    if (!s.mrMint || s.trUnit !== 'usd' || !plan || plan.unit !== 'usd') return false;
+    const have = this.mrHeld(s.mrMint).usd;
+    const gross = Math.round(Number(plan.gross) || 0);
+    const slack = Math.max(1, Math.round(Number(plan.feeUnit) || 0));
+    this._mrUp = this._mrUp || 0;
+    if (!(gross > 0) || have - gross <= slack || this._mrUp >= 3) return false;
+    const up = Math.floor(s.trSats * have / gross);
+    if (!(up > s.trSats)) return false;
+    this._mrUp += 1;
+    console.log('[foxy] remove: the dollars quoted at the mint\u2019s rate leave ' + (have - gross) + ' behind; asking for ' + up + ' sats');
+    this.setState({ trQuoting: false });
+    this.trMoveLess(up);
+    return true;
+  }
+
+  /* What a quote proved cannot move, in the unit being moved (`why`: 'fee' or 'floor'): it stays, said with its reason, and
+   * the removal goes on to the other balance, or asks its one line (`mrNextLeg`). */
+  mrDust(why) {
+    const s = this.state;
+    if (!s.mrMint) return;
+    const unit = s.trUnit === 'usd' ? 'usd' : 'sat';
+    this.setState({ mrDustWhy: Object.assign({}, s.mrDustWhy || {}, { [unit]: why || 'fee' }) });
+    this.mrNextLeg();
+  }
+
+  /* What comes next in a removal: a balance still to move (the sats before the dollars), or what came back as change while a
+   * quote may still move it (three moves of each at most), each with its own confirmation; then, with something left that
+   * cannot move, the one-line question (`mrAskEmpty`); with nothing left, the mint off the list (`mrFinish`). */
+  mrNextLeg() {
+    const s = this.state;
+    const url = s.mrMint;
+    if (!url) return;
+    const held = this.mrHeld(url);
+    const legs = s.mrLegs || [];
+    const dust = s.mrDustWhy || {};
+    const count = (u) => legs.filter(x => x === u).length;
+    const unit = ['sat', 'usd'].find(u => held[u] > 0 && !dust[u] && count(u) < 3);
+    if (unit) {
+      console.log('[foxy] remove ' + this.mintNameOf(url) + ': ' + (count(unit) ? 'what came back as change' : unit === 'usd' ? 'the dollars' : 'the sats') + ' next');
+      this._mrUp = 0;
+      this.setState({ trUnit: unit, trFrom: url, mrFloorAt: {} });
+      this.mrPickTo(s.mrTo);
+      return;
+    }
+    if (held.sat > 0 || held.usd > 0) { this.mrAskEmpty(url, s.mrTo || ''); return; }
+    this.mrFinish(url);
+  }
+
+  // what stays at a mint, in words ('₿ 12', '₿ 12 and $0.01'), or '' for nothing
+  mrLeftText(url) {
+    const held = this.mrHeld(url);
+    return [held.sat > 0 ? this.money(held.sat).main : '', held.usd > 0 ? this.unitFigure(held.usd, 'usd') : ''].filter(Boolean).join(' and ');
+  }
+
+  /* A token sent from the mint and not claimed (the keeper, 2026-11-07: "let it through"): it does not hold the mint on the
+   * list, and stays on its note as any sent token does; said, with its figure, before the mint goes. '' for none. */
+  mrSentLine(url) {
+    const W = window.FoxyWallet;
+    const t = (W && W.mintUnclaimedSent) ? W.mintUnclaimedSent(url) : { count: 0, sat: 0, usd: 0 };
+    if (!(t.count > 0)) return '';
+    const fig = [t.sat > 0 ? this.money(t.sat).main : '', t.usd > 0 ? this.unitFigure(t.usd, 'usd') : ''].filter(Boolean).join(' and ');
+    return t.count === 1 ? 'A token of ' + fig + ' you sent is still unclaimed; it stays on its note.'
+      : t.count + ' tokens of ' + fig + ' you sent are still unclaimed; they stay on their notes.';
+  }
+
+  /* ADD A MINT on a removal's TO WHICH MINT? (the keeper, 2026-11-07: "yes make it the destination"): the mint added is where
+   * the money goes. Its gate was passed by the tile (`typeMintGated`) or the scan (`mintGate`), so it is chosen and not asked
+   * again; the confirmation and the move follow as for any mint on the list. */
+  mrAddTo(url) {
+    const W = window.FoxyWallet;
+    const u = String(url || '').trim().replace(/\/+$/, '');
+    const bad = W && W.mintProblem && W.mintProblem(u);
+    if (bad) { this.toast(bad, true); return; }
+    if (this.mrSame(u, this.state.mrMint)) { this.toast('That is the mint being removed. Pick another.', true); return; }
+    this.mrUndoAdd();
+    /* What this add changes, so a dropped removal undoes only that: nothing for a mint already on the list or already
+     * chosen (its address typed again), else the choice and the place on the list, hidden again where it had been. */
+    const listed = this.allMints().some(m => this.mrSame(m.url, u));
+    const chosen = !!(W && W.mintChosen && W.mintChosen(u));
+    this._mrAdded = (listed || chosen) ? null : { url: u, wasHidden: !!(W && W.mintHidden && W.mintHidden(u)) };
+    if (W && W.chooseMint) W.chooseMint(u);
+    console.log('[foxy] remove ' + this.mintNameOf(this.state.mrMint) + ': to ' + this.mintNameOf(u) + ', added now');
+    this.trPickTo(u);
+  }
+
+  mrRemoveLeaving(url, picked) {
+    const to = picked || this.state.mrTo || '';
+    if (this.state.screen === 'trConfirm' || this.state.mrMint) {
+      this.setState({ screen: 'home', stack: [], trPlan: null, trStep: '', trErr: '', trBusy: false, mrMint: '', mrEdit: false });
+    }
+    const left = this.mrLeftText(url);
+    if (left) console.log('[foxy] remove ' + this.mintNameOf(url) + ': ' + left + ' stays there, too little to move');
+    this.mrRemoveNow(url, to);
+  }
+
+  /* A move of a removal landed: money is at the mint it went to, so a mint added for it stays; then what comes next
+   * (`mrNextLeg`). */
+  mrMoved() {
+    const s = this.state;
+    const url = s.mrMint;
+    if (!url) return;
+    this._mrAdded = null;
+    this.setState({ mrLegs: (s.mrLegs || []).concat([s.trUnit === 'usd' ? 'usd' : 'sat']) });
+    this.mrNextLeg();
+  }
+
+  /* The phone where it belongs (the mint it was on, unless that was the one removed, when the move left it at the mint the
+   * money went to), and the mint off the list. */
+  mrFinish(url) {
+    const was = this._trWas;
+    const W = window.FoxyWallet;
+    const back = was && !this.mrSame(was, url) && !this.mrSame(W.mintUrl, was) && this.connectBack ? this.connectBack(was) : null;
+    Promise.resolve(back).then(() => this.mrDrop(url), (e) => {
+      // not back where it was: it is at the mint the money went to, which is the phone's now
+      console.warn('[foxy] remove: back to ' + this.mintNameOf(was) + ' failed: ' + W.reason(e));
+      this.mrDrop(url);
+    });
+  }
+
+  /* The mints removed that HISTORY can still show, each as the list draws a mint (`allMints`). */
+  mrRemovedMints() {
+    const W = window.FoxyWallet;
+    const hidden = (W && W.mintsHidden) ? W.mintsHidden() : [];
+    const strip = u => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    return hidden.map(u => {
+      const shipped = (this.DEFAULT_MINTS || []).find(m => this.mrSame(m.url, u));
+      return shipped || { url: u, name: strip(u), host: strip(u), logo: '', tint: '#5A5A5A' };
+    });
+  }
+
+  // under the confirmation's figures, while a removal moves its money
+  mrConfirmLine() {
+    const s = this.state;
+    if (!s.mrMint) return '';
+    const held = this.mrHeld(s.mrMint);
+    const name = this.mintNameOf(s.mrMint) || 'that mint';
+    const next = s.trUnit === 'sat' && held.usd > 0 && (s.mrLegs || []).indexOf('usd') < 0 ? ' Its dollars move next.' : '';
+    const sent = this.mrSentLine(s.mrMint);
+    const again = (s.mrLegs || []).indexOf(s.trUnit === 'usd' ? 'usd' : 'sat') >= 0;
+    const back = again ? (s.trUnit === 'usd' ? this.unitFigure(held.usd, 'usd') : this.money(held.sat).main) + ' came back as change. ' : '';
+    return back + 'All of it moves, then ' + name + ' leaves your list.' + next
+      + ' Change the fee hands back stays at ' + name + ' until you add it again.' + (sent ? ' ' + sent : '');
+  }
 
   /* switchMint: the mint list. */
   /** @param {RenderContext} c */
@@ -39744,14 +40409,26 @@ class Component extends DCLogic {
       : s.tillPick ? 'Pick every mint this till takes. Payments from other mints cross into the default, the payer paying the fee.'
       : s.fcPick ? 'This card is at ' + this.mintNameOf(s.fc && s.fc.mint) + '. Other mints cost a Lightning fee.'
       : s.trStep === 'from' ? 'Move money between the mints you use.'
+      // a removal's question (26s-mint-remove.js): where all of it goes before the mint leaves the list
+      : (s.mrMint && s.trStep === 'to') ? 'Everything at ' + this.mintNameOf(s.trFrom) + ' moves to the mint you pick. Then '
+        + this.mintNameOf(s.trFrom) + ' leaves your list.'
       : s.trStep === 'to' ? 'Moving from ' + this.mintNameOf(s.trFrom) + '.'
       /* switching: no line, as designed; the mint you are on is the ticked tile, and each tile says what it holds in every unit.
        * Only a phone on no mint is told so, which no tile says. */
       : this.mintHost() ? '' : 'Connected to no mint.';
+    /* The pencil at the top right while switching (the keeper's words, 2026-11-07): edit mode puts a bin on each tile and a
+     * tick where the pencil was; a tile tapped then switches nothing (26s-mint-remove.js). */
+    const editable = sc === 'switchMint' && tiles && !s.trStep && !s.fcPick && !s.tillPick && !s.wdPick && !s.tillList && !histPick
+      && !s.bankPick && !s.mrMint;
+    const editing = editable && !!s.mrEdit;
     const FUR = "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),"
       + "linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),url('foxy-fur.webp')";
     return {
       isSwitchMint: sc === 'switchMint',
+      mintEditShown: editable,
+      mintEditOff: editable && !editing,
+      mintEditOn: editing,
+      mintEditTap: () => this.mrEditToggle(),
       mintTilesShown: tiles,
       mintRowsShown: !tiles,
       // the tiles sit closer to the screen's edges than the rows did, as designed, and a card's list closer to each other
@@ -39760,7 +40437,8 @@ class Component extends DCLogic {
       // the foot holds NEXT, or the till's second button; with neither, only the room the screen's edge wants
       mintFootPad: (L ? (!!L.next.shown || !!L.add.shown) : (cardList || s.tillPick === 'set')) ? '12px 24px 30px' : '0 0 22px',
       // adding a mint belongs to switching, not to picking one to move between
-      mintPickers: !s.trStep && !s.fcPick && !s.tillPick && !s.wdPick && !s.tillList && !histPick && !s.bankPick,
+      // (and a removal's TO WHICH MINT?, where the money can go to a mint added now, through the gate as ever)
+      mintPickers: (!s.trStep || (!!s.mrMint && s.trStep === 'to')) && !s.fcPick && !s.tillPick && !s.wdPick && !s.tillList && !histPick && !s.bankPick,
       /* The same list does three jobs: switching, and the two steps of a
        * transfer between your own mints. */
       /* And a fourth, for a card: which mint it moves to (26f-flashcard.js).
@@ -39779,7 +40457,7 @@ class Component extends DCLogic {
         : s.fcPick ? 'TRANSFER TO'
         : s.trStep === 'from' ? 'FROM WHICH MINT?'
         // TRANSFER's second question keeps its words; plain switching, the one these tiles are reached from, is SWITCH MINT
-        : s.trStep ? 'TO WHICH MINT?' : 'SWITCH MINT',
+        : s.trStep || s.mrMint ? 'TO WHICH MINT?' : 'SWITCH MINT',
       mintNowLine: nowLine,
       mintNowShown: !!nowLine,
       /* The mint you are on comes first and looks different. It used to be
@@ -39825,13 +40503,16 @@ class Component extends DCLogic {
             tint: m.tint,
             logo: m.logo ? "url('" + m.logo + "')" : 'none',
             here: here, notHere: !here,
+            // edit mode's bin (26s-mint-remove.js `mrTrash`)
+            trash: editing, trashTap: () => this.mrTrash(m.url),
             text: busy ? 'CONNECTING\u2026' : pile.text,
             ink: (here || busy) ? 'var(--acc-ink)' : pile.ink,
             busy: busy,
             bg: here ? 'rgba(var(--acc-rgb),.12)' : 'var(--surface)',
             border: here ? 'var(--acc)' : 'rgba(var(--ink-rgb),.12)',
             // tapping the one you are already on should do nothing at all
-            tap: histPick ? (() => this.histMintPick(m.url))
+            tap: editing ? (() => {})
+              : histPick ? (() => this.histMintPick(m.url))
               : !reach ? (() => this.offlineNo('Switching to ' + m.name))
               : s.tillPick === 'default' ? (() => this.tillMintPick(m.url))
               : s.tillPick ? (() => this.tillSetToggle(m.url))
@@ -39854,7 +40535,12 @@ class Component extends DCLogic {
         if (histPick) {
           const shown = String((this.histShown && this.histShown().mint) || '').replace(/\/+$/, '');
           const ticked = (m) => !!shown && m.url.replace(/\/+$/, '') === shown;
-          return all.filter(m => this.onMint(m.url)).concat(all.filter(m => !this.onMint(m.url))).map(m => row(m, ticked(m)));
+          /* And the mints removed from the list (26s-mint-remove.js `mrRemovedMints`), after the rest and greyed, REMOVED under
+           * the name: their history stays, and so does anything left there, which their tile shows. */
+          const gone = (this.mrRemovedMints ? this.mrRemovedMints() : []).map(m => Object.assign(row(m, ticked(m)), {
+            host: 'REMOVED \u00b7 ' + m.host, dim: '0.55',
+          }));
+          return all.filter(m => this.onMint(m.url)).concat(all.filter(m => !this.onMint(m.url))).map(m => row(m, ticked(m))).concat(gone);
         }
         if (s.wdPick) return this.fcWdRows ? this.fcWdRows(row) : [];
         // a card's TRANSFER TO (26n-card-withdraw-to.js), each other mint with what the move there costs

@@ -1083,18 +1083,24 @@
     const want = paidAt;
     const judgeAt = src ? src.mint : want;
     const atHere = !judgeAt || this.requestHere({ mints: [judgeAt] });
-    const thereHas = (!atHere && !usdReq && W && W.balanceAt) ? Math.round(Number(W.balanceAt(judgeAt)) || 0) : null;
+    // what is held there in the request's unit: dollars where it asks for dollars (`reqHeldAt`)
+    const thereHas = atHere || !W ? null
+      : usdReq ? (W.balanceOf ? Math.round(Number(W.balanceOf('usd', judgeAt)) || 0) : null)
+      : (W.balanceAt ? Math.round(Number(W.balanceAt(judgeAt)) || 0) : null);
     let lack = null;
     if (sats > 0 && W && W.sendShortfall && !(src && src.plan) && !swapSrc) {
       if (atHere || ((thereHas == null || thereHas < sats) && !src)) {
         lack = usdReq ? W.sendShortfall(sats, { unit: 'usd', locked: lockedNow }) : W.sendShortfall(sats, { locked: lockedNow });
       } else if (thereHas != null && thereHas >= sats) {
         // paid there, on a visit: what that mint charges for the pieces is known once there
-        lack = { short: false, need: sats, have: thereHas, fee: 0, there: true };
+        /* paid there, on a visit: what that mint charges for the pieces is known once there, unless its keysets on file
+         * say it charges nothing (`piecesFreeAt`), which is said as no fee */
+        const free = !!(W.piecesFreeAt && W.piecesFreeAt(judgeAt, usdReq ? 'usd' : 'sat') === true);
+        lack = { short: false, need: sats, have: thereHas, fee: 0, there: true, free: free };
       } else {
         const name = this.pfName ? this.pfName(judgeAt) : judgeAt;
         lack = { short: true, need: sats, have: thereHas || 0, fee: 0, there: true,
-          why: 'You hold ' + this.money(thereHas || 0).main + ' at ' + name + '. This needs ' + this.money(sats).main + '.' };
+          why: 'You hold ' + fig(thereHas || 0).main + ' at ' + name + '. This needs ' + fig(sats).main + '.' };
       }
     }
     /* Waiting on a connection that is on its way.
@@ -1148,7 +1154,10 @@
       : fig(n));
     const rows = (byTap ? [] : [this.cfRow('DELIVERED TO', to, siteHost ? { sub: siteHost } : undefined)]).concat([
       // (the source chosen on PAY FROM, its mint and balance: 26l-pay-from.js)
-      this.cfRow('PAYING FROM', src && this.pfLabel ? this.pfLabel(src.mint, src.unit || 'sat') : (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
+      // (or the mint it is paid at on a visit, where this phone holds enough: `reqHeldAt`)
+      this.cfRow('PAYING FROM', src && this.pfLabel ? this.pfLabel(src.mint, src.unit || 'sat')
+        : (lack && lack.there && judgeAt && this.pfLabel) ? this.pfLabel(judgeAt, usdReq ? 'usd' : 'sat')
+        : (this.mintName() || 'THIS MINT').toUpperCase(), { half: true }),
       this.cfRow('NETWORK', 'CASHU', { half: true }),
       // not in the accent: the accent on this screen belongs to the code, and
       // two orange things is one too many to look at
@@ -1172,7 +1181,7 @@
     const swapQ = swapSrc && swapSrc.q ? swapSrc.q : null;
     /* Paid on a visit to a mint this phone holds money at: what that mint charges for the pieces is known only there
      * (`lack.there`), so the fee is not said to be nothing. */
-    const feeThere = !!(lack && lack.there && !(src && (src.plan || src.swap)));
+    const feeThere = !!(lack && lack.there && !lack.free && !(src && (src.plan || src.swap)));
     // what leaves, as PAYING says it and PAY's figure: the amount and the fee, or the swap's whole, in the unit that leaves
     const payingText = !sats ? 'ANY AMOUNT' : held ? 'CHECKING…'
       /* the swap covers what is missing (`pfSwapSource`): what leaves is the other balance's whole for the swap, and the

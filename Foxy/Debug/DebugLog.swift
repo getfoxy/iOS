@@ -47,7 +47,10 @@ enum DebugLog {
                                                      in: .userDomainMask).first else { return nil }
         let dir = support.appendingPathComponent("foxy-logs", isDirectory: true)
         do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
+                                                    attributes: [.protectionKey: DebugLogFile.protection])
+            // and again for a folder an earlier build made without it
+            DebugLogFile.applyProtection(dir)
             // A debug log says nothing a backup should carry to another device.
             var mutable = dir
             var values = URLResourceValues()
@@ -67,13 +70,17 @@ enum DebugLog {
     /// `UNUserNotificationCenter.current` elsewhere in the app look like that
     /// mistake. The check is textual on purpose; the cheap answer is a name of
     /// our own.
-    private static var logFile: URL? { folder?.appendingPathComponent("foxy.log") }
-    private static var rolledFile: URL? { folder?.appendingPathComponent("foxy.log.1") }
 
-    private static let mostBytes = 4 * 1024 * 1024
+    /// 4 MB a file. `-FoxyLogBytes N` sets a smaller size for one run, so a
+    /// rotation can be watched in minutes rather than hours.
+    private static let mostBytes: Int = {
+        let asked = UserDefaults.standard.integer(forKey: "FoxyLogBytes")
+        return asked > 0 ? asked : 4 * 1024 * 1024
+    }()
     private static let queue = DispatchQueue(label: "foxy.debuglog")
-    private static var handle: FileHandle?
-    private static var written = 0
+    private static let file: DebugLogFile? = folder.map {
+        DebugLogFile(folder: $0, mostBytes: mostBytes)
+    }
     private static var started = false
 
     // MARK: Writing
@@ -127,6 +134,8 @@ enum DebugLog {
             append("app \(version) (\(build)) on \(device.systemName) \(device.systemVersion), \(device.model)")
             append("launch arguments: " + (flags.isEmpty ? "none" : flags.joined(separator: " ")))
             append("debugger attached: \(debuggerAttached ? "YES - suspension tests are INVALID" : "no")")
+            // the class a locked phone's pull depends on, as this phone reports it
+            if let file { append("log files: " + file.classes()) }
         }
     }
 
@@ -144,50 +153,10 @@ enum DebugLog {
     // MARK: The queue's own work — never call these from outside it
 
     private static func append(_ line: String) {
-        guard let url = logFile else { return }
-        let text = stamp() + " " + redact(line) + "\n"
-        guard let data = text.data(using: .utf8) else { return }
-
-        if handle == nil {
-            let fm = FileManager.default
-            if !fm.fileExists(atPath: url.path) {
-                fm.createFile(atPath: url.path, contents: nil,
-                              // Written while the app is in the background and the
-                              // screen may be locked, so not .complete: that would
-                              // fail exactly the writes a suspension test is for.
-                              attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
-                written = 0
-            } else {
-                let attributes = try? fm.attributesOfItem(atPath: url.path)
-                written = (attributes?[.size] as? Int) ?? 0
-            }
-            handle = try? FileHandle(forWritingTo: url)
-            try? handle?.seekToEnd()
-        }
-        guard let handle else { return }
-        do {
-            try handle.write(contentsOf: data)
-            written += data.count
-        } catch {
-            NSLog("[foxy] debug log: write failed: %@", String(describing: error))
-            return
-        }
-        if written >= mostBytes { rotateIfFull(force: true) }
+        file?.append(stamp() + " " + redact(line))
     }
 
-    private static func rotateIfFull(force: Bool) {
-        guard let url = logFile, let old = rolledFile else { return }
-        let fm = FileManager.default
-        let attributes = try? fm.attributesOfItem(atPath: url.path)
-        let size = (attributes?[.size] as? Int) ?? 0
-        guard force || size >= mostBytes else { return }
-        try? handle?.close()
-        handle = nil
-        written = 0
-        guard size > 0 else { return }
-        try? fm.removeItem(at: old)
-        try? fm.moveItem(at: url, to: old)
-    }
+    private static func rotateIfFull(force: Bool) { file?.rotateIfFull(force: force) }
 
     /// One formatter, not one per line: this runs on every print.
     private static let clock: DateFormatter = {
@@ -208,5 +177,101 @@ enum DebugLog {
     // requests, onion addresses and nostr keys the field log took out.
 
     private static func redact(_ line: String) -> String { LogRedaction.redact(line) }
+}
+
+/// The log's two files: where the lines go, the rotation, and the protection
+/// class. Its own type so FoxyTests can drive it in a folder of its own at a
+/// small size. Only DebugLog's queue calls it.
+final class DebugLogFile {
+    let folder: URL
+    let logFile: URL
+    let rolledFile: URL
+    let mostBytes: Int
+    /// Gives a file or folder its protection class. FoxyTests stands one in that
+    /// records the calls, since the simulator keeps no class at all.
+    private let protect: (URL) -> Void
+    private var handle: FileHandle?
+    private(set) var written = 0
+
+    /// Readable from the first unlock after a restart, not only while the
+    /// phone is unlocked: the app writes while the screen is locked, and a
+    /// pull copies the files off a locked phone. A pull of a locked phone read
+    /// the rolled file and came back with an empty current file, so the class
+    /// is set on the folder when it is made, and on the file again after every
+    /// create, rather than trusted to the create call's attributes.
+    static let protection = FileProtectionType.completeUntilFirstUserAuthentication
+
+    static func applyProtection(_ url: URL) {
+        do {
+            try FileManager.default.setAttributes([.protectionKey: protection], ofItemAtPath: url.path)
+        } catch {
+            NSLog("[foxy] debug log: could not set the protection of %@: %@",
+                  url.lastPathComponent, String(describing: error))
+        }
+    }
+
+    init(folder: URL, mostBytes: Int, protect: @escaping (URL) -> Void = DebugLogFile.applyProtection) {
+        self.folder = folder
+        logFile = folder.appendingPathComponent("foxy.log")
+        rolledFile = folder.appendingPathComponent("foxy.log.1")
+        self.mostBytes = mostBytes
+        self.protect = protect
+    }
+
+    func close() { try? handle?.close(); handle = nil }
+
+    /// One finished line, stamped and redacted by the caller.
+    func append(_ line: String) {
+        let url = logFile
+        guard let data = (line + "\n").data(using: .utf8) else { return }
+        if handle == nil {
+            let fm = FileManager.default
+            if !fm.fileExists(atPath: url.path) {
+                fm.createFile(atPath: url.path, contents: nil, attributes: [.protectionKey: Self.protection])
+                written = 0
+            } else {
+                let attributes = try? fm.attributesOfItem(atPath: url.path)
+                written = (attributes?[.size] as? Int) ?? 0
+            }
+            // On every open, a new file or the one a relaunch finds, so a file
+            // made under another class by an earlier build is moved to this one.
+            protect(url)
+            handle = try? FileHandle(forWritingTo: url)
+            try? handle?.seekToEnd()
+        }
+        guard let handle else { return }
+        do {
+            try handle.write(contentsOf: data)
+            written += data.count
+        } catch {
+            NSLog("[foxy] debug log: write failed: %@", String(describing: error))
+            return
+        }
+        if written >= mostBytes { rotateIfFull(force: true) }
+    }
+
+    func rotateIfFull(force: Bool) {
+        let url = logFile, old = rolledFile
+        let fm = FileManager.default
+        let attributes = try? fm.attributesOfItem(atPath: url.path)
+        let size = (attributes?[.size] as? Int) ?? 0
+        guard force || size >= mostBytes else { return }
+        try? handle?.close()
+        handle = nil
+        written = 0
+        guard size > 0 else { return }
+        try? fm.removeItem(at: old)
+        try? fm.moveItem(at: url, to: old)
+    }
+
+    /// The class each file and the folder really has, for the launch banner, so
+    /// a pulled log says whether a locked phone can copy it.
+    func classes() -> String {
+        func of(_ url: URL) -> String {
+            guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else { return "none" }
+            return (attributes[.protectionKey] as? FileProtectionType)?.rawValue ?? "not reported"
+        }
+        return "folder \(of(folder)), foxy.log \(of(logFile)), foxy.log.1 \(of(rolledFile))"
+    }
 }
 #endif

@@ -89,7 +89,7 @@ function phone(o) {
     reason: (e) => String((e && e.message) || e),
   };
   global.window = { FoxyWallet: W };
-  const a = Object.assign(lift(['reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'makeTokenForRequest(go) {', 'crossComeHome() {', 'comeHomeOwed() {',
+  const a = Object.assign(lift(['reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'reqHeldAt(req, amount) {', 'makeTokenForRequest(go) {', 'crossComeHome() {', 'comeHomeOwed() {',
     'openRequest(text, opts) {', 'requestHere(req) {', 'tellPayerShort(req) {',
     'reqRunLive() {', 'homeWaitsFor() {', 'syncHome() {', 'refuseForRun(viaTap) {',
     'pfOnchainGo(e, shown) {', 'pfOcHome() {', 'pfHere() {', 'pfMint(u) {', 'pfName(mint) {', 'openReceive() {']), {

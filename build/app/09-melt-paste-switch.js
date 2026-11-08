@@ -279,7 +279,8 @@
   otherUnitsLine() {
     const W = window.FoxyWallet;
     if (!W || typeof W.balances !== 'function') return '';
-    const list = W.balances().filter(b => b.unit !== 'sat');
+    // (not a removed mint's: HISTORY's mint list shows those, 26s-mint-remove.js)
+    const list = W.balances().filter(b => b.unit !== 'sat' && !(W.mintHidden && W.mintHidden(b.mint)));
     if (!list.length) return '';
     return 'Also ' + list.map(b => this.unitMoney(b.amount, b.unit) + ' in ' + this.unitLabel(b.unit)
       + ' ecash at ' + String(b.mint).replace(/^https?:\/\//, '')).join(', ') + '.';
@@ -428,6 +429,8 @@
     const W = window.FoxyWallet;
     const host = String(url).replace(/^https?:\/\//, '');
     if (this.state.switchBusy) return;
+    // ADD A MINT on a removal's TO WHICH MINT?: the mint added is where the money goes, not a switch (26s-mint-remove.js `mrAddTo`)
+    if (this.state.mrMint && this.state.trStep === 'to' && this.mrAddTo) { this.mrAddTo(url); return; }
     // a background sweep holding the proof lock is waited for, a few seconds, rather than refused (`switchAfterSweep`)
     if (!waited && this.switchAfterSweep(url, () => this.justSwitch(url, true))) return;
     // a payment or claim in progress finishes at the mint it started on
@@ -650,7 +653,9 @@
       : String(u || '').trim().replace(/\/+$/, ''));
     const want = canon(url);
     if (!want) return false;
-    if ((this.DEFAULT_MINTS || []).some(m => canon(m.url) === want)) return true;
+    // a shipped mint the keeper removed is not, until it is chosen again (26s-mint-remove.js; the wallet's `mintHidden`)
+    if ((this.DEFAULT_MINTS || []).some(m => canon(m.url) === want) && !(W && W.mintHidden && W.mintHidden(url))
+      && !(W && W.mintReturned && W.mintReturned(url))) return true;
     return !!(W && W.mintChosen && W.mintChosen(url));
   }
 

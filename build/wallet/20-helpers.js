@@ -115,6 +115,42 @@
       return sumProofs(load(K.proofs + '.' + url, []));
     },
 
+    /* Whether a mint charges nothing for spending its pieces in `unit` (sats where none is named), read from its keysets
+     * on file (`mintCacheFor`) with no request: true where no keyset of that unit there names a fee, false where one
+     * does, null where nothing of it is on file. A payment made there on a visit is judged before the visit by this: a
+     * mint that charges nothing is said to charge nothing, and one that does, or one not on file, is said to be told
+     * only there. */
+    piecesFreeAt: function (url, unit) {
+      var u = unitOf(unit || 'sat') || 'sat';
+      var c = canonicalMint(String(url || ''));
+      if (!c) return null;
+      var got = mintCacheFor(c) || mintCacheFor(String(url || '').replace(/\/+$/, ''));
+      var sets = (got && got.keys && Array.isArray(got.keys.keysets)) ? got.keys.keysets : [];
+      var mine = sets.filter(function (k) { return k && String(k.unit || 'sat').toLowerCase() === u; });
+      if (!mine.length) return null;
+      // (read as written: a fee of 0, or none, is the only free one; never coerced, as an amount from the library may not be)
+      return mine.every(function (k) { var f = k.input_fee_ppk; return f === undefined || f === null || String(f).trim() === '0'; });
+    },
+
+    /* The most a keyset of `unit` at that mint charges for one piece, in parts per thousand, from its keysets on file
+     * (`mintCacheFor`): 0 where none charges, null where nothing of it is on file. For sizing what a balance there must
+     * hold over an amount before it is counted as covering it on a visit (the app's `reqHeldAt`). */
+    pieceFeePpkAt: function (url, unit) {
+      var u = unitOf(unit || 'sat') || 'sat';
+      var c = canonicalMint(String(url || ''));
+      if (!c) return null;
+      var got = mintCacheFor(c) || mintCacheFor(String(url || '').replace(/\/+$/, ''));
+      var sets = (got && got.keys && Array.isArray(got.keys.keysets)) ? got.keys.keysets : [];
+      var mine = sets.filter(function (k) { return k && String(k.unit || 'sat').toLowerCase() === u; });
+      if (!mine.length) return null;
+      var most = 0;
+      mine.forEach(function (k) {
+        var f = k.input_fee_ppk === undefined || k.input_fee_ppk === null ? 0 : parseInt(String(k.input_fee_ppk), 10);
+        if (isFinite(f) && f > most) most = f;
+      });
+      return most;
+    },
+
     /* A mint as this wallet files it (`canonicalMint`), for the screens to
      * compare a request's mint with the ones held: a mint written with
      * capitals or :443 is the same mint, and `balanceAt` reads it only in

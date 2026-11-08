@@ -35,7 +35,7 @@ function method(sig) {
 }
 const methods = new Function('return {' + [
   'moneyBusy() {', 'busyWhy() {', 'refuseSwitchWhileBusy() {', 'tokenSwitchRefused(text) {',
-  'justSwitch(url, waited) {', 'sweepHoldsLock() {', 'switchAfterSweep(url, go) {', 'reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'makeTokenForRequest(go) {', 'sweepChange(from, left, already) {',
+  'justSwitch(url, waited) {', 'sweepHoldsLock() {', 'switchAfterSweep(url, go) {', 'reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'reqHeldAt(req, amount) {', 'makeTokenForRequest(go) {', 'sweepChange(from, left, already) {',
   'takeTokenFromPaste(text) {', 'takingToken(run) {', 'newMintKeep(passed) {', 'newMintRedeem() {',
   'rowUnits(row) {', 'adoptRestoreMint(passed) {', 'sweepNewMint(url, host) {', 'mintNameOf(url) {',
   'shortMintName(raw, url) {', 'mintKnownName(url) {',

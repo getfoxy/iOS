@@ -107,6 +107,18 @@ result. It needs no sudo, no cable and no
 works where `log collect` answers "Device not configured (6)" for a phone
 reached over the network.
 
+Unlock the phone before pulling. There are two files: `foxy.log` is the
+current one and `foxy.log.1` the previous 4 MB, rolled over when `foxy.log`
+reached that size. A pull of a locked phone has come back with `foxy.log.1`
+whole and `foxy.log` empty (0 bytes, the copy time as its date, or a
+"socket closed" failure on the first try) while the phone's file was 2.5 MB
+and still being written: **an empty `foxy.log` from a pull means the phone was
+locked, not that the log stopped.** Unlock it and pull again. Each launch's
+banner has a `log files:` line naming the protection class of the folder and
+both files as the phone reports it; both should say
+`NSFileProtectionCompleteUntilFirstUserAuthentication`. `-FoxyLogBytes N`
+makes the files N bytes instead of 4 MB for one run, to watch a rotation.
+
 The file's first lines are a banner giving the build, the launch arguments that
 were set, and **whether a debugger was attached** — so a log cannot later be
 mistaken for a valid suspension run. Note the file name, not a description of
@@ -1459,6 +1471,17 @@ Two phones on **different** mints.
 3. **Both online.** **Pass:** paid over Lightning as before.
 4. **Same mint**, either phone offline. **Pass:** paid with ecash over the
    link as before; no card.
+4a. **Sats held at the receiver's mint, the payer on another.** Payer on Forge
+   holding sats at Minibits (more than the amount), receiver at Minibits, both
+   online; the receiver asks for an amount, touch. **Pass:** the payer's log
+   says "tap: they named …minibits…; paying there by ecash from the balance
+   held" and not "paying by lightning"; PAY FROM (where Forge could pay too)
+   has MINIBITS first and ticked with FEE $ 0.00 (or ₿0), and NEXT opens the
+   request's confirmation with PAYING FROM MINIBITS · BITCOIN and FEE 0; PAY
+   arrives on the receiver at once with no fee in either history; the payer's
+   home is back on Forge afterwards, and still saved on Forge after a
+   restart. With too little at Minibits: their invoice by
+   Lightning, as in step 3.
 5. **A balance that is one mint's.** Offline, take a payment at mint A, then
    switch to mint B. **Pass:** B's home screen shows B's balance and nothing
    of the payment; back at A it shows.
@@ -2436,6 +2459,41 @@ only.*
    its own RECEIVED screen; nothing is listed together.
 7. **Reduce Motion** on: the screen is the same; the flash plays as on the
    single RECEIVED.
+
+#### 22q. Removing a mint from the list
+
+*Needs this phone and two mints on it. Test money only.*
+
+1. **Edit mode.** Open SWITCH MINT. **Pass:** a round pencil at the top right,
+   beside the title. Press it: a round bin on every mint, the pencil a tick, the
+   title unchanged. Tap a mint's name: nothing switches. Press the tick: the
+   bins go. Press the pencil, then the back arrow, and open SWITCH MINT again:
+   no bins.
+2. **A mint with nothing.** In edit mode, press the bin of a mint holding
+   nothing. **Pass:** REMOVE <MINT>? with REMOVE and CANCEL. REMOVE: the mint
+   is gone from the list, the phone stays where it was. ADD A MINT with its
+   address: the lock asks where one is set, and the mint is back.
+3. **A mint with a balance.** Hold a few hundred sats at a mint. Press its bin.
+   **Pass:** TO WHICH MINT?, the other mints and ADD A MINT. Pick one: the
+   CONFIRMATION with the fee and the line "All of it moves, then <mint> leaves
+   your list", no keypad. Press TRANSFER. **Pass:** the payment's screen, then
+   <MINT> REMOVED naming what stayed there ("₿ 8 stays at <MINT> until you add
+   it again"), or "<mint> is off your list" where nothing stayed. HISTORY's
+   chevron lists it after the others, greyed, REMOVED, with that figure. Were
+   you on that mint, Foxy is now on the mint you picked; else on the one you
+   were on.
+3b. **ADD A MINT as the destination, and a token sent.** Send a token from a
+   mint and leave it unclaimed; press that mint's bin, then ADD A MINT on TO
+   WHICH MINT? and add a mint not on the list. **Pass:** no switch; the
+   CONFIRMATION for all of it to the mint added, naming "A token of ₿ N you
+   sent is still unclaimed; it stays on its note". After it lands the mint is
+   removed and the token's row in HISTORY still offers RECLAIM.
+4. **Both balances.** At a mint holding dollars and bitcoin, press its bin.
+   **Pass:** the sats' confirmation says "Its dollars move next"; after it lands
+   the dollars' confirmation follows; after that one lands the mint is removed.
+5. **Refused.** Make an invoice at a mint and leave it unpaid; press that mint's
+   bin. **Pass:** NOT REMOVED, saying an invoice there is not paid or
+   collected; nothing moved.
 
 ## Getting a log off somebody else's phone
 

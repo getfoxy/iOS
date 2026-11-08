@@ -72,6 +72,13 @@ if [ -z "$LOG" ]; then
   exit 1
 fi
 
+# A locked phone has handed over foxy.log.1 whole and foxy.log empty while the
+# phone's own file was megabytes long. An empty file here is a locked phone,
+# not a log that stopped.
+if [ ! -s "$LOG" ]; then
+  echo "foxy.log came back EMPTY. Was the phone locked? Unlock it and run this again." >&2
+fi
+
 # oldest first, so one file reads in order
 ROLLED=$(find "$DEST" -name 'foxy.log.1' | head -1)
 ALL="$DEST/foxy-all.txt"

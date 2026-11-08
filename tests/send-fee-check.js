@@ -63,7 +63,7 @@ const method = (sig) => {
 // several, as one object
 const lift = (sigs) => new Function('return {' + sigs.map(method).join(',\n') + '}')();
 const { confirmSpec, reqMints, reqCanon, reqPayMint, requestSpec, requestNeedsRoute, requestHere, tellPayerShort, shortForReceiver, saidToReceiver, cfPayLook } =
-  lift(['confirmSpec() {', 'reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'requestSpec() {', 'requestNeedsRoute(req) {', 'requestHere(req) {', 'tellPayerShort(req) {', 'shortForReceiver() {', 'saidToReceiver(why) {', 'cfPayLook(spec, o) {']);
+  lift(['confirmSpec() {', 'reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'reqHeldAt(req, amount) {', 'requestSpec() {', 'requestNeedsRoute(req) {', 'requestHere(req) {', 'tellPayerShort(req) {', 'shortForReceiver() {', 'saidToReceiver(why) {', 'cfPayLook(spec, o) {']);
 
 /* The sentence, as it is to be said: the wallet's (Web/foxy-wallet.js pins the
  * wallet's own copy), written out here so a change to it fails in two places. */

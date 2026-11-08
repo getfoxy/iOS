@@ -657,7 +657,7 @@ const banner = (t) => t.w.eval('(function () { return {' + method('torBannerVals
    * screen's repaint after any change is a call to `syncSend`, which is what
    * its componentDidUpdate makes. */
   const LIFTED = ['connecting() {', 'offlineNow() {', 'acceptTarget(text) {', 'offlineInvoiceCard() {', 'openRequest(text, opts) {',
-    'reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'requestNeedsRoute(req) {', 'requestHere(req) {', 'tellPayerShort(req) {', 'shortForReceiver() {', 'saidToReceiver(why) {', 'wantedSats() {', 'typedSats() {', 'sendSatsNow() {', 'sendAsk() {', 'sendToAsk() {', 'quoteSendFee() {',
+    'reqMints(req) {', 'reqCanon(u) {', 'reqPayMint(req) {', 'reqHeldAt(req, amount) {', 'requestNeedsRoute(req) {', 'requestHere(req) {', 'tellPayerShort(req) {', 'shortForReceiver() {', 'saidToReceiver(why) {', 'wantedSats() {', 'typedSats() {', 'sendSatsNow() {', 'sendAsk() {', 'sendToAsk() {', 'quoteSendFee() {',
     'syncSend() {', 'notOnlineCard() {', 'toConfirm() {', 'toAmount() {', 'confirmSpec() {', 'requestSpec() {', 'cfRow(label, value, opt) {',
     'sendToText() {', 'shortId(v) {', 'sendAmountText() {', 'money(sats, fiatCents) {', 'usd(v) {', 'group(n) {', 'satUsd() {',
     'px() {', 'peerRate() {', 'peerRateLabel() {', 'peerRateRow() {', 'heldBlocks(shortBy) {', 'heldNote() {',

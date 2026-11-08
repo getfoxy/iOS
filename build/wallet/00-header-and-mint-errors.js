@@ -124,6 +124,13 @@
     mints: 'foxy.cashu.mints',       // every mint this device has connected to
     mintsUsed: 'foxy.cashu.mints.used', // the same, never pruned: a switch back to one is not scanned
     mintsChosen: 'foxy.cashu.mints.chosen', // the mints the person chose (a switch, a pass of the lock), not a visit's
+    /* The mints the keeper removed from the list (SWITCH MINT's bin, 27-render-mints-restore-backup.js): a shipped mint is
+     * on every phone's list, so its removal is written here, and it stays off until it is chosen again (the gate) or money
+     * at it is taken (a visit). Not money: the pieces of a mint removed with too little to move stay in their pile. */
+    mintsHidden: 'foxy.cashu.mints.hidden',
+    /* A removed mint that money came back to (a receive or a take-back landing in its pile): on the list again, as a mint
+     * visited is, and not the phone's own until it is chosen through the gate, a shipped one too. */
+    mintsReturned: 'foxy.cashu.mints.returned',
     mintNodes: 'foxy.cashu.mint.nodes', // each mint's Lightning node, from invoices it made
     tokenWatch: 'foxy.cashu.token.watch', // tokens being watched until redeemed: Ys, amount, mint
     outtok: 'foxy.cashu.outtoken',   // a token made but not yet handed over

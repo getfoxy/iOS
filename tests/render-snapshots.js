@@ -231,6 +231,21 @@ function cashuIdViews() {
   return v;
 }
 
+/* Removing a mint from the list (26s-mint-remove.js): SWITCH MINT in edit mode, a bin on each tile and the tick at the top
+ * right; the removal's TO WHICH MINT?; TRANSFER's confirmation for all of it with the removal's words; and HISTORY's mint list
+ * with a removed mint, greyed, REMOVED. Last, so that the views before keep their numbers. */
+function mintRemoveViews() {
+  const v = [];
+  const add = (label, view) => v.push([label, view]);
+  add('switchMint, edit mode: a bin on each mint', at('switchMint', { mrEdit: true, stack: ['home'] }));
+  add('switchMint, a removal: TO WHICH MINT?', at('switchMint', { mrMint: OTHER, trStep: 'to', trFrom: OTHER, trUnit: 'sat', stack: ['home'] }));
+  add('trConfirm, a removal moving all of it', at('trConfirm', { mrMint: OTHER, trFrom: OTHER, trTo: MINT, trUnit: 'sat', trSats: 2090, trFee: 10,
+    trPlan: { feeSats: 10, reserve: 10, padSats: 0, moving: 2090, net: 2090 }, stack: ['home', 'switchMint'] }));
+  add('switchMint, WHICH MINT\u2019S HISTORY?, a removed mint', at('switchMint', { histPick: true, stack: ['home', 'history'] },
+    { wallet: { mintsHidden: () => ['https://removed.example'], mintHidden: (u) => /removed\.example/.test(String(u)) } }));
+  return v;
+}
+
 /* HISTORY at a mint picked by the chevron beside its title, the wallet still at MINT (16-history-lists.js, `histShown`): its name for
  * the title, its rows, and its books at the end when they add up and at the top when they do not; and the list it is picked from.
  * Last, so that the views before keep their numbers. */
@@ -1513,7 +1528,7 @@ const INSTANCE = ['_lastFee', '_returnTo', '_blockedEl', '_blockedKind', '_cardQ
   const views = [['home (first render)', {}]]
     .concat(screens.map((s) => ['screen ' + s, { state: { screen: s, stack: [] } }]))
     .concat(popups.map((p) => ['popup ' + p, { state: { screen: 'home', stack: [], [p]: true } }]))
-    .concat(representative(logic), cards(), cashuIdViews(), histMintViews());
+    .concat(representative(logic), cards(), cashuIdViews(), histMintViews(), mintRemoveViews());
 
   const recorded = fs.existsSync(path.join(DIR, 'index.json'))
     ? JSON.parse(fs.readFileSync(path.join(DIR, 'index.json'), 'utf8')) : {};

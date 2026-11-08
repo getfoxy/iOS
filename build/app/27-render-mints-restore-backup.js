@@ -25,14 +25,26 @@
       : s.tillPick ? 'Pick every mint this till takes. Payments from other mints cross into the default, the payer paying the fee.'
       : s.fcPick ? 'This card is at ' + this.mintNameOf(s.fc && s.fc.mint) + '. Other mints cost a Lightning fee.'
       : s.trStep === 'from' ? 'Move money between the mints you use.'
+      // a removal's question (26s-mint-remove.js): where all of it goes before the mint leaves the list
+      : (s.mrMint && s.trStep === 'to') ? 'Everything at ' + this.mintNameOf(s.trFrom) + ' moves to the mint you pick. Then '
+        + this.mintNameOf(s.trFrom) + ' leaves your list.'
       : s.trStep === 'to' ? 'Moving from ' + this.mintNameOf(s.trFrom) + '.'
       /* switching: no line, as designed; the mint you are on is the ticked tile, and each tile says what it holds in every unit.
        * Only a phone on no mint is told so, which no tile says. */
       : this.mintHost() ? '' : 'Connected to no mint.';
+    /* The pencil at the top right while switching (the keeper's words, 2026-11-07): edit mode puts a bin on each tile and a
+     * tick where the pencil was; a tile tapped then switches nothing (26s-mint-remove.js). */
+    const editable = sc === 'switchMint' && tiles && !s.trStep && !s.fcPick && !s.tillPick && !s.wdPick && !s.tillList && !histPick
+      && !s.bankPick && !s.mrMint;
+    const editing = editable && !!s.mrEdit;
     const FUR = "radial-gradient(120% 84% at 26% 0%,rgba(255,240,220,.26),rgba(255,240,220,0) 62%),"
       + "linear-gradient(168deg,rgba(247,154,60,.62),rgba(232,98,42,.72) 48%,rgba(194,74,27,.78)),url('foxy-fur.webp')";
     return {
       isSwitchMint: sc === 'switchMint',
+      mintEditShown: editable,
+      mintEditOff: editable && !editing,
+      mintEditOn: editing,
+      mintEditTap: () => this.mrEditToggle(),
       mintTilesShown: tiles,
       mintRowsShown: !tiles,
       // the tiles sit closer to the screen's edges than the rows did, as designed, and a card's list closer to each other
@@ -41,7 +53,8 @@
       // the foot holds NEXT, or the till's second button; with neither, only the room the screen's edge wants
       mintFootPad: (L ? (!!L.next.shown || !!L.add.shown) : (cardList || s.tillPick === 'set')) ? '12px 24px 30px' : '0 0 22px',
       // adding a mint belongs to switching, not to picking one to move between
-      mintPickers: !s.trStep && !s.fcPick && !s.tillPick && !s.wdPick && !s.tillList && !histPick && !s.bankPick,
+      // (and a removal's TO WHICH MINT?, where the money can go to a mint added now, through the gate as ever)
+      mintPickers: (!s.trStep || (!!s.mrMint && s.trStep === 'to')) && !s.fcPick && !s.tillPick && !s.wdPick && !s.tillList && !histPick && !s.bankPick,
       /* The same list does three jobs: switching, and the two steps of a
        * transfer between your own mints. */
       /* And a fourth, for a card: which mint it moves to (26f-flashcard.js).
@@ -60,7 +73,7 @@
         : s.fcPick ? 'TRANSFER TO'
         : s.trStep === 'from' ? 'FROM WHICH MINT?'
         // TRANSFER's second question keeps its words; plain switching, the one these tiles are reached from, is SWITCH MINT
-        : s.trStep ? 'TO WHICH MINT?' : 'SWITCH MINT',
+        : s.trStep || s.mrMint ? 'TO WHICH MINT?' : 'SWITCH MINT',
       mintNowLine: nowLine,
       mintNowShown: !!nowLine,
       /* The mint you are on comes first and looks different. It used to be
@@ -106,13 +119,16 @@
             tint: m.tint,
             logo: m.logo ? "url('" + m.logo + "')" : 'none',
             here: here, notHere: !here,
+            // edit mode's bin (26s-mint-remove.js `mrTrash`)
+            trash: editing, trashTap: () => this.mrTrash(m.url),
             text: busy ? 'CONNECTING\u2026' : pile.text,
             ink: (here || busy) ? 'var(--acc-ink)' : pile.ink,
             busy: busy,
             bg: here ? 'rgba(var(--acc-rgb),.12)' : 'var(--surface)',
             border: here ? 'var(--acc)' : 'rgba(var(--ink-rgb),.12)',
             // tapping the one you are already on should do nothing at all
-            tap: histPick ? (() => this.histMintPick(m.url))
+            tap: editing ? (() => {})
+              : histPick ? (() => this.histMintPick(m.url))
               : !reach ? (() => this.offlineNo('Switching to ' + m.name))
               : s.tillPick === 'default' ? (() => this.tillMintPick(m.url))
               : s.tillPick ? (() => this.tillSetToggle(m.url))
@@ -135,7 +151,12 @@
         if (histPick) {
           const shown = String((this.histShown && this.histShown().mint) || '').replace(/\/+$/, '');
           const ticked = (m) => !!shown && m.url.replace(/\/+$/, '') === shown;
-          return all.filter(m => this.onMint(m.url)).concat(all.filter(m => !this.onMint(m.url))).map(m => row(m, ticked(m)));
+          /* And the mints removed from the list (26s-mint-remove.js `mrRemovedMints`), after the rest and greyed, REMOVED under
+           * the name: their history stays, and so does anything left there, which their tile shows. */
+          const gone = (this.mrRemovedMints ? this.mrRemovedMints() : []).map(m => Object.assign(row(m, ticked(m)), {
+            host: 'REMOVED \u00b7 ' + m.host, dim: '0.55',
+          }));
+          return all.filter(m => this.onMint(m.url)).concat(all.filter(m => !this.onMint(m.url))).map(m => row(m, ticked(m))).concat(gone);
         }
         if (s.wdPick) return this.fcWdRows ? this.fcWdRows(row) : [];
         // a card's TRANSFER TO (26n-card-withdraw-to.js), each other mint with what the move there costs

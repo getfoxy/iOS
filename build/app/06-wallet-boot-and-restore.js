@@ -728,7 +728,8 @@
       // a mint nobody shipped: no logo, and its host stands in for a name unless it is a test mint or has said its own
       out.push({ url: url, name: this.mintKnownName(url) || strip(url), host: strip(url), logo: '', tint: '#5A5A5A' });
     });
-    return out;
+    // and none the keeper removed (26s-mint-remove.js; the wallet's `mintHidden`), a shipped one among them
+    return (W && W.mintHidden) ? out.filter(m => !W.mintHidden(m.url)) : out;
   }
 
   knownMints() {
@@ -785,6 +786,10 @@
     this._rsCandidates.add(candidate);
     this.setState({ rsCandidate: candidate });
     this.forgetRestoreCandidates(candidate);     // an earlier one, never adopted
+    /* Words to restore: every mint the keeper removed is back on the list, the shipped ones too, so the scan looks at them
+     * as at any mint (26s-mint-remove.js). */
+    const W = window.FoxyWallet;
+    if (W && W.unhideAllMints) W.unhideAllMints();
     this.scanSeedRows(false, { candidate: candidate });
   }
 

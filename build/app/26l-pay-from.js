@@ -83,7 +83,9 @@
     try { all = (W && W.balances) ? W.balances() : []; } catch (e) { all = []; }
     // a test mint's ecash is worth nothing: it is never a balance to pay from (decided)
     return (Array.isArray(all) ? all : []).filter((b) => b && (b.unit === 'sat' || b.unit === 'usd') && Number(b.amount) > 0
-      && String(b.mint || '').toLowerCase().indexOf('testnut.cashu.space') < 0)
+      && String(b.mint || '').toLowerCase().indexOf('testnut.cashu.space') < 0
+      // nor a mint the keeper removed from the list (26s-mint-remove.js): its pile waits there until it is added again
+      && !(W && W.mintHidden && W.mintHidden(b.mint)))
       .map((b) => ({ mint: this.pfMint(b.mint), unit: b.unit, have: Math.round(Number(b.amount) || 0) }));
   }
 
@@ -379,9 +381,19 @@
     const here = this.pfHere();
     // dollars only where the mint issues them
     const issues = (p) => p.unit === 'sat' || (p.mint === here ? this.twoUnitsOn() : !!(W.twoUnits && W.twoUnits(p.mint)));
-    const piles = this.pfPiles().filter((p) => issues(p) && this.pfFace(p.have, p.unit, sats));
-    if (!piles.some((p) => p.mint !== here)) return false;
-    const list = piles.map((p) => this.pfEntry(p, { pref: p.mint === here }));
+    /* A tap whose request names a mint this phone holds enough at (26d-tap.js `tapPayHeld`, `_tapHeld`): that balance
+     * pays the request in ecash, first and chosen, at no fee and with no melt quote asked of it, and every other pays
+     * their invoice with its fee, as before. */
+    const bare = (x) => String(x || '').trim().replace(/^lightning:/i, '').toLowerCase();
+    const th = (this._tapHeld && ask.inv && bare(this._tapHeld.inv) === bare(ask.inv)) ? this._tapHeld : null;
+    let piles = this.pfPiles().filter((p) => issues(p) && this.pfFace(p.have, p.unit, sats));
+    if (th) piles = piles.filter((p) => !(p.mint === this.pfMint(th.at) && p.unit === th.unit));
+    if (!th && !piles.some((p) => p.mint !== here)) return false;
+    const held = th ? [this.pfEntry({ mint: this.pfMint(th.at), unit: th.unit, have: this.pfHeldHave(th) }, {
+      ecash: true, pref: true, cost: th.want, fee: 0, rank: -1, ok: true,
+      feeThere: !this.pfFreeThere(th.at, th.unit) })] : [];
+    const list = held.concat(piles.map((p) => this.pfEntry(p, { pref: p.mint === here })));
+    if (th && list.length === 1) { this.tapHeldGo(th); return true; }
     const show = list.length > 1;
     const key = ask.key;
     const found = Promise.resolve().then(() => (ask.addr ? W.lookupLnurl(ask.addr, ask.sats) : { pr: ask.inv }));
@@ -394,13 +406,25 @@
     const one = show ? null : list[0];
     this.pfOpen('send', list, {
       show: show, ask: 'Pay ' + this.sendAmountText() + ' from', quote: quote,
-      go: (e, shown) => this.pfSendGo(e, shown),
+      go: (e, shown) => (e.ecash ? this.tapHeldGo(th) : this.pfSendGo(e, shown)),
       none: () => this.pfSendGo(null, true),
-      cancel: () => this.setState({ screen: 'home', stack: [] }),
+      cancel: () => {
+        // a tap's other phone is told the payment is not coming
+        if (th && W.tapQuote) W.tapQuote(JSON.stringify({ gaveUp: 'The payer cancelled.' })).catch(() => {});
+        if (th) this._tapHeld = null;
+        this.setState({ screen: 'home', stack: [] });
+      },
       // the one source, chosen in the same breath: the confirmation is drawn from it, and asks nothing of this mint
       patch: one ? { payMint: one.mint, payUnit: one.unit, wallet: one.unit, walletAuto: false, walletTapped: true } : null,
     });
     return true;
+  }
+
+  /* What a tap's ecash source holds (`_tapHeld`): its pile, in its unit. */
+  pfHeldHave(th) {
+    const m = this.pfMint(th.at);
+    const p = this.pfPiles().filter((x) => x.mint === m && x.unit === th.unit)[0];
+    return p ? p.have : 0;
   }
 
   /* This mint's own quote for one of its balances, in the shape another mint's comes in (`quoteFeeAt`), and kept whole
@@ -536,6 +560,15 @@
 
   // ---- a Cashu request ----
 
+  /* A mint this phone is not on that charges nothing for spending its pieces in `unit`, by its keysets on file (the
+   * wallet's `piecesFreeAt`): ecash paid there on a visit costs nothing, and its tile says so (the keeper, 2026-11-07:
+   * paid from Minibits to Minibits, "was there a fee, why? should not have been"). False where it charges, or where
+   * nothing of it is on file: its fee is then told only there. */
+  pfFreeThere(mint, unit) {
+    const W = window.FoxyWallet;
+    try { return !!(W && W.piecesFreeAt && W.piecesFreeAt(mint, unit === 'usd' ? 'usd' : 'sat') === true); } catch (e) { return false; }
+  }
+
   /* PAY FROM before a request's confirmation (07-history-tokens-mints.js `openRequest`): the request's own mint with no
    * fee, first among equals, and every other mint's sats by the crossing, each quoted at once. Sats only: dollars do not
    * cross between mints, and a request in dollars is paid from the dollars at its own mint or not at all. Not with no
@@ -556,7 +589,13 @@
     const need = Math.round(Number(req.sats) || 0);
     if (!want || !(need > 0)) return swap ? this.pfReqOpen(req, [swap], '', this.money(need).main) : false;
     const here = this.pfHere();
-    const piles = this.pfPiles().filter((p) => p.unit === 'sat' && p.have >= need);
+    /* The one it is paid at when nothing is chosen (`reqHeldAt`): a free mint before one that charges, and a mint that
+     * charges counted as covering only with its fee and a margin (`reqHeldMargin`). PAY FROM ticks that one first, so
+     * what is ticked is what `reqPayMint` judges and PAY spends: a tile whose fee is not known yet ranked 0 like a free
+     * one, the request's listing order decided, and a fee mint named first was ticked over a free mint named after it. */
+    const heldAt = this.reqHeldAt ? this.reqHeldAt(req) : '';
+    const over = (p) => ((listed.indexOf(p.mint) >= 0 && this.reqHeldMargin) ? this.reqHeldMargin(p.mint, need, 'sat') : 0);
+    const piles = this.pfPiles().filter((p) => p.unit === 'sat' && p.have >= need + over(p));
     if (piles.length < (swap ? 1 : 2)) return swap ? this.pfReqOpen(req, piles.map((p) => this.pfEntry(p)).concat([swap]), want, this.money(need).main) : false;
     const list = piles.map((p) => {
       if (listed.indexOf(p.mint) < 0) return this.pfEntry(p);
@@ -567,8 +606,12 @@
           ? W.sendShortfall(need, { locked: !!(req.lockTo && !this.offlineNow()) }) : null;
       } catch (x) { lack = null; }
       const fee = lack ? Math.max(0, Number(lack.fee) || 0) : 0;
-      // (paid there on a visit, its mint's fee for the pieces is known only there: `feeThere`, and the tile does not say none)
-      return this.pfEntry(p, { pref: true, cost: need + fee, fee: fee, rank: fee, ok: !(lack && lack.short), feeThere: p.mint !== here,
+      /* (paid there on a visit, its mint's fee for the pieces is known only there: `feeThere`, and the tile does not say
+       * none; unless its keysets on file say it charges nothing, `pfFreeThere`, when the tile says no fee) */
+      const freeThere = p.mint === here || !!(this.pfFreeThere && this.pfFreeThere(p.mint, 'sat'));
+      // ranked: the one it is paid at first, then by fee, a mint that charges (or may) after a free one of the same fee
+      const rank = p.mint === heldAt ? -1 : freeThere ? fee : fee + 1;
+      return this.pfEntry(p, { pref: true, cost: need + fee, fee: fee, rank: rank, ok: !(lack && lack.short), feeThere: !freeThere,
         why: lack && lack.short ? String(lack.why || '') : '', tag: lack && lack.short ? 'NOT ENOUGH' : '' });
     });
     return this.pfReqOpen(req, swap ? list.concat([swap]) : list, want, this.money(need).main);
@@ -791,7 +834,7 @@
     if (piles.length < 2) return false;
     const ready = this._crossReady;
     const list = piles.map((p) => (p.mint === to
-      ? this.pfEntry(p, { pref: true, cost: want, fee: 0, rank: 0, ok: true, feeThere: p.mint !== this.pfHere() })
+      ? this.pfEntry(p, { pref: true, cost: want, fee: 0, rank: 0, ok: true, feeThere: p.mint !== this.pfHere() && !(this.pfFreeThere && this.pfFreeThere(p.mint, 'sat')) })
       : this.pfEntry(p)));
     const quote = (e) => {
       const same = !!(ready && ready.sats === want && ready.to === to && ready.from === e.mint);
