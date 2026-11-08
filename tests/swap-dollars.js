@@ -7,16 +7,16 @@
  * tests/two-balances-swap.js part 2 mounts it) on a stand-in wallet whose rate is fixed, so every figure is known.
  *
  * The amount: SET AMOUNT starts in dollars whichever way the swap goes, and the ⇅ turns it to sats and back as a
- * send's does. What the swap moves is still the balance that leaves, exactly: typed in that unit nothing converts;
- * typed in the other it converts at the mint's last rate (the one the confirmation values it at, not the market's),
- * rounded to the cent the ⇅ shows, and the rate is asked for what that comes to. With no price
- * the ⇅ is refused and the exact unit stays. MORE THAN YOUR ... and ALL OF IT are in the unit that leaves, and a
- * switch after a rate was asked drops that rate.
+ * send's does, at the mint's last rate. What is typed is what arrives, never converted at the phone's price: typed
+ * in the unit that arrives it is the invoice (`get`); typed in the unit that leaves it is what the mint values what
+ * arrives at (`worth`). The mint's fee goes on top. With no price the ⇅ is refused and the unit that leaves stays.
+ * NOT ENOUGH when the balance cannot cover the figure and the fee, with what would fit once the mint has said; ALL OF IT is the whole
+ * balance that leaves; a switch after a rate was asked drops that rate.
  *
- * The confirmation: YOU ARE GETTING, YOU ARE SPENDING, FEE, and the mint's RATE, in that order, both ways round, at
- * a rate of $ 82,601: a bitcoin figure is its dollar worth with its sats under it, a dollar figure has no sats line,
- * the fee is what leaves less what arrives, the heading names the mint, and "Rate held for" counts down on a clock
- * that stops when the screen goes and when the rate lapses. */
+ * The confirmation: RECEIVING, FEE, SPENDING, and the mint's RATE, in that order, both ways round, at a rate of
+ * $ 82,601: RECEIVING is the figure typed, a bitcoin figure is its dollar worth with its sats under it, a dollar
+ * figure has no sats line, the fee is what leaves less what arrives, SPENDING the two together, the heading names
+ * the mint, and "Rate held for" counts down on a clock that stops when the screen goes and when the rate lapses. */
 process.env.TZ = 'UTC';
 const fs = require('fs');
 const path = require('path');
@@ -84,19 +84,29 @@ async function mount() {
   };
   const settle = async () => { for (let i = 0; i < 6; i++) await wait(15); };
 
-  /* The stand-in: a mint that keeps 5% of what leaves, at $ 82,601. One dollar of bitcoin (1,211 sats) gives
-   * $ 0.95; one dollar gives 1,150 sats — the owner's example. `hold` keeps the next answer back until let go.
-   * `rate` is the mint's own (its last, and the one it quotes at), which can be moved off the market's; 0 is a mint
-   * that has given none. */
+  /* The stand-in: a mint that keeps 5% of what leaves, at $ 82,601. One dollar arriving in dollars costs 1,211 sats
+   * and the fee on top (₿ 1,275 in all); one dollar of bitcoin (₿ 1,210) costs $ 1.05. `hold` keeps the next answer
+   * back until let go. `rate` is the mint's own (its last, and the one it quotes at), which can be moved off the
+   * market's; 0 is a mint that has given none. As the wallet's `swapQuote`: `get` is what arrives, `worth` what the
+   * mint values it at, and all of it (or neither) what leaves. */
   const st = { usd: 4205, sat: 50000, host: 'forge.example.com', hold: null, rate: RATE };
   const asked = [];
-  const quote = (from, to, amount) => ({
-    id: 'uswap-' + asked.length, mint: 'https://' + st.host, from, to, total: amount, amount: Math.round(amount * 0.95),
-    fee: amount - Math.round(amount * 0.95),
-    get: from === 'usd' ? Math.floor(amount * 0.95 * 1e6 / (st.rate || RATE)) : Math.floor(amount * (st.rate || RATE) / 1e6 * 0.95),
-    rate: { usdPerBtc: st.rate || RATE, by: st.host }, market: RATE, spread: 0, spreadWarn: false,
-    expiresAt: Date.now() + 67500, state: 'quoted',
-  });
+  const quote = (from, to, given, opts) => {
+    const r = st.rate || RATE;
+    const o = opts || {};
+    const toFrom = (n) => (from === 'usd' ? Math.ceil(n * r / 1e6) : Math.ceil(n * 1e6 / r));
+    const fromTo = (n) => (from === 'usd' ? Math.floor(n * 1e6 / r) : Math.floor(n * r / 1e6));
+    let total, amount, get;
+    if (o.get) { get = given; amount = toFrom(get); total = Math.round(amount / 0.95); }
+    else if (o.worth) { amount = given; get = fromTo(amount); total = Math.round(amount / 0.95); }
+    else { total = given; amount = Math.round(given * 0.95); get = fromTo(amount); }
+    return {
+      id: 'uswap-' + asked.length, mint: 'https://' + st.host, from, to, total, amount, fee: total - amount, get,
+      mode: o.get ? 'get' : o.worth ? 'worth' : '', asked: given, inputFee: 0, spend: total,
+      rate: { usdPerBtc: r, by: st.host }, market: RATE, spread: 0, spreadWarn: false,
+      expiresAt: Date.now() + 67500, state: 'quoted',
+    };
+  };
   w.FoxyWallet = {
     connected: true, mintUrl: 'https://forge.example.com', mintHost: () => st.host, mints: () => [],
     reason: (e) => String((e && e.message) || e), backedUp: () => true, pinIsSet: () => false, tagsFor: () => ({}), tag() {},
@@ -113,12 +123,20 @@ async function mount() {
     mintRate: () => (st.rate ? { usdPerBtc: st.rate, at: Date.now() } : null),
     unitSwapsPending: () => [],
     swapQuote(from, to, amount, opts) {
-      asked.push([from, to, amount, !!(opts && opts.all)]);
-      const q = quote(from, to, amount);
+      asked.push([from, to, amount, opts && opts.all ? true : opts && opts.get ? 'get' : opts && opts.worth ? 'worth' : false]);
+      const q = quote(from, to, amount, opts);
       if (st.hold) return new Promise((r) => { st.hold.push(() => r(q)); });
       return Promise.resolve(q);
     },
     swapRun() { return new Promise(() => {}); },
+    // the wallet's guess (16b-two-balances.js `swapGuess`), for this stand-in's 5%
+    swapGuess(from, to, n, mode, have) {
+      const r = st.rate || RATE;
+      const per = from === 'usd' ? r / 1e6 : 1e6 / r;
+      const need = Math.ceil((mode === 'get' ? n * per : n) / 0.95);
+      const part = have * 0.95;
+      return { need, fits: Math.floor(mode === 'get' ? part / per : part) };
+    },
   };
   const PRICE = { livePrice: RATE, satUsd: RATE / 1e8 };
   A.setState(Object.assign({ walletLive: true, balSats: st.sat, balUsdCents: st.usd, screen: 'home', stack: [] }, PRICE));
@@ -151,92 +169,88 @@ async function mount() {
   A.syncUnit();
   ok(A.state.unit === 'USD', 'and the keypad is left where the person put it');
 
-  // bitcoin into dollars, typed in dollars: the sats that leave, at the mint's last rate
+  // bitcoin into dollars, typed in dollars: $ 1.00 arrives, exactly, whatever the price
   await type('100');
-  ok(/\$ 1\.00/.test(text()) && /₿ 1,211/.test(text()), 'typed $ 1.00, the line under it says the ₿ 1,211 that leave', text().slice(0, 300));
-  ok(A.swapTyped() === Math.round(1 / RATE * 1e8), 'swapTyped is 1,211 sats', String(A.swapTyped()));
+  ok(/\$ 1\.00/.test(text()) && /≈ ₿ 1,211/.test(text()), 'typed $ 1.00, the line under it says about ₿ 1,211', text().slice(0, 300));
+  ok(A.swapTyped() === 100 && A.swapMode() === 'get', 'swapTyped is 100 cents, to arrive', A.swapTyped() + ' ' + A.swapMode());
+  A.setState({ livePrice: 50000, satUsd: 50000 / 1e8 });
+  ok(A.swapTyped() === 100, 'whatever the price is doing');
+  A.setState(PRICE);
   await next();
-  ok(A.state.screen === 'swapConfirm' && JSON.stringify(asked[asked.length - 1]) === '["sat","usd",1211,false]',
-    'NEXT asks the rate for 1,211 sats', JSON.stringify(asked[asked.length - 1]));
-  ok(A.state.swapAmount === 1211, 'and the swap is for those sats');
+  ok(A.state.screen === 'swapConfirm' && JSON.stringify(asked[asked.length - 1]) === '["sat","usd",100,"get"]',
+    'NEXT asks the mint for an invoice of 100 cents', JSON.stringify(asked[asked.length - 1]));
+  ok(A.state.swapAmount === 100 && A.state.swapMode === 'get', 'and the swap is for those cents to arrive');
 
-  // bitcoin into dollars, typed in sats: what is typed is what leaves
+  // bitcoin into dollars, typed in sats: what those sats are worth at the mint arrives
   await toAmount('sat');
   await toggle();
   await type('1211');
-  ok(A.swapTyped() === 1211 && /≈ \$ 1\.00/.test(text()), 'typed ₿ 1,211 in sats: 1,211 exactly, and about what it gives under it', text().slice(0, 300));
+  ok(A.swapTyped() === 1211 && A.swapMode() === 'worth' && /≈ \$ 1\.00/.test(text()), 'typed ₿ 1,211 in sats: 1,211 exactly, and about what it is worth under it', text().slice(0, 300));
   A.setState({ livePrice: 50000, satUsd: 50000 / 1e8 });
   ok(A.swapTyped() === 1211, 'whatever the price is doing');
   A.setState(PRICE);
   await next();
-  ok(JSON.stringify(asked[asked.length - 1]) === '["sat","usd",1211,false]', 'and NEXT asks for 1,211 sats');
+  ok(JSON.stringify(asked[asked.length - 1]) === '["sat","usd",1211,"worth"]', 'and NEXT asks for ₿ 1,211 worth of dollars', JSON.stringify(asked[asked.length - 1]));
 
-  // dollars into bitcoin, typed in sats: the cents that leave
+  // dollars into bitcoin, typed in sats: those sats arrive
   await toAmount('usd');
   await toggle();
   ok(A.state.unit === 'SATS', 'dollars into bitcoin: the ⇅ to sats');
   await type('1211');
-  ok(A.swapTyped() === 100 && /₿ 1,211/.test(text()) && /\$ 1\.00/.test(text()), 'typed ₿ 1,211: $ 1.00 leaves, said under it', text().slice(0, 300));
+  ok(A.swapTyped() === 1211 && A.swapMode() === 'get' && /≈ \$ 1\.00/.test(text()), 'typed ₿ 1,211: those sats to arrive, about $ 1.00 under', text().slice(0, 300));
   await next();
-  ok(JSON.stringify(asked[asked.length - 1]) === '["usd","sat",100,false]', 'NEXT asks the rate for 100 cents', JSON.stringify(asked[asked.length - 1]));
+  ok(JSON.stringify(asked[asked.length - 1]) === '["usd","sat",1211,"get"]', 'NEXT asks for an invoice of ₿ 1,211', JSON.stringify(asked[asked.length - 1]));
 
-  // dollars into bitcoin, typed in dollars: nothing converts
+  // dollars into bitcoin, typed in dollars: $ 1.00 of bitcoin, whatever the price
   await toAmount('usd');
   await type('100');
   A.setState({ livePrice: 50000, satUsd: 50000 / 1e8 });
-  ok(A.swapTyped() === 100, 'typed $ 1.00 in dollars: 100 cents, whatever the price');
+  ok(A.swapTyped() === 100 && A.swapMode() === 'worth', 'typed $ 1.00 in dollars: $ 1.00 of bitcoin, whatever the price');
   A.setState(PRICE);
   await next();
-  ok(JSON.stringify(asked[asked.length - 1]) === '["usd","sat",100,false]', 'NEXT asks for 100 cents');
+  ok(JSON.stringify(asked[asked.length - 1]) === '["usd","sat",100,"worth"]', 'NEXT asks for $ 1.00 of bitcoin', JSON.stringify(asked[asked.length - 1]));
 
-  /* Sats typed for dollars leaving are cents rounded to the nearest, as the ⇅ writes them: 1,000 sats at $ 82,601
-   * are 82.601 cents, so 83 (not 82, as cutting them down would ask), and 351 sats are 28.993 cents, so 29 (0.29
-   * times a hundred is 28.999...: a cut there would ask 28). */
+  /* Sats typed are sats: nothing is cut or rounded into cents on the phone (the mint's quote says what they are
+   * worth). The ⇅ still writes them as the cents it shows: at a mint rate of $ 82,000, 750 sats are 61.5 cents, which
+   * the ⇅ writes as $ 0.61. */
   await toAmount('usd');
   await toggle();
   await type('1000');
-  ok(A.swapTyped() === 83, 'typed ₿ 1,000 at $ 82,601 (82.601 cents): 83 cents, rounded to the nearest', String(A.swapTyped()));
+  ok(A.swapTyped() === 1000, 'typed ₿ 1,000: 1,000 sats, as typed', String(A.swapTyped()));
   await next();
-  ok(JSON.stringify(asked[asked.length - 1]) === '["usd","sat",83,false]', 'and NEXT asks for 83 cents', JSON.stringify(asked[asked.length - 1]));
-  await toAmount('usd');
-  await toggle();
-  await type('351');
-  ok(A.swapTyped() === 29, 'typed ₿ 351 (28.993 cents): 29 cents', String(A.swapTyped()));
-  /* And on an exact half the cents asked for are the figure the ⇅ shows: at a mint rate of $ 82,000, 750 sats are
-   * 61.5 cents, which the ⇅ writes as $ 0.61 and rounding the product times a hundred would make 62. */
+  ok(JSON.stringify(asked[asked.length - 1]) === '["usd","sat",1000,"get"]', 'and NEXT asks for ₿ 1,000 to arrive', JSON.stringify(asked[asked.length - 1]));
   st.rate = 82000;
   await toAmount('usd');
   await toggle();
   await type('750');
-  ok(A.swapTyped() === 61, 'typed ₿ 750 at $ 82,000 (61.5 cents): 61, as the ⇅ shows it', String(A.swapTyped()));
   await toggle();
-  ok(A.state.unit === 'USD' && A.state.amount === '0.61', 'and the ⇅ shows $ 0.61', A.state.amount);
+  ok(A.state.unit === 'USD' && A.state.amount === '0.61', 'the ⇅ shows ₿ 750 as $ 0.61', A.state.amount);
   st.rate = RATE;
 
-  /* The mint's rate off the market's: $ 80,000 at the mint, $ 82,601 on the market. A figure typed in the other unit
-   * converts at the mint's, the rate the confirmation values it at, so the dollars typed are the dollars it repeats. */
+  /* The mint's rate off the market's: $ 80,000 at the mint, $ 82,601 on the market. The ⇅ and the line under the
+   * figure use the mint's, and the confirmation repeats the figure typed at the mint's own quote. */
   st.rate = 80000;
   await toAmount('sat');
   await type('100');
-  ok(A.swapTyped() === 1250 && /₿ 1,250/.test(text()), 'mint at $ 80,000: $ 1.00 of bitcoin is ₿ 1,250 (not the market’s 1,211)', A.swapTyped() + ' ' + text().slice(0, 200));
+  ok(A.swapTyped() === 100 && /≈ ₿ 1,250/.test(text()), 'mint at $ 80,000: $ 1.00 is about ₿ 1,250 (not the market’s 1,211)', A.swapTyped() + ' ' + text().slice(0, 200));
   await next();
-  ok(JSON.stringify(asked[asked.length - 1]) === '["sat","usd",1250,false]', 'NEXT asks for 1,250 sats', JSON.stringify(asked[asked.length - 1]));
-  b0 = (A.confirmSpec().rows || [])[1] || {};
-  ok(b0.value === '$ 1.00 in BITCOIN' && b0.sub === '(₿ 1,250)', 'and the confirmation repeats $ 1.00 in BITCOIN (₿ 1,250)', b0.value + ' ' + b0.sub);
+  ok(JSON.stringify(asked[asked.length - 1]) === '["sat","usd",100,"get"]', 'NEXT asks for $ 1.00 to arrive', JSON.stringify(asked[asked.length - 1]));
+  b0 = (A.confirmSpec().rows || [])[0] || {};
+  ok(b0.label === 'RECEIVING' && b0.value === '$ 1.00 in DOLLARS', 'and the confirmation repeats RECEIVING $ 1.00 in DOLLARS', b0.value);
   await toAmount('usd');
   await type('100');
   await toggle();
   ok(A.state.unit === 'SATS' && A.state.amount === '1250', 'dollars leaving: the ⇅ turns $ 1.00 into ₿ 1,250 at the mint’s rate', A.state.amount);
-  ok(A.swapTyped() === 100, 'which is 100 cents again', String(A.swapTyped()));
+  await toggle();
   await next();
-  ok(JSON.stringify(asked[asked.length - 1]) === '["usd","sat",100,false]', 'and NEXT asks for 100 cents', JSON.stringify(asked[asked.length - 1]));
-  b0 = (A.confirmSpec().rows || [])[1] || {};
-  ok(b0.value === '$ 1.00 in DOLLARS', 'the confirmation repeats $ 1.00 in DOLLARS', b0.value);
-  // a mint that has given no rate: the market's
+  ok(JSON.stringify(asked[asked.length - 1]) === '["usd","sat",100,"worth"]', 'and NEXT asks for $ 1.00 of bitcoin', JSON.stringify(asked[asked.length - 1]));
+  b0 = (A.confirmSpec().rows || [])[0] || {};
+  ok(b0.value === '$ 1.00 in BITCOIN' && b0.sub === '(₿ 1,250)', 'the confirmation repeats $ 1.00 in BITCOIN (₿ 1,250)', b0.value + ' ' + b0.sub);
+  // a mint that has given no rate: the market's, for the line under the figure only
   st.rate = 0;
   await toAmount('sat');
   await type('100');
-  ok(A.swapTyped() === 1211, 'a mint with no rate yet: the market’s, ₿ 1,211', String(A.swapTyped()));
+  ok(A.swapTyped() === 100 && /≈ ₿ 1,211/.test(text()), 'a mint with no rate yet: about ₿ 1,211 at the market’s', A.swapTyped() + ' ' + text().slice(0, 200));
   st.rate = RATE;
 
   // no price ever seen
@@ -257,16 +271,16 @@ async function mount() {
   ok(A.state.unit === 'SATS' && A.state.amount === '', 'the price gone under dollars typed for bitcoin: back to sats, cleared');
   A.setState(PRICE);
 
-  // over the balance, both ways, in the unit that leaves
+  // the figure and the fee on top are more than the balance, both ways: NOT ENOUGH, with what would fit
   await toAmount('sat');
-  await type('5000');
+  await type('4000');
   v = A.renderVals();
-  ok(v.sendOverShown === '1' && v.sendOverLabel === 'MORE THAN YOUR BITCOIN', '$ 50.00 of bitcoin is more than ₿ 50,000', v.sendOverLabel);
+  ok(v.sendOverShown === '1' && v.sendOverLabel === 'NOT ENOUGH', '$ 40.00 and the fee are more than ₿ 50,000: NOT ENOUGH, no figure from a guess', v.sendOverLabel);
   let n = asked.length;
   await next();
   ok(A.state.screen === 'amount' && asked.length === n, 'and NEXT does not take it');
-  await type('4000');
-  ok(A.renderVals().sendOverShown === '0', '$ 40.00 of bitcoin (₿ 48,425) is not');
+  await type('3900');
+  ok(A.renderVals().sendOverShown === '0', '$ 39.00 and the fee are not');
   ok(A.renderVals().amtAltLabel === 'ALL OF IT (₿ 50,000)', 'ALL OF IT is the whole bitcoin balance, in sats, typed in dollars or not', A.renderVals().amtAltLabel);
   A.renderVals().amtAltTap();
   await settle();
@@ -275,9 +289,17 @@ async function mount() {
   await toggle();
   await type('60000');
   v = A.renderVals();
-  ok(v.sendOverShown === '1' && v.sendOverLabel === 'MORE THAN YOUR DOLLARS', '₿ 60,000 ($ 49.56) is more than $ 42.05', v.sendOverLabel);
-  await type('50000');
-  ok(A.renderVals().sendOverShown === '0', '₿ 50,000 ($ 41.30) is not');
+  ok(v.sendOverShown === '1' && v.sendOverLabel === 'NOT ENOUGH', '₿ 60,000 and the fee are more than $ 42.05: NOT ENOUGH', v.sendOverLabel);
+  await type('48000');
+  ok(A.renderVals().sendOverShown === '0', '₿ 48,000 and the fee are not');
+  await toggle();
+  await type('4300');
+  ok(A.renderVals().sendOverLabel === 'NOT ENOUGH', 'typed in dollars, $ 43.00 of bitcoin: NOT ENOUGH', A.renderVals().sendOverLabel);
+  // the mint's own answer for these keys names what would fit
+  A._swapShortFor = { keypad: A.swapKeypad(), from: 'usd', mint: A.swapMintHere(), fits: 3994 };
+  A.setState({ swapTick: Date.now() });
+  ok(A.renderVals().sendOverLabel === 'NOT ENOUGH · UP TO $ 39.94', 'and once the mint has said, up to its figure: $ 39.94', A.renderVals().sendOverLabel);
+  A._swapShortFor = null;
   ok(A.renderVals().amtAltLabel === 'ALL OF IT ($ 42.05)', 'ALL OF IT is the whole dollar balance, in dollars, typed in sats or not');
   A.renderVals().amtAltTap();
   await settle();
@@ -295,7 +317,7 @@ async function mount() {
   ok(A.state.unit === 'SATS' && !A.state.swapQuote, 'the ⇅ drops it');
   await type('1211');
   await next();
-  ok(!!A.state.swapQuote && A.state.swapQuote.total === 100, 'NEXT asks again, for what the new figure comes to');
+  ok(!!A.state.swapQuote && A.state.swapQuote.get === 1211, 'NEXT asks again, for the new figure to arrive');
   A.back();
   await settle();
   A.press('0');
@@ -316,24 +338,24 @@ async function mount() {
   const blocks = () => (A.confirmSpec().rows || []).map((r) => [r.label, r.value, r.sub]);
   const said = (rows) => JSON.stringify(rows.map((r) => r.slice(0, 3)));
 
-  // bitcoin into dollars: $ 1.00 of bitcoin
+  // bitcoin into dollars: $ 1.00 to arrive
   await toAmount('sat');
   await type('100');
   await next();
   let b = blocks();
   ok(said(b.slice(0, 3)) === JSON.stringify([
-    ['YOU ARE GETTING', '$ 0.95 in DOLLARS', ''],
-    ['YOU ARE SPENDING', '$ 1.00 in BITCOIN', '(₿ 1,211)'],
-    ['FEE', '$ 0.05', '(₿ 61)'],
-  ]), 'bitcoin into dollars: GETTING $ 0.95 in DOLLARS, SPENDING $ 1.00 in BITCOIN (₿ 1,211), FEE $ 0.05 (₿ 61)', said(b));
+    ['RECEIVING', '$ 1.00 in DOLLARS', ''],
+    ['FEE', '$ 0.05', '(₿ 64)'],
+    ['SPENDING', '$ 1.05 in BITCOIN', '(₿ 1,275)'],
+  ]), 'bitcoin into dollars: RECEIVING $ 1.00 in DOLLARS, FEE $ 0.05 (₿ 64), SPENDING $ 1.05 in BITCOIN (₿ 1,275)', said(b));
   ok(b[3][0] === 'FORGE’S RATE' && b[3][1] === '₿ 1 = $ 82,601' && /^Rate held for 00:5\d$/.test(b[3][2]),
     'then FORGE’S RATE, ₿ 1 = $ 82,601, Rate held for 00:5x', said(b));
   let t = text();
-  ok(/SWAP YOU ARE GETTING \$ 0\.95 in DOLLARS YOU ARE SPENDING \$ 1\.00 in BITCOIN \(₿ 1,211\) FEE \$ 0\.05 \(₿ 61\) FORGE’S RATE ₿ 1 = \$ 82,601 Rate held for 00:5\d SWAP$/.test(t),
+  ok(/SWAP RECEIVING \$ 1\.00 in DOLLARS FEE \$ 0\.05 \(₿ 64\) SPENDING \$ 1\.05 in BITCOIN \(₿ 1,275\) FORGE’S RATE ₿ 1 = \$ 82,601 Rate held for 00:5\d SWAP$/.test(t),
     'the page draws the four blocks in that order, and nothing else between the title and SWAP', t.slice(0, 400));
-  ok(!/TOTAL|NETWORK|FEE INCLUDED|YOU GET /.test(t), 'no TOTAL, NETWORK, FEE INCLUDED or YOU GET left over');
+  ok(!/TOTAL|NETWORK|FEE INCLUDED|YOU GET |YOU ARE /.test(t), 'no TOTAL, NETWORK, FEE INCLUDED, YOU GET or YOU ARE left over');
   const q1 = A.state.swapQuote;
-  ok(Math.round(q1.total * RATE / 1e6) - q1.get === 5, 'the fee is what leaves less what arrives, at the rate: 100 − 95 cents');
+  ok(Math.round(q1.total * RATE / 1e6) - q1.get === 5, 'the fee is what leaves less what arrives, at the rate: 105 − 100 cents');
 
   // the countdown ticks, and its clock stops with the screen
   const before = b[3][2];
@@ -346,22 +368,22 @@ async function mount() {
   await wait(1200);
   ok(!A._swapClockT, 'which stops when the screen goes');
 
-  // dollars into bitcoin: $ 1.00
+  // dollars into bitcoin: $ 1.00 of bitcoin
   await toAmount('usd');
   await type('100');
   await next();
   b = blocks();
   ok(said(b.slice(0, 3)) === JSON.stringify([
-    ['YOU ARE GETTING', '$ 0.95 in BITCOIN', '(₿ 1,150)'],
-    ['YOU ARE SPENDING', '$ 1.00 in DOLLARS', ''],
+    ['RECEIVING', '$ 1.00 in BITCOIN', '(₿ 1,210)'],
     ['FEE', '$ 0.05', '(₿ 61)'],
-  ]), 'dollars into bitcoin: GETTING $ 0.95 in BITCOIN (₿ 1,150), SPENDING $ 1.00 in DOLLARS, FEE $ 0.05 (₿ 61)', said(b));
+    ['SPENDING', '$ 1.05 in DOLLARS', ''],
+  ]), 'dollars into bitcoin: RECEIVING $ 1.00 in BITCOIN (₿ 1,210), FEE $ 0.05 (₿ 61), SPENDING $ 1.05 in DOLLARS', said(b));
   t = text();
-  ok(/SWAP YOU ARE GETTING \$ 0\.95 in BITCOIN \(₿ 1,150\) YOU ARE SPENDING \$ 1\.00 in DOLLARS FEE \$ 0\.05 \(₿ 61\) FORGE’S RATE ₿ 1 = \$ 82,601 Rate held for 00:5\d SWAP$/.test(t),
+  ok(/SWAP RECEIVING \$ 1\.00 in BITCOIN \(₿ 1,210\) FEE \$ 0\.05 \(₿ 61\) SPENDING \$ 1\.05 in DOLLARS FORGE’S RATE ₿ 1 = \$ 82,601 Rate held for 00:5\d SWAP$/.test(t),
     'the page draws them in that order', t.slice(0, 400));
   ok((t.match(/\(₿ [\d,]+\)/g) || []).length === 2, 'two sats lines, under the bitcoin and the fee, and none under the dollars');
   const q2 = A.state.swapQuote;
-  ok(q2.total - Math.round(q2.get * RATE / 1e6) === 5, 'the fee is what leaves less what arrives: 100 − 95 cents');
+  ok(q2.total - Math.round(q2.get * RATE / 1e6) === 5, 'the fee is what leaves less what arrives: 105 − 100 cents');
   const row0 = A.confirmSpec().rows[0];
   ok(row0.size === '30px' && row0.ink === '#F2742B', 'what arrives heads the screen, a size up, in the ink of its balance');
   ok(A.renderVals().cfCtaLabel === 'SWAP' && A.renderVals().cfCtaBg === '#3AB54A', 'the green SWAP is kept');
@@ -379,20 +401,20 @@ async function mount() {
   ok(A.state.swapLapsed && !A.state.swapQuote && A.confirmSpec().cta === 'GET A NEW RATE', 'a rate run out: GET A NEW RATE, as before');
   ok(!A._swapClockT, 'and the clock has stopped with the rate');
   b = blocks();
-  ok(said(b) === JSON.stringify([['YOU ARE GETTING', 'UNKNOWN', ''], ['YOU ARE SPENDING', '$ 1.00 in DOLLARS', ''], ['FEE', 'UNKNOWN', ''], ['FORGE’S RATE', 'UNKNOWN', '']]),
-    'with no rate the blocks stay, saying UNKNOWN', said(b));
-  /* Bitcoin leaving, with no rate in hand: its dollars at the mint's last rate, the sats under it, as the keypad
-   * had it; and with no price at all, the sats alone, with no unit word after them. */
-  A.setState({ swapFrom: 'sat', swapTo: 'usd', swapAmount: 1211 });
+  ok(said(b) === JSON.stringify([['RECEIVING', '$ 1.00 in BITCOIN', ''], ['FEE', 'UNKNOWN', ''], ['SPENDING', 'UNKNOWN', ''], ['FORGE’S RATE', 'UNKNOWN', '']]),
+    'with no rate the blocks stay: the $ 1.00 of bitcoin asked for, and UNKNOWN', said(b));
+  /* Bitcoin to arrive, typed in sats, with no rate in hand: its dollars at the mint's last rate, the sats under it,
+   * as the keypad had it; and with no price at all, the sats alone, with no unit word after them. */
+  A.setState({ swapFrom: 'usd', swapTo: 'sat', swapAmount: 1211, swapMode: 'get' });
   b = blocks();
-  ok(said([b[1]]) === JSON.stringify([['YOU ARE SPENDING', '$ 1.00 in BITCOIN', '(₿ 1,211)']]),
-    'bitcoin leaving, rate run out: YOU ARE SPENDING $ 1.00 in BITCOIN (₿ 1,211)', said(b));
+  ok(said([b[0]]) === JSON.stringify([['RECEIVING', '$ 1.00 in BITCOIN', '(₿ 1,211)']]),
+    'bitcoin to arrive, rate run out: RECEIVING $ 1.00 in BITCOIN (₿ 1,211)', said(b));
   st.rate = 0;
   A.setState({ livePrice: null, satUsd: null });
   b = blocks();
-  ok(said([b[1]]) === JSON.stringify([['YOU ARE SPENDING', '₿ 1,211', '']]), 'and with no price at all: ₿ 1,211 alone', said(b));
+  ok(said([b[0]]) === JSON.stringify([['RECEIVING', '₿ 1,211', '']]), 'and with no price at all: ₿ 1,211 alone', said(b));
   st.rate = RATE;
-  A.setState(Object.assign({ swapFrom: 'usd', swapTo: 'sat' }, PRICE));
+  A.setState(Object.assign({ swapFrom: 'usd', swapTo: 'sat', swapMode: 'worth' }, PRICE));
   A.SWAP_REQUOTES = requotes;
 
   // another mint with two balances says its own name
@@ -464,12 +486,12 @@ async function mount() {
     ok(asked.length === n1, 'typed $ 2.50: nothing asked before it has stood still');
     await wait(300);
     await settle();
-    ok(asked.length === n1 + 1 && JSON.stringify(asked[asked.length - 1]) === '["usd","sat",250,false]', 'after 600 ms, its quote, once', JSON.stringify(asked.slice(n1)));
+    ok(asked.length === n1 + 1 && JSON.stringify(asked[asked.length - 1]) === '["usd","sat",250,"worth"]', 'after 600 ms, its quote, once', JSON.stringify(asked.slice(n1)));
     await next();
-    ok(A.state.screen === 'swapConfirm' && A.state.swapQuote && A.state.swapQuote.total === 250 && asked.length === n1 + 1,
+    ok(A.state.screen === 'swapConfirm' && A.state.swapQuote && A.state.swapQuote.amount === 250 && asked.length === n1 + 1,
       'NEXT: the confirmation, filled, with no new question', String(asked.length - n1));
-    b0 = (A.confirmSpec().rows || [])[1] || {};
-    ok(b0.value === '$ 2.50 in DOLLARS' && A.confirmSpec().cta === 'SWAP', 'YOU ARE SPENDING $ 2.50 in DOLLARS, and SWAP', b0.value);
+    b0 = (A.confirmSpec().rows || [])[0] || {};
+    ok(b0.value === '$ 2.50 in BITCOIN' && A.confirmSpec().cta === 'SWAP', 'RECEIVING $ 2.50 in BITCOIN, and SWAP', b0.value);
     A.setState({ screen: 'home', stack: [] });
     await wait(1200);
   }

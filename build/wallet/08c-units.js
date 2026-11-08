@@ -817,6 +817,43 @@
     return t > 0 && meltNeed(w, pile, t).ok ? t : 0;
   }
 
+  /* The pieces a sum of `n` is cut into: one per set bit, as the mint's denominations are powers of two. */
+  function onesIn(n) {
+    var v = Math.max(0, Math.round(Number(n) || 0));
+    return String(v.toString(2)).split('1').length - 1;
+  }
+
+  /* The pieces a swap's melt of `total` will be paid with, and their input fee: the pieces as they are where they fit
+   * (`meltAsIs`: exact pieces, or pieces paid over with the rest back as change), else the pieces the cut takes from the
+   * pile, whose own pieces for the melt carry their fee (cashu-ts `includeFees`, as a token's do; the melt
+   * charges the fee on those pieces and gives the rest back) and whose split costs the fee on what it takes. { fee, plan: { path, secrets } }: the plan goes with the quote and `pay` spends
+   * those very pieces (16-sending.js, `opts.plan`), since cashu-ts picks pieces by chance and a second pick could cost a
+   * piece more than the confirmation said. `meltNeed`, with its cushion, is still what refuses. A fee of Infinity when
+   * it cannot be told. */
+  function swapPlan(w, pile, total, melt) {
+    var asIs = null;
+    try { asIs = meltAsIs(w, pile, total, melt); } catch (e) { asIs = null; }
+    var secretsOf = function (list) { return (list || []).map(function (p) { return String(p.secret); }); };
+    if (asIs) {
+      return { fee: Math.max(0, sumProofs(asIs.send) - (Number(asIs.over) || 0) - total), plan: { path: asIs.path, secrets: secretsOf(asIs.send) } };
+    }
+    /* The fee the cut's pieces are made to carry, as cashu-ts makes it: the least that covers the fee on the amount's
+     * pieces and its own (`tokenFeeFor` stops after a few steps, which at a high fee is short of where this lands). */
+    var fee = feeForInputs(w, onesIn(total)) || 0;
+    for (var i = 0; i < 4096 && (feeForInputs(w, onesIn(total) + onesIn(fee)) || 0) > fee; i++) fee += 1;
+    var sel = [];
+    var split = NaN;
+    try {
+      sel = (w.selectProofsToSend(pile, total + fee, true) || {}).send || [];
+      split = sel.length ? swapFeeFor(w, sel) : NaN;
+    } catch (e) { split = NaN; }
+    if (!isFinite(split)) return { fee: Infinity, plan: null };
+    /* What the melt then charges is the fee on the pieces the cut made it, the amount's and the fee's own (`fee` errs a
+     * little over so the pieces surely carry it, and what it is over comes back as the melt's change). */
+    var melted = feeForInputs(w, onesIn(total) + onesIn(fee));
+    return { fee: (isFinite(melted) ? Math.min(fee, melted) : fee) + split, plan: { path: 'cut', secrets: secretsOf(sel) } };
+  }
+
   /* The units of a record: { from, to }. A record written before they were
    * kept is sats into dollars, which is all there was then. */
   function convertUnits(rec) {

@@ -188,6 +188,10 @@
     routeComing: function () { return routeComing(); },
     // may a mint be asked anything right now (`routeOpen`): for a screen whose words depend on it
     routeOpen: function () { return routeOpen(); },
+    // and, where it may not, the words a step refused for it says (`assertRoute`): '' with a route
+    routeWords: function () {
+      try { assertRoute(); return ''; } catch (e) { return String((e && e.message) || ''); }
+    },
     routeSoon: function (ms) {
       return routeSoon(ms === undefined ? FoxyWallet._routeWaitMs : ms);
     },

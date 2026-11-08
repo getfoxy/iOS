@@ -331,8 +331,8 @@
  },
  "amount, the set-up’s 24HR LIMIT, nothing typed yet, SKIP under NEXT": {
   "file": "682-amount-the-set-up-s-24hr-limit-nothing-typed-yet-skip-under-next.html",
-  "markup": "a5f077f2a011280f6550462e3bb81200ffd144fa3e7ded232961f42aeb0b42f9",
-  "vals": "f24d636f72d373b517ac289cc6c04fa87d5fb4284e2fb59c62874558bfeba2f6"
+  "markup": "9e681fff888f37f709c35dc143a60a29f411dd4223d0d117003a085b5f0b41f2",
+  "vals": "c1c22e00b06a5d1797af50ed44accb2ad180764f241668869ccb52d0e4130a80"
  },
  "amount, the set-up’s max per tap, its seconds under the figure, SKIP under NEXT": {
   "file": "569-amount-the-set-up-s-max-per-tap-its-seconds-under-the-figure-skip-under-next.html",
@@ -391,8 +391,8 @@
  },
  "fcLimits, CARD LIMITS: $5 per sec, $100 per tap": {
   "file": "562-fclimits-card-limits-5-per-sec-100-per-tap.html",
-  "markup": "31ab18a8fe1305fe26fcc94f3b051c5f7346066f1dc2e7b36688dfa3bbc07c88",
-  "vals": "9ac8f20ec17c6cae13c5cf7565518f0511d6c3c4283a21591c7c4a1ca235de5d"
+  "markup": "200472537a9c36d11b1467e339c9866849feae67068814bb571af48390133ea6",
+  "vals": "7cd2c46541c64844aad36ad4ca2ad55044c2e9a609afc7062ff22549b8dcaa65"
  },
  "fcLimits, CARD LIMITS: none set, a card with no PIN": {
   "file": "563-fclimits-card-limits-none-set-a-card-with-no-pin.html",
@@ -421,18 +421,18 @@
  },
  "fcLimitConfirm, a limit for paying without the PIN, to be confirmed": {
   "file": "334-fclimitconfirm-a-limit-for-paying-without-the-pin-to-be-confirmed.html",
-  "markup": "8f074cb29db99d39fb56f3dae726df643b7a8c9a5acbaebf8918bbc3f55880c9",
-  "vals": "9a60dd16348e05462067f81845b56a0a43bae727db05f74b71947df084f3f203"
+  "markup": "d326e1434ed29ec07b89d60bd1da80c3e9d9064d3a7f684bd5e0b01aec0fc1b0",
+  "vals": "586e0f60c9d61b38e3f77bf85dde00bf7db83c752e7bedc86a263d38b0b7f99f"
  },
  "fcLimitConfirm, a limit for paying without the PIN, kept in dollars": {
   "file": "335-fclimitconfirm-a-limit-for-paying-without-the-pin-kept-in-dollars.html",
-  "markup": "a61adce258297bce9e802664380f54caa45bb7d1af117e745b56e41565d3f296",
-  "vals": "f4671d723a7905181cee7c61c6c458d0cdb448e9393c14a21af60aa89585210c"
+  "markup": "3c8875b6679d3de1f409f7bc3362c9351932b67c84b2ed0a9a48d11c4e23c783",
+  "vals": "bd88f65d7bd2a5859683a8926eff7f218dc2cc4b9cd388b845540453d3089473"
  },
  "fcLimitConfirm, no limit for paying without the PIN, to be confirmed": {
   "file": "336-fclimitconfirm-no-limit-for-paying-without-the-pin-to-be-confirmed.html",
-  "markup": "5bbc89d362c9874f557f409ca054982b382d4cc0a2b90bf4b30bbac6ec88b551",
-  "vals": "34ab59522d88dec630fc2c67feb30207a8563d83ce9f2e0a9806946b715c1476"
+  "markup": "d21c87d579dc80696ead7d41e0749d0fa160b697fa7703e592fca91657c08a7f",
+  "vals": "c6516dcef8aac6dce38933c4e031b6455e18f7205057c3af211b158f16b80fad"
  },
  "switchMint, asking which mint a card moves to": {
   "file": "255-switchmint-asking-which-mint-a-card-moves-to.html",
@@ -1711,23 +1711,23 @@
  },
  "two balances: SET AMOUNT, a swap from bitcoin": {
   "file": "411-two-balances-set-amount-a-swap-from-bitcoin.html",
-  "markup": "270499d6519c4e50e9d91b4c1d8d03fca5c6a42c154e27f1dda9493d0a4b0b03",
-  "vals": "10f9a848e7850d2dac4073120bbc62caf3572ba83e8d35aad131fab4b595c0d3"
+  "markup": "17af6779129273ab45c8e3138bc136cd60638606ec99fe01f83a967720e32098",
+  "vals": "662c663cb5e6ee015840f4ae5b790ef5082f4ff036bee45c3fc92185c8b47301"
  },
  "two balances: SWAP confirm, the market price far off": {
   "file": "412-two-balances-swap-confirm-the-market-price-far-off.html",
-  "markup": "4b249e5c560337dcbebf4a663ec5cc4520c5e8301de0a7d4714f04998c0f3a7e",
-  "vals": "ab1234a24dc775a6a9633fe82fa19cd9457b1ee14f23ff0bf67e9730686879e7"
+  "markup": "e68dab7cee028ad569e8393c80537439a37abd1fb91ac92ce80eac13bdede52e",
+  "vals": "bf21dc742028263d6911778df9aefafa41c6e0e1be12b9ba9da641395c33400a"
  },
  "two balances: SWAP confirm, a new rate": {
   "file": "413-two-balances-swap-confirm-a-new-rate.html",
-  "markup": "037a1faa1bfc7c9643e23285aeffbd6b167c807b752c9c48f94b60308d2e9c91",
-  "vals": "51f9e86e8b9d39e1df634e9a194ea6db53a69de2802d990bfba39a3eee83be38"
+  "markup": "627159ec4f1329ccaa4595775290a713c3d8862fb75ce94079b9c72569723dbd",
+  "vals": "4f4cb929babf250ff8b2aa4bee6d893e1912474a8a3c4b00fb6a143793fa127c"
  },
  "two balances: SWAP confirm, asking the rate": {
   "file": "414-two-balances-swap-confirm-asking-the-rate.html",
-  "markup": "605b294e95efd0c603fe7698c7a886b8fdcfee307034094d84de7ea38eecbbaf",
-  "vals": "c67f522408eeda724a016c0d64af601d903c17c952f365b1eeb784ed277aa12d"
+  "markup": "0b33bc7af9095171ebb887ee0af1376bba5d3ab75e54752f5bf22cfe66f060c0",
+  "vals": "de32693a547b18f0044f26c94f8e7645f3925188cc1774be6634e5b2c80f331b"
  },
  "two balances: SWAPPED": {
   "file": "415-two-balances-swapped.html",
@@ -1841,23 +1841,28 @@
  },
  "two balances: SWAP confirm, bitcoin into dollars": {
   "file": "417-two-balances-swap-confirm-bitcoin-into-dollars.html",
-  "markup": "192cbd1bd2965e154db0f2af4a12eb9729545e064be7482eb135912d0fe02d01",
-  "vals": "124a969b879325d28977724a540e1f7145dc45614ab8076049d63aec15874f08"
+  "markup": "523aa8bff37d7dbcbef25eef6f3a2e652c0bc64dae5ed08b667e129d9f00abab",
+  "vals": "cb9e72515145e28359e6dd88ffaef8fcb2384764d5450236c5b070b9c69b324f"
  },
  "two balances: SET AMOUNT, a swap from bitcoin in dollars": {
   "file": "418-two-balances-set-amount-a-swap-from-bitcoin-in-dollars.html",
-  "markup": "7e611aa9d7f1e1f7ca49909aee3bef7e53a7898cb265834b5ad5e8b25b98e394",
-  "vals": "8bb3452c3f7fabb3541ad3d1d7144537264ff79d81e08bf742776d604252e550"
+  "markup": "1ec04184320e15f75f5274080567ace965ffbf22660c6c30f295854de7322f4b",
+  "vals": "638b7cf8da7ad20eefc8b16943bb3718a943c74e658f9a7edc98b6dbaf5b26ab"
  },
  "two balances: SET AMOUNT, a swap, checking the rate": {
   "file": "499-two-balances-set-amount-a-swap-checking-the-rate.html",
-  "markup": "eef4772590776d593e561fd00e1cd449d6939fcc90fd0348776269ded58fcc3c",
-  "vals": "7ac0cff4b7e475588dc64f0997e0eb783956f25480e12b08c32d4cca7b07fe51"
+  "markup": "92e1accb6e1e9aac18b26d9eab2af01680d64d430225dc0f1257b1b3c53fd1f1",
+  "vals": "4cdc4d051ef7a462110778b8a532af047cc875a99893ee63efd50df06d51700e"
  },
  "two balances: SET AMOUNT, a swap at the market price": {
   "file": "500-two-balances-set-amount-a-swap-at-the-market-price.html",
-  "markup": "eef4772590776d593e561fd00e1cd449d6939fcc90fd0348776269ded58fcc3c",
-  "vals": "7ac0cff4b7e475588dc64f0997e0eb783956f25480e12b08c32d4cca7b07fe51"
+  "markup": "92e1accb6e1e9aac18b26d9eab2af01680d64d430225dc0f1257b1b3c53fd1f1",
+  "vals": "4cdc4d051ef7a462110778b8a532af047cc875a99893ee63efd50df06d51700e"
+ },
+ "two balances: SET AMOUNT, a swap not enough with the fee": {
+  "file": "737-two-balances-set-amount-a-swap-not-enough-with-the-fee.html",
+  "markup": "2350f3bf2734c3aeae2a8b1c6c6225d4a8530123af72d5ee9320b1c6abde1c1a",
+  "vals": "8829a972f2ba89562506ff2d7f3457baed2d1178be9e56f0d424ce8093ba6079"
  },
  "ocConfirm, from a card: FROM FLASHCARD and NEXT": {
   "file": "442-occonfirm-from-a-card-from-flashcard-and-next.html",
@@ -2511,7 +2516,7 @@
  },
  "stage: 1a tap to set up": {
   "file": "709-stage-1a-tap-to-set-up.html",
-  "markup": "3057a214e1c7fdc706c533a15c1869d2a6435fa8d25fef2f31d32ab04429a03c",
+  "markup": "595880d97d582772947aef376d4d668dff2592c2b9988b8d5bc853770b9b87a2",
   "vals": "978d6490b41226fc17e4a6ffd88e939626da2a4bcfbc6a85fd65063f9659f9f2"
  },
  "stage: checking a card payment": {
@@ -2541,7 +2546,7 @@
  },
  "card: set no PIN limit, the warning": {
   "file": "341-card-set-no-pin-limit-the-warning.html",
-  "markup": "0c1a97e933102e56dd6602cc3f45cefc6b09d87a07e007aae7a6f8e7a773251e",
+  "markup": "8f5b5f6984d3d2803cfdb84cdb9e61a1e8c5ae9852ea4b4edb7c6d3a76f2467b",
   "vals": "978d6490b41226fc17e4a6ffd88e939626da2a4bcfbc6a85fd65063f9659f9f2"
  },
  "overlay: CREATE A PIN, for a card set up for its holder": {

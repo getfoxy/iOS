@@ -781,7 +781,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     ok(limits(holder) && limits(holder).rows[0] === 'PER SECOND LIMIT | How fast the card can pay | $20.00 | per sec', 'CARD LIMITS: PER SECOND LIMIT first, $20.00 a payment said as $20.00 a second', limits(holder) && limits(holder).rows.join(' / '));
     limits(holder).press('PER SECOND LIMIT');
     if (explainer(holder)) { explainer(holder).finish(); explainer(holder).press('CONTINUE'); } else card(holder).press('CONTINUE');
-    ok(speed(holder) && speed(holder).mode === 'limit' && speed(holder).chosen === '$5', 'CONTINUE opens MAX PER SECOND, at $5 a second', JSON.stringify(speed(holder)));
+    ok(speed(holder) && speed(holder).mode === 'limit' && speed(holder).chosen === '$10', 'CONTINUE opens MAX PER SECOND, at $10 a second', JSON.stringify(speed(holder)));
     speed(holder).other();
     ok(holder.state.screen === 'amount' && holder.state.flow === 'cardLimit' && holder.state.unit === 'USD' && holder.usdKeypad() === true
        && holder.fcLimitQuestion() === 'What is the most this card should pay each second?', 'its figure opens the dollar keypad, asking a figure a second', holder.fcLimitQuestion());

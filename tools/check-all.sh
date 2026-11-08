@@ -150,6 +150,7 @@ check "flashcard change" 1 node tests/flashcard-change.js
 check "flashcard owed change" 1 node tests/flashcard-owed.js
 check "flashcard setup" 1 node tests/flashcard-setup.js
 check "flashcard holder" 1 node tests/flashcard-holder.js
+check "card set-up without a connection" 1 node tests/card-setup.js
 check "flashcard mend" 1 node tests/flashcard-mend.js
 check "flashcard owner key" 1 node tests/flashcard-owner-vectors.js
 check "flashcard money" 1 node tests/flashcard-money.js

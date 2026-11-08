@@ -2524,6 +2524,28 @@ only.*
    `sh tools/pull-device-log.sh`: `first run (words made): asking which currencies to use`, or for the second,
    `a restore found dollars and bitcoin; both kept, nothing asked`.
 
+#### 22s. A card's set-up with the connection dropped
+
+*A new card (software 1.21 or later) and this phone with a route. Test money only; nothing is loaded.*
+
+1. **The defaults.** FLASHCARD, tap the new card, SET UP CARD, a name, a PIN twice (and DOLLARS or BITCOIN where CURRENCY is
+   asked). **Pass:** NO PIN AMOUNT shows `$10.00` (the dollar sign, not ₿); NEXT; the next screen is titled NO PIN MAXIMUM,
+   asks `What’s the most this card should pay in total before asking for a PIN?` (`… in 24 hours …` on a card of 1.25) and
+   shows `$30.00`. Back, type $4.00, NEXT: it shows `$12.00`. NEXT: MAX PER SECOND at `$10`.
+2. **Dollars offline.** Back to NO PIN AMOUNT, turn on airplane mode, wait for the banner to say offline, then back once more
+   and NEXT again. **Pass:** the keypad is still in dollars, with the price's age under the figure; no ₿.
+3. **No connection before the tap.** Still in airplane mode, go on to MAX PER SECOND, choose $25, NEXT. **Pass:** NO
+   CONNECTION with the offline words, TRY AGAIN and BACK; Apple's sheet does not come up. TRY AGAIN: the same card again.
+   BACK: MAX PER SECOND at $25; back once more: NO PIN MAXIMUM as typed.
+4. **Connection back.** Airplane mode off, wait for the route (the banner goes), NEXT on MAX PER SECOND. **Pass:** the screen
+   behind the sheet says TAP TO FINISH; hold the card; the card is set up with the name, the PIN, $25 a second and the no PIN
+   figures chosen (LIMITS in its menu shows them).
+5. **Lost between NEXT and the tap.** On a second new card, run steps 1 and 4 but turn on airplane mode while the sheet is
+   up, before holding the card. **Pass:** NO CONNECTION (or the sheet's own failure) with TRY AGAIN and BACK, never the
+   card's first screen; airplane mode off, TRY AGAIN, hold the card: set up as chosen, nothing typed twice.
+6. **The log.** `sh tools/pull-device-log.sh`. **Pass:** `the set-up waits for a connection, its entries kept` at steps 3
+   and 5, and no `offline, so the keypad is in sats` on the set-up's screens.
+
 ## Getting a log off somebody else's phone
 
 `tools/pull-device-log.sh` needs a Debug build and a cable. A person running a

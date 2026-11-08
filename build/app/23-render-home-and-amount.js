@@ -615,14 +615,14 @@
           + (this.priceAgo() ? this.priceAgo().toLowerCase() : 'from a moment ago') + '.'
         : '',
       priceWarnShown: (sendHeld || this.keypadStale()) ? '1' : '0',
-      /* A card's set-up names its amounts (the design): NO PIN AMOUNT (one payment), 24HR LIMIT (the card's allowance) and, typed
+      /* A card's set-up names its amounts (the design): NO PIN AMOUNT (one payment), NO PIN MAXIMUM (the card's allowance) and, typed
        * rather than chosen, MAX PER SECOND (26j-card-wheel.js), as LIMITS does for the two without the PIN and for the rate of a card
        * that waits for its limit. */
       // the till's own screen is named for what it is (either role)
       amountTitle: tillHere ? 'POS MODE'
         : (s.flow === 'cardSuNoPinTx' || s.flow === 'cardLimitTx') ? 'NO PIN AMOUNT'
-        // (by the card's software: NO PIN LIMIT on 1.21 to 1.24, whose allowance the PIN fills again, 26j-card-wheel.js `fcSuDayWords`)
-        : s.flow === 'cardSuNoPin' ? (this.fcSuDayWords ? this.fcSuDayWords().title : '24HR LIMIT')
+        // (NO PIN MAXIMUM, its question by the card's software, 26j-card-wheel.js `fcSuDayWords`)
+        : s.flow === 'cardSuNoPin' ? (this.fcSuDayWords ? this.fcSuDayWords().title : 'NO PIN MAXIMUM')
         : (s.flow === 'cardLimit' && this._fcLimitNoPin && s.fc && s.fc.noPinDay) ? '24HR LIMIT'
         : s.flow === 'tillTip' ? 'TIP'
         : (s.flow === 'cardSuTap' || (s.flow === 'cardLimit' && this._fcLimitTap && this.fcPacedNow && this.fcPacedNow())) ? 'MAX PER SECOND'
@@ -640,8 +640,8 @@
         // a card's set-up (26j-card-wheel.js): LIMITS' own questions for the three
         // (one payment without the PIN: this phone's own rule, NO PIN AMOUNT; and from CARD LIMITS too)
         : (s.flow === 'cardSuNoPinTx' || s.flow === 'cardLimitTx') ? 'What is the most this card should pay in one transaction without asking for your PIN?'
-        // (the set-up's 24HR LIMIT is the card's 24-hour total without the PIN, software 1.25, written to the allowance)
-        : s.flow === 'cardSuNoPin' ? (this.fcSuDayWords ? this.fcSuDayWords().question : 'What is the most this card should pay in 24 hours without asking for your PIN?')
+        // (the set-up's NO PIN MAXIMUM is the card's total without the PIN, over 24 hours on software 1.25, written to the allowance)
+        : s.flow === 'cardSuNoPin' ? (this.fcSuDayWords ? this.fcSuDayWords().question : 'What\u2019s the most this card should pay in 24 hours before asking for a PIN?')
         : s.flow === 'cardSuTap' ? 'What is the most this card should pay each second?'
         : s.flow === 'receive' ? 'How much to receive?'
         : s.flow === 'swap' ? 'How much to swap?'
@@ -836,7 +836,7 @@
       ...((s.flow === 'cardWd' || ((s.flow === 'send' || s.flow === 'onchain') && this.fcOutMode && this.fcOutMode())) ? { sendOverLabel: 'MORE THAN THE CARD HOLDS' } : {}),
       // adding to one, the card has no room for the amount: its limit, not the phone's
       ...(s.flow === 'cardAdd' && c.roomOver ? { sendOverLabel: 'MORE THAN THE CARD CAN TAKE' } : {}),
-      // a swap is out of one balance, and the line names it
-      ...(s.flow === 'swap' ? { sendOverLabel: 'MORE THAN YOUR ' + this.unitWord(this.swapUnits().from) } : {}),
+      // a swap: what arrives and the fee on top are more than the balance it leaves, and the line says what would fit
+      ...(s.flow === 'swap' ? { sendOverLabel: (sendOver && this.swapShortLabel && this.swapShortLabel()) || 'NOT ENOUGH' } : {}),
     };
   }

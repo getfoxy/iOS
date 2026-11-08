@@ -6,18 +6,21 @@
    *                on the seam that turns them round, and NEXT
    *   amount       SET AMOUNT with flow 'swap': "How much to swap?", in dollars
    *                to start whichever way it goes, with the ⇅ to sats and back
-   *                as a send has it, and ALL OF IT. What the swap moves is the
-   *                FROM balance's own unit, cents or sats, exactly: typed in
-   *                it, nothing converts; typed in the other, it converts at the
-   *                mint's last rate, the one its confirmation will be valued
-   *                at, so the dollars typed are the dollars it repeats
-   *                (`swapTyped`, `swapPx`). Under the question, the mint's
+   *                as a send has it, and ALL OF IT. What is typed is what
+   *                arrives, and the mint's fee goes on top: typed in the unit
+   *                that arrives it is the invoice itself (`get`); typed in the
+   *                unit that leaves it is what the mint values what arrives at
+   *                ("$ 1.00 of bitcoin", `worth`). Nothing is converted at the
+   *                phone's price: the mint's quote says the rest (`swapTyped`,
+   *                `swapMode`). A balance that cannot cover the figure and the
+   *                fee says NOT ENOUGH with what would fit (`swapShort`).
+   *                Under the question, the mint's
    *                rate, asked as SWAP was tapped (`swapProbe`,
    *                `swapRateLine`); a figure left still is quoted in the
    *                background, so NEXT opens the confirmation filled
    *                (`swapAheadAsk`)
-   *   swapConfirm  four blocks, as the owner laid them out: YOU ARE GETTING,
-   *                YOU ARE SPENDING, FEE, and the mint's RATE with how long it
+   *   swapConfirm  four blocks: RECEIVING (what was typed), FEE, SPENDING
+   *                (the two together), and the mint's RATE with how long it
    *                is held for, then SWAP. A bitcoin figure is its dollar worth
    *                at the quote's rate with the sats under it; a dollar figure
    *                is exact and has no sats line
@@ -83,8 +86,9 @@
     if (!this.twoUnitsOn()) { this.toast('This mint issues only bitcoin, so there is nothing to swap with.', true); return; }
     const from = this.unitBalance('usd') > 0 || !(this.unitBalance('sat') > 0) ? 'usd' : 'sat';
     console.log('[foxy] swap: opened, from ' + this.unitWord(from).toLowerCase());
-    // a new screen: what was asked ahead for the last one is not this one's
+    // a new screen: what was asked ahead for the last one is not this one's, nor a NOT ENOUGH the mint said then
     this._swapAhead = null;
+    this._swapShortFor = null;
     this._swapProbed = {};
     this._swapProbeWanted = null;
     clearTimeout(this._swapTypedT);
@@ -183,11 +187,19 @@
     }));
   }
 
-  /* Is the keypad in the unit that leaves (dollars for dollars, sats for
-   * bitcoin), so that what is typed is what moves? */
+  /* Is the keypad in the unit that arrives (sats for bitcoin, dollars for
+   * dollars), so that what is typed is the invoice itself? */
   swapExact() {
-    const { from } = this.swapUnits();
-    return (this.state.unit === 'SATS') === (from === 'sat');
+    const { to } = this.swapUnits();
+    return (this.state.unit === 'SATS') === (to === 'sat');
+  }
+
+  /* How the figure on the keypad is asked of the wallet (`swapQuote`): 'get'
+   * when it is typed in the unit that arrives, so it arrives exactly; 'worth'
+   * when typed in the unit that leaves, so what arrives is what the mint
+   * values at it. Either way the fee is on top. */
+  swapMode() {
+    return this.swapExact() ? 'get' : 'worth';
   }
 
   /* The price a swap's two units are put side by side at before the mint
@@ -204,20 +216,53 @@
     return rate > 0 ? rate : (this.px() || 0);
   }
 
-  /* What is typed on SET AMOUNT for a swap, in the FROM unit: cents for
-   * dollars, sats for bitcoin. Typed in that unit it is taken exactly. Typed
-   * in the other it converts at the swap's price (`swapPx`), rounded as the
-   * ⇅ rounds: dollars to the nearest sat, sats to the cent the ⇅ would show
-   * (`centsOfSats`), so the cents asked for are the figure seen. No price,
-   * no conversion: nought. */
+  /* What is typed on SET AMOUNT for a swap, in the keypad's own unit: cents
+   * for dollars, sats for bitcoin, exactly, never converted. `swapMode` says
+   * which side of the swap it fixes. */
   swapTyped() {
-    const { from } = this.swapUnits();
     const v = parseFloat(this.state.amount) || 0;
     if (!(v > 0)) return 0;
-    if (this.swapExact()) return from === 'usd' ? this.centsTyped() : Math.round(v);
-    const px = this.swapPx();
-    if (!px) return 0;
-    return from === 'usd' ? this.centsOfSats(Math.round(v), px) : Math.round(v / px * 1e8);
+    return this.state.unit === 'SATS' ? Math.round(v) : this.centsTyped();
+  }
+
+  /* The keypad's figure is more than the balance can swap with the mint's
+   * fee on top: { fits }, the most that would, in the keypad's unit (0 when
+   * that is not known), else null. Only the mint's own answer for these very
+   * keys ever names a figure (`swapAheadAsk`, `swapAsk`); a quote asked ahead
+   * for them that the balance covers says it fits. Otherwise the wallet's
+   * guess from the pairs this mint answered lately (`swapGuess`) can say NOT
+   * ENOUGH, but names nothing: it reads the fee low, and a figure it offered
+   * could be refused again. */
+  swapShort() {
+    const W = window.FoxyWallet;
+    const n = this.swapTyped();
+    if (!(n > 0)) return null;
+    const { from, to } = this.swapUnits();
+    const k = this._swapShortFor;
+    if (k && k.keypad === this.swapKeypad() && k.from === from && k.mint === this.swapMintHere()) return { fits: k.fits };
+    const have = this.swapHave(from);
+    const ahead = this.swapAheadFor(this.swapAheadMine());
+    if (ahead && Number(ahead.q.spend || ahead.q.total) <= have) return null;
+    let g = null;
+    try { g = W && W.swapGuess ? W.swapGuess(from, to, n, this.swapMode(), have) : null; } catch (e) { g = null; }
+    if (g && g.need > have) return { fits: 0 };
+    // nothing known of the mint's rate: what leaves is at least what was typed in its own unit
+    if (!g && this.swapMode() === 'worth' && n > have) return { fits: 0 };
+    return null;
+  }
+
+  /* The line under the keypad's figure when it is short: NOT ENOUGH, and
+   * the most that would fit, in the keypad's unit. */
+  swapShortLabel() {
+    const sh = this.swapShort();
+    if (!sh) return '';
+    return sh.fits > 0 ? 'NOT ENOUGH · UP TO ' + this.unitFigure(sh.fits, this.state.unit === 'SATS' ? 'sat' : 'usd') : 'NOT ENOUGH';
+  }
+
+  /* The mint said these keys are short (`e.short`): kept for them, so the
+   * keypad says it with the mint's figure until they change. */
+  swapShortKeep(keypad, from, mint, e) {
+    this._swapShortFor = { keypad: keypad, from: from, mint: mint, fits: Math.max(0, Math.round(Number(e && e.fits) || 0)) };
   }
 
   /* A quote is for the amount as it stood at NEXT. The keypad changing under
@@ -252,7 +297,11 @@
     if (this.offlineNow() || !this.twoUnitsOn() || this._swapRun || s.swapBusy) return;
     const { from, to } = this.swapUnits();
     const amount = this.swapTyped();
-    if (!(amount > 0) || amount > this.swapHave(from)) return;
+    const mode = this.swapMode();
+    /* Short by the mint's own answer for these keys: nothing more to ask. Short by the guess alone, it is asked all the
+     * same (a quote commits to nothing), so the keypad can say what would fit in the mint's figure. */
+    const k = this._swapShortFor;
+    if (!(amount > 0) || (k && k.keypad === this.swapKeypad() && k.from === from && k.mint === this.swapMintHere())) return;
     const had = this.swapAheadMine();
     if (had && (had.asking || this.swapAheadFor(had))) return;
     if (this._swapAheadOut) { this._swapAheadWaiting = true; return; }
@@ -266,14 +315,14 @@
     }
     let hurry = null;
     const mine = {
-      from: from, to: to, amount: amount, keypad: this.swapKeypad(), mint: this.swapMintHere(),
+      from: from, to: to, amount: amount, mode: mode, keypad: this.swapKeypad(), mint: this.swapMintHere(),
       asking: true, q: null, at: Date.now(),
       // NEXT on this very figure: the person is waiting now, so its pace is let go (`_swapPaced`)
       hurry: () => { if (hurry) hurry(); },
     };
     this._swapAhead = mine;
-    console.log('[foxy] swap: asking the rate for ' + this.unitFigure(amount, from) + ' as it is typed');
-    const opts = Object.assign({ paceMs: this.SWAP_AHEAD_GAP_MS, perMin: this.SWAP_AHEAD_PER_MIN, hurry: new Promise((r) => { hurry = r; }) }, this.swapComing(from));
+    console.log('[foxy] swap: asking the rate for ' + this.unitFigure(amount, mode === 'get' ? to : from) + (mode === 'get' ? ' to arrive' : ' of ' + this.unitWord(to).toLowerCase()) + ' as it is typed');
+    const opts = Object.assign({ paceMs: this.SWAP_AHEAD_GAP_MS, perMin: this.SWAP_AHEAD_PER_MIN, hurry: new Promise((r) => { hurry = r; }), [mode]: true }, this.swapComing(from));
     const ask = this._swapAheadOut = W.swapQuote(from, to, amount, opts).then((q) => {
       mine.q = q;
       mine.asking = false;
@@ -281,6 +330,8 @@
       // not said on screen: NEXT asks again and says why if it is refused there
       mine.asking = false;
       if (this._swapAhead === mine) this._swapAhead = null;
+      // short with the fee: the keypad says so, with the mint's own figure for what would fit
+      if (e && e.short) { this.swapShortKeep(mine.keypad, from, mine.mint, e); this.setState({ swapTick: Date.now() }); }
       console.log('[foxy] swap: the rate asked ahead did not come:', (e && e.message) || e);
     }).then(() => {
       if (this._swapAheadOut === ask) this._swapAheadOut = null;
@@ -333,7 +384,7 @@
   swapAheadTake(a, from, to) {
     this._swapAskRun = (this._swapAskRun || 0) + 1;
     this._swapQuotedAt = a.at;
-    console.log('[foxy] swap: quoted ' + this.unitFigure(a.q.total, from) + ' for ' + this.unitFigure(a.q.get, to)
+    console.log('[foxy] swap: quoted ' + this.unitFigure(a.q.spend || a.q.total, from) + ' for ' + this.unitFigure(a.q.get, to)
       + ' (asked as it was typed)');
     this.setState({ swapQuoting: false, swapQuote: a.q, swapNewRate: false });
     this.swapClock();
@@ -349,10 +400,13 @@
      * has since moved the rate the keys would convert at. */
     const mine = all ? null : this.swapAheadMine();
     const amount = all ? have : mine ? mine.amount : this.swapTyped();
+    const mode = all ? '' : mine ? mine.mode : this.swapMode();
     if (!(amount > 0)) { this.toast('Type an amount first.', true); return; }
-    if (amount > have) {
-      this.toast('That is more than your ' + this.unitWord(from).toLowerCase() + ': you hold '
-        + this.unitFigure(have, from) + '.', true);
+    // (the keypad holds NEXT back with NOT ENOUGH on screen; this is for anything else that calls it)
+    const short = all ? null : this.swapShort();
+    if (short) {
+      this.toast('That is more than your ' + this.unitWord(from).toLowerCase() + ' cover with the mint’s fee'
+        + (short.fits > 0 ? ': up to ' + this.unitFigure(short.fits, this.state.unit === 'SATS' ? 'sat' : 'usd') + ' fits.' : '.'), true);
       return;
     }
     clearTimeout(this._swapTypedT);
@@ -362,7 +416,7 @@
     const coming = !ahead && mine && mine.asking ? mine : null;
     this.setState(p => ({
       screen: 'swapConfirm', stack: p.stack.concat([p.screen]),
-      swapAmount: amount, swapAll: !!all, swapQuote: null, swapNewRate: false,
+      swapAmount: amount, swapMode: mode, swapAll: !!all, swapQuote: null, swapNewRate: false,
       swapErr: '', swapErrAmount: false, swapRequotes: 0, swapLapsed: false,
       swapQuoting: !!coming,
     }));
@@ -379,19 +433,19 @@
         if (this.state.screen !== 'swapConfirm') { this.setState({ swapQuoting: false }); return; }
         const got = this._swapAhead === coming ? this.swapAheadFor(coming) : null;
         if (got) this.swapAheadTake(got, from, to);
-        else this.swapAsk(false, amount, !!all);
+        else this.swapAsk(false, amount, !!all, mode);
       });
       return;
     }
     // the amount handed over, not read back from state the same moment it was set
     // (a card's SWAP: ALL OF IT is the card's, asked as that figure, never as all of this phone's)
-    this.swapAsk(false, amount, this._swapCard ? false : !!all);
+    this.swapAsk(false, amount, this._swapCard ? false : !!all, mode);
   }
 
   /* The mint's rate for this swap. `again` is a rate asked for because the
    * last one ran out: the rows change under the person, so the button says
    * CONFIRM NEW RATE until it is pressed. Nothing moves by asking. */
-  swapAsk(again, amountGiven, allGiven) {
+  swapAsk(again, amountGiven, allGiven, modeGiven) {
     const W = window.FoxyWallet;
     const s = this.state;
     // a swap being run is not asked about again; a newer question replaces an older one (`run`)
@@ -399,16 +453,20 @@
     const { from, to } = this.swapUnits();
     const amount = amountGiven != null ? amountGiven : (s.swapAmount || 0);
     const all = allGiven != null ? allGiven : !!s.swapAll;
+    // what arrives as typed, the fee on top (`swapMode`); all of a balance is what leaves, the fee in it
+    const mode = all ? '' : (modeGiven != null ? modeGiven : (s.swapMode || ''));
+    // the keys the figure came from, for a NOT ENOUGH said back on them
+    const keys = this.swapKeypad(), mintAt = this.swapMintHere();
     const run = (this._swapAskRun = (this._swapAskRun || 0) + 1);
     this.setState({ swapQuoting: true, swapErr: '', swapErrAmount: false, swapLapsed: false });
     // out with the mint until it answers: nothing is asked ahead beside it (`swapProbe`, `swapAheadAsk`)
-    const asked = this._swapAskOut = W.swapQuote(from, to, amount, Object.assign(all ? { all: true } : {}, this.swapComing(from)));
+    const asked = this._swapAskOut = W.swapQuote(from, to, amount, Object.assign(all ? { all: true } : mode ? { [mode]: true } : {}, this.swapComing(from)));
     asked.then(() => {}, () => {}).then(() => { if (this._swapAskOut === asked) this._swapAskOut = null; });
     asked.then(q => {
       // an answer for an older question is dropped; one for a screen that has gone only ends the wait
       if (run !== this._swapAskRun) return;
       if (this.state.screen !== 'swapConfirm') { this.setState({ swapQuoting: false }); return; }
-      console.log('[foxy] swap: quoted ' + this.unitFigure(q.total, from) + ' for ' + this.unitFigure(q.get, to)
+      console.log('[foxy] swap: quoted ' + this.unitFigure(q.spend || q.total, from) + ' for ' + this.unitFigure(q.get, to)
         + (again ? ' (a new rate)' : ''));
       // (a card's SWAP: what the swap spends, its fee with it, comes off the card, which has to hold it)
       if (this._swapCard && Number(q.total) > this.swapHave(from)) {
@@ -423,8 +481,10 @@
       if (run !== this._swapAskRun) return;
       const why = W.reason ? W.reason(e) : String((e && e.message) || e);
       console.warn('[foxy] swap: no rate:', why);
+      // short with the fee: the keypad says NOT ENOUGH with the mint's figure for what would fit
+      if (e && e.short && mode) this.swapShortKeep(keys, from, mintAt, e);
       // an amount the mint will not swap is changed on the keypad; anything else is asked again
-      const amountWrong = /too little|more than your|above zero/i.test(why);
+      const amountWrong = !!(e && e.short) || /too little|more than your|above zero|not enough/i.test(why);
       this.setState({ swapQuoting: false, swapQuote: null, swapErr: why, swapErrAmount: amountWrong });
     });
   }
@@ -497,7 +557,7 @@
     // the fox, the figure following the swap's own stages (26r-fox-wait.js); the melt loader where it cannot be drawn
     const fox = !!(this.foxUp && this.foxUp('swapMove', 'swap', { forMs: 120000 }));
     if (!fox) this.showMelt('Swapping ' + this.unitWord(from).toLowerCase() + ' into ' + this.unitWord(to).toLowerCase() + '…', 120000);
-    console.log('[foxy] swap: running ' + this.unitFigure(q.total, from) + ' into ' + this.unitFigure(q.get, to));
+    console.log('[foxy] swap: running ' + this.unitFigure(q.spend || q.total, from) + ' into ' + this.unitFigure(q.get, to));
     const heard = (stage) => console.log('[foxy] swap: ' + stage);
     this._swapRun = W.swapRun(q, fox ? this.foxHears('swapMove', heard) : heard).then(r => {
       /* One leg unanswered is, most of the time, a mint a few seconds slow rather than a mint stuck, and the card for
@@ -832,28 +892,30 @@
     return market > 0 ? 'MARKET PRICE ' + this.swapRateText(market) : '';
   }
 
-  /* The line under the keypad's figure, in the other unit, as a send has it.
-   * Typed in the unit that leaves: about what the swap would give, at the
-   * mint's last rate (or the market's). Typed in the other: what leaves,
-   * exactly as it will be asked for. '' with nothing to say. */
+  /* The line under the keypad's figure, in the other unit, as a send has it:
+   * about what the typed figure is worth there, at the mint's last rate (or
+   * the market's). Only a guide: what arrives is the figure typed, and the
+   * mint's quote says the rest. '' with nothing to say. */
   swapEstimate() {
-    const { from, to } = this.swapUnits();
     const n = this.swapTyped();
     if (!(n > 0)) return '';
-    if (!this.swapExact()) return this.unitFigure(n, from);
     const rate = this.swapPx();
     if (!(rate > 0)) return '';
-    const got = from === 'usd' ? Math.floor(n / 100 / rate * 1e8) : Math.floor(n * rate / 1e8 * 100);
-    return '≈ ' + this.unitFigure(got, to);
+    if (this.state.unit === 'SATS') return '≈ ' + this.unitFigure(this.centsOfSats(n, rate), 'usd');
+    return '≈ ' + this.unitFigure(Math.round(n / 100 / rate * 1e8), 'sat');
   }
 
-  /* The confirmation's contents (confirmSpec), in the four blocks the owner
-   * laid out, top to bottom: YOU ARE GETTING, YOU ARE SPENDING, FEE, and the
-   * mint's RATE with how long it is held for. No NETWORK row, since a swap
+  /* The confirmation's contents (confirmSpec), in four blocks, top to
+   * bottom: RECEIVING, FEE, SPENDING, and the mint's RATE with how long it
+   * is held for. RECEIVING is the figure typed (`swapMode`), FEE the mint's
+   * whole cost of the swap on top of it (what leaves less what arrives, both
+   * at the quote's rate, in dollars with the sats under it), and SPENDING the
+   * two together (`spend`: the invoice, the reserve and any fee on the
+   * pieces), so the three add up as read; what the reserve does not use
+   * comes back, and SWAPPED says what left. No NETWORK row, since a swap
    * never leaves the mint, and no TOTAL, since what is spent is its own
-   * block. The fee is the mint's whole cost of the swap: what leaves less
-   * what arrives, both at the quote's rate, in dollars with the sats under
-   * it, so the three figures add up as read. */
+   * block. All of a balance (ALL OF IT) is the other way round: what leaves
+   * is the balance, and what arrives is what it buys. */
   /** @returns {ConfirmSpec} */
   swapSpec() {
     const s = this.state;
@@ -869,21 +931,41 @@
       close: () => this.setState(p => ({ screen: p.stack.indexOf('flashcard') >= 0 ? 'flashcard' : 'home', stack: [] })),
     };
     if (!q) {
-      /* No rate yet: what leaves, and the rest waiting on the mint. Bitcoin
-       * leaving is shown as the keypad showed it, in dollars at the mint's
-       * last rate with the exact sats under it (`swapPx`); with no price at
-       * all it is the sats alone, with no unit word to make it read as a
-       * dollar figure. */
+      /* No rate yet: the figure asked for, and the rest waiting on the mint.
+       * Typed in the unit that arrives it is exact; typed in the unit that
+       * leaves it is what arrives is worth, said in that unit. All of a
+       * balance is what leaves, shown as the keypad showed it: bitcoin in
+       * dollars at the mint's last rate with the exact sats under it
+       * (`swapPx`), and with no price at all the sats alone. */
       const word = s.swapQuoting ? 'CHECKING…' : 'UNKNOWN';
       const guess = this.swapPx();
-      const spent = this.swapWorth(s.swapAmount || 0, from, guess);
       const wrong = !s.swapQuoting && !s.swapLapsed;
-      const rows = [
-        this.cfRow('YOU ARE GETTING', word, getOpt),
-        block('YOU ARE SPENDING', spent, (from === 'usd' || guess > 0) ? from : '', wrong ? { ink: '#FF5C5C' } : {}),
-        this.cfRow('FEE', word),
-        this.cfRow(this.swapRateHead(), word),
-      ];
+      const red = wrong ? { ink: '#FF5C5C' } : {};
+      const mode = s.swapAll ? '' : (s.swapMode || 'get');
+      const amt = s.swapAmount || 0;
+      let rows;
+      if (!mode) {
+        const spent = this.swapWorth(amt, from, guess);
+        rows = [
+          this.cfRow('RECEIVING', word, getOpt),
+          this.cfRow('FEE', word),
+          block('SPENDING', spent, (from === 'usd' || guess > 0) ? from : '', red),
+          this.cfRow(this.swapRateHead(), word),
+        ];
+      } else {
+        /* (typed in sats for dollars: what arrives is said in dollars, about, until the mint says exactly; typed in dollars
+         * for bitcoin it is that many dollars of bitcoin already) */
+        const got = mode === 'get' ? this.swapWorth(amt, to, guess)
+          : from === 'usd' ? { main: this.unitFigure(amt, 'usd'), sub: '' }
+          : { main: guess > 0 ? '≈ ' + this.unitFigure(this.centsOfSats(amt, guess), 'usd') : word, sub: '' };
+        const named = mode === 'get' ? (to === 'usd' || guess > 0) : (from === 'usd' || guess > 0);
+        rows = [
+          block('RECEIVING', got, named ? to : '', Object.assign({}, getOpt, red)),
+          this.cfRow('FEE', word),
+          this.cfRow('SPENDING', word),
+          this.cfRow(this.swapRateHead(), word),
+        ];
+      }
       if (s.swapQuoting) {
         return Object.assign(base, { rows: rows,
           cta: 'CHECKING THE RATE…', ctaBusy: true, ctaTone: 'go', go: () => {} });
@@ -912,18 +994,20 @@
     const rate = this.swapRateOf(q.rate);
     const market = this.swapRateOf(q.market);
     const got = this.swapWorth(q.get, to, rate);
-    const spent = this.swapWorth(q.total, from, rate);
+    // all that can leave: the invoice, the reserve, and this mint's fee on the pieces (a quote from before `spend`: its total)
+    const out = Number(q.spend) > 0 ? Number(q.spend) : Number(q.total) || 0;
+    const spent = this.swapWorth(out, from, rate);
     // with no rate to put the two sides in one unit, the mint's own fee in the unit that leaves
     const fee = rate > 0
       ? (() => {
         const c = Math.max(0, spent.cents - got.cents), n = Math.max(0, spent.sats - got.sats);
         return { main: this.swapCents(c, n), sub: '(' + this.unitFigure(n, 'sat') + ')' };
       })()
-      : { main: this.unitFigure(q.fee, from), sub: '' };
+      : { main: this.unitFigure(Math.max(0, out - (Number(q.amount) || 0)), from), sub: '' };
     const rows = [
-      block('YOU ARE GETTING', got, to, getOpt),
-      block('YOU ARE SPENDING', spent, from),
+      block('RECEIVING', got, to, getOpt),
       block('FEE', fee, ''),
+      block('SPENDING', spent, from),
       this.cfRow(this.swapRateHead(), rate > 0 ? this.swapRateText(rate) : 'UNKNOWN', {
         sub: 'Rate held for ' + this.swapClockText(this.swapLeft()),
         // far from the market price: the market's, in red, under the mint's

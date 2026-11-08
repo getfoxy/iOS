@@ -195,6 +195,33 @@ No limit is asked for and none is suggested. A new card has none. From software 
 is left out by default (*No PIN, and the no-PIN allowance*, below): the tap writes the record and the owner only,
 and the card is cash to whoever holds it from that moment. Nothing at set-up says so; ADD PIN's first pad does (below).
 
+### Software 1.21 and on: the steps, their defaults, and no connection
+
+A card of 1.21 and on holds no money without a PIN, so its set-up asks, in order (`build/app/26j-card-wheel.js`): NAME CARD,
+CREATE A PIN and RE-ENTER PIN, CURRENCY (at a mint with two balances), then three amounts on SET AMOUNT and MAX PER SECOND,
+then one tap, whose screen behind Apple's sheet is titled **TAP TO FINISH**.
+
+| Step | Asks | Comes up at |
+| --- | --- | --- |
+| NO PIN AMOUNT | `What is the most this card should pay in one transaction without asking for your PIN?` | $10.00 |
+| NO PIN MAXIMUM | `What’s the most this card should pay in total before asking for a PIN?` (1.21 to 1.24, whose allowance the PIN fills again); `… in 24 hours before asking for a PIN?` on 1.25 | three times NO PIN AMOUNT ($30.00 for the default) |
+| MAX PER SECOND | the rate, six figures to choose from | $10 a second |
+
+NO PIN MAXIMUM follows NO PIN AMOUNT (going back and changing it changes the default) until it is typed by hand; then it
+keeps what was typed. Each default is in dollars, the keeper's default currency, and is kept as dollars for a bitcoin card
+as any figure typed in dollars is, so that this phone sets the card again when the price has moved. The keypad stays in
+dollars offline, at the last price this phone saw (kept on the disk, with its age said under the figure); it is in sats only
+on a phone that has never seen a price. A dollar card's amounts are dollars always.
+
+The tap needs the mint, so the route is looked at before TAP TO FINISH is shown and again as the tap fires. With none,
+**NO CONNECTION** says so in the wallet's own words (`Foxy is working offline. This needs a connection — tap OFFLINE to
+reconnect.`, or `Foxy is securing its connection. Try again in a moment.` while one is on its way, which is waited for a
+few seconds first), with **TRY AGAIN** and **BACK**, and no sheet is opened. A tap that fails for any reason, the route
+lost between NEXT and the tap among them, or a sheet ended with no card, comes back to the same choice: TRY AGAIN runs the
+tap again with every entry as it was, and BACK (or a tap beside the card) is MAX PER SECOND again with the rate, both
+amounts, the PIN and the name kept. Nothing goes back to the start; the entries are dropped only when the card is written
+or the round back buttons are walked out of the set-up on purpose.
+
 A card with no owner is open while it is empty, because there is nothing on it
 to protect, and it cannot be loaded. A card with an owner is its owner's, empty
 or not: a terminal that has the PIN and empties a card cannot then claim it.
@@ -262,7 +289,7 @@ repository's `FOXY-CARD-SPEC.md` and `FOXY-CARD-DAILY-LIMIT.md`.
 - **NO PIN AMOUNT, this phone's own rule.** The card has no figure for one payment without the PIN: its allowance is a
   total, over 24 hours on 1.25 (and refilled by the PIN on 1.21 to 1.24), and a payment within what is left of it is
   signed whatever its size. So the set-up asks NO PIN AMOUNT (`What is the most this card should pay in one transaction
-  without asking for your PIN?`) before 24HR LIMIT, the allowance, and LIMITS' NO PIN LIMIT asks it too, and the figure is
+  without asking for your PIN?`) before NO PIN MAXIMUM, the allowance, and LIMITS' NO PIN LIMIT asks it too, and the figure is
   kept on the phone that set it, never on the card: `cardSetNoPinTx(key, n, unit, usd)` (`n` cents or sats, 0 for
   none), read with `cardNoPinTx(key)`, in the same stored row as the dollars of the card's limits. **It is not restored
   from the seed phrase and it is gone when the card is reset**: a restored phone, like any other phone, asks nothing
@@ -731,7 +758,7 @@ The words by flow (`FC_TAP_FLOWS`; a tap names its flow, `fcTap`'s `o.flow`):
 | TRANSFER to another mint, and its write (`move`) | TAP TO MOVE | MOVING | CHECKING |
 | RENEW, and a backup moved to this phone (`renew`) | TAP TO RENEW | RENEWING | CHECKING |
 | RESET (`reset`) | TAP TO RESET | RESETTING | CHECKING |
-| SET UP (`setup`) | TAP TO SET UP | SETTING UP | CHECKING |
+| SET UP (`setup`) | TAP TO FINISH | SETTING UP | CHECKING |
 | CHANGE PIN, ADD PIN (`pin`) | TAP TO SET PIN | WRITING | CHECKING |
 | LIMITS (`limit`) | TAP TO SET LIMIT | WRITING | CHECKING |
 | the card's rate (`rate`) | TAP TO SET RATE | WRITING | CHECKING |

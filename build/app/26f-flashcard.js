@@ -1197,9 +1197,29 @@
         shut: { label: 'OK' },
       }),
     };
-    const spec = (cards[kind] || (() => ({ tone: 'warn', title: 'THAT DID NOT WORK', reason: said + safe })))();
+    /* A card's set-up (26j-card-wheel.js, `fcSetUpStepsRun`): the route gone between NEXT and the tap is NO CONNECTION, as it is
+     * before the tap (`fcSuNoRoute`), with nothing asked of the card; and every refusal keeps the entries, with TRY AGAIN where
+     * trying again can work and BACK to the last step, never the start (`fcSuKeepCard`). */
+    if (opt.setUp && this.fcSuNoRoute && !kind && this.fcRouteRefusal(e)) {
+      const go = opt.again;
+      this.fcSuNoRoute(() => (go ? go() : null), said);
+      return;
+    }
+    let spec = (cards[kind] || (() => ({ tone: 'warn', title: 'THAT DID NOT WORK', reason: said + safe })))();
+    if (opt.setUp && this.fcSuKeepCard && this._fcSuLast) {
+      if (!spec.retry && retry && kind !== 'blocked') spec = Object.assign({}, spec, again);
+      spec = this.fcSuKeepCard(spec);
+    }
     this.haptic && this.haptic('error');
     this.blockedCard('fc-' + (kind || 'failed'), spec);
+  }
+
+  /* A refusal that asked the mint nothing for want of a route: the wallet's own words for it (`assertRoute`), or the route shut now. */
+  fcRouteRefusal(e) {
+    const said = String((e && e.message) || '');
+    if (/^Foxy is working offline\.|^Foxy is securing its connection\.|^Tor is reconnecting\.|^Foxy is still connecting to Tor\.|^Foxy is not connected to Tor\./.test(said)) return true;
+    const W = this.fcW ? this.fcW() : null;
+    return !!(W && W.routeOpen && !W.routeOpen());
   }
 
   /* A time as a person reads it on a card's day: "3:40 PM" for today, and
@@ -4714,7 +4734,7 @@
       return;
     }
     this.blockedCard('fc-limit-warn', np ? {
-      tone: 'warn', title: 'SET NO PIN LIMIT',
+      tone: 'warn', title: 'SET NO PIN MAXIMUM',
       // (from 1.21 the allowance is refilled each time the PIN is entered on the card, not by the day)
       /* (1.25: a total of its own over 24 hours from the first payment without the PIN; contact with this phone, the owner's, ends the
        * 24 hours, and the PIN alone does not: `noPinDay`) */
@@ -4781,13 +4801,13 @@
     const secondary = { label: 'CANCEL', go: () => this.fcLimitCancel() };
     if (this._fcLimitNoPin) {
       return !(sats > 0) ? {
-        title: 'CONFIRMATION', amountLabel: 'YOU ARE REMOVING THIS CARD\u2019S NO PIN LIMIT.',
+        title: 'CONFIRMATION', amountLabel: 'YOU ARE REMOVING THIS CARD\u2019S NO PIN MAXIMUM.',
         amount: 'NO LIMIT', amountSub: '', rows: [],
         warn: 'Every payment will ask for the PIN.',
         secondary, cta: 'CONFIRM', ctaTone: 'go',
         go: () => this.fcLimitConfirmed(),
       } : {
-        title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A NO PIN LIMIT OF:',
+        title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A NO PIN MAXIMUM OF:',
         amount: fig(sats).main, amountSub: fig(sats).sub, rows: [],
         // (from 1.21 the PIN fills the allowance again, and no day does)
         warn: ((this.state.fc && this.state.fc.noPinDay) ? 'This card will pay up to this much in 24 hours without its PIN; the 24 hours end early when the card is held to this phone, not when the PIN is entered. '
@@ -5083,7 +5103,7 @@
         if (np && tx) this.fcNoPinTxKeep(card && card.key, { noPinTx: tx.n, noPinTxUnit: tx.unit, noPinTxUsd: tx.usd });
         this.fcShow(card);
         this.haptic && this.haptic('success');
-        this.toast((np ? 'No PIN limit ' : (this.fcPacedNow && this.fcPacedNow()) ? 'Per second limit ' : 'Per tap limit ') + (sats > 0 ? 'set.' : 'removed.') + (card && card.recut ? ' The card\u2019s money is recut under it.' : ''));
+        this.toast((np ? 'No PIN maximum ' : (this.fcPacedNow && this.fcPacedNow()) ? 'Per second limit ' : 'Per tap limit ') + (sats > 0 ? 'set.' : 'removed.') + (card && card.recut ? ' The card\u2019s money is recut under it.' : ''));
       }, (e) => {
         // the rate guard: asked once, and the limit written with the answer
         if (e && e.card === 'rate-far' && !answer) { this.fcRateFar(e, (a) => this.fcLimitRun(sats, tap, usd, pin, a, tx)); return; }
@@ -5096,8 +5116,8 @@
   /* ---- SWAP between a card's two balances (software 1.23) ------------------------------------------------------------
    *
    * The card cannot reach a mint, and a swap between dollars and bitcoin is the mint's, which takes longer than a card is held. So it is
-   * this phone's own SWAP (26i-swap.js) with the card at each end: the amount on SET AMOUNT in the currency that leaves, the swap's own
-   * confirmation (YOU ARE GETTING, YOU ARE SPENDING, FEE, the mint's rate), then
+   * this phone's own SWAP (26i-swap.js) with the card at each end: the amount on SET AMOUNT is what arrives, the swap's own
+   * confirmation (RECEIVING, FEE, SPENDING, the mint's rate), then
    *
    *   tap 1, the PIN    what the swap spends, its fee with it, taken off the card in that currency, as WITHDRAW takes it;
    *   no card           the swap at the mint, on this phone, at the rate shown while it holds (a new one for what came off where not);
@@ -5117,6 +5137,7 @@
     console.log('[foxy] card: SWAP opened on the card, from ' + this.unitWord(from).toLowerCase());
     // as home's SWAP opens (26i-swap.js, `goSwap`), from the card's balances
     this._swapAhead = null;
+    this._swapShortFor = null;
     this._swapProbed = {};
     this._swapProbeWanted = null;
     clearTimeout(this._swapTypedT);
@@ -5138,7 +5159,8 @@
     const { from, to } = this.swapUnits();
     if (!W || !sc || !q) return;
     if (this.moneyBusy && this.moneyBusy()) { this.toast('Something else is moving money right now. Try again in a moment.', true); return; }
-    const total = Math.round(Number(q.total) || 0);
+    // all that can leave: the quote and the fee on the pieces it is paid with (`spend`), or the melt is refused for want of that fee
+    const total = Math.round(Number(q.spend) || Number(q.total) || 0);
     this.fcPinOr({
       title: 'CARD PIN',
       subtitle: 'To take ' + this.fcBoth(total, from) + ' off the card for the swap. Then tap the card again to put on what the swap brings.',
@@ -5158,7 +5180,9 @@
           /* the card the swap is for (`opts.card`, kept on the quote and the swap's records); the swap's own rows are this phone's and
            * name no card: in the card's history it is the two taps. The quote the swap screen asked is marked here, a new one is asked with it. */
           if (fresh) q.card = sc.key;
-          this._swapRun = (fresh ? Promise.resolve(q) : W.swapQuote(from, to, took, { card: sc.key })).then((q2) => W.swapRun(q2, (stage) => console.log('[foxy] card: swap ' + stage)));
+          // a new one asked as the figure was typed (`mode` on `asked`), so what arrives is still that figure
+          const again = q.mode ? W.swapQuote(from, to, q.asked, { card: sc.key, [q.mode]: true }) : W.swapQuote(from, to, took, { card: sc.key });
+          this._swapRun = (fresh ? Promise.resolve(q) : again).then((q2) => W.swapRun(q2, (stage) => console.log('[foxy] card: swap ' + stage)));
           return this._swapRun.then((sw) => { this._swapRun = null; return sw; }, (e) => { this._swapRun = null; throw e; });
         })
         .then((sw) => {
@@ -6551,7 +6575,7 @@
       // (the dollars each number was chosen in, and the price: a card of software 1.23 keeps them in cents with its rate)
       return W.cardSetUpFor(link, { pin: c.pin, unit: c.unit, design: this.FC_SETUP_DESIGN, tapLimit: c.tapLimit, noPin: c.noPin,
                                     tapUsd: c.tapUsd, noPinUsd: c.noPinUsd, price: (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0) })
-        .then((card) => { setUp = true; this.fcNameSettle(card && card.key); on('mint'); return this.fcSendPrepare(card, sats, unit, alt); })
+        .then((card) => { setUp = true; this._fcSuLast = null; this.fcNameSettle(card && card.key); on('mint'); return this.fcSendPrepare(card, sats, unit, alt); })
         .then((m) => {
           made = m;
           if (m && m.hash) this.txIsNew(m.hash);
@@ -6577,8 +6601,10 @@
       /* Set up, the next try is the send with the holder's PIN. Cut short before that, it is the set-up again with the same PIN and
        * the same two numbers (`cardSetUpFor` takes up a set-up cut after the PIN or after the record): the holder's numbers are not
        * dropped by a send that never writes them. A wrong PIN (a card that keeps one): the pad once more, the numbers kept. */
-      this.fcFailed(e, { again: () => (setUp ? this.fcSendRun(sats, c.pin, unit, alt) : this.fcSendSetUpRun(sats, unit, alt, c)),
-                         pinAgain: () => (setUp ? this.fcSendAsk(sats, unit, alt) : this.fcSuPinAgain(c, (c2) => this.fcSendSetUpRun(sats, unit, alt, c2))) });
+      /* (cut short before the set-up was written: its entries kept, as the keeper's own set-up keeps them, `fcSuKeepCard`) */
+      this.fcFailed(e, Object.assign({ again: () => (setUp ? this.fcSendRun(sats, c.pin, unit, alt) : this.fcSendSetUpRun(sats, unit, alt, c)),
+                         pinAgain: () => (setUp ? this.fcSendAsk(sats, unit, alt) : this.fcSuPinAgain(c, (c2) => this.fcSendSetUpRun(sats, unit, alt, c2))) },
+                         setUp ? {} : { setUp: true, cancelled: () => this.fcSuReturn() }));
     });
   }
 

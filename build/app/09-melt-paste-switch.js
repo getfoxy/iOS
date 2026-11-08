@@ -1066,11 +1066,10 @@
     const s0 = this.state;
     /* A swap's keypad starts in dollars when its SET AMOUNT opens
      * (`swapToAmount`), and the ⇅ is the person's from then on: nothing here
-     * moves it back. Typed in the unit the swap does not leave, the figure is
-     * converted at the swap's price (`swapTyped`), and this keypad offers
-     * the other unit only with a market price seen, so with none it goes
-     * back to the unit that leaves, where nothing needs converting
-     * (26i-swap.js). */
+     * moves it back. Either unit is taken as typed, never converted
+     * (`swapTyped`, `swapMode`), but this keypad offers the other unit only
+     * with a market price seen, so with none it goes back to the unit that
+     * leaves (26i-swap.js). */
     if (s0.flow === 'swap' && s0.screen === 'amount') {
       const exact = s0.swapFrom === 'sat' ? 'SATS' : 'USD';
       if (s0.unit !== exact && !this.px()) {
@@ -1096,7 +1095,22 @@
       }
       return;
     }
+    /* A dollar card's own amounts are cents, typed in dollars exactly (`keypadLocked`): no price is needed for them, so neither
+     * no route nor no price ever moves that keypad to sats. */
+    if (this.keypadLocked && this.keypadLocked()) return;
     if (this.state.unit !== 'USD') return;
+    /* A limit is not a payment. A card's set-up amounts, its limits and a till's caps (`limitFlows`) move no money as they
+     * are typed, and the keeper's default is dollars: offline they stay in dollars at the last price this phone saw (the
+     * wallet keeps it on the disk, `lastPriceBack`, and every screen that converts at it says its age, `priceWarn`), and the
+     * dollars are kept beside the figure so that it follows the price once there is a route again. So is a till's tip, which
+     * is asking to be paid, as a receive is. Sats only where this phone has never seen a price (below). */
+    const limitFlows = ['cardSuNoPinTx', 'cardSuNoPin', 'cardSuTap', 'cardLimit', 'cardLimitTx', 'tillCap', 'tillTip'];
+    if (limitFlows.indexOf(String(this.state.flow)) >= 0) {
+      if (this.satUsd()) return;
+      console.log('[foxy] no price ever seen, so the keypad is in sats');
+      this.setState({ unit: 'SATS' });
+      return;
+    }
     /* Offline, a stale price may be shown but must not decide how much money
      * moves. The figure on the home screen carries its age and is there to be
      * read; a send converts at it silently, and a rate hours old converting a

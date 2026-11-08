@@ -288,9 +288,9 @@
     }
     const px = this.px();
     if (!px) { this.toast('No bitcoin price yet \u2014 amounts stay in ' + this.state.unit + '.', true); return; }
-    /* A swap turns between dollars and sats as a send does. What it moves is
-     * still the balance it leaves, worked out from the figure at NEXT
-     * (`swapTyped`), so a rate asked for the old figure is dropped. It turns
+    /* A swap turns between dollars and sats as a send does. What it asks the
+     * mint for follows the figure and its unit at NEXT (`swapTyped`,
+     * `swapMode`), so a rate asked for the old figure is dropped. It turns
      * at the swap's own price, the mint's last rate (`swapPx`), the one the
      * figure is taken at, so what the ⇅ shows is what is asked for. */
     const swapping = this.state.flow === 'swap' && this.state.screen === 'amount' && this.swapForget;

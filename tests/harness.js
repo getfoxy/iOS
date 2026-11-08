@@ -742,7 +742,12 @@ function fakeMint(w, opts) {
       const q = melts[body.quote];
       if (!q) return no(20007, 'quote not found');
       if (q.state !== 'UNPAID') return no(20005, 'quote already ' + q.state);
-      const paidIn = sum(body.inputs);
+      /* o.meltInputFee: the melt charges this mint's input fee on its inputs, as NUT-02 has Nutshell and CDK do (inputs less
+       * their fee must cover the quote and its reserve, and the change is what is left after it). Without it, as it always was
+       * here, a melt's inputs pay no fee. */
+      const meltPpkOf = (pr) => (o.usdFeePpk !== undefined && unitOfKeyset(pr && pr.id) === 'usd' ? Number(o.usdFeePpk) || 0 : Number(o.feePpk) || 0);
+      const meltFee = o.meltInputFee ? Math.ceil((body.inputs || []).reduce((n, pr) => n + meltPpkOf(pr), 0) / 1000) : 0;
+      const paidIn = sum(body.inputs) - meltFee;
       if (paidIn < q.amount + q.fee_reserve) return no(11002, 'not enough inputs for the quote');
       // pieces and change in the quote's unit (Nutshell: "inputs have different units")
       if (hasUsd && [...unitsOfAll(body.inputs)].some((u) => u !== (q.unit || 'sat'))) return no(11005, 'inputs are not in the unit of the quote');

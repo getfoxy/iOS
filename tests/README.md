@@ -305,8 +305,13 @@ person does (the direction, the amount, the confirmation and its rows, SWAP,
 SWAPPED), then a rate that runs out on screen and is asked again with CONFIRM
 NEW RATE, a confirmation left alone that stops asking, the mint refusing the
 payment (nothing held, the pile whole), and a swap cut off once its payment has
-gone (the card, home's held pill, and the next connect finishing it). Every
-page's books close per unit. The second part mounts the real page on a stand-in
+gone (the card, home's held pill, and the next connect finishing it). Then
+what is typed arrives and the fee goes on top: $ 1.00 typed is RECEIVING $ 1.00
+(in dollars, or bitcoin the mint values at $ 1.00) and SPENDING it and the fee,
+both ways round, in either unit, at a mint that charges for pieces and at one
+that charges nothing; NOT ENOUGH on the keypad with what would fit, from the
+guess and from the mint's own refusal; the reserve's unused part coming back.
+Every page's books close per unit. The second part mounts the real page on a stand-in
 wallet and reads what it draws, down to both pills glowing on home.
 
 **`swap-run.js`** counts what a swap between units asks the mint once SWAP
@@ -330,16 +335,15 @@ close per unit.
 
 **`swap-dollars.js`** holds a swap's amount and its confirmation, on the real
 page and a stand-in wallet with a fixed rate. SET AMOUNT opens in dollars both
-ways round, and the ⇅ turns it to sats and back; what the swap moves is still
-the balance that leaves, exactly, converted at the mint's last rate only when
-it was typed in the other unit (so the confirmation repeats the dollars typed,
-even with the market price elsewhere), rounded to the cent the ⇅ shows, and
-asked for at NEXT in that unit. No price
-refuses the ⇅; MORE THAN YOUR ... and ALL OF IT are in the unit that leaves; a
-switch after a rate drops it. The confirmation is the four blocks in order, YOU
-ARE GETTING, YOU ARE SPENDING, FEE and the mint's RATE, both ways round at the
-owner's example figures, with sats lines only under bitcoin and the fee, and a
-countdown whose clock stops with its screen and with its rate.
+ways round, and the ⇅ turns it to sats and back at the mint's last rate; what
+is typed is what arrives, never converted at the phone's price: in the unit
+that arrives it is the invoice (`get`), in the unit that leaves it is what the
+mint values what arrives at (`worth`), and the fee goes on top. No price
+refuses the ⇅; NOT ENOUGH says what would fit with the fee; ALL OF IT is the
+balance that leaves; a switch after a rate drops it. The confirmation is the
+four blocks in order, RECEIVING, FEE, SPENDING and the mint's RATE, both ways
+round, with sats lines only under bitcoin and the fee, and a countdown whose
+clock stops with its screen and with its rate.
 
 **`bridge-matrix.js`** holds THREAT-MODEL.md §1's table of what each bridge
 action needs to the Swift that implements it. It reads both of the page's doors:

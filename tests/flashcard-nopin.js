@@ -656,13 +656,13 @@ async function world(pin, o) {
     const amount = fs.readFileSync(path.join(__dirname, '..', 'build', 'app', '23-render-home-and-amount.js'), 'utf8');
     const wheel = fs.readFileSync(path.join(__dirname, '..', 'build', 'app', '26j-card-wheel.js'), 'utf8');
     ok(amount.indexOf("s.flow === 'cardSuNoPin' ? (this.fcSuDayWords ? this.fcSuDayWords().question") >= 0
-       && wheel.indexOf("question: 'What is the most this card should pay in 24 hours without asking for your PIN?'") >= 0
-       && wheel.indexOf("question: 'What is the most this card should pay by tap alone before it asks for its PIN?'") >= 0,
-       'the set-up asks for the 24-hour figure in the keeper\u2019s words, on 24HR LIMIT', 'amountSubtitle');
+       && wheel.indexOf("title: 'NO PIN MAXIMUM', question: 'What\\u2019s the most this card should pay in 24 hours before asking for a PIN?'") >= 0
+       && wheel.indexOf("title: 'NO PIN MAXIMUM', question: 'What\\u2019s the most this card should pay in total before asking for a PIN?'") >= 0,
+       'the set-up asks for the no-PIN total in the keeper\u2019s words, on NO PIN MAXIMUM (in 24 hours on a card of 1.25)', 'amountSubtitle');
     ok(amount.indexOf("? 'What is the most this card should pay in one transaction without asking for your PIN?'") >= 0,
        'and before it, NO PIN AMOUNT, the most for one payment', 'amountSubtitle');
     ok(/noPinDay[\s\S]{0,400}Entering the PIN does not start the 24 hours over: they end after 24 hours, or when the card is next held to this phone/.test(src),
-       'the NO PIN LIMIT explainer says the owner\u2019s phone ends the 24 hours and the PIN alone does not', 'fcLimitAsk');
+       'the NO PIN MAXIMUM explainer says the owner\u2019s phone ends the 24 hours and the PIN alone does not', 'fcLimitAsk');
   }
 
   await settle();

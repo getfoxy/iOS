@@ -7551,11 +7551,10 @@ class Component extends DCLogic {
     const s0 = this.state;
     /* A swap's keypad starts in dollars when its SET AMOUNT opens
      * (`swapToAmount`), and the ⇅ is the person's from then on: nothing here
-     * moves it back. Typed in the unit the swap does not leave, the figure is
-     * converted at the swap's price (`swapTyped`), and this keypad offers
-     * the other unit only with a market price seen, so with none it goes
-     * back to the unit that leaves, where nothing needs converting
-     * (26i-swap.js). */
+     * moves it back. Either unit is taken as typed, never converted
+     * (`swapTyped`, `swapMode`), but this keypad offers the other unit only
+     * with a market price seen, so with none it goes back to the unit that
+     * leaves (26i-swap.js). */
     if (s0.flow === 'swap' && s0.screen === 'amount') {
       const exact = s0.swapFrom === 'sat' ? 'SATS' : 'USD';
       if (s0.unit !== exact && !this.px()) {
@@ -7581,7 +7580,22 @@ class Component extends DCLogic {
       }
       return;
     }
+    /* A dollar card's own amounts are cents, typed in dollars exactly (`keypadLocked`): no price is needed for them, so neither
+     * no route nor no price ever moves that keypad to sats. */
+    if (this.keypadLocked && this.keypadLocked()) return;
     if (this.state.unit !== 'USD') return;
+    /* A limit is not a payment. A card's set-up amounts, its limits and a till's caps (`limitFlows`) move no money as they
+     * are typed, and the keeper's default is dollars: offline they stay in dollars at the last price this phone saw (the
+     * wallet keeps it on the disk, `lastPriceBack`, and every screen that converts at it says its age, `priceWarn`), and the
+     * dollars are kept beside the figure so that it follows the price once there is a route again. So is a till's tip, which
+     * is asking to be paid, as a receive is. Sats only where this phone has never seen a price (below). */
+    const limitFlows = ['cardSuNoPinTx', 'cardSuNoPin', 'cardSuTap', 'cardLimit', 'cardLimitTx', 'tillCap', 'tillTip'];
+    if (limitFlows.indexOf(String(this.state.flow)) >= 0) {
+      if (this.satUsd()) return;
+      console.log('[foxy] no price ever seen, so the keypad is in sats');
+      this.setState({ unit: 'SATS' });
+      return;
+    }
     /* Offline, a stale price may be shown but must not decide how much money
      * moves. The figure on the home screen carries its age and is there to be
      * read; a send converts at it silently, and a rate hours old converting a
@@ -15540,9 +15554,9 @@ class Component extends DCLogic {
     }
     const px = this.px();
     if (!px) { this.toast('No bitcoin price yet \u2014 amounts stay in ' + this.state.unit + '.', true); return; }
-    /* A swap turns between dollars and sats as a send does. What it moves is
-     * still the balance it leaves, worked out from the figure at NEXT
-     * (`swapTyped`), so a rate asked for the old figure is dropped. It turns
+    /* A swap turns between dollars and sats as a send does. What it asks the
+     * mint for follows the figure and its unit at NEXT (`swapTyped`,
+     * `swapMode`), so a rate asked for the old figure is dropped. It turns
      * at the swap's own price, the mint's last rate (`swapPx`), the one the
      * figure is taken at, so what the ⇅ shows is what is asked for. */
     const swapping = this.state.flow === 'swap' && this.state.screen === 'amount' && this.swapForget;
@@ -16983,10 +16997,10 @@ class Component extends DCLogic {
       ? this.fcLoadFits(usdLoad ? Math.min(Math.round(sendEnteredUsd * 100), depAsk ? Infinity : Math.max(0, Math.round(Number(s.balUsdCents) || 0)))
         : Math.min(this.wantedSats(), depAsk ? Infinity : Math.floor(balLive.sats || 0))) : null;
     const roomOver = !!(room && !room.ok);
-    /* A swap's amount is what leaves its balance, and is capped by it: cents
-     * against cents, or sats against sats. Typed in the other unit it is
-     * converted first, at the mint's last rate (`swapTyped`). */
-    const swapOver = s.flow === 'swap' && sc === 'amount' && this.swapTyped() > this.unitBalance(this.swapUnits().from);
+    /* A swap's amount is what arrives, and the mint's fee goes on top: the
+     * balance it leaves has to cover both (`swapShort`, the mint's answer for
+     * these keys or the wallet's guess from its last pairs). */
+    const swapOver = !!(s.flow === 'swap' && sc === 'amount' && this.swapShort && this.swapShort());
     const sendOver = (capped && (sendEnteredUsd > sendCapUsd + 0.005 || overLimit || roomOver)) || (depAsk && roomOver) || swapOver;
     // handed to syncHaptics, which cannot repeat this balance/limit maths
     this._amtOver = false;
@@ -17682,14 +17696,14 @@ class Component extends DCLogic {
           + (this.priceAgo() ? this.priceAgo().toLowerCase() : 'from a moment ago') + '.'
         : '',
       priceWarnShown: (sendHeld || this.keypadStale()) ? '1' : '0',
-      /* A card's set-up names its amounts (the design): NO PIN AMOUNT (one payment), 24HR LIMIT (the card's allowance) and, typed
+      /* A card's set-up names its amounts (the design): NO PIN AMOUNT (one payment), NO PIN MAXIMUM (the card's allowance) and, typed
        * rather than chosen, MAX PER SECOND (26j-card-wheel.js), as LIMITS does for the two without the PIN and for the rate of a card
        * that waits for its limit. */
       // the till's own screen is named for what it is (either role)
       amountTitle: tillHere ? 'POS MODE'
         : (s.flow === 'cardSuNoPinTx' || s.flow === 'cardLimitTx') ? 'NO PIN AMOUNT'
-        // (by the card's software: NO PIN LIMIT on 1.21 to 1.24, whose allowance the PIN fills again, 26j-card-wheel.js `fcSuDayWords`)
-        : s.flow === 'cardSuNoPin' ? (this.fcSuDayWords ? this.fcSuDayWords().title : '24HR LIMIT')
+        // (NO PIN MAXIMUM, its question by the card's software, 26j-card-wheel.js `fcSuDayWords`)
+        : s.flow === 'cardSuNoPin' ? (this.fcSuDayWords ? this.fcSuDayWords().title : 'NO PIN MAXIMUM')
         : (s.flow === 'cardLimit' && this._fcLimitNoPin && s.fc && s.fc.noPinDay) ? '24HR LIMIT'
         : s.flow === 'tillTip' ? 'TIP'
         : (s.flow === 'cardSuTap' || (s.flow === 'cardLimit' && this._fcLimitTap && this.fcPacedNow && this.fcPacedNow())) ? 'MAX PER SECOND'
@@ -17707,8 +17721,8 @@ class Component extends DCLogic {
         // a card's set-up (26j-card-wheel.js): LIMITS' own questions for the three
         // (one payment without the PIN: this phone's own rule, NO PIN AMOUNT; and from CARD LIMITS too)
         : (s.flow === 'cardSuNoPinTx' || s.flow === 'cardLimitTx') ? 'What is the most this card should pay in one transaction without asking for your PIN?'
-        // (the set-up's 24HR LIMIT is the card's 24-hour total without the PIN, software 1.25, written to the allowance)
-        : s.flow === 'cardSuNoPin' ? (this.fcSuDayWords ? this.fcSuDayWords().question : 'What is the most this card should pay in 24 hours without asking for your PIN?')
+        // (the set-up's NO PIN MAXIMUM is the card's total without the PIN, over 24 hours on software 1.25, written to the allowance)
+        : s.flow === 'cardSuNoPin' ? (this.fcSuDayWords ? this.fcSuDayWords().question : 'What\u2019s the most this card should pay in 24 hours before asking for a PIN?')
         : s.flow === 'cardSuTap' ? 'What is the most this card should pay each second?'
         : s.flow === 'receive' ? 'How much to receive?'
         : s.flow === 'swap' ? 'How much to swap?'
@@ -17903,8 +17917,8 @@ class Component extends DCLogic {
       ...((s.flow === 'cardWd' || ((s.flow === 'send' || s.flow === 'onchain') && this.fcOutMode && this.fcOutMode())) ? { sendOverLabel: 'MORE THAN THE CARD HOLDS' } : {}),
       // adding to one, the card has no room for the amount: its limit, not the phone's
       ...(s.flow === 'cardAdd' && c.roomOver ? { sendOverLabel: 'MORE THAN THE CARD CAN TAKE' } : {}),
-      // a swap is out of one balance, and the line names it
-      ...(s.flow === 'swap' ? { sendOverLabel: 'MORE THAN YOUR ' + this.unitWord(this.swapUnits().from) } : {}),
+      // a swap: what arrives and the fee on top are more than the balance it leaves, and the line says what would fit
+      ...(s.flow === 'swap' ? { sendOverLabel: (sendOver && this.swapShortLabel && this.swapShortLabel()) || 'NOT ENOUGH' } : {}),
     };
   }
 
@@ -26884,9 +26898,29 @@ class Component extends DCLogic {
         shut: { label: 'OK' },
       }),
     };
-    const spec = (cards[kind] || (() => ({ tone: 'warn', title: 'THAT DID NOT WORK', reason: said + safe })))();
+    /* A card's set-up (26j-card-wheel.js, `fcSetUpStepsRun`): the route gone between NEXT and the tap is NO CONNECTION, as it is
+     * before the tap (`fcSuNoRoute`), with nothing asked of the card; and every refusal keeps the entries, with TRY AGAIN where
+     * trying again can work and BACK to the last step, never the start (`fcSuKeepCard`). */
+    if (opt.setUp && this.fcSuNoRoute && !kind && this.fcRouteRefusal(e)) {
+      const go = opt.again;
+      this.fcSuNoRoute(() => (go ? go() : null), said);
+      return;
+    }
+    let spec = (cards[kind] || (() => ({ tone: 'warn', title: 'THAT DID NOT WORK', reason: said + safe })))();
+    if (opt.setUp && this.fcSuKeepCard && this._fcSuLast) {
+      if (!spec.retry && retry && kind !== 'blocked') spec = Object.assign({}, spec, again);
+      spec = this.fcSuKeepCard(spec);
+    }
     this.haptic && this.haptic('error');
     this.blockedCard('fc-' + (kind || 'failed'), spec);
+  }
+
+  /* A refusal that asked the mint nothing for want of a route: the wallet's own words for it (`assertRoute`), or the route shut now. */
+  fcRouteRefusal(e) {
+    const said = String((e && e.message) || '');
+    if (/^Foxy is working offline\.|^Foxy is securing its connection\.|^Tor is reconnecting\.|^Foxy is still connecting to Tor\.|^Foxy is not connected to Tor\./.test(said)) return true;
+    const W = this.fcW ? this.fcW() : null;
+    return !!(W && W.routeOpen && !W.routeOpen());
   }
 
   /* A time as a person reads it on a card's day: "3:40 PM" for today, and
@@ -30401,7 +30435,7 @@ class Component extends DCLogic {
       return;
     }
     this.blockedCard('fc-limit-warn', np ? {
-      tone: 'warn', title: 'SET NO PIN LIMIT',
+      tone: 'warn', title: 'SET NO PIN MAXIMUM',
       // (from 1.21 the allowance is refilled each time the PIN is entered on the card, not by the day)
       /* (1.25: a total of its own over 24 hours from the first payment without the PIN; contact with this phone, the owner's, ends the
        * 24 hours, and the PIN alone does not: `noPinDay`) */
@@ -30468,13 +30502,13 @@ class Component extends DCLogic {
     const secondary = { label: 'CANCEL', go: () => this.fcLimitCancel() };
     if (this._fcLimitNoPin) {
       return !(sats > 0) ? {
-        title: 'CONFIRMATION', amountLabel: 'YOU ARE REMOVING THIS CARD\u2019S NO PIN LIMIT.',
+        title: 'CONFIRMATION', amountLabel: 'YOU ARE REMOVING THIS CARD\u2019S NO PIN MAXIMUM.',
         amount: 'NO LIMIT', amountSub: '', rows: [],
         warn: 'Every payment will ask for the PIN.',
         secondary, cta: 'CONFIRM', ctaTone: 'go',
         go: () => this.fcLimitConfirmed(),
       } : {
-        title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A NO PIN LIMIT OF:',
+        title: 'CONFIRMATION', amountLabel: 'YOU ARE APPLYING A NO PIN MAXIMUM OF:',
         amount: fig(sats).main, amountSub: fig(sats).sub, rows: [],
         // (from 1.21 the PIN fills the allowance again, and no day does)
         warn: ((this.state.fc && this.state.fc.noPinDay) ? 'This card will pay up to this much in 24 hours without its PIN; the 24 hours end early when the card is held to this phone, not when the PIN is entered. '
@@ -30770,7 +30804,7 @@ class Component extends DCLogic {
         if (np && tx) this.fcNoPinTxKeep(card && card.key, { noPinTx: tx.n, noPinTxUnit: tx.unit, noPinTxUsd: tx.usd });
         this.fcShow(card);
         this.haptic && this.haptic('success');
-        this.toast((np ? 'No PIN limit ' : (this.fcPacedNow && this.fcPacedNow()) ? 'Per second limit ' : 'Per tap limit ') + (sats > 0 ? 'set.' : 'removed.') + (card && card.recut ? ' The card\u2019s money is recut under it.' : ''));
+        this.toast((np ? 'No PIN maximum ' : (this.fcPacedNow && this.fcPacedNow()) ? 'Per second limit ' : 'Per tap limit ') + (sats > 0 ? 'set.' : 'removed.') + (card && card.recut ? ' The card\u2019s money is recut under it.' : ''));
       }, (e) => {
         // the rate guard: asked once, and the limit written with the answer
         if (e && e.card === 'rate-far' && !answer) { this.fcRateFar(e, (a) => this.fcLimitRun(sats, tap, usd, pin, a, tx)); return; }
@@ -30783,8 +30817,8 @@ class Component extends DCLogic {
   /* ---- SWAP between a card's two balances (software 1.23) ------------------------------------------------------------
    *
    * The card cannot reach a mint, and a swap between dollars and bitcoin is the mint's, which takes longer than a card is held. So it is
-   * this phone's own SWAP (26i-swap.js) with the card at each end: the amount on SET AMOUNT in the currency that leaves, the swap's own
-   * confirmation (YOU ARE GETTING, YOU ARE SPENDING, FEE, the mint's rate), then
+   * this phone's own SWAP (26i-swap.js) with the card at each end: the amount on SET AMOUNT is what arrives, the swap's own
+   * confirmation (RECEIVING, FEE, SPENDING, the mint's rate), then
    *
    *   tap 1, the PIN    what the swap spends, its fee with it, taken off the card in that currency, as WITHDRAW takes it;
    *   no card           the swap at the mint, on this phone, at the rate shown while it holds (a new one for what came off where not);
@@ -30804,6 +30838,7 @@ class Component extends DCLogic {
     console.log('[foxy] card: SWAP opened on the card, from ' + this.unitWord(from).toLowerCase());
     // as home's SWAP opens (26i-swap.js, `goSwap`), from the card's balances
     this._swapAhead = null;
+    this._swapShortFor = null;
     this._swapProbed = {};
     this._swapProbeWanted = null;
     clearTimeout(this._swapTypedT);
@@ -30825,7 +30860,8 @@ class Component extends DCLogic {
     const { from, to } = this.swapUnits();
     if (!W || !sc || !q) return;
     if (this.moneyBusy && this.moneyBusy()) { this.toast('Something else is moving money right now. Try again in a moment.', true); return; }
-    const total = Math.round(Number(q.total) || 0);
+    // all that can leave: the quote and the fee on the pieces it is paid with (`spend`), or the melt is refused for want of that fee
+    const total = Math.round(Number(q.spend) || Number(q.total) || 0);
     this.fcPinOr({
       title: 'CARD PIN',
       subtitle: 'To take ' + this.fcBoth(total, from) + ' off the card for the swap. Then tap the card again to put on what the swap brings.',
@@ -30845,7 +30881,9 @@ class Component extends DCLogic {
           /* the card the swap is for (`opts.card`, kept on the quote and the swap's records); the swap's own rows are this phone's and
            * name no card: in the card's history it is the two taps. The quote the swap screen asked is marked here, a new one is asked with it. */
           if (fresh) q.card = sc.key;
-          this._swapRun = (fresh ? Promise.resolve(q) : W.swapQuote(from, to, took, { card: sc.key })).then((q2) => W.swapRun(q2, (stage) => console.log('[foxy] card: swap ' + stage)));
+          // a new one asked as the figure was typed (`mode` on `asked`), so what arrives is still that figure
+          const again = q.mode ? W.swapQuote(from, to, q.asked, { card: sc.key, [q.mode]: true }) : W.swapQuote(from, to, took, { card: sc.key });
+          this._swapRun = (fresh ? Promise.resolve(q) : again).then((q2) => W.swapRun(q2, (stage) => console.log('[foxy] card: swap ' + stage)));
           return this._swapRun.then((sw) => { this._swapRun = null; return sw; }, (e) => { this._swapRun = null; throw e; });
         })
         .then((sw) => {
@@ -32238,7 +32276,7 @@ class Component extends DCLogic {
       // (the dollars each number was chosen in, and the price: a card of software 1.23 keeps them in cents with its rate)
       return W.cardSetUpFor(link, { pin: c.pin, unit: c.unit, design: this.FC_SETUP_DESIGN, tapLimit: c.tapLimit, noPin: c.noPin,
                                     tapUsd: c.tapUsd, noPinUsd: c.noPinUsd, price: (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0) })
-        .then((card) => { setUp = true; this.fcNameSettle(card && card.key); on('mint'); return this.fcSendPrepare(card, sats, unit, alt); })
+        .then((card) => { setUp = true; this._fcSuLast = null; this.fcNameSettle(card && card.key); on('mint'); return this.fcSendPrepare(card, sats, unit, alt); })
         .then((m) => {
           made = m;
           if (m && m.hash) this.txIsNew(m.hash);
@@ -32264,8 +32302,10 @@ class Component extends DCLogic {
       /* Set up, the next try is the send with the holder's PIN. Cut short before that, it is the set-up again with the same PIN and
        * the same two numbers (`cardSetUpFor` takes up a set-up cut after the PIN or after the record): the holder's numbers are not
        * dropped by a send that never writes them. A wrong PIN (a card that keeps one): the pad once more, the numbers kept. */
-      this.fcFailed(e, { again: () => (setUp ? this.fcSendRun(sats, c.pin, unit, alt) : this.fcSendSetUpRun(sats, unit, alt, c)),
-                         pinAgain: () => (setUp ? this.fcSendAsk(sats, unit, alt) : this.fcSuPinAgain(c, (c2) => this.fcSendSetUpRun(sats, unit, alt, c2))) });
+      /* (cut short before the set-up was written: its entries kept, as the keeper's own set-up keeps them, `fcSuKeepCard`) */
+      this.fcFailed(e, Object.assign({ again: () => (setUp ? this.fcSendRun(sats, c.pin, unit, alt) : this.fcSendSetUpRun(sats, unit, alt, c)),
+                         pinAgain: () => (setUp ? this.fcSendAsk(sats, unit, alt) : this.fcSuPinAgain(c, (c2) => this.fcSendSetUpRun(sats, unit, alt, c2))) },
+                         setUp ? {} : { setUp: true, cancelled: () => this.fcSuReturn() }));
     });
   }
 
@@ -33681,7 +33721,8 @@ class Component extends DCLogic {
     move: { tap: 'TAP TO MOVE', contact: 'MOVING', check: 'CHECKING' },
     renew: { tap: 'TAP TO RENEW', contact: 'RENEWING', check: 'CHECKING' },
     reset: { tap: 'TAP TO RESET', contact: 'RESETTING', check: 'CHECKING' },
-    setup: { tap: 'TAP TO SET UP', contact: 'SETTING UP', check: 'CHECKING' },
+    // (a set-up's tap is the last step of its questions: the keeper's TAP TO FINISH, 2026-11-08)
+    setup: { tap: 'TAP TO FINISH', contact: 'SETTING UP', check: 'CHECKING' },
     pin: { tap: 'TAP TO SET PIN', contact: 'WRITING', check: 'CHECKING' },
     limit: { tap: 'TAP TO SET LIMIT', contact: 'WRITING', check: 'CHECKING' },
     rate: { tap: 'TAP TO SET RATE', contact: 'WRITING', check: 'CHECKING' },
@@ -34108,18 +34149,21 @@ class Component extends DCLogic {
    *                on the seam that turns them round, and NEXT
    *   amount       SET AMOUNT with flow 'swap': "How much to swap?", in dollars
    *                to start whichever way it goes, with the ⇅ to sats and back
-   *                as a send has it, and ALL OF IT. What the swap moves is the
-   *                FROM balance's own unit, cents or sats, exactly: typed in
-   *                it, nothing converts; typed in the other, it converts at the
-   *                mint's last rate, the one its confirmation will be valued
-   *                at, so the dollars typed are the dollars it repeats
-   *                (`swapTyped`, `swapPx`). Under the question, the mint's
+   *                as a send has it, and ALL OF IT. What is typed is what
+   *                arrives, and the mint's fee goes on top: typed in the unit
+   *                that arrives it is the invoice itself (`get`); typed in the
+   *                unit that leaves it is what the mint values what arrives at
+   *                ("$ 1.00 of bitcoin", `worth`). Nothing is converted at the
+   *                phone's price: the mint's quote says the rest (`swapTyped`,
+   *                `swapMode`). A balance that cannot cover the figure and the
+   *                fee says NOT ENOUGH with what would fit (`swapShort`).
+   *                Under the question, the mint's
    *                rate, asked as SWAP was tapped (`swapProbe`,
    *                `swapRateLine`); a figure left still is quoted in the
    *                background, so NEXT opens the confirmation filled
    *                (`swapAheadAsk`)
-   *   swapConfirm  four blocks, as the owner laid them out: YOU ARE GETTING,
-   *                YOU ARE SPENDING, FEE, and the mint's RATE with how long it
+   *   swapConfirm  four blocks: RECEIVING (what was typed), FEE, SPENDING
+   *                (the two together), and the mint's RATE with how long it
    *                is held for, then SWAP. A bitcoin figure is its dollar worth
    *                at the quote's rate with the sats under it; a dollar figure
    *                is exact and has no sats line
@@ -34185,8 +34229,9 @@ class Component extends DCLogic {
     if (!this.twoUnitsOn()) { this.toast('This mint issues only bitcoin, so there is nothing to swap with.', true); return; }
     const from = this.unitBalance('usd') > 0 || !(this.unitBalance('sat') > 0) ? 'usd' : 'sat';
     console.log('[foxy] swap: opened, from ' + this.unitWord(from).toLowerCase());
-    // a new screen: what was asked ahead for the last one is not this one's
+    // a new screen: what was asked ahead for the last one is not this one's, nor a NOT ENOUGH the mint said then
     this._swapAhead = null;
+    this._swapShortFor = null;
     this._swapProbed = {};
     this._swapProbeWanted = null;
     clearTimeout(this._swapTypedT);
@@ -34285,11 +34330,19 @@ class Component extends DCLogic {
     }));
   }
 
-  /* Is the keypad in the unit that leaves (dollars for dollars, sats for
-   * bitcoin), so that what is typed is what moves? */
+  /* Is the keypad in the unit that arrives (sats for bitcoin, dollars for
+   * dollars), so that what is typed is the invoice itself? */
   swapExact() {
-    const { from } = this.swapUnits();
-    return (this.state.unit === 'SATS') === (from === 'sat');
+    const { to } = this.swapUnits();
+    return (this.state.unit === 'SATS') === (to === 'sat');
+  }
+
+  /* How the figure on the keypad is asked of the wallet (`swapQuote`): 'get'
+   * when it is typed in the unit that arrives, so it arrives exactly; 'worth'
+   * when typed in the unit that leaves, so what arrives is what the mint
+   * values at it. Either way the fee is on top. */
+  swapMode() {
+    return this.swapExact() ? 'get' : 'worth';
   }
 
   /* The price a swap's two units are put side by side at before the mint
@@ -34306,20 +34359,53 @@ class Component extends DCLogic {
     return rate > 0 ? rate : (this.px() || 0);
   }
 
-  /* What is typed on SET AMOUNT for a swap, in the FROM unit: cents for
-   * dollars, sats for bitcoin. Typed in that unit it is taken exactly. Typed
-   * in the other it converts at the swap's price (`swapPx`), rounded as the
-   * ⇅ rounds: dollars to the nearest sat, sats to the cent the ⇅ would show
-   * (`centsOfSats`), so the cents asked for are the figure seen. No price,
-   * no conversion: nought. */
+  /* What is typed on SET AMOUNT for a swap, in the keypad's own unit: cents
+   * for dollars, sats for bitcoin, exactly, never converted. `swapMode` says
+   * which side of the swap it fixes. */
   swapTyped() {
-    const { from } = this.swapUnits();
     const v = parseFloat(this.state.amount) || 0;
     if (!(v > 0)) return 0;
-    if (this.swapExact()) return from === 'usd' ? this.centsTyped() : Math.round(v);
-    const px = this.swapPx();
-    if (!px) return 0;
-    return from === 'usd' ? this.centsOfSats(Math.round(v), px) : Math.round(v / px * 1e8);
+    return this.state.unit === 'SATS' ? Math.round(v) : this.centsTyped();
+  }
+
+  /* The keypad's figure is more than the balance can swap with the mint's
+   * fee on top: { fits }, the most that would, in the keypad's unit (0 when
+   * that is not known), else null. Only the mint's own answer for these very
+   * keys ever names a figure (`swapAheadAsk`, `swapAsk`); a quote asked ahead
+   * for them that the balance covers says it fits. Otherwise the wallet's
+   * guess from the pairs this mint answered lately (`swapGuess`) can say NOT
+   * ENOUGH, but names nothing: it reads the fee low, and a figure it offered
+   * could be refused again. */
+  swapShort() {
+    const W = window.FoxyWallet;
+    const n = this.swapTyped();
+    if (!(n > 0)) return null;
+    const { from, to } = this.swapUnits();
+    const k = this._swapShortFor;
+    if (k && k.keypad === this.swapKeypad() && k.from === from && k.mint === this.swapMintHere()) return { fits: k.fits };
+    const have = this.swapHave(from);
+    const ahead = this.swapAheadFor(this.swapAheadMine());
+    if (ahead && Number(ahead.q.spend || ahead.q.total) <= have) return null;
+    let g = null;
+    try { g = W && W.swapGuess ? W.swapGuess(from, to, n, this.swapMode(), have) : null; } catch (e) { g = null; }
+    if (g && g.need > have) return { fits: 0 };
+    // nothing known of the mint's rate: what leaves is at least what was typed in its own unit
+    if (!g && this.swapMode() === 'worth' && n > have) return { fits: 0 };
+    return null;
+  }
+
+  /* The line under the keypad's figure when it is short: NOT ENOUGH, and
+   * the most that would fit, in the keypad's unit. */
+  swapShortLabel() {
+    const sh = this.swapShort();
+    if (!sh) return '';
+    return sh.fits > 0 ? 'NOT ENOUGH · UP TO ' + this.unitFigure(sh.fits, this.state.unit === 'SATS' ? 'sat' : 'usd') : 'NOT ENOUGH';
+  }
+
+  /* The mint said these keys are short (`e.short`): kept for them, so the
+   * keypad says it with the mint's figure until they change. */
+  swapShortKeep(keypad, from, mint, e) {
+    this._swapShortFor = { keypad: keypad, from: from, mint: mint, fits: Math.max(0, Math.round(Number(e && e.fits) || 0)) };
   }
 
   /* A quote is for the amount as it stood at NEXT. The keypad changing under
@@ -34354,7 +34440,11 @@ class Component extends DCLogic {
     if (this.offlineNow() || !this.twoUnitsOn() || this._swapRun || s.swapBusy) return;
     const { from, to } = this.swapUnits();
     const amount = this.swapTyped();
-    if (!(amount > 0) || amount > this.swapHave(from)) return;
+    const mode = this.swapMode();
+    /* Short by the mint's own answer for these keys: nothing more to ask. Short by the guess alone, it is asked all the
+     * same (a quote commits to nothing), so the keypad can say what would fit in the mint's figure. */
+    const k = this._swapShortFor;
+    if (!(amount > 0) || (k && k.keypad === this.swapKeypad() && k.from === from && k.mint === this.swapMintHere())) return;
     const had = this.swapAheadMine();
     if (had && (had.asking || this.swapAheadFor(had))) return;
     if (this._swapAheadOut) { this._swapAheadWaiting = true; return; }
@@ -34368,14 +34458,14 @@ class Component extends DCLogic {
     }
     let hurry = null;
     const mine = {
-      from: from, to: to, amount: amount, keypad: this.swapKeypad(), mint: this.swapMintHere(),
+      from: from, to: to, amount: amount, mode: mode, keypad: this.swapKeypad(), mint: this.swapMintHere(),
       asking: true, q: null, at: Date.now(),
       // NEXT on this very figure: the person is waiting now, so its pace is let go (`_swapPaced`)
       hurry: () => { if (hurry) hurry(); },
     };
     this._swapAhead = mine;
-    console.log('[foxy] swap: asking the rate for ' + this.unitFigure(amount, from) + ' as it is typed');
-    const opts = Object.assign({ paceMs: this.SWAP_AHEAD_GAP_MS, perMin: this.SWAP_AHEAD_PER_MIN, hurry: new Promise((r) => { hurry = r; }) }, this.swapComing(from));
+    console.log('[foxy] swap: asking the rate for ' + this.unitFigure(amount, mode === 'get' ? to : from) + (mode === 'get' ? ' to arrive' : ' of ' + this.unitWord(to).toLowerCase()) + ' as it is typed');
+    const opts = Object.assign({ paceMs: this.SWAP_AHEAD_GAP_MS, perMin: this.SWAP_AHEAD_PER_MIN, hurry: new Promise((r) => { hurry = r; }), [mode]: true }, this.swapComing(from));
     const ask = this._swapAheadOut = W.swapQuote(from, to, amount, opts).then((q) => {
       mine.q = q;
       mine.asking = false;
@@ -34383,6 +34473,8 @@ class Component extends DCLogic {
       // not said on screen: NEXT asks again and says why if it is refused there
       mine.asking = false;
       if (this._swapAhead === mine) this._swapAhead = null;
+      // short with the fee: the keypad says so, with the mint's own figure for what would fit
+      if (e && e.short) { this.swapShortKeep(mine.keypad, from, mine.mint, e); this.setState({ swapTick: Date.now() }); }
       console.log('[foxy] swap: the rate asked ahead did not come:', (e && e.message) || e);
     }).then(() => {
       if (this._swapAheadOut === ask) this._swapAheadOut = null;
@@ -34435,7 +34527,7 @@ class Component extends DCLogic {
   swapAheadTake(a, from, to) {
     this._swapAskRun = (this._swapAskRun || 0) + 1;
     this._swapQuotedAt = a.at;
-    console.log('[foxy] swap: quoted ' + this.unitFigure(a.q.total, from) + ' for ' + this.unitFigure(a.q.get, to)
+    console.log('[foxy] swap: quoted ' + this.unitFigure(a.q.spend || a.q.total, from) + ' for ' + this.unitFigure(a.q.get, to)
       + ' (asked as it was typed)');
     this.setState({ swapQuoting: false, swapQuote: a.q, swapNewRate: false });
     this.swapClock();
@@ -34451,10 +34543,13 @@ class Component extends DCLogic {
      * has since moved the rate the keys would convert at. */
     const mine = all ? null : this.swapAheadMine();
     const amount = all ? have : mine ? mine.amount : this.swapTyped();
+    const mode = all ? '' : mine ? mine.mode : this.swapMode();
     if (!(amount > 0)) { this.toast('Type an amount first.', true); return; }
-    if (amount > have) {
-      this.toast('That is more than your ' + this.unitWord(from).toLowerCase() + ': you hold '
-        + this.unitFigure(have, from) + '.', true);
+    // (the keypad holds NEXT back with NOT ENOUGH on screen; this is for anything else that calls it)
+    const short = all ? null : this.swapShort();
+    if (short) {
+      this.toast('That is more than your ' + this.unitWord(from).toLowerCase() + ' cover with the mint’s fee'
+        + (short.fits > 0 ? ': up to ' + this.unitFigure(short.fits, this.state.unit === 'SATS' ? 'sat' : 'usd') + ' fits.' : '.'), true);
       return;
     }
     clearTimeout(this._swapTypedT);
@@ -34464,7 +34559,7 @@ class Component extends DCLogic {
     const coming = !ahead && mine && mine.asking ? mine : null;
     this.setState(p => ({
       screen: 'swapConfirm', stack: p.stack.concat([p.screen]),
-      swapAmount: amount, swapAll: !!all, swapQuote: null, swapNewRate: false,
+      swapAmount: amount, swapMode: mode, swapAll: !!all, swapQuote: null, swapNewRate: false,
       swapErr: '', swapErrAmount: false, swapRequotes: 0, swapLapsed: false,
       swapQuoting: !!coming,
     }));
@@ -34481,19 +34576,19 @@ class Component extends DCLogic {
         if (this.state.screen !== 'swapConfirm') { this.setState({ swapQuoting: false }); return; }
         const got = this._swapAhead === coming ? this.swapAheadFor(coming) : null;
         if (got) this.swapAheadTake(got, from, to);
-        else this.swapAsk(false, amount, !!all);
+        else this.swapAsk(false, amount, !!all, mode);
       });
       return;
     }
     // the amount handed over, not read back from state the same moment it was set
     // (a card's SWAP: ALL OF IT is the card's, asked as that figure, never as all of this phone's)
-    this.swapAsk(false, amount, this._swapCard ? false : !!all);
+    this.swapAsk(false, amount, this._swapCard ? false : !!all, mode);
   }
 
   /* The mint's rate for this swap. `again` is a rate asked for because the
    * last one ran out: the rows change under the person, so the button says
    * CONFIRM NEW RATE until it is pressed. Nothing moves by asking. */
-  swapAsk(again, amountGiven, allGiven) {
+  swapAsk(again, amountGiven, allGiven, modeGiven) {
     const W = window.FoxyWallet;
     const s = this.state;
     // a swap being run is not asked about again; a newer question replaces an older one (`run`)
@@ -34501,16 +34596,20 @@ class Component extends DCLogic {
     const { from, to } = this.swapUnits();
     const amount = amountGiven != null ? amountGiven : (s.swapAmount || 0);
     const all = allGiven != null ? allGiven : !!s.swapAll;
+    // what arrives as typed, the fee on top (`swapMode`); all of a balance is what leaves, the fee in it
+    const mode = all ? '' : (modeGiven != null ? modeGiven : (s.swapMode || ''));
+    // the keys the figure came from, for a NOT ENOUGH said back on them
+    const keys = this.swapKeypad(), mintAt = this.swapMintHere();
     const run = (this._swapAskRun = (this._swapAskRun || 0) + 1);
     this.setState({ swapQuoting: true, swapErr: '', swapErrAmount: false, swapLapsed: false });
     // out with the mint until it answers: nothing is asked ahead beside it (`swapProbe`, `swapAheadAsk`)
-    const asked = this._swapAskOut = W.swapQuote(from, to, amount, Object.assign(all ? { all: true } : {}, this.swapComing(from)));
+    const asked = this._swapAskOut = W.swapQuote(from, to, amount, Object.assign(all ? { all: true } : mode ? { [mode]: true } : {}, this.swapComing(from)));
     asked.then(() => {}, () => {}).then(() => { if (this._swapAskOut === asked) this._swapAskOut = null; });
     asked.then(q => {
       // an answer for an older question is dropped; one for a screen that has gone only ends the wait
       if (run !== this._swapAskRun) return;
       if (this.state.screen !== 'swapConfirm') { this.setState({ swapQuoting: false }); return; }
-      console.log('[foxy] swap: quoted ' + this.unitFigure(q.total, from) + ' for ' + this.unitFigure(q.get, to)
+      console.log('[foxy] swap: quoted ' + this.unitFigure(q.spend || q.total, from) + ' for ' + this.unitFigure(q.get, to)
         + (again ? ' (a new rate)' : ''));
       // (a card's SWAP: what the swap spends, its fee with it, comes off the card, which has to hold it)
       if (this._swapCard && Number(q.total) > this.swapHave(from)) {
@@ -34525,8 +34624,10 @@ class Component extends DCLogic {
       if (run !== this._swapAskRun) return;
       const why = W.reason ? W.reason(e) : String((e && e.message) || e);
       console.warn('[foxy] swap: no rate:', why);
+      // short with the fee: the keypad says NOT ENOUGH with the mint's figure for what would fit
+      if (e && e.short && mode) this.swapShortKeep(keys, from, mintAt, e);
       // an amount the mint will not swap is changed on the keypad; anything else is asked again
-      const amountWrong = /too little|more than your|above zero/i.test(why);
+      const amountWrong = !!(e && e.short) || /too little|more than your|above zero|not enough/i.test(why);
       this.setState({ swapQuoting: false, swapQuote: null, swapErr: why, swapErrAmount: amountWrong });
     });
   }
@@ -34599,7 +34700,7 @@ class Component extends DCLogic {
     // the fox, the figure following the swap's own stages (26r-fox-wait.js); the melt loader where it cannot be drawn
     const fox = !!(this.foxUp && this.foxUp('swapMove', 'swap', { forMs: 120000 }));
     if (!fox) this.showMelt('Swapping ' + this.unitWord(from).toLowerCase() + ' into ' + this.unitWord(to).toLowerCase() + '…', 120000);
-    console.log('[foxy] swap: running ' + this.unitFigure(q.total, from) + ' into ' + this.unitFigure(q.get, to));
+    console.log('[foxy] swap: running ' + this.unitFigure(q.spend || q.total, from) + ' into ' + this.unitFigure(q.get, to));
     const heard = (stage) => console.log('[foxy] swap: ' + stage);
     this._swapRun = W.swapRun(q, fox ? this.foxHears('swapMove', heard) : heard).then(r => {
       /* One leg unanswered is, most of the time, a mint a few seconds slow rather than a mint stuck, and the card for
@@ -34934,28 +35035,30 @@ class Component extends DCLogic {
     return market > 0 ? 'MARKET PRICE ' + this.swapRateText(market) : '';
   }
 
-  /* The line under the keypad's figure, in the other unit, as a send has it.
-   * Typed in the unit that leaves: about what the swap would give, at the
-   * mint's last rate (or the market's). Typed in the other: what leaves,
-   * exactly as it will be asked for. '' with nothing to say. */
+  /* The line under the keypad's figure, in the other unit, as a send has it:
+   * about what the typed figure is worth there, at the mint's last rate (or
+   * the market's). Only a guide: what arrives is the figure typed, and the
+   * mint's quote says the rest. '' with nothing to say. */
   swapEstimate() {
-    const { from, to } = this.swapUnits();
     const n = this.swapTyped();
     if (!(n > 0)) return '';
-    if (!this.swapExact()) return this.unitFigure(n, from);
     const rate = this.swapPx();
     if (!(rate > 0)) return '';
-    const got = from === 'usd' ? Math.floor(n / 100 / rate * 1e8) : Math.floor(n * rate / 1e8 * 100);
-    return '≈ ' + this.unitFigure(got, to);
+    if (this.state.unit === 'SATS') return '≈ ' + this.unitFigure(this.centsOfSats(n, rate), 'usd');
+    return '≈ ' + this.unitFigure(Math.round(n / 100 / rate * 1e8), 'sat');
   }
 
-  /* The confirmation's contents (confirmSpec), in the four blocks the owner
-   * laid out, top to bottom: YOU ARE GETTING, YOU ARE SPENDING, FEE, and the
-   * mint's RATE with how long it is held for. No NETWORK row, since a swap
+  /* The confirmation's contents (confirmSpec), in four blocks, top to
+   * bottom: RECEIVING, FEE, SPENDING, and the mint's RATE with how long it
+   * is held for. RECEIVING is the figure typed (`swapMode`), FEE the mint's
+   * whole cost of the swap on top of it (what leaves less what arrives, both
+   * at the quote's rate, in dollars with the sats under it), and SPENDING the
+   * two together (`spend`: the invoice, the reserve and any fee on the
+   * pieces), so the three add up as read; what the reserve does not use
+   * comes back, and SWAPPED says what left. No NETWORK row, since a swap
    * never leaves the mint, and no TOTAL, since what is spent is its own
-   * block. The fee is the mint's whole cost of the swap: what leaves less
-   * what arrives, both at the quote's rate, in dollars with the sats under
-   * it, so the three figures add up as read. */
+   * block. All of a balance (ALL OF IT) is the other way round: what leaves
+   * is the balance, and what arrives is what it buys. */
   /** @returns {ConfirmSpec} */
   swapSpec() {
     const s = this.state;
@@ -34971,21 +35074,41 @@ class Component extends DCLogic {
       close: () => this.setState(p => ({ screen: p.stack.indexOf('flashcard') >= 0 ? 'flashcard' : 'home', stack: [] })),
     };
     if (!q) {
-      /* No rate yet: what leaves, and the rest waiting on the mint. Bitcoin
-       * leaving is shown as the keypad showed it, in dollars at the mint's
-       * last rate with the exact sats under it (`swapPx`); with no price at
-       * all it is the sats alone, with no unit word to make it read as a
-       * dollar figure. */
+      /* No rate yet: the figure asked for, and the rest waiting on the mint.
+       * Typed in the unit that arrives it is exact; typed in the unit that
+       * leaves it is what arrives is worth, said in that unit. All of a
+       * balance is what leaves, shown as the keypad showed it: bitcoin in
+       * dollars at the mint's last rate with the exact sats under it
+       * (`swapPx`), and with no price at all the sats alone. */
       const word = s.swapQuoting ? 'CHECKING…' : 'UNKNOWN';
       const guess = this.swapPx();
-      const spent = this.swapWorth(s.swapAmount || 0, from, guess);
       const wrong = !s.swapQuoting && !s.swapLapsed;
-      const rows = [
-        this.cfRow('YOU ARE GETTING', word, getOpt),
-        block('YOU ARE SPENDING', spent, (from === 'usd' || guess > 0) ? from : '', wrong ? { ink: '#FF5C5C' } : {}),
-        this.cfRow('FEE', word),
-        this.cfRow(this.swapRateHead(), word),
-      ];
+      const red = wrong ? { ink: '#FF5C5C' } : {};
+      const mode = s.swapAll ? '' : (s.swapMode || 'get');
+      const amt = s.swapAmount || 0;
+      let rows;
+      if (!mode) {
+        const spent = this.swapWorth(amt, from, guess);
+        rows = [
+          this.cfRow('RECEIVING', word, getOpt),
+          this.cfRow('FEE', word),
+          block('SPENDING', spent, (from === 'usd' || guess > 0) ? from : '', red),
+          this.cfRow(this.swapRateHead(), word),
+        ];
+      } else {
+        /* (typed in sats for dollars: what arrives is said in dollars, about, until the mint says exactly; typed in dollars
+         * for bitcoin it is that many dollars of bitcoin already) */
+        const got = mode === 'get' ? this.swapWorth(amt, to, guess)
+          : from === 'usd' ? { main: this.unitFigure(amt, 'usd'), sub: '' }
+          : { main: guess > 0 ? '≈ ' + this.unitFigure(this.centsOfSats(amt, guess), 'usd') : word, sub: '' };
+        const named = mode === 'get' ? (to === 'usd' || guess > 0) : (from === 'usd' || guess > 0);
+        rows = [
+          block('RECEIVING', got, named ? to : '', Object.assign({}, getOpt, red)),
+          this.cfRow('FEE', word),
+          this.cfRow('SPENDING', word),
+          this.cfRow(this.swapRateHead(), word),
+        ];
+      }
       if (s.swapQuoting) {
         return Object.assign(base, { rows: rows,
           cta: 'CHECKING THE RATE…', ctaBusy: true, ctaTone: 'go', go: () => {} });
@@ -35014,18 +35137,20 @@ class Component extends DCLogic {
     const rate = this.swapRateOf(q.rate);
     const market = this.swapRateOf(q.market);
     const got = this.swapWorth(q.get, to, rate);
-    const spent = this.swapWorth(q.total, from, rate);
+    // all that can leave: the invoice, the reserve, and this mint's fee on the pieces (a quote from before `spend`: its total)
+    const out = Number(q.spend) > 0 ? Number(q.spend) : Number(q.total) || 0;
+    const spent = this.swapWorth(out, from, rate);
     // with no rate to put the two sides in one unit, the mint's own fee in the unit that leaves
     const fee = rate > 0
       ? (() => {
         const c = Math.max(0, spent.cents - got.cents), n = Math.max(0, spent.sats - got.sats);
         return { main: this.swapCents(c, n), sub: '(' + this.unitFigure(n, 'sat') + ')' };
       })()
-      : { main: this.unitFigure(q.fee, from), sub: '' };
+      : { main: this.unitFigure(Math.max(0, out - (Number(q.amount) || 0)), from), sub: '' };
     const rows = [
-      block('YOU ARE GETTING', got, to, getOpt),
-      block('YOU ARE SPENDING', spent, from),
+      block('RECEIVING', got, to, getOpt),
       block('FEE', fee, ''),
+      block('SPENDING', spent, from),
       this.cfRow(this.swapRateHead(), rate > 0 ? this.swapRateText(rate) : 'UNKNOWN', {
         sub: 'Rate held for ' + this.swapClockText(this.swapLeft()),
         // far from the market price: the market's, in red, under the mint's
@@ -35112,7 +35237,7 @@ class Component extends DCLogic {
    *   NO PIN AMOUNT      SET AMOUNT for the most one payment may be without the PIN: this phone's own rule, kept on this phone
    *                      (the wallet's `cardSetNoPinTx`); the card has no such figure, and the phone asks for the PIN above it at
    *                      a tap it reads (`cardNeedsPin`)
-   *   24HR LIMIT         SET AMOUNT for the most the card pays in 24 hours without the PIN: the card's own allowance
+   *   NO PIN MAXIMUM     SET AMOUNT for the most the card pays without the PIN (in 24 hours on 1.25): the card's own allowance
    *   SPEND PER SECOND   "Do you want to limit how much the card pays each second?" YES or NO; YES opens MAX PER SECOND
    *                      (`fcSpeedOpen`): six figures a second to choose from, and the figure itself to type another on SET AMOUNT
    *
@@ -35133,14 +35258,23 @@ class Component extends DCLogic {
    * the tap writes no owner and no key of this phone's, then the money under the holder's PIN.
    *
    * The way back is the round back button of the pad and of SET AMOUNT: one step back (from SET AMOUNT, to its question; from
-   * NO PIN AMOUNT, to CURRENCY where it was asked; from 24HR LIMIT, to NO PIN AMOUNT), and from the first, to where the set-up began. A question's card goes when
+   * NO PIN AMOUNT, to CURRENCY where it was asked; from NO PIN MAXIMUM, to NO PIN AMOUNT), and from the first, to where the set-up began. A question's card goes when
    * it is tapped beside, and the set-up with it.
    *
    * A card set up for its holder (`other`) is not asked NO PIN AMOUNT: the rule would be kept on this phone, which is not the one the
-   * holder's card pays at, so it would hold nowhere; its first amount is 24HR LIMIT, whose back button leaves the set-up.
+   * holder's card pays at, so it would hold nowhere; its first amount is NO PIN MAXIMUM, whose back button leaves the set-up.
    *
-   * NO PIN AMOUNT comes up filled in at $5.00 and 24HR LIMIT at $20.00 (FC_SU_NOPIN_DEFAULT_CENTS) where it is typed in dollars,
-   * or the figure chosen before where the step is come back to; the first key typed replaces it (`amountDefault`). */
+   * NO PIN AMOUNT comes up filled in at $10.00 (FC_SU_NOPIN_DEFAULT_CENTS) where it is typed in dollars, and NO PIN MAXIMUM, the
+   * second amount, at three times what NO PIN AMOUNT was given (FC_SU_NOPIN_TIMES: $30.00 for the default), worked out again
+   * whenever NO PIN AMOUNT changes until NO PIN MAXIMUM is typed by hand (`noPinHand`); MAX PER SECOND comes up at $10 a second
+   * (FC_SPEED_FIRST). Each is the figure chosen before where the step is come back to, and the first key typed replaces it
+   * (`amountDefault`). A default set in dollars is kept in dollars for a bitcoin card, as a figure typed in dollars is, so that
+   * this phone sets the card again when the price has moved.
+   *
+   * Every entry is kept until the card is written or the set-up is left on purpose, by the round back buttons. The connection is
+   * looked at before the tap is asked for (`fcSuRouteThen`): with no route, NO CONNECTION says so, with TRY AGAIN and BACK, and no
+   * sheet is opened. A tap that fails, or is cancelled, comes back to the same choice, TRY AGAIN with everything as it was or BACK
+   * to the last step to change an entry (`fcSuReturn`), and never to the start. */
 
   /* What a card can hold, as the set-up's CURRENCY step offers it, in order. */
   FC_SETUP_UNITS = ['usd', 'sat'];
@@ -35150,6 +35284,8 @@ class Component extends DCLogic {
    * noPinTx, noPinTxUsd, noPinTxUnit } (this phone's own set-up when none is given). */
   fcSetUpSteps(o) {
     this._fcSu = Object.assign({ pin: '', unit: '', noPin: 0, tapLimit: 0, noPinUsd: 0, tapUsd: 0, noPinTx: 0, noPinTxUsd: 0 }, o || {});
+    // (a set-up begun afresh: nothing of an earlier one's is taken up again)
+    this._fcSuLast = null;
     this.fcSuPin('');
   }
 
@@ -35202,7 +35338,7 @@ class Component extends DCLogic {
   }
 
   /* The amounts are asked straight away, with no question first (the design's rule): NO PIN AMOUNT on SET AMOUNT (one payment), then
-   * 24HR LIMIT (the card's allowance), then the rate on MAX PER SECOND; SKIP under NEXT on each (`fcSuSkip`) sets none. */
+   * NO PIN MAXIMUM (the card's allowance), then the rate on MAX PER SECOND; SKIP under NEXT on each (`fcSuSkip`) sets none. */
   fcSuNoPin() {
     if (!this._fcSu) return;
     // (not for a card set up for its holder: see above)
@@ -35235,30 +35371,40 @@ class Component extends DCLogic {
     su.ask = which;
     // (the rate typed: whether it was reached from MAX PER SECOND, which its back button returns to)
     su.fromSpeed = which === 'tap' && !!other;
-    if (which === 'tap' && !other && this.fcSpeedChoosable(this.fcSuUnitNow())) { this.fcSpeedOpen('su', this.fcSuUnitNow(), this.FC_SPEED_FIRST); return; }
+    // (at the rate chosen before, where the step is come back to)
+    if (which === 'tap' && !other && this.fcSpeedChoosable(this.fcSuUnitNow())) { this.fcSpeedOpen('su', this.fcSuUnitNow(), su.tapRate || this.FC_SPEED_FIRST); return; }
     this.fcAmount(this.FC_SU_FLOWS[which]);
     if (which !== 'tap') this.fcSuPrefill(su, which);
   }
 
-  /* What NO PIN AMOUNT and 24HR LIMIT show before anything is typed: the figure chosen before, where the step is come back to (from
-   * the next step's back button), in the unit it was typed in; else $20.00 where dollars are typed. A bitcoin card with no price types
-   * sats, and is given no figure (there are no dollars to say it in). Marked the default: the first key typed starts from nothing
-   * (19-update-keypad-balance.js, `press`), so $20.00 is not what a 5 is typed after. */
-  FC_SU_NOPIN_DEFAULT_CENTS = { noPinTx: 500, noPin: 2000 };
+  /* What NO PIN AMOUNT and NO PIN MAXIMUM show before anything is typed: the figure chosen before, where the step is come back to
+   * (from the next step's back button), in the unit it was typed in; else $10.00 for NO PIN AMOUNT where dollars are typed. NO PIN
+   * MAXIMUM, until it is typed by hand (`noPinHand`), is three times NO PIN AMOUNT (FC_SU_NOPIN_TIMES), in the unit that was given in,
+   * or three times the $10.00 where NO PIN AMOUNT was skipped. A bitcoin card with no price types sats, and is given no default (there
+   * are no dollars to say it in). Marked the default: the first key typed starts from nothing (19-update-keypad-balance.js, `press`),
+   * so $10.00 is not what a 5 is typed after. */
+  FC_SU_NOPIN_DEFAULT_CENTS = { noPinTx: 1000 };
+  FC_SU_NOPIN_TIMES = 3;
   fcSuPrefill(su, which) {
     const s = this.state;
     const tx = which === 'noPinTx';
-    const n = tx ? su.noPinTx : su.noPin;
-    const nUsd = tx ? su.noPinTxUsd : su.noPinUsd;
+    const k = this.FC_SU_NOPIN_TIMES;
+    const usdCard = this.fcSuUnitNow() === 'usd';
+    // NO PIN MAXIMUM not typed by hand: three times NO PIN AMOUNT, said as it was given
+    const derived = !tx && !su.noPinHand;
+    const n = tx ? su.noPinTx : derived ? su.noPinTx * k : su.noPin;
+    const nUsd = tx ? su.noPinTxUsd : derived ? su.noPinTxUsd * k : su.noPinUsd;
     let amount = '';
     let unit = s.unit;
     if (n > 0) {
-      if (this.fcSuUnitNow() === 'usd') amount = (n / 100).toFixed(2);
+      if (usdCard) amount = (n / 100).toFixed(2);
       else if (s.unit === 'USD' && nUsd > 0) amount = Number(nUsd).toFixed(2);
       else { amount = String(Math.round(n)); unit = 'SATS'; }
     } else if (s.unit === 'USD') {
-      amount = (this.FC_SU_NOPIN_DEFAULT_CENTS[tx ? 'noPinTx' : 'noPin'] / 100).toFixed(2);
+      amount = (this.FC_SU_NOPIN_DEFAULT_CENTS.noPinTx * (tx ? 1 : k) / 100).toFixed(2);
     }
+    // (what came up, so that NEXT can tell a figure typed over it from the default taken as it was, `fcSuAmountNext`)
+    su.shown = amount ? { which, amount, unit } : null;
     if (amount) this.setState({ amount, unit, amountDefault: true });
   }
 
@@ -35288,25 +35434,29 @@ class Component extends DCLogic {
     if (!(amount > 0)) { this.toast('Type an amount first.', true); return; }
     const usd = this.fcSuUnitNow() === 'usd' ? 0 : this.state.unit === 'USD' ? Number(this.state.amount) || 0 : 0;
     const k = this.FC_SPEED_SECS;
-    if (which === 'tap') { su.tapLimit = amount * k; su.tapUsd = usd * k; } else if (which === 'noPinTx') { su.noPinTx = amount; su.noPinTxUsd = usd; } else { su.noPin = amount; su.noPinUsd = usd; }
+    // (the rate typed, in dollars a second, for MAX PER SECOND to come up at where the step is come back to)
+    if (which === 'tap') { su.tapLimit = amount * k; su.tapUsd = usd * k; su.tapRate = this.fcSuUnitNow() === 'usd' ? amount / 100 : usd; } else if (which === 'noPinTx') { su.noPinTx = amount; su.noPinTxUsd = usd; } else { su.noPin = amount; su.noPinUsd = usd; }
+    // (NO PIN MAXIMUM typed by hand, not its default taken as it came up: it no longer follows NO PIN AMOUNT)
+    const shown = su.shown;
+    if (which === 'noPin' && (!this.state.amountDefault || !shown || shown.which !== 'noPin' || shown.amount !== String(this.state.amount) || shown.unit !== this.state.unit)) su.noPinHand = true;
     this.fcSuLeave();
     if (which === 'tap') this.fcSuGo(); else if (which === 'noPinTx') this.fcSuNoPinDay(); else this.fcSuTap();
   }
 
-  /* SKIP under NEXT: none of it. No rule on one payment, and on to 24HR LIMIT; no allowance without the PIN, and on to the rate; no
+  /* SKIP under NEXT: none of it. No rule on one payment, and on to NO PIN MAXIMUM; no allowance without the PIN, and on to the rate; no
    * limit on a payment, and on to the tap. */
   fcSuSkip(which) {
     const su = this._fcSu;
     const w = which || this.fcSuAsking();
     if (!su || !w) return;
     this.fcSuLeave();
-    if (w === 'tap') { su.tapLimit = 0; su.tapUsd = 0; this.fcSuGo(); } else if (w === 'noPinTx') { su.noPinTx = 0; su.noPinTxUsd = 0; this.fcSuNoPinDay(); } else { su.noPin = 0; su.noPinUsd = 0; this.fcSuTap(); }
+    if (w === 'tap') { su.tapLimit = 0; su.tapUsd = 0; su.tapRate = 0; this.fcSuGo(); } else if (w === 'noPinTx') { su.noPinTx = 0; su.noPinTxUsd = 0; this.fcSuNoPinDay(); } else { su.noPin = 0; su.noPinUsd = 0; su.noPinHand = false; this.fcSuTap(); }
   }
 
   /* The round back button on SET AMOUNT (01-ui-basics.js, `back`), a step back: off NO PIN AMOUNT, CURRENCY again where it was asked
-   * (the choice open once more), and otherwise out of the set-up to the screen it was asked over, with nothing written; off 24HR LIMIT,
-   * NO PIN AMOUNT; off the rate typed, MAX PER SECOND where it came from there, 24HR LIMIT otherwise. True where it was the set-up's. */
-  /* (and on MAX PER SECOND, while the set-up asks it: 24HR LIMIT, `fcSpeedBack`) */
+   * (the choice open once more), and otherwise out of the set-up to the screen it was asked over, with nothing written; off NO PIN MAXIMUM,
+   * NO PIN AMOUNT; off the rate typed, MAX PER SECOND where it came from there, NO PIN MAXIMUM otherwise. True where it was the set-up's. */
+  /* (and on MAX PER SECOND, while the set-up asks it: NO PIN MAXIMUM, `fcSpeedBack`) */
   fcSuAmountBack() {
     if (this._fcSu && this.state.screen === 'fcSpeed' && this.state.fcSpeed && this.state.fcSpeed.mode === 'su') { this.fcSpeedBack(); return true; }
     const which = this.fcSuAsking();
@@ -35317,7 +35467,7 @@ class Component extends DCLogic {
       this.fcSuNoPin();
       return true;
     }
-    // (the first amount asked: NO PIN AMOUNT, or 24HR LIMIT for a card set up for its holder)
+    // (the first amount asked: NO PIN AMOUNT, or NO PIN MAXIMUM for a card set up for its holder)
     if (which === 'noPinTx' || which === 'noPin') {
       this.fcSuLeave();
       // the step before was CURRENCY (asked only of the owner's own card, at a mint with two balances): that question again, not the start
@@ -35337,14 +35487,15 @@ class Component extends DCLogic {
     return true;
   }
 
-  /* The second amount's words, by the card's software as CARD LIMITS says them (26f-flashcard.js, `fcLimitQuestion`): 24HR LIMIT and its
-   * 24 hours on a card of 1.25, whose allowance is a 24-hour total; NO PIN LIMIT and "before it asks for its PIN" on 1.21 to 1.24, whose
-   * allowance the PIN fills again. A card not read yet (SEND's set-up for a holder has none on show) is taken as the newest. */
+  /* The second amount's words: NO PIN MAXIMUM, asked "in total" on 1.21 to 1.24, whose allowance the PIN fills again, and "in 24
+   * hours" on a card of 1.25, whose allowance is a 24-hour total. A card not read yet (SEND's set-up for a holder has none on show) is taken as the newest. */
   fcSuDayWords() {
     const fc = this.state.fc;
     const refill = !!(fc && fc.pinFirst && !fc.noPinDay && fc.noPinKnown);
-    return refill ? { title: 'NO PIN LIMIT', question: 'What is the most this card should pay by tap alone before it asks for its PIN?' }
-      : { title: '24HR LIMIT', question: 'What is the most this card should pay in 24 hours without asking for your PIN?' };
+    /* NO PIN MAXIMUM either way (the keeper's words, 2026-11-08); a card of 1.25 fills its allowance again every 24 hours, and its
+     * question says so. */
+    return refill ? { title: 'NO PIN MAXIMUM', question: 'What\u2019s the most this card should pay in total before asking for a PIN?' }
+      : { title: 'NO PIN MAXIMUM', question: 'What\u2019s the most this card should pay in 24 hours before asking for a PIN?' };
   }
 
   /* The line under the amount on SET AMOUNT for the rate: "It will take N seconds to pay $X." for the limit it makes (one second of
@@ -35387,16 +35538,72 @@ class Component extends DCLogic {
     return H.eachBefore * (k - 1);
   }
 
-  // the end of the questions: the tap
+  /* The end of the questions: the tap, once there is a route (`fcSuRouteThen`). The entries are kept (`_fcSuLast`) until the card is
+   * written, so that a tap that fails, or no route, comes back to them (`fcSuReturn`). */
   fcSuGo() {
     const su = this._fcSu;
     if (!su) return;
     const noPinTxUnit = this.fcSuUnitNow();
     this._fcSu = null;
+    this._fcSuLast = su;
     const choice = { pin: su.pin, unit: su.unit, noPin: su.noPin, tapLimit: su.tapLimit, noPinUsd: su.noPinUsd, tapUsd: su.tapUsd,
                      noPinTx: su.noPinTx || 0, noPinTxUsd: su.noPinTxUsd || 0, noPinTxUnit };
-    if (typeof su.run === 'function') { su.run(choice); return; }
-    this.fcSetUpStepsRun(choice);
+    this.fcSuRouteThen(() => {
+      if (typeof su.run === 'function') { su.run(choice); return; }
+      this.fcSetUpStepsRun(choice);
+    });
+  }
+
+  /* The set-up's tap needs the mint (its first pieces, the refund key's lock), so the route is looked at before the TAP TO FINISH
+   * screen and its sheet are shown, and again as the tap fires (`fcSetUpStepsRun`). A connection on its way is waited for, the
+   * few seconds a money step waits (the wallet's `routeSoon`); with none, NO CONNECTION in the wallet's own words (`routeWords`),
+   * TRY AGAIN to look again and BACK to the last step, every entry kept, and no sheet opened. `go` runs once the route is open. */
+  fcSuRouteThen(go) {
+    const W = this.fcW ? this.fcW() : null;
+    const open = () => !W || !W.routeOpen || W.routeOpen();
+    if (open()) { go(); return; }
+    const soon = (W && W.routeSoon && W.routeComing && W.routeComing()) ? W.routeSoon() : Promise.resolve(false);
+    Promise.resolve(soon).then(() => {
+      if (open()) { go(); return; }
+      this.fcSuNoRoute(go);
+    }, () => this.fcSuNoRoute(go));
+  }
+
+  // NO CONNECTION, before the tap or from a tap the route went from: TRY AGAIN (the route looked at again, then `go`) and BACK
+  fcSuNoRoute(go, said) {
+    const W = this.fcW ? this.fcW() : null;
+    let words = String(said || '');
+    if (!words) { try { words = (W && W.routeWords && W.routeWords()) || ''; } catch (e) { words = ''; } }
+    console.log('[foxy] card: the set-up waits for a connection, its entries kept');
+    this.haptic && this.haptic('error');
+    this.blockedCard('fc-no-route', this.fcSuKeepCard({
+      tone: 'warn', title: 'NO CONNECTION',
+      reason: words || 'Foxy needs a connection to finish setting up this card.',
+      chip: 'Connect, then tap TRY AGAIN. Everything you chose is kept.',
+      retry: 'TRY AGAIN', go: () => this.fcSuRouteThen(go),
+    }));
+  }
+
+  /* A card over the set-up's tap with BACK as its second choice, and the card tapped beside it taken the same way: back to the last
+   * step with every entry kept (`fcSuReturn`), never to the start. TRY AGAIN, and any other button the card has, are its own. */
+  fcSuKeepCard(spec) {
+    let chose = false;
+    const mark = (f) => (typeof f === 'function' ? (...a) => { chose = true; return f(...a); } : f);
+    const out = Object.assign({}, spec, { go: mark(spec.go), shut: { label: 'BACK', tap: () => { chose = true; this.fcSuReturn(); } } });
+    out.onClose = () => setTimeout(() => { if (!chose) this.fcSuReturn(); }, 0);
+    return out;
+  }
+
+  /* BACK from the set-up's tap: its last step again, MAX PER SECOND at the rate chosen (or SET AMOUNT where the rate is typed), with
+   * every entry as it was. False where there is no set-up to go back to. */
+  fcSuReturn() {
+    const su = this._fcSuLast;
+    if (!su) return false;
+    this._fcSuLast = null;
+    su.was = null;
+    this._fcSu = su;
+    this.fcSuTap();
+    return true;
   }
 
   /* The owner's set-up, in one tap: the PIN, the record, the holder's numbers, and this phone as the owner, the card holding while
@@ -35411,14 +35618,20 @@ class Component extends DCLogic {
     if (c.unit) how.unit = c.unit === 'both' ? 'usd' : c.unit;
     const fc = this.state.fc;
     if (fc && fc.v123 && c.unit) how.hold = c.unit;
+    // (the route looked at again as the tap fires: lost since NEXT, it is NO CONNECTION, nothing asked of the card)
+    const W2 = /** @type {any} */ (W);
+    if (W2.routeOpen && !W2.routeOpen()) { this.fcSuRouteThen(() => this.fcSetUpStepsRun(c)); return; }
     this.fcTap({ flow: 'setup' }, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
       .then((card) => {
+        // written: nothing of the set-up is left to come back to
+        this._fcSuLast = null;
         this.fcNameSettle(card && card.key);
         this.fcNoPinTxKeep(card && card.key, c);
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.toast(c.unit === 'both' ? 'The card is set up. It holds dollars and bitcoin.' : c.unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
-      }, (e) => this.fcFailed(e, { again: () => this.fcSetUpStepsRun(c), pinAgain: () => this.fcSuPinAgain(c, (c2) => this.fcSetUpStepsRun(c2)) }));
+      }, (e) => this.fcFailed(e, { setUp: true, again: () => this.fcSetUpStepsRun(c), pinAgain: () => this.fcSuPinAgain(c, (c2) => this.fcSetUpStepsRun(c2)),
+                                   cancelled: () => this.fcSuReturn() }));
   }
 
   /* NO PIN AMOUNT, once the card is set up: this phone's own rule for it, kept on this phone (the wallet's `cardSetNoPinTx`), none where
@@ -35446,7 +35659,7 @@ class Component extends DCLogic {
    * too. A bitcoin card with no price has nothing to say dollars at, and is asked on SET AMOUNT in sats straight away. */
   FC_SPEED_CHIPS = [1, 2, 5, 10, 25, 50];
   FC_SPEED_SECS = 1;
-  FC_SPEED_FIRST = 5;
+  FC_SPEED_FIRST = 10;
 
   // whether a rate in dollars can be turned into a card's limit in `unit`: a dollar card's always, a bitcoin card's where there is a price
   fcSpeedChoosable(unit) {
@@ -35523,6 +35736,7 @@ class Component extends DCLogic {
       if (!su) return;
       su.tapLimit = limit;
       su.tapUsd = usd;
+      su.tapRate = fs.r;
       this.fcSuLeave();
       this.fcSuGo();
       return;
@@ -35630,7 +35844,7 @@ class Component extends DCLogic {
     if (fc.pinSet && fc.noPinKnown && fc.pin !== 'blocked') {
       const n = (fc.noPin && fc.noPin.known && fc.noPin.set) ? Number(fc.noPin.limit) || 0 : 0;
       // (before 1.21 the allowance is a day's; from 1.21 the PIN fills it again)
-      rows.push({ key: 'nopin', label: 'NO PIN LIMIT', sub: 'Most it pays without a PIN',
+      rows.push({ key: 'nopin', label: 'NO PIN MAXIMUM', sub: 'Most it pays without a PIN',
         value: n > 0 ? whole(this.fcPrice(n, LU)) : 'NONE', unit: n > 0 ? (fc.pinFirst ? 'per tap' : 'a day') : '' });
     }
     return rows.map((r) => Object.assign(r, { unitShown: !!r.unit, tap: () => this.fcLimitsGo(r.key) }));

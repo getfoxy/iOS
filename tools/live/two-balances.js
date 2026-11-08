@@ -34,7 +34,8 @@
  *      (Nutshell 0.20.3 stores no expiry on a mint quote; Forge's fork may
  *      differ, which is why this is pinned here)
  *   L8 the books, per unit, after each of the above
- *   and a swap each way, at the mint's rate, with the books per unit.
+ *   and a swap each way, at the mint's rate, with the books per unit, then
+ *   the amount typed arriving with the fee on top, each way
  * L6 (an unpaid usd quote lapsing) needs a mint that does not pay at all: the
  * same container with FAKEWALLET_BRR=false (FAKEWALLET_DELAY_INCOMING_PAYMENT
  * does not hold the payment back at 0.20.3), say on 3390 behind 8485. Give its
@@ -164,6 +165,26 @@ async function satInvoice(sats) {
     const r2 = await W.swapRun(q2);
     check('swap: bitcoin to dollars, done', r2.state === 'done' && r2.to.unit === 'usd' && r2.to.amount === q2.get, r2);
     check('L8 the books close per unit after two swaps', JSON.stringify(offOf(a)) === '{"sat":0,"usd":0}', offOf(a));
+    /* What is typed arrives and the fee goes on top, as SET AMOUNT asks it: $ 1.00 of bitcoin (`worth`), and $ 0.50
+     * into dollars (`get`), each landing exactly with its fee spent over it. */
+    if (W.balanceOf('usd') < 110 || W.balanceOf('sat') < 1200) {
+      skip('swap: the amount typed arrives, the fee on top', 'too little left here: $ ' + (W.balanceOf('usd') / 100).toFixed(2) + ', ' + W.balanceOf('sat') + ' sats');
+    } else {
+      const q3 = await W.swapQuote('usd', 'sat', 100, { worth: true });
+      const sat3 = W.balanceOf('sat'), usd3 = W.balanceOf('usd');
+      const r3 = await W.swapRun(q3);
+      check('swap: $ 1.00 of bitcoin is priced at exactly $ 1.00, the fee on top, and its sats arrive',
+        q3.amount === 100 && q3.spend >= q3.total && q3.total > 100 && r3.state === 'done' && W.balanceOf('sat') === sat3 + q3.get
+          && usd3 - W.balanceOf('usd') === r3.from.amount && r3.from.amount <= q3.spend,
+        { amount: q3.amount, total: q3.total, spend: q3.spend, get: q3.get, left: usd3 - W.balanceOf('usd') });
+      const q4 = await W.swapQuote('sat', 'usd', 50, { get: true });
+      const usd4 = W.balanceOf('usd');
+      const r4 = await W.swapRun(q4);
+      check('swap: $ 0.50 into dollars arrives exactly, the fee on top in sats',
+        q4.get === 50 && r4.state === 'done' && W.balanceOf('usd') === usd4 + 50 && r4.from.amount <= q4.spend,
+        { get: q4.get, total: q4.total, spend: q4.spend, left: r4.from.amount });
+      check('L8 the books close per unit after the typed swaps', JSON.stringify(offOf(a)) === '{"sat":0,"usd":0}', offOf(a));
+    }
     check('swap: nothing left pending', W.unitSwapsPending().length === 0, W.unitSwapsPending());
 
     // L5

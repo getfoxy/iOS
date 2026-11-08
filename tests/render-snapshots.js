@@ -942,20 +942,22 @@ function representative(logic) {
   add('two balances: history, BITCOIN', at('history', Object.assign({ history: TWO_HIST, historyComplete: true, histUnit: 'sat' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: a swap in detail', at('txDetail', Object.assign({ tx: Object.assign({ mint: 'https://forge.example.com' }, SWAP_OUT) }, TWO_LIVE), { wallet: TWO() }));
   /* SWAP (build/app/26i-swap.js): which way, how much, the four blocks with the time the rate is held for, and
-   * SWAPPED. The quote's expiry is read at render time, so the countdown always says 00:52. */
+   * SWAPPED. The quote's expiry is read at render time, so the countdown always says 00:52. What is typed arrives
+   * and the fee goes on top: $ 10.00 of bitcoin, SPENDING $ 10.02. */
   const SWAP_Q = (over) => Object.assign({ id: 'uswap-1', mint: 'https://forge.example.com', from: 'usd', to: 'sat',
-    total: 1000, amount: 998, fee: 2, get: 12202, rate: { usdPerBtc: 81786, by: 'forge.example.com' }, market: 80000,
+    total: 1002, amount: 1000, fee: 2, get: 12227, mode: 'worth', asked: 1000, inputFee: 0, spend: 1002,
+    rate: { usdPerBtc: 81786, by: 'forge.example.com' }, market: 80000,
     spread: 0.0223, spreadWarn: true, state: 'quoted', get expiresAt() { return Date.now() + 67500; } }, over || {});
   add('two balances: SWAP, from dollars', at('swap', Object.assign({ swapFrom: 'usd', swapTo: 'sat' }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: SET AMOUNT, a swap from bitcoin', at('amount', Object.assign({ flow: 'swap', swapFrom: 'sat', swapTo: 'usd',
     unit: 'SATS', amount: '12230' }, TWO_LIVE), { wallet: TWO({ mintRate: () => ({ usdPerBtc: 81786, at: Date.now() }) }) }));
   add('two balances: SWAP confirm, the market price far off', at('swapConfirm', Object.assign({ swapFrom: 'usd', swapTo: 'sat',
-    swapAmount: 1000, swapQuote: SWAP_Q() }, TWO_LIVE), { wallet: TWO() }));
+    swapAmount: 1000, swapMode: 'worth', swapQuote: SWAP_Q() }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: SWAP confirm, a new rate', at('swapConfirm', Object.assign({ swapFrom: 'usd', swapTo: 'sat',
-    swapAmount: 1000, swapNewRate: true, swapQuote: SWAP_Q({ spreadWarn: false, spread: 0.01 }) }, TWO_LIVE), { wallet: TWO() }));
-  // bitcoin leaving before the rate: its dollars at the mint's last rate, $ 10.00, with the sats under it
+    swapAmount: 1000, swapMode: 'worth', swapNewRate: true, swapQuote: SWAP_Q({ spreadWarn: false, spread: 0.01 }) }, TWO_LIVE), { wallet: TWO() }));
+  // dollars to arrive before the rate: RECEIVING $ 10.00, the rest waiting on the mint
   add('two balances: SWAP confirm, asking the rate', at('swapConfirm', Object.assign({ swapFrom: 'sat', swapTo: 'usd',
-    swapAmount: 12230, swapQuoting: true }, TWO_LIVE), { wallet: TWO({ mintRate: () => ({ usdPerBtc: 81786 }) }) }));
+    swapAmount: 1000, swapMode: 'get', swapQuoting: true }, TWO_LIVE), { wallet: TWO({ mintRate: () => ({ usdPerBtc: 81786 }) }) }));
   add('two balances: SWAPPED', at('swapDone', Object.assign({ swapResult: { id: 'uswap-1', state: 'done', from: { unit: 'usd', amount: 1000 },
     to: { unit: 'sat', amount: 1221 }, fee: 1, rate: { usdPerBtc: 81786, by: 'forge.example.com' } } }, TWO_LIVE), { wallet: TWO() }));
   /* The shield on the money card, in each of the states the Tor banner had (23-render-home-and-amount.js, `shieldVals`), at a
@@ -990,11 +992,11 @@ function representative(logic) {
     { wallet: ROUTE() }));
   add('two balances: home, a swap still going through', at('home', Object.assign({}, TWO_LIVE),
     { wallet: TWO({ unitSwapsPending: () => [{ id: 'uswap-1', at: 1, from: { unit: 'usd', amount: 1000 }, to: { unit: 'sat', amount: 1221 } }] }) }));
-  /* The other way round, at the owner's example: $ 1.00 of bitcoin for $ 0.95 at $ 82,601, and its amount typed in
-   * dollars, the sats that leave under it. */
+  /* The other way round: $ 1.00 to arrive in dollars at $ 82,601, ₿ 1,211 and a 5% fee on top, and its amount typed
+   * in dollars, about the sats it is worth under it. */
   add('two balances: SWAP confirm, bitcoin into dollars', at('swapConfirm', Object.assign({ swapFrom: 'sat', swapTo: 'usd',
-    swapAmount: 1211, swapQuote: SWAP_Q({ from: 'sat', to: 'usd', total: 1211, amount: 1150, fee: 61, get: 95,
-      rate: { usdPerBtc: 82601, by: 'forge.example.com' }, market: 82601, spread: 0, spreadWarn: false }) }, TWO_LIVE), { wallet: TWO() }));
+    swapAmount: 100, swapMode: 'get', swapQuote: SWAP_Q({ from: 'sat', to: 'usd', total: 1275, amount: 1211, fee: 64, get: 100, mode: 'get',
+      asked: 100, spend: 1275, rate: { usdPerBtc: 82601, by: 'forge.example.com' }, market: 82601, spread: 0, spreadWarn: false }) }, TWO_LIVE), { wallet: TWO() }));
   add('two balances: SET AMOUNT, a swap from bitcoin in dollars', at('amount', Object.assign({ flow: 'swap', swapFrom: 'sat', swapTo: 'usd',
     unit: 'USD', amount: '1.00' }, TWO_LIVE), { wallet: TWO({ mintRate: () => ({ usdPerBtc: 82601, at: Date.now() }) }) }));
   /* The rate line under the question (26i-swap.js, `swapRateLine`): while the rate asked at the SWAP tap is out, and the
@@ -1003,6 +1005,10 @@ function representative(logic) {
     unit: 'USD', amount: '', swapProbing: true }, TWO_LIVE), { wallet: TWO({ mintRate: () => null }) }));
   add('two balances: SET AMOUNT, a swap at the market price', at('amount', Object.assign({ flow: 'swap', swapFrom: 'usd', swapTo: 'sat',
     unit: 'USD', amount: '' }, TWO_LIVE), { wallet: TWO({ mintRate: () => null }) }));
+  // the figure and the mint's fee on top are more than the balance by the wallet's guess (`swapGuess`): NOT ENOUGH, with no figure until the mint says one
+  add('two balances: SET AMOUNT, a swap not enough with the fee', at('amount', Object.assign({ flow: 'swap', swapFrom: 'usd', swapTo: 'sat',
+    unit: 'USD', amount: '45.00' }, TWO_LIVE), { wallet: TWO({ mintRate: () => ({ usdPerBtc: 81786, at: Date.now() }),
+    swapGuess: () => ({ need: 4602, fits: 4203 }) }) }));
   /* The same address paid from a card (SEND on the card's screen): FROM / FLASHCARD in place of PAYING FROM, the fee's sats
    * under it, and NEXT, which reads the card for the amount and the reserve (26f-flashcard.js, `fcOcNext`). */
   add('ocConfirm, from a card: FROM FLASHCARD and NEXT', at('ocConfirm',

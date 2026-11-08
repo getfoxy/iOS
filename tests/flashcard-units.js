@@ -954,21 +954,21 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       await toCurrency(a, c);
       cur(a).curCards[i].tap();
       const unitNow = a.fcTypedUnit();
-      ok(!cardUp(a) && a.state.screen === 'amount' && a.state.flow === 'cardSuNoPinTx' && a.state.unit === 'USD' && a.state.amount === '5.00' && a.state.amountDefault === true && unitNow === (i === 0 ? 'usd' : 'sat'),
-         name + ': the currency opens NO PIN AMOUNT on SET AMOUNT, no question first, $5.00 filled in as the default, in dollars, for ' + (i === 0 ? 'cents' : 'sats'), JSON.stringify([a.state.flow, a.state.unit, unitNow]));
+      ok(!cardUp(a) && a.state.screen === 'amount' && a.state.flow === 'cardSuNoPinTx' && a.state.unit === 'USD' && a.state.amount === '10.00' && a.state.amountDefault === true && unitNow === (i === 0 ? 'usd' : 'sat'),
+         name + ': the currency opens NO PIN AMOUNT on SET AMOUNT, no question first, $10.00 filled in as the default, in dollars, for ' + (i === 0 ? 'cents' : 'sats'), JSON.stringify([a.state.flow, a.state.unit, unitNow]));
       // the round back button off NO PIN AMOUNT is CURRENCY again (the step before), not the start of the set-up
       a.back();
       ok(a.state.screen === 'currency' && a.state.currencyFlow === 'card' && !!a._fcSu && a._fcSu.unit === '' && !cardUp(a) && a.state.stack.slice(-1)[0] === 'flashcard',
          name + ': back off NO PIN AMOUNT is the CURRENCY question again, the set-up still open, over the card’s screen', JSON.stringify([a.state.screen, a.state.currencyFlow, a.state.stack]));
       cur(a).curCards[i].tap();
-      ok(a.state.screen === 'amount' && a.state.flow === 'cardSuNoPinTx' && a.state.amount === '5.00' && a.fcTypedUnit() === (i === 0 ? 'usd' : 'sat'),
+      ok(a.state.screen === 'amount' && a.state.flow === 'cardSuNoPinTx' && a.state.amount === '10.00' && a.fcTypedUnit() === (i === 0 ? 'usd' : 'sat'),
          name + ': chosen again, NO PIN AMOUNT again with its default', JSON.stringify([a.state.screen, a.state.flow, a.state.amount]));
       a.setState({ amount: '1.00', amountDefault: false });
       a.fcAmountNext();
-      ok(a.state.screen === 'amount' && a.state.flow === 'cardSuNoPin' && a.fcTypedUnit() === (i === 0 ? 'usd' : 'sat'), name + ': NEXT is 24HR LIMIT, in the same unit', a.state.flow);
+      ok(a.state.screen === 'amount' && a.state.flow === 'cardSuNoPin' && a.fcTypedUnit() === (i === 0 ? 'usd' : 'sat'), name + ': NEXT is NO PIN MAXIMUM, in the same unit', a.state.flow);
       a.setState({ amount: '2.00' });
       a.fcAmountNext();
-      ok(!cardUp(a) && speed(a) && speed(a).chosen === '$5' && speed(a).alt === 'SKIP', name + ': NEXT opens MAX PER SECOND, in dollars, SKIP under NEXT', JSON.stringify(speed(a)));
+      ok(!cardUp(a) && speed(a) && speed(a).chosen === '$10' && speed(a).alt === 'SKIP', name + ': NEXT opens MAX PER SECOND, in dollars, at $10 a second, SKIP under NEXT', JSON.stringify(speed(a)));
       speed(a).other();
       a.setState({ amount: '10.00' });
       ok(a.state.flow === 'cardSuTap' && a.fcSuAmountLine() === 'It will take 9 seconds to pay $40.00.', name + ': its figure, SET AMOUNT for another rate, its seconds under the figure', a.fcSuAmountLine());
@@ -1371,6 +1371,99 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       ok(a.state.screen === 'amount' && a.state.flow === 'cardSuNoPin' && !cardUp(a), 'a set-up for the card’s holder goes from the PIN to 24HR LIMIT, no currency and no NO PIN AMOUNT asked',
          a.state.screen + ' ' + a.state.flow);
       void c;
+    }
+  }
+
+  /* ---- 21: a card's SWAP at a mint that charges for pieces, and at a rate that lapsed before the first tap -------------
+   * The card has to give up the swap's fee on the pieces as well as the quote (`spend`, not `total`), or the melt is
+   * refused for want of it; and a rate that ran out before the tap is asked again as it was typed (`mode` on `asked`),
+   * so what arrives is still the figure typed. */
+  if (want(21)) {
+    const H = await funded({ units: ['sat', 'usd'], feePpk: 1000, mintOpts: { usdFeePpk: 1000 } }, 50000);
+    await fundUsd(H, 20000);
+    // the phone's screens, with the CURRENCY screen's own values and pick (25-render-confirm-and-blocked.js, 01-ui-basics.js)
+    const screens = () => {
+      const a = appOn(H, { screen: 'home' });
+      a.price = PRICE;
+      a.twoUnitsOn = () => true;
+      a.unitBalance = (u) => (u === 'usd' ? 20000 : 50000);
+      const lifted = new Function('return {' + [['01-ui-basics.js', 'currencyPick(unit) {'], ['01-ui-basics.js', 'unitWord(unit) {'],
+        ['01-ui-basics.js', 'unitFigure(amount, unit) {'], ['25-render-confirm-and-blocked.js', 'renderCurrency(c) {']].map(([f, sig]) => liftFrom(f, sig)).join(',\n') + '}')();
+      Object.assign(a, lifted);
+      a.satUsd = () => PRICE / 1e8;
+      return a;
+    };
+    const cur = (a) => a.renderCurrency({ s: a.state, sc: 'currency' });
+    const toCurrency = async (a, c) => {
+      H.nfc = c;
+      c.tap();
+      a.goFlashcard();
+      await until('the new card to be read', () => !!a.state.fc && a.state.fc.key === c.key && !(a._fcTaps > 0));
+      a.fcSetUp();
+      pad(a).type('1234');
+      pad(a).type('1234');
+    };
+    const setUpAs = async (a, c, i) => {
+      await toCurrency(a, c);
+      cur(a).curCards[i].tap();
+      // SKIP on every amount (26j-card-wheel.js, `fcSuSkip`): NO PIN AMOUNT and 24HR LIMIT on SET AMOUNT, then MAX PER SECOND (or the rate typed)
+      a.fcSuSkip();
+      a.fcSuSkip();
+      c.tap();
+      if (speed(a)) speed(a).skip(); else a.fcSuSkip();
+      await until('the card to be set up', () => !!c.state.owner && a.state.fc && a.state.fc.key === c.key && a.state.fc.ownedHere === true && !(a._fcTaps > 0));
+      await uiSettle();
+    };
+    for (const lapsed of [false, true]) {
+      const a = screens();
+      const c = newCard(H, undefined, { format: 4, software: 23 });
+      await setUpAs(a, c, 2);
+      await add(H, c, 1000, 'usd');
+      c.tap();
+      a.fcRead();
+      await until('the card read with its dollars', () => !(a._fcTaps > 0) && a.state.fc && a.state.fc.bal && a.state.fc.bal.usd > 0);
+      await uiSettle();
+      a.offlineNow = () => false;
+      Object.assign(a, new Function('return {' + [['26i-swap.js', 'swapUnits() {'], ['26i-swap.js', 'swapComing(u) {'], ['26i-swap.js', 'swapHave(u) {']]
+        .map(([f, sig]) => liftFrom(f, sig)).join(',\n') + '}')());
+      a.swapProbe = () => {};
+      vals(a).fcMenuItems.find((x) => x.label === 'SWAP').tap();
+      await uiSettle();
+      const onCard = a.state.fc.bal.usd;
+      const q = await H.W.swapQuote('usd', 'sat', 400, Object.assign({ worth: true }, a.swapComing('usd')));
+      const tag = lapsed ? 'a lapsed rate: ' : 'at a fee mint: ';
+      ok(q && q.amount === 400 && q.inputFee > 0 && q.spend === q.total + q.inputFee && q.spend <= onCard,
+         tag + 'the card’s $ 4.00 of bitcoin is quoted with the fee on its pieces on top', JSON.stringify(q && [q.amount, q.total, q.inputFee, q.spend, onCard]));
+      if (lapsed) q.expiresAt = Date.now() + 12000;
+      const asks = [];
+      const real = H.W.swapQuote;
+      H.W.swapQuote = function (f, t, n, o) { asks.push([f, t, n, Object.assign({}, o || {})]); return real.apply(this, arguments); };
+      c.tap();
+      a.fcSwapGo(q);
+      await until('the PIN pad', () => !!pad(a));
+      pad(a).type('1234');
+      await until('the dollars to come off', () => !!a._swapRun || a.state.screen === 'swapDone' || !!cardUp(a));
+      c.tap();
+      await until('the swap and the second tap', () => !(a._fcTaps > 0) && (a.state.screen === 'swapDone' || !!cardUp(a)));
+      await uiSettle();
+      H.W.swapQuote = real;
+      ok(a.state.screen === 'swapDone' && !cardUp(a), tag + 'SWAPPED: both taps made, the melt not refused for its fee',
+         JSON.stringify([a.state.screen, cardUp(a) && cardUp(a).all]));
+      const log21 = await H.W.transactions(500);
+      const legs = log21.filter((e) => e.kind === 'swap' && e.dir === 'in');
+      const off21 = log21.filter((e) => e.memo === 'from card' && e.card === c.key && e.unit === 'usd')[0];
+      if (!lapsed) ok(off21 && Number(off21.amount) === q.spend, tag + 'what came off the card is SPENDING, the fee on its pieces with it', JSON.stringify(off21 && off21.amount) + ' / ' + q.spend);
+      if (lapsed) {
+        ok(asks.length === 1 && asks[0][2] === 400 && asks[0][3].worth === true && asks[0][3].card === c.key,
+           tag + 'asked again as it was typed: $ 4.00 of bitcoin, for this card', JSON.stringify(asks));
+      } else {
+        // (the shown quote is run while it holds; the taps can outlast it under load, and then it is asked again the same way)
+        ok(asks.every((x) => x[2] === 400 && x[3].worth === true), tag + 'the quote shown is run, or one asked as it was typed', JSON.stringify(asks));
+      }
+      ok(legs.length > 0, tag + 'the sats arrived as a swap', String(legs.length));
+      booksGood('a card’s swap ' + tag, H);
+      a.setState({ screen: 'flashcard', stack: [] });
+      await settle();
     }
   }
 

@@ -1521,7 +1521,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
         pay: 'TAP TO PAY / PAYING / CHECKING', load: 'TAP TO LOAD / RECEIVING / CHARGING', change: 'TAP FOR CHANGE / RECEIVING / CHARGING',
         read: 'TAP TO READ / READING / VERIFYING', withdraw: 'TAP TO WITHDRAW / WITHDRAWING / CHECKING', swap: 'TAP TO SWAP / SWAPPING / CHECKING',
         move: 'TAP TO MOVE / MOVING / CHECKING', renew: 'TAP TO RENEW / RENEWING / CHECKING', reset: 'TAP TO RESET / RESETTING / CHECKING',
-        setup: 'TAP TO SET UP / SETTING UP / CHECKING', pin: 'TAP TO SET PIN / WRITING / CHECKING', limit: 'TAP TO SET LIMIT / WRITING / CHECKING',
+        setup: 'TAP TO FINISH / SETTING UP / CHECKING', pin: 'TAP TO SET PIN / WRITING / CHECKING', limit: 'TAP TO SET LIMIT / WRITING / CHECKING',
         rate: 'TAP TO SET RATE / WRITING / CHECKING', write: 'TAP CARD / WRITING / CHECKING', card: 'TAP CARD / READING / CHECKING',
       };
       const got = Object.keys(want).map((f) => f + ': ' + words({ flow: f }));
@@ -2111,7 +2111,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
 
   /* ---- software 1.16: the PIN is optional, and a limit for paying without it ------------------------------------------
    * A card is set up with NO PIN under the pad that asks for one; it pays at a till in one tap; ADD PIN gives it one, and
-   * then every payment asks for it until the owner sets a NO PIN LIMIT, a third limit with its own three steps; within it
+   * then every payment asks for it until the owner sets a NO PIN MAXIMUM, a third limit with its own three steps; within it
    * a payment is made in the first tap, over it the sheet ends asking for the PIN and the pad comes up for a second. */
   {
     const H2 = await funded({}, 8000);
@@ -2168,7 +2168,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
        'its MENU has ADD PIN in CHANGE PIN’s place, after LIMITS, then TRANSFER, with RESET last (a card of 1.17 and on), and HISTORY first in it', menuOf(v));
     owner.fcSetLimit();
     ok(limits(owner) && limits(owner).labels === 'PER SECOND LIMIT',
-       'LIMITS offers a card with no PIN its per second limit and no NO PIN LIMIT: there is nothing to pay without', limits(owner) && limits(owner).labels);
+       'LIMITS offers a card with no PIN its per second limit and no NO PIN MAXIMUM: there is nothing to pay without', limits(owner) && limits(owner).labels);
     limits(owner).press('CLOSE');
 
     /* its owner puts money on it and takes some off with no PIN asked for; a till is paid in one tap */
@@ -2233,7 +2233,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     v = vals(owner);
     ok(menuOf(v) === 'HISTORY,RENAME CARD,LIMITS,CHANGE PIN,TRANSFER,RESET' && limitsSub(v) === '', 'and ADD PIN is CHANGE PIN again', menuOf(v));
 
-    /* a card with a PIN and no NO PIN LIMIT asks for it for every payment: the first tap says so, the pad comes up, the second tap pays */
+    /* a card with a PIN and no NO PIN MAXIMUM asks for it for every payment: the first tap says so, the pad comes up, the second tap pays */
     n.sent.length = 0;
     await payAt(300);
     await until('the card to say it wants its PIN', () => !!pad(till3));
@@ -2243,21 +2243,21 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     await finish('the payment with the PIN to be made');
     ok((await bal2()) === 600 && pins() === 1, 'and the second tap pays with it: 300 more, the PIN sent once', (await bal2()) + ' / ' + pins());
 
-    /* the NO PIN LIMIT: its warning, its amount, its confirmation, its tap */
+    /* the NO PIN MAXIMUM: its warning, its amount, its confirmation, its tap */
     const NOPIN_WARNING = 'A \u201cNo PIN\u201d limit is the most this card will pay in one day without requiring your PIN.\n\n'
       + 'Once you reach your limit, the PIN is asked for every payment until the next day.\n\n'
       + 'Only this phone, or a phone restored from its seed phrase, can change or remove the limit.';
     await look();
     owner.fcSetLimit();
-    ok(limits(owner) && limits(owner).labels === 'PER SECOND LIMIT,NO PIN LIMIT',
-       'on a card with a PIN, LIMITS has a second row, NO PIN LIMIT, under PER SECOND LIMIT', limits(owner) && limits(owner).labels);
-    limits(owner).press('NO PIN LIMIT');
-    ok(card(owner) && card(owner).all === ['SET NO PIN LIMIT', NOPIN_WARNING, 'CONTINUE', 'CANCEL'].join(' | '),
-       'NO PIN LIMIT opens its warning: what it is, that over it the PIN is asked for the whole payment, that only payments with no PIN count', card(owner) && card(owner).all);
+    ok(limits(owner) && limits(owner).labels === 'PER SECOND LIMIT,NO PIN MAXIMUM',
+       'on a card with a PIN, LIMITS has a second row, NO PIN MAXIMUM, under PER SECOND LIMIT', limits(owner) && limits(owner).labels);
+    limits(owner).press('NO PIN MAXIMUM');
+    ok(card(owner) && card(owner).all === ['SET NO PIN MAXIMUM', NOPIN_WARNING, 'CONTINUE', 'CANCEL'].join(' | '),
+       'NO PIN MAXIMUM opens its warning: what it is, that over it the PIN is asked for the whole payment, that only payments with no PIN count', card(owner) && card(owner).all);
     card(owner).press('CANCEL');
     ok(!card(owner) && owner.state.screen === 'flashcard' && owner._fcLimitDone === null, 'CANCEL there changes nothing');
     owner.fcSetLimit();
-    limits(owner).press('NO PIN LIMIT');
+    limits(owner).press('NO PIN MAXIMUM');
     card(owner).press('CONTINUE');
     // NO PIN AMOUNT first: the most for one payment, this phone's own rule (the card has no such figure)
     ok(owner.state.screen === 'amount' && owner.state.flow === 'cardLimitTx' && owner.state.amount === '',
@@ -2276,14 +2276,14 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     keyIn(owner, 500);
     {
       const cf = owner.fcLimitSpec();
-      ok(owner.state.screen === 'fcLimitConfirm' && cf.amountLabel === 'YOU ARE APPLYING A NO PIN LIMIT OF:' && cf.amount === '₿ 500' && cf.cta === 'CONFIRM' && cf.secondary.label === 'CANCEL'
+      ok(owner.state.screen === 'fcLimitConfirm' && cf.amountLabel === 'YOU ARE APPLYING A NO PIN MAXIMUM OF:' && cf.amount === '₿ 500' && cf.cta === 'CONFIRM' && cf.secondary.label === 'CANCEL'
          && cf.warn === 'This card will pay up to this much a day without its PIN. Over it, the PIN is asked for the whole payment. Only this phone, or a phone restored from its seed phrase, can change or remove it. This phone alone asks for the PIN above ₿100; a phone restored from the seed phrase, or any other phone, does not.',
          'the confirmation says the amount and what it means, and this phone’s NO PIN AMOUNT, with CONFIRM and CANCEL', JSON.stringify([cf.amountLabel, cf.amount, cf.warn]));
       cf.secondary.go();
       ok(owner.state.screen === 'flashcard' && n.state.noPinLimit === 0 && !pad(owner) && !H2.W.cardNoPinTx(n.key), 'CANCEL there writes nothing, on the card or on this phone');
     }
     owner.fcSetLimit();
-    limits(owner).press('NO PIN LIMIT');
+    limits(owner).press('NO PIN MAXIMUM');
     card(owner).press('CONTINUE');
     keyIn(owner, 100);
     keyIn(owner, 500);
@@ -2294,7 +2294,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(JSON.stringify(H2.W.cardNoPinTx(n.key)) === JSON.stringify({ n: 100, unit: 'sat', usd: 0 }), 'and NO PIN AMOUNT, 100, is kept on this phone once the card has taken its limit', JSON.stringify(H2.W.cardNoPinTx(n.key)));
     // (none again, for the payments below: NO LIMIT on NO PIN AMOUNT, as the button under its NEXT does)
     owner.fcSetLimit();
-    limits(owner).press('NO PIN LIMIT');
+    limits(owner).press('NO PIN MAXIMUM');
     card(owner).press('CONTINUE');
     ok(owner.state.flow === 'cardLimitTx' && owner.state.amount === '100', 'NO PIN AMOUNT comes back with the 100 kept filled in', owner.state.amount);
     owner.fcLimitTxNext(0, 0);
@@ -2302,7 +2302,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     owner.fcLimitSpec().go();
     await until('NO PIN AMOUNT to be none', () => !H2.W.cardNoPinTx(n.key));
     await settle();
-    ok(n.state.noPinLimit === 500 && n.state.record.limit === 0 && pins() === 0 && owner.toasts.indexOf('No PIN limit set.') >= 0,
+    ok(n.state.noPinLimit === 500 && n.state.record.limit === 0 && pins() === 0 && owner.toasts.indexOf('No PIN maximum set.') >= 0,
        'the card has an allowance of 500 and no PIN was sent', String(n.state.noPinLimit));
     v = vals(owner);
     ok(limitOf(owner) === '' && !v.fcLimitShown && v.fcNoPinShown === undefined && limitsSub(v) === 'No PIN up to ₿500 · ₿500 left today',
@@ -2358,23 +2358,23 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
 
     // NO LIMIT removes it: every payment asks for the PIN again
     owner.fcSetLimit();
-    limits(owner).press('NO PIN LIMIT');
+    limits(owner).press('NO PIN MAXIMUM');
     card(owner).press('CONTINUE');
     owner.fcLimitConfirm(0);
     {
       const cf = owner.fcLimitSpec();
-      ok(cf.amountLabel === 'YOU ARE REMOVING THIS CARD’S NO PIN LIMIT.' && cf.amount === 'NO LIMIT' && cf.warn === 'Every payment will ask for the PIN.' && cf.cta === 'CONFIRM',
+      ok(cf.amountLabel === 'YOU ARE REMOVING THIS CARD’S NO PIN MAXIMUM.' && cf.amount === 'NO LIMIT' && cf.warn === 'Every payment will ask for the PIN.' && cf.cta === 'CONFIRM',
          'NO LIMIT under the keypad is confirmed in its own words: every payment will ask for the PIN', JSON.stringify([cf.amountLabel, cf.warn]));
     }
     owner.fcLimitSpec().go();
     await until('the no PIN limit to be removed', () => owner.state.fc.noPin && owner.state.fc.noPin.limit === 0);
-    ok(n.state.noPinLimit === 0 && owner.toasts.indexOf('No PIN limit removed.') >= 0 && limitsSub(vals(owner)) === '' && limitOf(owner) === 'NO LIMIT',
+    ok(n.state.noPinLimit === 0 && owner.toasts.indexOf('No PIN maximum removed.') >= 0 && limitsSub(vals(owner)) === '' && limitOf(owner) === 'NO LIMIT',
        'and the card has none, and its screen says so', limitOf(owner));
 
     // in dollars where there is a price: kept at those dollars
     owner.price = 100000;
     owner.fcSetLimit();
-    limits(owner).press('NO PIN LIMIT');
+    limits(owner).press('NO PIN MAXIMUM');
     card(owner).press('CONTINUE');
     ok(owner.state.unit === 'USD', 'with a price the amount is asked in dollars first');
     owner.fcLimitTxNext(0, 0);

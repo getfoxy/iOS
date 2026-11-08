@@ -19,7 +19,8 @@
  *   - a swap from bitcoin typed in dollars: NEXT takes the quote asked for those keys, though its answer moved the
  *     rate the keys convert at; another direction, another mint, or a screen opened again asks afresh
  *   - one probe per direction per screen; the ⇅ asks the other way's; an old mint rate is shown as the market's
- *   - the first pass taken when it fits, the second still asked when it does not
+ *   - the first pass taken when it fits, the second still asked when it does not; a figure to arrive (`get`) or valued
+ *     (`worth`) lands in one pair after the probe
  *   - the books of every unit closing to the unit after each swap run */
 process.env.TZ = 'UTC';
 const fs = require('fs');
@@ -57,7 +58,7 @@ const method = (sig) => {
 };
 // (`swapHave`: what there is to swap, this phone's balance or a card's, 26f-flashcard.js `fcSwap`; `swapComing`: a card's, counted as coming)
 const LIFTED = ['goSwap() {', 'swapFlip() {', 'swapUnits() {', 'swapHave(u) {', 'swapComing(u) {', 'swapToAmount() {', 'swapTyped() {', 'swapNext(all) {',
-  'swapAsk(again, amountGiven, allGiven) {', 'swapLeft() {', 'swapClock() {', 'swapGo() {', 'swapStillGoing(r) {', 'swapPendingCard(r, o) {',
+  'swapAsk(again, amountGiven, allGiven, modeGiven) {', 'swapMode() {', 'swapShort() {', 'swapShortLabel() {', 'swapShortKeep(keypad, from, mint, e) {', 'swapLeft() {', 'swapClock() {', 'swapGo() {', 'swapStillGoing(r) {', 'swapPendingCard(r, o) {',
   'swapDoneClose() {', 'swapRateOf(r) {', 'swapRateText(n) {', 'swapRateWho() {', 'swapInk(unit) {', 'swapEstimate() {', 'swapSpec() {',
   'swapExact() {', 'swapForget() {', 'swapRateHead() {', 'swapClockText(sec) {', 'swapWorth(n, unit, rate) {', 'swapCents(cents, sats) {',
   'cfRow(label, value, opt) {', 'unitFigure(amount, unit) {', 'unitWord(unit) {', 'unitBalance(unit) {',
@@ -247,7 +248,8 @@ function appOn(ctx) {
     await wait(300);
     ok(quotes === 1, 'still for 600 ms: its quote is asked, once', String(quotes));
     await until(() => app._swapAhead && app._swapAhead.q, 5000);
-    ok(app._swapAhead.q.total <= 1000 && app._swapAhead.amount === 1000, 'a quote for $ 10.00 in hand', JSON.stringify(app._swapAhead.q.total));
+    ok(app._swapAhead.q.amount === 1000 && app._swapAhead.q.total === 1002 && app._swapAhead.amount === 1000 && app._swapAhead.mode === 'worth',
+      'a quote for $ 10.00 of bitcoin in hand, the fee on top', JSON.stringify(app._swapAhead.q.total));
     await wait(700);
     ok(quotes === 1, 'and not asked again while the figure stays put');
     // NEXT within the hold: the confirmation opens filled, and the mint is asked nothing
@@ -297,7 +299,7 @@ function appOn(ctx) {
     app.swapNext(false);
     ok(app.state.swapQuoting && !app.state.swapQuote, 'NEXT on another figure than the one quoted: the rate is asked');
     await until(() => app.state.swapQuote, 5000);
-    ok(app.state.swapQuote.total <= 900 && app.state.swapQuote.total > 880 && pairs(c) !== n0, 'for $ 9.00, with a request to the mint');
+    ok(app.state.swapQuote.amount === 900 && app.state.swapQuote.total === 902 && pairs(c) !== n0, 'for $ 9.00 of bitcoin, with a request to the mint');
     app.back();
     // a hold too short
     app.state.amount = '12.00';
@@ -367,7 +369,7 @@ function appOn(ctx) {
     ok(starts.length === 3, 'a figure that is the one already out is not asked again when that answer comes', String(starts.length));
     // every pair asked ahead (the probe's, and each pass of each typed quote) the gap from the one before
     const gaps = c.asks.at.slice(aheadFrom).map((t, i, l) => (i ? t - l[i - 1] : 0)).slice(1);
-    ok(gaps.length >= 4 && gaps.every((g) => g >= GAP - 50), 'every pair asked ahead, second passes included, the gap or more after the last', JSON.stringify(gaps));
+    ok(gaps.length >= 3 && gaps.every((g) => g >= GAP - 50), 'every pair asked ahead, second passes included, the gap or more after the last', JSON.stringify(gaps));
     app.state.screen = 'home';
   }
 
@@ -400,6 +402,20 @@ function appOn(ctx) {
     const step = Math.ceil(e.amount / e.get);
     ok(c.asks.mint - n === 1 && e.total <= 20000 && 20000 - e.total <= step, 'bitcoin into dollars, the same figure again: one pair, within one cent’s worth under',
       (c.asks.mint - n) + ' pair(s), total ' + e.total + ', step ' + step);
+    /* What arrives as typed, the fee on top (`get`, `worth`): after the probe, one pair, landing on the figure exactly:
+     * $ 10.00 of bitcoin is a melt of exactly 1,000 cents, $ 10.00 into dollars an invoice of exactly 1,000 cents. */
+    n = c.asks.mint;
+    const w1 = await c.W.swapQuote('usd', 'sat', 1000, { worth: true });
+    ok(c.asks.mint - n === 1 && w1.amount === 1000 && w1.total === 1000 + w1.fee && w1.spend === w1.total,
+      '$ 10.00 of bitcoin: one pair, the mint pricing it at exactly $ 10.00, its fee on top', (c.asks.mint - n) + ' pair(s), ' + JSON.stringify([w1.amount, w1.total]));
+    await c.W.swapProbe('sat', 'usd');
+    n = c.asks.mint;
+    const g1 = await c.W.swapQuote('sat', 'usd', 1000, { get: true });
+    ok(c.asks.mint - n === 1 && g1.get === 1000 && g1.total === g1.amount + g1.fee, '$ 10.00 into dollars: one pair, the invoice for exactly $ 10.00', (c.asks.mint - n) + ' pair(s), ' + g1.get);
+    n = c.asks.mint;
+    const w2 = await c.W.swapQuote('sat', 'usd', 20000, { worth: true });
+    ok(c.asks.mint - n <= 2 && w2.amount <= 20000 && 20000 - w2.amount <= Math.ceil(w2.amount / w2.get), '₿ 20,000 of dollars: within a cent’s worth under, the fee on top',
+      (c.asks.mint - n) + ' pair(s), ' + w2.amount);
     // a rate that has moved since: the first pass does not fit, and the second is still asked
     const key = Object.keys(c.W._swapSeen).find((k) => /\|usd\|sat$/.test(k));
     c.W._swapSeen[key] = c.W._swapSeen[key].map((p) => Object.assign({}, p, { get: Math.round(p.get * 1.05) }));

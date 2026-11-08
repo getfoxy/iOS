@@ -1302,7 +1302,7 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     eq(W.rec.sets.length, 0, 'NEXT writes nothing yet');
     eq(run.asked.pop(), { from: 'usd', to: 'sat', amount: 4205, all: true }, 'the rate is asked for all of the dollars');
     const t = textOf(w);
-    ok(A.state.screen === 'swapConfirm' && /YOU ARE GETTING/.test(t) && /YOU ARE SPENDING\s*\$ 41\.97 in DOLLARS/.test(t) && /FEE\s*\$ 0\.02/.test(t),
+    ok(A.state.screen === 'swapConfirm' && /RECEIVING/.test(t) && /SPENDING\s*\$ 41\.97 in DOLLARS/.test(t) && /FEE\s*\$ 0\.02/.test(t),
       'the swap confirmation: what arrives, all the dollars the mint will take ($ 41.97 of $ 42.05), and the fee', t.slice(0, 300));
     eq(V().cfCtaLabel, 'SWAP', 'its button is SWAP, as every swap’s');
     // CANCEL (the round ✕): the choice as it was

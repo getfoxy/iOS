@@ -402,8 +402,8 @@ const amountVals = (o) => app.renderAmount(Object.assign(
      'and from CARD LIMITS the same screen, with NO LIMIT under NEXT', amountVals().amountTitle + ' | ' + amountVals().amtAltLabel);
   reset({ screen: 'amount', flow: 'cardSuNoPin' });
   const v = amountVals();
-  ok(v.amountTitle === '24HR LIMIT' && v.amountSubtitle === 'What is the most this card should pay in 24 hours without asking for your PIN?',
-     'then 24HR LIMIT, the most in 24 hours', v.amountTitle + ' | ' + v.amountSubtitle);
+  ok(v.amountTitle === 'NO PIN MAXIMUM' && v.amountSubtitle === 'What\u2019s the most this card should pay in 24 hours before asking for a PIN?',
+     'then NO PIN MAXIMUM, the most before the PIN (in 24 hours on a card of 1.25)', v.amountTitle + ' | ' + v.amountSubtitle);
   ok(v.nextBg === 'rgba(var(--ink-rgb),.14)' && v.nextFur === 'none,none,none' && amountVals({ val: 5 }).nextBg === 'var(--acc)',
      'NEXT is grey until an amount is typed, and the fur button once it is', v.nextBg);
   // SKIP under NEXT, for none: the set-up's own (26j-card-wheel.js, `fcSuSkip`)

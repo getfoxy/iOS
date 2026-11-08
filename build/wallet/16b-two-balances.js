@@ -689,9 +689,52 @@
       });
     },
 
+    /* `swapPlan` (08c-units.js), for the suites: the pieces a swap's melt of `total` would spend from `pile`, and their fee. */
+    _swapPlan: function (w, pile, total, melt) { return swapPlan(w, pile, total, melt); },
+
+    /* A guess, in memory only, at what a swap asked as `swapQuote`'s `get` or
+     * `worth` (`mode`) needs from the FROM balance, and the most of `amount`'s
+     * unit that `have` would cover: { need, fits }, or null with nothing to go
+     * on. From the newest pair this mint answered this way in the last ten
+     * minutes, its fee read as fixed and as a share and the smaller taken, so
+     * it errs towards asking; else the mint's last rate (or the market's) with
+     * no fee, and `fits` 0, since what would fit is not known without one. The keypad says NOT ENOUGH by it before a quote is in; the quote
+     * itself is the one that refuses. Moves nothing and asks nothing. */
+    swapGuess: function (from, to, amount, mode, have) {
+      var f = unitOf(from), t = unitOf(to);
+      if (!f || !t || f === t || !HANDLED_UNITS[f] || !HANDLED_UNITS[t]) return null;
+      var n = Math.round(Number(amount) || 0);
+      if (!(n > 0)) return null;
+      var at = wallet ? mintOf(wallet) : '';
+      var p = ((at && FoxyWallet._swapSeen[canonicalMint(at) + '|' + f + '|' + t]) || []).filter(function (x) {
+        return x && Date.now() - x.at < 600000 && x.get > 0 && x.amount > 0;
+      })[0] || null;
+      var known = at ? FoxyWallet.mintRate(at) : null;
+      var rate = (known && known.usdPerBtc) || Number(FoxyWallet._rate) || 0;
+      // FROM units for one unit of TO
+      var per = p ? p.amount / p.get : rate > 0 ? (f === 'usd' ? rate / 1e6 : 1e6 / rate) : 0;
+      if (mode === 'get' && !(per > 0)) return null;
+      var base = mode === 'get' ? n * per : n;
+      var feeOf = function (x) { return p ? Math.min(p.fee, p.fee * x / p.amount) : 0; };
+      var need = Math.ceil(base + feeOf(base));
+      var h = Math.max(0, Math.round(Number(have) || 0));
+      var part = Math.max(0, h - feeOf(h));
+      var fits = !p ? 0 : mode === 'get' ? Math.floor(part / per) : Math.floor(part);
+      return { need: need, fits: Math.max(0, fits) };
+    },
+
     /* The rate for swapping `amount` of `from` into `to`, held by the mint.
      * `amount` is what leaves, the mint's fee included; `opts.all` is the
-     * whole of the FROM balance. The first pass is sized from the last pair
+     * whole of the FROM balance. With `opts.get`, `amount` is what arrives
+     * instead, in the TO unit, exactly: the invoice is for it and the fee
+     * goes on top. With `opts.worth`, `amount` is in the FROM unit and is
+     * what the mint values what arrives at, its fee again on top (dollars
+     * typed for bitcoin: "$ 1.00 of bitcoin"). Either way, a balance that
+     * cannot cover what arrives and the fee is refused with `short`, `need`,
+     * `have` and `fits` (the most that would fit, in the unit `amount` is
+     * in), and the quote carries `mode`, `asked`, `inputFee` (this mint's
+     * fee on the pieces the payment spends, at most) and `spend` (`total`
+     * and that fee: all that can leave). The first pass is sized from the last pair
      * this mint answered in this direction (the probe's, or an earlier
      * quote's), else from the rate last seen, a little under; it is taken
      * as it is when no larger figure in the TO unit would fit. Otherwise a
@@ -721,9 +764,11 @@
       var have = sumProofs(proofs(at, f));
       var total = (opts && opts.all) ? have : Math.round(Number(amount));
       var all = !!(opts && opts.all);
+      // what arrives as asked, the fee on top: exact in TO (`get`), or valued at the amount in FROM (`worth`)
+      var mode = all ? '' : (opts && opts.get) ? 'get' : (opts && opts.worth) ? 'worth' : '';
       have += coming;
       if (!(total > 0)) return Promise.reject(new Error('Ask for an amount above zero.'));
-      if (total > have) {
+      if (!mode && total > have) {
         return Promise.reject(new Error('That is more than your ' + balanceWord(f) + ': you hold ' + moneyWords(have, f) + '.'));
       }
       var view;
@@ -781,8 +826,116 @@
         if (e && (e.offline || (neverSent(e) && !e.storageFull))) throw offline();
         throw e;
       };
-      return Promise.all([unitWalletOn(view, t), unitWalletOn(view, f)]).then(function (ws) {
+      /* What arrives, as asked (`opts.worth`): the largest invoice in TO whose melt the mint prices at no more than
+       * `want` in FROM, and exactly `want` where the units allow it (a cent of bitcoin is a dozen sats or so, so
+       * dollars land on the cent; a sat of dollars is under a cent, so sats land within a cent's worth under).
+       * Sized from the pairs this mint answered this way, else the rate last seen; three passes at most. */
+      var worthPasses = function (want) {
+        var pts = (FoxyWallet._swapSeen[canonicalMint(at) + '|' + f + '|' + t] || []).filter(function (p) {
+          return p && Date.now() - p.at < 600000 && p.get > 0 && p.amount > 0;
+        });
+        // the pair its rounding blurs least; a melt's amount is rounded up to the unit, so aim at the middle of the last one
+        var big = pts.length ? pts.reduce(function (a, p) { return p.amount > a.amount ? p : a; }, pts[0]) : null;
+        var first = big ? Math.round((want - 0.5) / (Math.max(0.5, big.amount - 0.5) / big.get)) : convert(want, guess);
+        var tried = [];
+        var best = function () {
+          return tried.filter(function (p) { return p.amount <= want; }).reduce(function (a, p) {
+            return !a || p.amount > a.amount || (p.amount === a.amount && p.get > a.get) ? p : a;
+          }, null);
+        };
+        var take = function () {
+          var b = best();
+          if (!b) throw new Error('The mint would not hold a rate. Try again.');
+          return b;
+        };
+        var step = function (g) {
+          if (!(g > 0)) throw refuseLow();
+          return pass(g).then(function (p) {
+            tried.push(p);
+            if (!(p.amount > 0)) throw refuseLow();
+            if (p.amount === want || tried.length >= 3) return take();
+            var per = Math.max(0.5, p.amount - 0.5) / p.get;
+            var aim = Math.round((want - 0.5) / per);
+            var next = p.amount > want ? Math.min(g - 1, aim) : Math.max(g + (aim > g ? 1 : 0), aim);
+            // under, and no larger invoice would land under too: as close as the units allow
+            if (next === g || tried.some(function (x) { return x.get === next; })) return take();
+            return step(next);
+          });
+        };
+        return step(Math.max(1, first));
+      };
+      /* The balance against what arrives and the fee (`get`, `worth`): the one sum a payment is refused on
+       * (`meltNeed`), so what the confirmation offers is what `pay` will take. What is shown on top is not that
+       * sum, which keeps a cushion of four more pieces, but the fee on the pieces `pay` will pick (`swapPlanFee`).
+       * A card's swap counts what comes off the card (`coming`) as the plain sum and the fee on the pieces it comes
+       * off as (`cardInFee`). Short, it says the most that would fit, stepped down until that much is taken too. */
+      var cardInFee = function (tot) {
+        var fee = 0;
+        for (var i = 0; i < 4; i++) fee = Math.max(fee, feeForInputs(fw, onesIn(tot + fee)) || 0);
+        return fee;
+      };
+      var takes = function (tot) {
+        if (coming > 0) return tot + cardInFee(tot) <= sumProofs(proofs(at, f)) + coming;
+        return !!meltNeed(fw, proofs(at, f), tot).ok;
+      };
+      var cover = function (got) {
+        var pile = proofs(at, f);
+        var held = sumProofs(pile);
+        var fits = true, need = got.total, inputFee = 0, usable = 0, plan = null;
+        if (coming > 0) {
+          inputFee = cardInFee(got.total);
+          need = got.total + inputFee;
+          fits = need <= held + coming;
+          usable = held + coming;
+        } else {
+          var mn = meltNeed(fw, pile, got.total);
+          fits = !!mn.ok;
+          need = Math.max(got.total, Math.round(Number(mn.need) || 0));
+          if (fits) {
+            var planned = swapPlan(fw, pile, got.total, got.melt);
+            // the plan `pay` will follow, or with none the refusal's own sum, which is never less than what leaves
+            if (planned.plan && isFinite(planned.fee)) { inputFee = planned.fee; plan = planned.plan; }
+            else inputFee = Math.max(0, need - got.total);
+          }
+          else usable = allFits(fw, pile, held);
+        }
+        if (fits) return { got: got, inputFee: inputFee, plan: plan };
+        // the arriving share of what would fit, read off this pair: as a share of it, and as its fee fixed, whichever is less
+        var part = Math.floor(Math.min(usable * got.amount / got.total, usable - got.fee));
+        var most = part > 0 ? (mode === 'get' ? Math.floor(part * got.get / got.amount) : part) : 0;
+        // what that much would cost by this pair, stepped down until the same sum as the refusal takes it
+        var costOf = function (m) { return (mode === 'get' ? Math.ceil(m * got.amount / got.get) : m) + got.fee; };
+        /* The quote for that figure lands a little under its cost by this pair (sats valued at a figure land within a
+         * cent's worth under, an invoice's melt is rounded), and the sum the refusal asks is not steady from one total
+         * to the next, since the pieces it takes follow the bits of the total: every total it could land on is asked. */
+        var under = (mode === 'worth' && f === 'sat') ? Math.ceil(got.amount / got.get) : mode === 'get' ? 2 : 0;
+        var surely = function (m) {
+          var top = costOf(m) + (mode === 'get' ? 1 : 0);
+          for (var x = Math.max(1, top - under - (mode === 'get' ? 1 : 0)); x <= top; x++) { if (!takes(x)) return false; }
+          return true;
+        };
+        for (var i = 0; i < 60 && most > 0 && !surely(most); i++) {
+          most -= mode === 'get' ? Math.max(1, Math.floor(got.get / got.amount)) : 1;
+        }
+        if (!(most > 0) || !surely(most)) most = 0;
+        var inUnit = mode === 'get' ? t : f;
+        var e = /** @type {any} */ (new Error('Not enough ' + balanceWord(f) + ': with the mint’s fee this swap needs '
+          + moneyWords(need, f) + ', and you hold ' + moneyWords(held + coming, f) + '.'
+          + (most > 0 ? ' You can ' + (mode === 'get' ? 'get' : 'swap') + ' up to ' + moneyWords(most, inUnit) + '.' : '')));
+        e.short = true;
+        e.need = need;
+        e.have = held + coming;
+        e.fits = Math.max(0, most);
+        e.fitsUnit = inUnit;
+        throw e;
+      };
+      var asked = Math.round(Number(amount));
+      var walletsUp = Promise.all([unitWalletOn(view, t), unitWalletOn(view, f)]).then(function (ws) {
         tw = ws[0]; fw = ws[1];
+      });
+      var sized = mode ? walletsUp.then(function () {
+        return mode === 'get' ? pass(asked) : worthPasses(asked);
+      }).catch(mintRefusal).then(cover) : walletsUp.then(function () {
         /* All of it, at a mint that charges for the pieces a payment spends: the payment needs its quote and that fee
          * out of the same pile (`meltNeed`, as `pay` asks it), so the quote aims at what is left once the fee is
          * taken off, or the swap would be refused every time for want of the fee. */
@@ -815,7 +968,9 @@
             return three;
           });
         });
-      }, mintRefusal).then(function (got) {
+      }, mintRefusal).then(function (got) { return { got: got, inputFee: 0 }; });
+      return sized.then(function (sz) {
+        var got = sz.got;
         // the rate the person gets, before the fee, kept as the mint's latest
         var usdPerBtc = FoxyWallet._swapNote(at, f, t, got);
         var market = Number(FoxyWallet._rate) > 0 ? Number(FoxyWallet._rate) : null;
@@ -831,6 +986,7 @@
           id: 'uswap-' + now.toString(36) + '-' + Math.random().toString(36).slice(2, 8),
           mint: at, from: f, to: t,
           total: got.total, amount: got.amount, fee: got.fee, get: got.get,
+          mode: mode, asked: mode ? asked : got.total, inputFee: sz.inputFee, spend: got.total + sz.inputFee,
           rate: { usdPerBtc: usdPerBtc, by: hostOf(at) },
           market: market, spread: spread, spreadWarn: spread > 0.02,
           expiresAt: Math.min.apply(null, ends),
@@ -846,6 +1002,8 @@
         Object.defineProperty(quote, '_melt', { value: got.melt, enumerable: false });
         Object.defineProperty(quote, '_w', { value: got.fw, enumerable: false });
         Object.defineProperty(quote, '_tw', { value: tw, enumerable: false });
+        // the pieces the confirmation's SPENDING was worked out on, for `pay` to spend (`swapPlan`)
+        Object.defineProperty(quote, '_plan', { value: (sz && sz.plan) || null, enumerable: false });
         return quote;
       });
     },
@@ -900,7 +1058,9 @@
         dropQuoteRecord({ key: K.quotes, entry: { quote: mq.quote } });
       };
       return FoxyWallet.pay(String(mq.request), function () {}, {
-        unit: q.from, swap: q.id, mintRate: rate, swapCard: swapCard,
+        unit: q.from, swap: q.id, mintRate: rate, swapCard: swapCard, plan: q._plan || undefined,
+        // the fee on the pieces SPENDING was shown with: a plan made again on a changed pile may cost no more
+        planFee: q._plan ? Number(q.inputFee) || 0 : undefined,
         quote: { quote: melt, w: q._w, bolt11: String(mq.request), at: Date.now(), unit: q.from },
       }).then(function (paid) {
         if (paid && paid.pending) {

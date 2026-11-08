@@ -13,7 +13,7 @@
    *   NO PIN AMOUNT      SET AMOUNT for the most one payment may be without the PIN: this phone's own rule, kept on this phone
    *                      (the wallet's `cardSetNoPinTx`); the card has no such figure, and the phone asks for the PIN above it at
    *                      a tap it reads (`cardNeedsPin`)
-   *   24HR LIMIT         SET AMOUNT for the most the card pays in 24 hours without the PIN: the card's own allowance
+   *   NO PIN MAXIMUM     SET AMOUNT for the most the card pays without the PIN (in 24 hours on 1.25): the card's own allowance
    *   SPEND PER SECOND   "Do you want to limit how much the card pays each second?" YES or NO; YES opens MAX PER SECOND
    *                      (`fcSpeedOpen`): six figures a second to choose from, and the figure itself to type another on SET AMOUNT
    *
@@ -34,14 +34,23 @@
    * the tap writes no owner and no key of this phone's, then the money under the holder's PIN.
    *
    * The way back is the round back button of the pad and of SET AMOUNT: one step back (from SET AMOUNT, to its question; from
-   * NO PIN AMOUNT, to CURRENCY where it was asked; from 24HR LIMIT, to NO PIN AMOUNT), and from the first, to where the set-up began. A question's card goes when
+   * NO PIN AMOUNT, to CURRENCY where it was asked; from NO PIN MAXIMUM, to NO PIN AMOUNT), and from the first, to where the set-up began. A question's card goes when
    * it is tapped beside, and the set-up with it.
    *
    * A card set up for its holder (`other`) is not asked NO PIN AMOUNT: the rule would be kept on this phone, which is not the one the
-   * holder's card pays at, so it would hold nowhere; its first amount is 24HR LIMIT, whose back button leaves the set-up.
+   * holder's card pays at, so it would hold nowhere; its first amount is NO PIN MAXIMUM, whose back button leaves the set-up.
    *
-   * NO PIN AMOUNT comes up filled in at $5.00 and 24HR LIMIT at $20.00 (FC_SU_NOPIN_DEFAULT_CENTS) where it is typed in dollars,
-   * or the figure chosen before where the step is come back to; the first key typed replaces it (`amountDefault`). */
+   * NO PIN AMOUNT comes up filled in at $10.00 (FC_SU_NOPIN_DEFAULT_CENTS) where it is typed in dollars, and NO PIN MAXIMUM, the
+   * second amount, at three times what NO PIN AMOUNT was given (FC_SU_NOPIN_TIMES: $30.00 for the default), worked out again
+   * whenever NO PIN AMOUNT changes until NO PIN MAXIMUM is typed by hand (`noPinHand`); MAX PER SECOND comes up at $10 a second
+   * (FC_SPEED_FIRST). Each is the figure chosen before where the step is come back to, and the first key typed replaces it
+   * (`amountDefault`). A default set in dollars is kept in dollars for a bitcoin card, as a figure typed in dollars is, so that
+   * this phone sets the card again when the price has moved.
+   *
+   * Every entry is kept until the card is written or the set-up is left on purpose, by the round back buttons. The connection is
+   * looked at before the tap is asked for (`fcSuRouteThen`): with no route, NO CONNECTION says so, with TRY AGAIN and BACK, and no
+   * sheet is opened. A tap that fails, or is cancelled, comes back to the same choice, TRY AGAIN with everything as it was or BACK
+   * to the last step to change an entry (`fcSuReturn`), and never to the start. */
 
   /* What a card can hold, as the set-up's CURRENCY step offers it, in order. */
   FC_SETUP_UNITS = ['usd', 'sat'];
@@ -51,6 +60,8 @@
    * noPinTx, noPinTxUsd, noPinTxUnit } (this phone's own set-up when none is given). */
   fcSetUpSteps(o) {
     this._fcSu = Object.assign({ pin: '', unit: '', noPin: 0, tapLimit: 0, noPinUsd: 0, tapUsd: 0, noPinTx: 0, noPinTxUsd: 0 }, o || {});
+    // (a set-up begun afresh: nothing of an earlier one's is taken up again)
+    this._fcSuLast = null;
     this.fcSuPin('');
   }
 
@@ -103,7 +114,7 @@
   }
 
   /* The amounts are asked straight away, with no question first (the design's rule): NO PIN AMOUNT on SET AMOUNT (one payment), then
-   * 24HR LIMIT (the card's allowance), then the rate on MAX PER SECOND; SKIP under NEXT on each (`fcSuSkip`) sets none. */
+   * NO PIN MAXIMUM (the card's allowance), then the rate on MAX PER SECOND; SKIP under NEXT on each (`fcSuSkip`) sets none. */
   fcSuNoPin() {
     if (!this._fcSu) return;
     // (not for a card set up for its holder: see above)
@@ -136,30 +147,40 @@
     su.ask = which;
     // (the rate typed: whether it was reached from MAX PER SECOND, which its back button returns to)
     su.fromSpeed = which === 'tap' && !!other;
-    if (which === 'tap' && !other && this.fcSpeedChoosable(this.fcSuUnitNow())) { this.fcSpeedOpen('su', this.fcSuUnitNow(), this.FC_SPEED_FIRST); return; }
+    // (at the rate chosen before, where the step is come back to)
+    if (which === 'tap' && !other && this.fcSpeedChoosable(this.fcSuUnitNow())) { this.fcSpeedOpen('su', this.fcSuUnitNow(), su.tapRate || this.FC_SPEED_FIRST); return; }
     this.fcAmount(this.FC_SU_FLOWS[which]);
     if (which !== 'tap') this.fcSuPrefill(su, which);
   }
 
-  /* What NO PIN AMOUNT and 24HR LIMIT show before anything is typed: the figure chosen before, where the step is come back to (from
-   * the next step's back button), in the unit it was typed in; else $20.00 where dollars are typed. A bitcoin card with no price types
-   * sats, and is given no figure (there are no dollars to say it in). Marked the default: the first key typed starts from nothing
-   * (19-update-keypad-balance.js, `press`), so $20.00 is not what a 5 is typed after. */
-  FC_SU_NOPIN_DEFAULT_CENTS = { noPinTx: 500, noPin: 2000 };
+  /* What NO PIN AMOUNT and NO PIN MAXIMUM show before anything is typed: the figure chosen before, where the step is come back to
+   * (from the next step's back button), in the unit it was typed in; else $10.00 for NO PIN AMOUNT where dollars are typed. NO PIN
+   * MAXIMUM, until it is typed by hand (`noPinHand`), is three times NO PIN AMOUNT (FC_SU_NOPIN_TIMES), in the unit that was given in,
+   * or three times the $10.00 where NO PIN AMOUNT was skipped. A bitcoin card with no price types sats, and is given no default (there
+   * are no dollars to say it in). Marked the default: the first key typed starts from nothing (19-update-keypad-balance.js, `press`),
+   * so $10.00 is not what a 5 is typed after. */
+  FC_SU_NOPIN_DEFAULT_CENTS = { noPinTx: 1000 };
+  FC_SU_NOPIN_TIMES = 3;
   fcSuPrefill(su, which) {
     const s = this.state;
     const tx = which === 'noPinTx';
-    const n = tx ? su.noPinTx : su.noPin;
-    const nUsd = tx ? su.noPinTxUsd : su.noPinUsd;
+    const k = this.FC_SU_NOPIN_TIMES;
+    const usdCard = this.fcSuUnitNow() === 'usd';
+    // NO PIN MAXIMUM not typed by hand: three times NO PIN AMOUNT, said as it was given
+    const derived = !tx && !su.noPinHand;
+    const n = tx ? su.noPinTx : derived ? su.noPinTx * k : su.noPin;
+    const nUsd = tx ? su.noPinTxUsd : derived ? su.noPinTxUsd * k : su.noPinUsd;
     let amount = '';
     let unit = s.unit;
     if (n > 0) {
-      if (this.fcSuUnitNow() === 'usd') amount = (n / 100).toFixed(2);
+      if (usdCard) amount = (n / 100).toFixed(2);
       else if (s.unit === 'USD' && nUsd > 0) amount = Number(nUsd).toFixed(2);
       else { amount = String(Math.round(n)); unit = 'SATS'; }
     } else if (s.unit === 'USD') {
-      amount = (this.FC_SU_NOPIN_DEFAULT_CENTS[tx ? 'noPinTx' : 'noPin'] / 100).toFixed(2);
+      amount = (this.FC_SU_NOPIN_DEFAULT_CENTS.noPinTx * (tx ? 1 : k) / 100).toFixed(2);
     }
+    // (what came up, so that NEXT can tell a figure typed over it from the default taken as it was, `fcSuAmountNext`)
+    su.shown = amount ? { which, amount, unit } : null;
     if (amount) this.setState({ amount, unit, amountDefault: true });
   }
 
@@ -189,25 +210,29 @@
     if (!(amount > 0)) { this.toast('Type an amount first.', true); return; }
     const usd = this.fcSuUnitNow() === 'usd' ? 0 : this.state.unit === 'USD' ? Number(this.state.amount) || 0 : 0;
     const k = this.FC_SPEED_SECS;
-    if (which === 'tap') { su.tapLimit = amount * k; su.tapUsd = usd * k; } else if (which === 'noPinTx') { su.noPinTx = amount; su.noPinTxUsd = usd; } else { su.noPin = amount; su.noPinUsd = usd; }
+    // (the rate typed, in dollars a second, for MAX PER SECOND to come up at where the step is come back to)
+    if (which === 'tap') { su.tapLimit = amount * k; su.tapUsd = usd * k; su.tapRate = this.fcSuUnitNow() === 'usd' ? amount / 100 : usd; } else if (which === 'noPinTx') { su.noPinTx = amount; su.noPinTxUsd = usd; } else { su.noPin = amount; su.noPinUsd = usd; }
+    // (NO PIN MAXIMUM typed by hand, not its default taken as it came up: it no longer follows NO PIN AMOUNT)
+    const shown = su.shown;
+    if (which === 'noPin' && (!this.state.amountDefault || !shown || shown.which !== 'noPin' || shown.amount !== String(this.state.amount) || shown.unit !== this.state.unit)) su.noPinHand = true;
     this.fcSuLeave();
     if (which === 'tap') this.fcSuGo(); else if (which === 'noPinTx') this.fcSuNoPinDay(); else this.fcSuTap();
   }
 
-  /* SKIP under NEXT: none of it. No rule on one payment, and on to 24HR LIMIT; no allowance without the PIN, and on to the rate; no
+  /* SKIP under NEXT: none of it. No rule on one payment, and on to NO PIN MAXIMUM; no allowance without the PIN, and on to the rate; no
    * limit on a payment, and on to the tap. */
   fcSuSkip(which) {
     const su = this._fcSu;
     const w = which || this.fcSuAsking();
     if (!su || !w) return;
     this.fcSuLeave();
-    if (w === 'tap') { su.tapLimit = 0; su.tapUsd = 0; this.fcSuGo(); } else if (w === 'noPinTx') { su.noPinTx = 0; su.noPinTxUsd = 0; this.fcSuNoPinDay(); } else { su.noPin = 0; su.noPinUsd = 0; this.fcSuTap(); }
+    if (w === 'tap') { su.tapLimit = 0; su.tapUsd = 0; su.tapRate = 0; this.fcSuGo(); } else if (w === 'noPinTx') { su.noPinTx = 0; su.noPinTxUsd = 0; this.fcSuNoPinDay(); } else { su.noPin = 0; su.noPinUsd = 0; su.noPinHand = false; this.fcSuTap(); }
   }
 
   /* The round back button on SET AMOUNT (01-ui-basics.js, `back`), a step back: off NO PIN AMOUNT, CURRENCY again where it was asked
-   * (the choice open once more), and otherwise out of the set-up to the screen it was asked over, with nothing written; off 24HR LIMIT,
-   * NO PIN AMOUNT; off the rate typed, MAX PER SECOND where it came from there, 24HR LIMIT otherwise. True where it was the set-up's. */
-  /* (and on MAX PER SECOND, while the set-up asks it: 24HR LIMIT, `fcSpeedBack`) */
+   * (the choice open once more), and otherwise out of the set-up to the screen it was asked over, with nothing written; off NO PIN MAXIMUM,
+   * NO PIN AMOUNT; off the rate typed, MAX PER SECOND where it came from there, NO PIN MAXIMUM otherwise. True where it was the set-up's. */
+  /* (and on MAX PER SECOND, while the set-up asks it: NO PIN MAXIMUM, `fcSpeedBack`) */
   fcSuAmountBack() {
     if (this._fcSu && this.state.screen === 'fcSpeed' && this.state.fcSpeed && this.state.fcSpeed.mode === 'su') { this.fcSpeedBack(); return true; }
     const which = this.fcSuAsking();
@@ -218,7 +243,7 @@
       this.fcSuNoPin();
       return true;
     }
-    // (the first amount asked: NO PIN AMOUNT, or 24HR LIMIT for a card set up for its holder)
+    // (the first amount asked: NO PIN AMOUNT, or NO PIN MAXIMUM for a card set up for its holder)
     if (which === 'noPinTx' || which === 'noPin') {
       this.fcSuLeave();
       // the step before was CURRENCY (asked only of the owner's own card, at a mint with two balances): that question again, not the start
@@ -238,14 +263,15 @@
     return true;
   }
 
-  /* The second amount's words, by the card's software as CARD LIMITS says them (26f-flashcard.js, `fcLimitQuestion`): 24HR LIMIT and its
-   * 24 hours on a card of 1.25, whose allowance is a 24-hour total; NO PIN LIMIT and "before it asks for its PIN" on 1.21 to 1.24, whose
-   * allowance the PIN fills again. A card not read yet (SEND's set-up for a holder has none on show) is taken as the newest. */
+  /* The second amount's words: NO PIN MAXIMUM, asked "in total" on 1.21 to 1.24, whose allowance the PIN fills again, and "in 24
+   * hours" on a card of 1.25, whose allowance is a 24-hour total. A card not read yet (SEND's set-up for a holder has none on show) is taken as the newest. */
   fcSuDayWords() {
     const fc = this.state.fc;
     const refill = !!(fc && fc.pinFirst && !fc.noPinDay && fc.noPinKnown);
-    return refill ? { title: 'NO PIN LIMIT', question: 'What is the most this card should pay by tap alone before it asks for its PIN?' }
-      : { title: '24HR LIMIT', question: 'What is the most this card should pay in 24 hours without asking for your PIN?' };
+    /* NO PIN MAXIMUM either way (the keeper's words, 2026-11-08); a card of 1.25 fills its allowance again every 24 hours, and its
+     * question says so. */
+    return refill ? { title: 'NO PIN MAXIMUM', question: 'What\u2019s the most this card should pay in total before asking for a PIN?' }
+      : { title: 'NO PIN MAXIMUM', question: 'What\u2019s the most this card should pay in 24 hours before asking for a PIN?' };
   }
 
   /* The line under the amount on SET AMOUNT for the rate: "It will take N seconds to pay $X." for the limit it makes (one second of
@@ -288,16 +314,72 @@
     return H.eachBefore * (k - 1);
   }
 
-  // the end of the questions: the tap
+  /* The end of the questions: the tap, once there is a route (`fcSuRouteThen`). The entries are kept (`_fcSuLast`) until the card is
+   * written, so that a tap that fails, or no route, comes back to them (`fcSuReturn`). */
   fcSuGo() {
     const su = this._fcSu;
     if (!su) return;
     const noPinTxUnit = this.fcSuUnitNow();
     this._fcSu = null;
+    this._fcSuLast = su;
     const choice = { pin: su.pin, unit: su.unit, noPin: su.noPin, tapLimit: su.tapLimit, noPinUsd: su.noPinUsd, tapUsd: su.tapUsd,
                      noPinTx: su.noPinTx || 0, noPinTxUsd: su.noPinTxUsd || 0, noPinTxUnit };
-    if (typeof su.run === 'function') { su.run(choice); return; }
-    this.fcSetUpStepsRun(choice);
+    this.fcSuRouteThen(() => {
+      if (typeof su.run === 'function') { su.run(choice); return; }
+      this.fcSetUpStepsRun(choice);
+    });
+  }
+
+  /* The set-up's tap needs the mint (its first pieces, the refund key's lock), so the route is looked at before the TAP TO FINISH
+   * screen and its sheet are shown, and again as the tap fires (`fcSetUpStepsRun`). A connection on its way is waited for, the
+   * few seconds a money step waits (the wallet's `routeSoon`); with none, NO CONNECTION in the wallet's own words (`routeWords`),
+   * TRY AGAIN to look again and BACK to the last step, every entry kept, and no sheet opened. `go` runs once the route is open. */
+  fcSuRouteThen(go) {
+    const W = this.fcW ? this.fcW() : null;
+    const open = () => !W || !W.routeOpen || W.routeOpen();
+    if (open()) { go(); return; }
+    const soon = (W && W.routeSoon && W.routeComing && W.routeComing()) ? W.routeSoon() : Promise.resolve(false);
+    Promise.resolve(soon).then(() => {
+      if (open()) { go(); return; }
+      this.fcSuNoRoute(go);
+    }, () => this.fcSuNoRoute(go));
+  }
+
+  // NO CONNECTION, before the tap or from a tap the route went from: TRY AGAIN (the route looked at again, then `go`) and BACK
+  fcSuNoRoute(go, said) {
+    const W = this.fcW ? this.fcW() : null;
+    let words = String(said || '');
+    if (!words) { try { words = (W && W.routeWords && W.routeWords()) || ''; } catch (e) { words = ''; } }
+    console.log('[foxy] card: the set-up waits for a connection, its entries kept');
+    this.haptic && this.haptic('error');
+    this.blockedCard('fc-no-route', this.fcSuKeepCard({
+      tone: 'warn', title: 'NO CONNECTION',
+      reason: words || 'Foxy needs a connection to finish setting up this card.',
+      chip: 'Connect, then tap TRY AGAIN. Everything you chose is kept.',
+      retry: 'TRY AGAIN', go: () => this.fcSuRouteThen(go),
+    }));
+  }
+
+  /* A card over the set-up's tap with BACK as its second choice, and the card tapped beside it taken the same way: back to the last
+   * step with every entry kept (`fcSuReturn`), never to the start. TRY AGAIN, and any other button the card has, are its own. */
+  fcSuKeepCard(spec) {
+    let chose = false;
+    const mark = (f) => (typeof f === 'function' ? (...a) => { chose = true; return f(...a); } : f);
+    const out = Object.assign({}, spec, { go: mark(spec.go), shut: { label: 'BACK', tap: () => { chose = true; this.fcSuReturn(); } } });
+    out.onClose = () => setTimeout(() => { if (!chose) this.fcSuReturn(); }, 0);
+    return out;
+  }
+
+  /* BACK from the set-up's tap: its last step again, MAX PER SECOND at the rate chosen (or SET AMOUNT where the rate is typed), with
+   * every entry as it was. False where there is no set-up to go back to. */
+  fcSuReturn() {
+    const su = this._fcSuLast;
+    if (!su) return false;
+    this._fcSuLast = null;
+    su.was = null;
+    this._fcSu = su;
+    this.fcSuTap();
+    return true;
   }
 
   /* The owner's set-up, in one tap: the PIN, the record, the holder's numbers, and this phone as the owner, the card holding while
@@ -312,14 +394,20 @@
     if (c.unit) how.unit = c.unit === 'both' ? 'usd' : c.unit;
     const fc = this.state.fc;
     if (fc && fc.v123 && c.unit) how.hold = c.unit;
+    // (the route looked at again as the tap fires: lost since NEXT, it is NO CONNECTION, nothing asked of the card)
+    const W2 = /** @type {any} */ (W);
+    if (W2.routeOpen && !W2.routeOpen()) { this.fcSuRouteThen(() => this.fcSetUpStepsRun(c)); return; }
     this.fcTap({ flow: 'setup' }, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
       .then((card) => {
+        // written: nothing of the set-up is left to come back to
+        this._fcSuLast = null;
         this.fcNameSettle(card && card.key);
         this.fcNoPinTxKeep(card && card.key, c);
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.toast(c.unit === 'both' ? 'The card is set up. It holds dollars and bitcoin.' : c.unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
-      }, (e) => this.fcFailed(e, { again: () => this.fcSetUpStepsRun(c), pinAgain: () => this.fcSuPinAgain(c, (c2) => this.fcSetUpStepsRun(c2)) }));
+      }, (e) => this.fcFailed(e, { setUp: true, again: () => this.fcSetUpStepsRun(c), pinAgain: () => this.fcSuPinAgain(c, (c2) => this.fcSetUpStepsRun(c2)),
+                                   cancelled: () => this.fcSuReturn() }));
   }
 
   /* NO PIN AMOUNT, once the card is set up: this phone's own rule for it, kept on this phone (the wallet's `cardSetNoPinTx`), none where
@@ -347,7 +435,7 @@
    * too. A bitcoin card with no price has nothing to say dollars at, and is asked on SET AMOUNT in sats straight away. */
   FC_SPEED_CHIPS = [1, 2, 5, 10, 25, 50];
   FC_SPEED_SECS = 1;
-  FC_SPEED_FIRST = 5;
+  FC_SPEED_FIRST = 10;
 
   // whether a rate in dollars can be turned into a card's limit in `unit`: a dollar card's always, a bitcoin card's where there is a price
   fcSpeedChoosable(unit) {
@@ -424,6 +512,7 @@
       if (!su) return;
       su.tapLimit = limit;
       su.tapUsd = usd;
+      su.tapRate = fs.r;
       this.fcSuLeave();
       this.fcSuGo();
       return;
@@ -531,7 +620,7 @@
     if (fc.pinSet && fc.noPinKnown && fc.pin !== 'blocked') {
       const n = (fc.noPin && fc.noPin.known && fc.noPin.set) ? Number(fc.noPin.limit) || 0 : 0;
       // (before 1.21 the allowance is a day's; from 1.21 the PIN fills it again)
-      rows.push({ key: 'nopin', label: 'NO PIN LIMIT', sub: 'Most it pays without a PIN',
+      rows.push({ key: 'nopin', label: 'NO PIN MAXIMUM', sub: 'Most it pays without a PIN',
         value: n > 0 ? whole(this.fcPrice(n, LU)) : 'NONE', unit: n > 0 ? (fc.pinFirst ? 'per tap' : 'a day') : '' });
     }
     return rows.map((r) => Object.assign(r, { unitShown: !!r.unit, tap: () => this.fcLimitsGo(r.key) }));

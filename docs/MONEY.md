@@ -2129,10 +2129,39 @@ mint quote in the unit wanted, paid by a melt from the unit given. At Forge
 those are two different nodes, so it pays Lightning fees and needs both
 backends up.
 
-- `swapQuote(from, to, amount, { all })` sizes it in two passes (four
+- `swapQuote(from, to, amount, { get | worth | all })`. **What the person
+  types is what arrives, and the mint's fee goes on top.** With `get`,
+  `amount` is in TO and is the invoice itself: one pair (two requests), and
+  exactly that arrives. With `worth`, `amount` is in FROM and is what the mint
+  prices what arrives at before its fee (dollars typed for bitcoin: "$ 1.00 of
+  bitcoin" is the invoice whose melt amount is exactly 100 cents): sized from
+  the pairs this mint answered this way, three passes at most, exact where the
+  units allow (a cent of bitcoin is a dozen sats, so dollars land on the cent;
+  sats typed for dollars land within a cent's worth under). Either way `total`
+  (melt amount + reserve) and `inputFee` are on top, and `spend` = `total` +
+  `inputFee` is all that can leave. `inputFee` is the fee on the very pieces
+  the payment will spend (`swapPlan`, 08c-units.js): the pieces as they are
+  where they fit, else the pieces the cut takes, the fee the cut's pieces carry
+  as cashu-ts makes it, and what the melt charges on them. cashu-ts picks pieces
+  by chance, so the plan goes with the quote (`_plan`) and `pay` spends those
+  very pieces (`opts.plan`, 16-sending.js) while every one is still in the pile;
+  so what leaves is SPENDING less the reserve's unused part, to the unit.
+  `meltNeed`, with its cushion of four more pieces, still decides the refusal.
+  A balance that cannot cover it is refused before anything moves with
+  `short`, `need`, `have` and `fits` (the most that would fit, in the unit
+  `amount` is in, stepped down until every total a quote for it could land on
+  is one `meltNeed` takes): "Not enough dollars: with the mint’s fee this swap
+  needs $ 1.02, and you hold $ 1.00. You can swap up to $ 0.98." `swapGuess` is
+  a rough form of the same sum from the last pair, in memory only, for the
+  keypad before a quote is in. A card's swap (`coming`) counts the fee on the
+  pieces the card's money comes in as, takes `spend` off the card, and a rate
+  that lapsed before the tap is asked again as typed (`mode` on `asked`). With neither (all
+  of a balance, PAY FROM's crossing, the swap of dollars paid to a bitcoin
+  wallet) `amount` is what leaves, the fee inside it, sized in two passes (four
   requests): an invoice in TO at the rate last seen, a melt quote of it in
   FROM, then once more sized from that answer so what leaves (`total` = melt
-  amount + reserve) is no more than asked. It answers the rate the person gets
+  amount + reserve) is no more than asked. The rate is the quote's, never the
+  phone's price. It answers the rate the person gets
   (`rate.usdPerBtc`, by the mint), the market price if one is known, and
   `spreadWarn` past 2 % against the person; the rate is held until the soonest
   of the two quotes' expiries and a minute (`expiresAt`).
@@ -2158,16 +2187,23 @@ backends up.
   pieces still with the mint.
 - The screens (`build/app/26i-swap.js`) show the quote before anything
   moves and run that same object on SWAP. The amount is typed in dollars to
-  start, or in sats after the ⇅, and what is asked for is always the FROM
-  unit: exact when typed in it, converted when typed in the other
-  (`swapTyped`) at the mint's last rate, or the market's when the mint has
-  given none (`swapPx`), so the confirmation repeats the dollars typed unless
-  the mint's rate moved since; the ⇅ turns at that same rate, and sats become
-  cents rounded as the ⇅ writes them (`centsOfSats`). There is no conversion
-  and no ⇅ without a market price. The
-  confirmation is YOU ARE GETTING, YOU ARE SPENDING, FEE (what leaves less
-  what arrives, at the quote's rate) and the mint's RATE; bitcoin is shown as
-  its dollar worth at that rate with the exact sats under it. It counts down to
+  start, or in sats after the ⇅, and is never converted on the phone
+  (`swapTyped`): typed in the unit that arrives it is asked as `get`, typed in
+  the unit that leaves as `worth` (`swapMode`). The ⇅ and the line under the
+  figure turn at the mint's last rate, or the market's when the mint has given
+  none (`swapPx`), as a guide only; there is no ⇅ without a market price.
+  When the figure and the fee are more than the balance the keypad says NOT
+  ENOUGH and holds NEXT back (`swapShort`); it says UP TO, with what would fit,
+  only in the mint's own figure, once a quote for those keys came back short
+  (asked ahead, or at NEXT, where the confirmation shows the refusal with
+  CHANGE AMOUNT). By `swapGuess` alone it names no figure, since the guess reads
+  the fee low. A quote asked ahead for those keys that the balance covers wins
+  over the guess. ALL OF IT is the balance that leaves, as before. The
+  confirmation is RECEIVING (the figure typed), FEE (what leaves less what
+  arrives, at the quote's rate), SPENDING (`spend`, the two together) and the
+  mint's RATE; bitcoin is shown as its dollar worth at that rate with the
+  exact sats under it. What the reserve does not use comes back as the melt's
+  change, and SWAPPED says what left and the fee taken. It counts down to
   fifteen seconds before the quote's expiry (the point `swapRun` refuses), asks
   again when it gets there (three times at most with nobody tapping), and
   reads CONFIRM NEW RATE once a new rate is up; a tap within 1.5 s of the

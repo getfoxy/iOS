@@ -702,7 +702,7 @@ async function world(feePpk, sats, make) {
     await until('the card to be read', () => !!holder.state.fc);
     holder.fcSetLimit();
     const which = uiLimits(holder);
-    ok(which && holder.state.screen === 'fcLimits' && which.labels === 'PER SECOND LIMIT,NO PIN LIMIT', 'CARD LIMITS asks which limit, a row for each', which && which.labels);
+    ok(which && holder.state.screen === 'fcLimits' && which.labels === 'PER SECOND LIMIT,NO PIN MAXIMUM', 'CARD LIMITS asks which limit, a row for each', which && which.labels);
     which.press('PER SECOND LIMIT');
     ok(uiExplainer(holder) && !uiCard(holder) && uiExplainer(holder).title === 'How tap limit works', 'and PER SECOND LIMIT opens HOW TAP LIMIT WORKS, the rule played out', uiExplainer(holder) && uiExplainer(holder).title);
     uiExplainer(holder).finish();

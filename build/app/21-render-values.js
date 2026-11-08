@@ -640,10 +640,10 @@
       ? this.fcLoadFits(usdLoad ? Math.min(Math.round(sendEnteredUsd * 100), depAsk ? Infinity : Math.max(0, Math.round(Number(s.balUsdCents) || 0)))
         : Math.min(this.wantedSats(), depAsk ? Infinity : Math.floor(balLive.sats || 0))) : null;
     const roomOver = !!(room && !room.ok);
-    /* A swap's amount is what leaves its balance, and is capped by it: cents
-     * against cents, or sats against sats. Typed in the other unit it is
-     * converted first, at the mint's last rate (`swapTyped`). */
-    const swapOver = s.flow === 'swap' && sc === 'amount' && this.swapTyped() > this.unitBalance(this.swapUnits().from);
+    /* A swap's amount is what arrives, and the mint's fee goes on top: the
+     * balance it leaves has to cover both (`swapShort`, the mint's answer for
+     * these keys or the wallet's guess from its last pairs). */
+    const swapOver = !!(s.flow === 'swap' && sc === 'amount' && this.swapShort && this.swapShort());
     const sendOver = (capped && (sendEnteredUsd > sendCapUsd + 0.005 || overLimit || roomOver)) || (depAsk && roomOver) || swapOver;
     // handed to syncHaptics, which cannot repeat this balance/limit maths
     this._amtOver = false;

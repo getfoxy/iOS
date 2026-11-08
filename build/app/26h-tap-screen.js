@@ -65,7 +65,8 @@
     move: { tap: 'TAP TO MOVE', contact: 'MOVING', check: 'CHECKING' },
     renew: { tap: 'TAP TO RENEW', contact: 'RENEWING', check: 'CHECKING' },
     reset: { tap: 'TAP TO RESET', contact: 'RESETTING', check: 'CHECKING' },
-    setup: { tap: 'TAP TO SET UP', contact: 'SETTING UP', check: 'CHECKING' },
+    // (a set-up's tap is the last step of its questions: the keeper's TAP TO FINISH, 2026-11-08)
+    setup: { tap: 'TAP TO FINISH', contact: 'SETTING UP', check: 'CHECKING' },
     pin: { tap: 'TAP TO SET PIN', contact: 'WRITING', check: 'CHECKING' },
     limit: { tap: 'TAP TO SET LIMIT', contact: 'WRITING', check: 'CHECKING' },
     rate: { tap: 'TAP TO SET RATE', contact: 'WRITING', check: 'CHECKING' },

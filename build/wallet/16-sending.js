@@ -211,7 +211,40 @@
          * would have spent with the rest back as the melt's change. Either
          * way no split, so one round trip fewer before the payment. Every
          * other payment is split as it always was. */
-        var asIs = (heldId || !swapId) ? null : meltAsIs(w, have, owed, quote);
+        /* A swap's quote may carry the pieces its SPENDING was worked out on (08c-units.js, `swapPlan`): those very
+         * pieces are spent, every one still in the pile, so what leaves is what the confirmation said. A piece gone
+         * since (spent, or the pile reshaped), and the pieces are planned again on the pile as it is now: at no more
+         * fee than the confirmation showed (`opts.planFee`) the new plan is spent, and over it the payment is refused
+         * before anything moves, as a rate that ran out (`expired`), so the screen asks again and says the new figure. */
+        var plan = (!heldId && swapId && opts && opts.plan && opts.plan.secrets && opts.plan.secrets.length) ? opts.plan : null;
+        var planned = null, unplanned = [];
+        var pick = function (pl) {
+          var want = {};
+          pl.secrets.forEach(function (sec) { want[String(sec)] = true; });
+          planned = have.filter(function (p) { return p && want[String(p.secret)]; });
+          unplanned = have.filter(function (p) { return !(p && want[String(p.secret)]); });
+          return planned.length === pl.secrets.length;
+        };
+        if (plan && !pick(plan)) {
+          var replan = swapPlan(w, have, owed, quote);
+          var allowed = Number(opts.planFee);
+          if (!replan.plan || !(replan.fee <= (isFinite(allowed) ? allowed : -1)) || !pick(replan.plan)) {
+            var moved = /** @type {any} */ (new Error('This swap’s pieces have changed since it was priced, and it would now cost more. Confirm the new rate.'));
+            moved.expired = true;
+            moved.repriced = true;
+            moved.unsent = true;
+            throw moved;
+          }
+          plan = replan.plan;
+        }
+        var asIsPlanned = function () {
+          var over = sumProofs(planned) - swapFeeFor(w, planned) - owed;
+          if (!(over >= 0)) return null;
+          return { path: over === 0 ? 'exact' : 'change', send: planned, keep: unplanned, over: over };
+        };
+        var asIs = (heldId || !swapId) ? null
+          : planned ? (plan.path !== 'cut' ? asIsPlanned() : null)
+          : meltAsIs(w, have, owed, quote);
         var path = heldId ? 'card' : asIs ? (asIs.path === 'exact' ? 'exact pieces' : 'change on the melt') : 'shaped';
         if (!heldId) {
           console.log('[foxy] melt ' + String(quote.quote).slice(0, 12) + '\u2026: ' + path + ', '
@@ -222,11 +255,15 @@
         }
         // split the pile into exactly what the melt needs, and what stays;
         // its output ranges are on disk until the answer is in (swapGuard)
-        var splitGuard = (heldId || asIs) ? { done: function () {} } : swapGuard(w, 'split', { inputs: have, unit: unit });
+        // (a planned cut takes only its own pieces; the rest of the pile stays as it is)
+        var cutFrom = (planned && plan.path === 'cut') ? planned : have;
+        var splitGuard = (heldId || asIs) ? { done: function () {} } : swapGuard(w, 'split', { inputs: cutFrom, unit: unit });
         var splitting = heldId ? Promise.resolve({ send: have, keep: null })
           : asIs ? Promise.resolve({ send: asIs.send, keep: asIs.keep })
           : splitGuard.run('payment split', function () {
-            return w.send(owed, have, { includeFees: true });
+            return w.send(owed, cutFrom, { includeFees: true }).then(function (sp) {
+              return cutFrom === have ? sp : { send: sp.send, keep: (sp.keep || []).concat(unplanned) };
+            });
           }).catch(function (e) {
             // some of that ecash was spent elsewhere: out of the pile, and made again
             return retryWithoutSpent(w, e);

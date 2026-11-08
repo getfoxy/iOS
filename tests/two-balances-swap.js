@@ -16,10 +16,13 @@
  *   - the mint refusing the payment: nothing held, the pile whole, the screen says so
  *   - cut off after the payment (the claim's answer lost, and the payment's own answer lost): the card SWAP STILL
  *     GOING THROUGH, home's held pill, and the next connect finishing it into the right pile
+ *   - what is typed arrives and the fee goes on top: RECEIVING the figure typed, SPENDING it and the fee, both ways
+ *     round, in either unit, at a fee mint and a free one; NOT ENOUGH on the keypad with what would fit; the reserve
+ *     the payment did not use back
  *
  * Part 2 mounts the real page (build/foxy-render.js, as tests/two-balances-screens.js does) on a stand-in wallet
  * that answers the swap calls, and reads what is drawn: the SWAP button, the two pills and the ⇅, SET AMOUNT in the
- * dollars with its ⇅ and ALL OF IT, the confirmation's four blocks with the countdown and the green SWAP, SWAPPED, both pills
+ * dollars with its ⇅ and ALL OF IT, the confirmation's four blocks (RECEIVING, FEE, SPENDING, the RATE) with the countdown and the green SWAP, SWAPPED, both pills
  * glowing on home, SWAP dimmed offline, and the card for a swap still going through. */
 process.env.TZ = 'UTC';
 const fs = require('fs');
@@ -57,7 +60,7 @@ const method = (sig) => {
 };
 // (`swapHave`: what there is to swap, this phone's balance or a card's, 26f-flashcard.js `fcSwap`; `swapComing`: a card's, counted as coming)
 const LIFTED = ['goSwap() {', 'swapFlip() {', 'swapUnits() {', 'swapHave(u) {', 'swapComing(u) {', 'swapToAmount() {', 'swapTyped() {', 'swapNext(all) {',
-  'swapAsk(again, amountGiven, allGiven) {', 'swapLeft() {', 'swapClock() {', 'swapGo() {', 'swapStillGoing(r) {', 'swapPendingCard(r, o) {', 'swapDoneClose() {',
+  'swapAsk(again, amountGiven, allGiven, modeGiven) {', 'swapMode() {', 'swapShort() {', 'swapShortLabel() {', 'swapShortKeep(keypad, from, mint, e) {', 'swapLeft() {', 'swapClock() {', 'swapGo() {', 'swapStillGoing(r) {', 'swapPendingCard(r, o) {', 'swapDoneClose() {',
   'swapRateOf(r) {', 'swapRateText(n) {', 'swapRateWho() {', 'swapInk(unit) {', 'swapEstimate() {', 'swapSpec() {',
   'swapExact() {', 'swapForget() {', 'swapRateHead() {', 'swapClockText(sec) {', 'swapWorth(n, unit, rate) {', 'swapCents(cents, sats) {',
   'renderSwap(c) {', 'cfRow(label, value, opt) {', 'unitFigure(amount, unit) {', 'unitWord(unit) {', 'unitBalance(unit) {',
@@ -169,29 +172,30 @@ const rowOf = (spec, label) => (spec.rows || []).find((r) => r.label === label) 
     ok(app.state.screen === 'amount' && app.state.flow === 'swap' && app.state.unit === 'USD', 'NEXT: SET AMOUNT, typed in dollars');
     app.state.amount = '25.00';
     app.swapNext(false);
-    ok(app.state.screen === 'amount' && /more than your dollars: you hold \$ 20\.00/.test(app.log.toasts.pop() || ''),
-      'more than the dollars is not taken past the keypad');
+    ok(app.state.screen === 'amount' && /more than your dollars cover with the mint’s fee/.test(app.log.toasts.pop() || ''),
+      'more than the dollars cover with the fee is not taken past the keypad');
     app.state.amount = '10.00';
     app.swapNext(false);
-    ok(app.state.screen === 'swapConfirm' && app.state.swapAmount === 1000, 'NEXT with $ 10.00: the confirmation, 1,000 cents');
+    ok(app.state.screen === 'swapConfirm' && app.state.swapAmount === 1000 && app.state.swapMode === 'worth',
+      'NEXT with $ 10.00: the confirmation, $ 10.00 of bitcoin');
     let spec = app.swapSpec();
     ok(spec.cta === 'CHECKING THE RATE…' && spec.ctaBusy, 'it says it is checking the rate while it is asked');
     await until(() => app.state.swapQuote || app.state.swapErr);
     const q = app.state.swapQuote;
-    ok(q && q.from === 'usd' && q.to === 'sat' && q.total <= 1000 && typeof q._melt === 'object', 'the wallet’s quote is kept whole, insides and all',
-      app.state.swapErr);
+    ok(q && q.from === 'usd' && q.to === 'sat' && q.amount === 1000 && q.spend === q.total && q.total === 1002 && typeof q._melt === 'object',
+      'the wallet’s quote is kept whole, insides and all: $ 10.00 of bitcoin, the fee on top', app.state.swapErr || JSON.stringify(q && [q.amount, q.total, q.spend]));
     spec = app.swapSpec();
     ok(spec.title === 'SWAP' && spec.titleUp && !spec.amountLabel && !spec.amount, 'SWAP, with no TOTAL over the blocks', spec.amount);
-    ok(JSON.stringify(spec.rows.map((r) => r.label)) === '["YOU ARE GETTING","YOU ARE SPENDING","FEE","FORGE’S RATE"]',
-      'blocks YOU ARE GETTING, YOU ARE SPENDING, FEE, FORGE’S RATE, and no NETWORK', JSON.stringify(spec.rows.map((r) => r.label)));
+    ok(JSON.stringify(spec.rows.map((r) => r.label)) === '["RECEIVING","FEE","SPENDING","FORGE’S RATE"]',
+      'blocks RECEIVING, FEE, SPENDING, FORGE’S RATE, and no NETWORK', JSON.stringify(spec.rows.map((r) => r.label)));
     const qr = app.swapRateOf(q.rate);
     const getC = Math.round(q.get * qr / 1e6);
-    ok(rowOf(spec, 'YOU ARE GETTING').value === app.unitFigure(getC, 'usd') + ' in BITCOIN'
-      && rowOf(spec, 'YOU ARE GETTING').sub === '(' + app.unitFigure(q.get, 'sat') + ')' && rowOf(spec, 'YOU ARE GETTING').ink === '#F2742B',
-      'YOU ARE GETTING: the bitcoin’s dollar worth, its sats under it, in fur ink', rowOf(spec, 'YOU ARE GETTING').value);
-    ok(rowOf(spec, 'YOU ARE SPENDING').value === app.unitFigure(q.total, 'usd') + ' in DOLLARS' && rowOf(spec, 'YOU ARE SPENDING').sub === '',
-      'YOU ARE SPENDING: the dollars that leave, exactly, with no sats line', rowOf(spec, 'YOU ARE SPENDING').value);
-    ok(rowOf(spec, 'FEE').value === app.unitFigure(q.total - getC, 'usd'), 'the fee: what leaves less what arrives, in dollars', rowOf(spec, 'FEE').value);
+    ok(getC === 1000 && rowOf(spec, 'RECEIVING').value === '$ 10.00 in BITCOIN'
+      && rowOf(spec, 'RECEIVING').sub === '(' + app.unitFigure(q.get, 'sat') + ')' && rowOf(spec, 'RECEIVING').ink === '#F2742B',
+      'RECEIVING: the $ 10.00 typed, as bitcoin at the mint’s rate, its sats under it, in fur ink', rowOf(spec, 'RECEIVING').value);
+    ok(rowOf(spec, 'SPENDING').value === '$ 10.02 in DOLLARS' && rowOf(spec, 'SPENDING').sub === '',
+      'SPENDING: the amount and the fee on top, exactly, with no sats line', rowOf(spec, 'SPENDING').value);
+    ok(rowOf(spec, 'FEE').value === '$ 0.02', 'the fee: what leaves less what arrives, in dollars', rowOf(spec, 'FEE').value);
     ok(/^₿ 1 = \$ 7[67],\d{3}$/.test(rowOf(spec, 'FORGE’S RATE').value), 'the rate is the mint’s, by name', rowOf(spec, 'FORGE’S RATE').value);
     ok(/^Rate held for 00:4\d$/.test(rowOf(spec, 'FORGE’S RATE').sub), 'and how long it is held for, under it', rowOf(spec, 'FORGE’S RATE').sub);
     ok(spec.cta === 'SWAP' && spec.ctaTone === 'money' && !spec.ctaBusy, 'the button is the green SWAP');
@@ -279,7 +283,7 @@ const rowOf = (spec, label) => (spec.rows || []).find((r) => r.label === label) 
     ok(!app.state.swapQuoting && !app.state.swapQuote, 'its answer ends the wait, and is not kept for a screen that has gone');
     app.state.amount = '4.00'; app.swapNext(false);
     await until(() => app.state.swapQuote);
-    ok(app.state.swapQuote && app.state.swapQuote.total <= 400 && app.state.swapQuote.total > 380, 'NEXT again asks for the new amount', JSON.stringify(app.state.swapQuote && app.state.swapQuote.total));
+    ok(app.state.swapQuote && app.state.swapQuote.amount === 400 && app.state.swapQuote.total === 402, 'NEXT again asks for the new amount', JSON.stringify(app.state.swapQuote && app.state.swapQuote.total));
     app.state.screen = 'home';
   }
 
@@ -389,6 +393,246 @@ const rowOf = (spec, label) => (spec.rows || []).find((r) => r.label === label) 
     ok(off.state.screen === 'home' && off.log.toasts.pop() === 'Swapping needs the mint.', 'offline: Swapping needs the mint.');
   }
 
+  // ---- 6. what is typed arrives, and the fee goes on top ------------------------------------------------
+  /* The amount typed on SET AMOUNT is RECEIVING, exactly: $ 1.00 typed is $ 1.00 arriving (in dollars, or as bitcoin
+   * the mint values at $ 1.00), and the mint's fee is on top of it in SPENDING. Both ways round, typed in either unit,
+   * at a mint that charges for the pieces a payment spends and at one that charges nothing; a balance that cannot
+   * cover the amount and the fee says NOT ENOUGH on the keypad with what would fit; and the reserve the payment does
+   * not use comes back. The books close after every swap. */
+  const typedSwap = async (o) => {
+    const c = page({ mintOpts: Object.assign({ units: ['sat', 'usd'] }, o.mintOpts || {}) });
+    await c.W.connect(MINT, { remember: true });
+    for (const [n, u] of o.fund) await fund(c, n, u);
+    const from = books(c);
+    const app = appOn(c);
+    app.goSwap();
+    if (app.state.swapFrom !== o.from) app.swapFlip();
+    await until(() => !app.state.swapProbing && !app._swapAheadOut);
+    app.swapToAmount();
+    if (o.unit) app.state.unit = o.unit;
+    app.state.amount = o.typed;
+    const before = { usd: c.W.balanceOf('usd'), sat: c.W.balanceOf('sat') };
+    return { c, app, from, before };
+  };
+  const confirmOf = async (app) => {
+    app.swapNext(false);
+    await until(() => app.state.swapQuote || app.state.swapErr, 5000);
+    return app.state.swapQuote;
+  };
+  const runIt = async (app) => {
+    app.swapGo();
+    await until(() => !app._swapRun && !app.state.swapBusy && app.state.screen !== 'swapConfirm', 15000);
+    return app.state.swapResult;
+  };
+  const said = (spec, label) => { const r = rowOf(spec, label); return (r.value || '') + (r.sub ? ' ' + r.sub : ''); };
+  for (const [name, mintOpts] of [['a fee mint', { feePpk: 1000, usdFeePpk: 1000 }], ['a free mint', { internalFree: true, satFeeReserve: 0, usdFeeReserve: 0 }]]) {
+    // dollars into bitcoin, $ 1.00 typed in dollars: $ 1.00 of bitcoin arrives, the fee on top
+    {
+      const { c, app, from, before } = await typedSwap({ mintOpts, fund: [[2000, 'usd']], from: 'usd', typed: '1.00' });
+      ok(app.swapMode() === 'worth' && app.swapTyped() === 100, name + ': $ 1.00 typed for bitcoin is $ 1.00 of bitcoin');
+      const q = await confirmOf(app);
+      ok(q && q.amount === 100 && q.mode === 'worth', name + ': the mint prices what arrives at exactly $ 1.00', app.state.swapErr || JSON.stringify(q && [q.amount, q.total]));
+      const spec = app.swapSpec();
+      ok(/^\$ 1\.00 in BITCOIN \(₿ [\d,]+\)$/.test(said(spec, 'RECEIVING')), name + ': RECEIVING $ 1.00 in BITCOIN, the sats under it', said(spec, 'RECEIVING'));
+      ok(q.spend === q.total + q.inputFee && said(spec, 'SPENDING') === app.unitFigure(q.spend, 'usd') + ' in DOLLARS',
+        name + ': SPENDING is the $ 1.00 and every fee on top', said(spec, 'SPENDING') + ' ' + JSON.stringify([q.total, q.inputFee]));
+      ok(rowOf(spec, 'FEE').value === app.unitFigure(q.spend - 100, 'usd'), name + ': FEE is what is spent over the $ 1.00', rowOf(spec, 'FEE').value);
+      ok(name === 'a free mint' ? q.spend === 100 && rowOf(spec, 'FEE').value === '$ 0.00' : q.spend > 100, name + ': ' + (name === 'a free mint' ? 'nothing on top' : 'something on top'), String(q.spend));
+      const r = await runIt(app);
+      ok(r && r.state === 'done' && c.W.balanceOf('sat') === before.sat + q.get, name + ': the sats quoted are the sats that arrive', JSON.stringify(r && r.state) + ' ' + c.W.balanceOf('sat'));
+      const left = before.usd - c.W.balanceOf('usd');
+      ok(left === r.from.amount && left >= 100 && left <= q.spend, name + ': what left is the $ 1.00 and the fee used, no more than SPENDING', left + ' of ' + q.spend);
+      ok(booksClose(c, from), name + ': the books close in each unit', JSON.stringify(booksMove(c, from)));
+      app.state.screen = 'home';
+    }
+    // bitcoin into dollars, $ 1.00 typed: $ 1.00 arrives in dollars, exactly, the fee on top in sats
+    {
+      const { c, app, from, before } = await typedSwap({ mintOpts, fund: [[20000, 'sat']], from: 'sat', typed: '1.00' });
+      ok(app.swapMode() === 'get' && app.swapTyped() === 100, name + ': $ 1.00 typed for dollars is the invoice itself');
+      const q = await confirmOf(app);
+      ok(q && q.get === 100 && q.mode === 'get', name + ': the invoice is for $ 1.00', app.state.swapErr || JSON.stringify(q && q.get));
+      const spec = app.swapSpec();
+      ok(said(spec, 'RECEIVING') === '$ 1.00 in DOLLARS', name + ': RECEIVING $ 1.00 in DOLLARS', said(spec, 'RECEIVING'));
+      ok(new RegExp('\\(' + app.unitFigure(q.spend, 'sat').replace(/[$₿]/g, '.') + '\\)$').test(said(spec, 'SPENDING')),
+        name + ': SPENDING names every sat that can leave', said(spec, 'SPENDING') + ' ' + q.spend);
+      const r = await runIt(app);
+      ok(r && r.state === 'done' && c.W.balanceOf('usd') === before.usd + 100, name + ': exactly $ 1.00 arrives', c.W.balanceOf('usd') + ' cents');
+      const left = before.sat - c.W.balanceOf('sat');
+      ok(left === r.from.amount && left <= q.spend, name + ': what left is no more than SPENDING', left + ' of ' + q.spend);
+      ok(booksClose(c, from), name + ': the books close in each unit', JSON.stringify(booksMove(c, from)));
+      app.state.screen = 'home';
+    }
+  }
+  // typed in sats for bitcoin: those sats arrive exactly
+  {
+    const { c, app, from, before } = await typedSwap({ fund: [[2000, 'usd']], from: 'usd', unit: 'SATS', typed: '1000' });
+    ok(app.swapMode() === 'get' && app.swapTyped() === 1000, '₿ 1,000 typed for bitcoin: the invoice is for 1,000 sats');
+    const q = await confirmOf(app);
+    ok(q && q.get === 1000, 'and the quote is for them', app.state.swapErr);
+    ok(/\(₿ 1,000\)$/.test(said(app.swapSpec(), 'RECEIVING')), 'RECEIVING names ₿ 1,000', said(app.swapSpec(), 'RECEIVING'));
+    const r = await runIt(app);
+    ok(r && r.state === 'done' && c.W.balanceOf('sat') === before.sat + 1000, '₿ 1,000 arrive, exactly', String(c.W.balanceOf('sat')));
+    ok(booksClose(c, from), 'the books close in each unit', JSON.stringify(booksMove(c, from)));
+    app.state.screen = 'home';
+  }
+  // the reserve the payment does not use comes back
+  {
+    const { c, app, from, before } = await typedSwap({ mintOpts: { usdFeeReserve: 9 }, fund: [[2000, 'usd']], from: 'usd', typed: '1.00' });
+    const q = await confirmOf(app);
+    ok(q && q.amount === 100 && q.spend === 109 && said(app.swapSpec(), 'SPENDING') === '$ 1.09 in DOLLARS', 'a reserve of 9 cents: SPENDING $ 1.09', said(app.swapSpec(), 'SPENDING'));
+    const r = await runIt(app);
+    ok(r && r.state === 'done' && before.usd - c.W.balanceOf('usd') === 102 && r.from.amount === 102 && r.fee === 2,
+      'the 7 cents it did not use come back: $ 1.02 left, the fee 2 cents', (before.usd - c.W.balanceOf('usd')) + ' ' + JSON.stringify(r && [r.from.amount, r.fee]));
+    const v = app.renderSwap({ s: app.state, sc: 'swapDone' });
+    ok(v.swapDoneRows[0].text === '−$ 1.02' && /^Fee \$ 0\.02/.test(v.swapDoneNote), 'SWAPPED says what left and the fee it took', v.swapDoneRows[0].text + ' ' + v.swapDoneNote);
+    ok(booksClose(c, from), 'the books close in each unit', JSON.stringify(booksMove(c, from)));
+    app.state.screen = 'home';
+  }
+  // the balance cannot cover the amount and the fee: NOT ENOUGH on the keypad, with what would fit
+  {
+    const { c, app } = await typedSwap({ fund: [[100, 'usd']], from: 'usd', typed: '1.00' });
+    ok(!!app.swapShort(), '$ 1.00 of bitcoin from $ 1.00 held, with a fee on top: short');
+    ok(app.swapShortLabel() === 'NOT ENOUGH', 'the guess alone says NOT ENOUGH and offers no figure', app.swapShortLabel());
+    // the quote asked ahead for these keys comes back short: the keypad names the mint's own figure
+    Object.assign(app, { SWAP_AHEAD_GAP_MS: 0, SWAP_AHEAD_PER_MIN: 0 });
+    app.swapAheadAsk();
+    await until(() => !!app._swapShortFor, 5000);
+    const label = app.swapShortLabel();
+    ok(label === 'NOT ENOUGH · UP TO $ 0.98', 'the mint’s answer: NOT ENOUGH, with what would fit', label);
+    let e = null;
+    try { await c.W.swapQuote('usd', 'sat', 100, { worth: true }); } catch (x) { e = x; }
+    ok(e && e.short && e.fits === 98 && e.need === 102 && e.have === 100 && /You can swap up to \$ 0\.98\./.test(e.message),
+      'and the mint’s own quote refuses it with the same figure: up to $ 0.98', e && (e.message + ' ' + e.fits));
+    const nothing = c.W.balanceOf('usd') === 100 && c.W.heldIn('usd') === 0 && c.W.unitSwapsPending().length === 0;
+    ok(nothing, 'nothing moved, nothing is held');
+    app.state.amount = '0.98';
+    ok(!app.swapShort(), '$ 0.98 fits');
+    const q = await confirmOf(app);
+    ok(q && q.amount === 98 && q.spend === 100, '$ 0.98 of bitcoin, SPENDING the whole $ 1.00', app.state.swapErr || JSON.stringify(q && [q.amount, q.spend]));
+    app.state.screen = 'home';
+  }
+  /* At a mint that charges for the pieces a payment spends: SPENDING is what leaves and what the reserve gives back, to a unit,
+   * not the refusal's cushion of four more pieces; and NOT ENOUGH names only the mint's own figure, which then goes through. */
+  for (const ppk of [1000, 3000]) {
+    for (const [from, typed, mode] of [['usd', 100, 'worth'], ['usd', 1, 'worth'], ['usd', 1000, 'get'], ['sat', 100, 'get'], ['sat', 1000, 'worth']]) {
+      const to = from === 'usd' ? 'sat' : 'usd';
+      const c = page({ mintOpts: { units: ['sat', 'usd'], feePpk: ppk, usdFeePpk: ppk, meltInputFee: true } });
+      await c.W.connect(MINT, { remember: true });
+      for (const n of [700, 300, 150]) await fund(c, n, 'usd');
+      for (const n of [9000, 4000, 1500]) await fund(c, n, 'sat');
+      const start = books(c);
+      const q = await c.W.swapQuote(from, to, typed, { [mode]: true });
+      const before = c.W.balanceOf(from), into = c.W.balanceOf(to);
+      const r = await c.W.swapRun(q);
+      const left = before - c.W.balanceOf(from);
+      const back = q.fee - Math.min(2, q.fee);
+      const name = ppk + ' ppk, ' + mode + ' ' + typed + ' ' + from + ' into ' + to;
+      ok(r.state === 'done' && (mode === 'get' ? c.W.balanceOf(to) - into === typed : q.amount <= typed), name + ': arrives as typed', JSON.stringify([r.state, c.W.balanceOf(to) - into, q.amount]));
+      ok(left <= q.spend && q.spend - left - back >= 0 && q.spend - left - back <= 1,
+        name + ': SPENDING is what left and the reserve given back, to a unit', JSON.stringify({ spend: q.spend, total: q.total, inputFee: q.inputFee, left, back }));
+      ok(booksClose(c, start), name + ': the books close', JSON.stringify(booksMove(c, start)));
+    }
+  }
+  // NOT ENOUGH at a fee mint: the mint's figure, which is then taken (the guess named more than the mint takes)
+  for (const [ppk, from, held, typed, mode] of [[1000, 'usd', 100, 100, 'worth'], [1000, 'sat', 2000, 200, 'get'], [3000, 'sat', 2000, 200, 'get'], [3000, 'sat', 2000, 2000, 'worth'], [3000, 'usd', 300, 300, 'worth']]) {
+    const to = from === 'usd' ? 'sat' : 'usd';
+    const c = page({ mintOpts: { units: ['sat', 'usd'], feePpk: ppk, usdFeePpk: ppk, meltInputFee: true } });
+    await c.W.connect(MINT, { remember: true });
+    await fund(c, held, from);
+    const name = ppk + ' ppk, ' + from + ' ' + held + ' held, ' + mode + ' ' + typed;
+    let e = null;
+    try { await c.W.swapQuote(from, to, typed, { [mode]: true }); } catch (x) { e = x; }
+    ok(e && e.short && e.fits > 0, name + ': short, with a figure', e && e.message);
+    let q = null, e2 = null;
+    try { q = await c.W.swapQuote(from, to, e.fits, { [mode]: true }); } catch (x) { e2 = x; }
+    ok(q && q.spend <= held, name + ': the figure it names is taken', (e2 && e2.message) || JSON.stringify(q && [q.spend, held]));
+    const start = books(c);
+    const r = q ? await c.W.swapRun(q) : null;
+    ok(r && r.state === 'done' && booksClose(c, start), name + ': and swaps, the books closing', JSON.stringify(r && r.state));
+  }
+  /* The pieces SPENDING was priced on gone by SWAP (a token sent and taken back reshapes the pile): planned again on the
+   * pile as it is. At no more fee than the confirmation showed it runs and what leaves is no more than SPENDING; at more it
+   * is refused before anything moves, and the confirmation asks again and reads CONFIRM NEW RATE. */
+  for (const dearer of [false, true]) {
+    const name = dearer ? 'pieces gone, the new plan dearer: ' : 'pieces gone, the new plan no dearer: ';
+    const { c, app } = await typedSwap({ mintOpts: { feePpk: 3000, usdFeePpk: 3000, meltInputFee: true }, fund: [[700, 'usd'], [300, 'usd'], [150, 'usd']],
+      from: 'usd', unit: 'SATS', typed: '1000' });
+    const q = await confirmOf(app);
+    const pinned = (q && q._plan && q._plan.secrets) || [];
+    ok(q && q.get === 1000 && pinned.length > 0, name + 'a quote for ₿ 1,000, its pieces pinned', app.state.swapErr || String(pinned.length));
+    const pileNow = () => JSON.parse(c.storage.getItem('foxy.cashu.proofs.' + MINT + '@usd') || '[]');
+    // tokens made of the pieces the swap pinned and taken back, until one of them has gone (the wallet picks a token's pieces itself)
+    const gone = () => pinned.some((sec) => !pileNow().some((p) => String(p.secret) === String(sec)));
+    for (let k = 0; k < 4 && !gone(); k++) {
+      const still = pileNow().filter((p) => pinned.indexOf(String(p.secret)) >= 0);
+      const big = still.reduce((a, p) => (Number(p.amount) > Number(a.amount) ? p : a), still[0]);
+      const tok = await c.W.sendToken(Math.max(1, Number(big.amount) - 3), { unit: 'usd' });
+      await c.W.receiveToken(tok.token);
+    }
+    ok(pinned.some((sec) => !pileNow().some((p) => String(p.secret) === String(sec))), name + 'a pinned piece is gone from the pile');
+    const again = c.W._swapPlan(q._w, pileNow(), q.total, q._melt);
+    // the fee the confirmation allowed, set either side of what the new pile costs
+    q.inputFee = dearer ? again.fee - 1 : again.fee;
+    q.spend = q.total + q.inputFee;
+    const start = books(c);
+    const before = { usd: c.W.balanceOf('usd'), sat: c.W.balanceOf('sat') };
+    const asks = [];
+    const real = c.W.swapQuote;
+    c.W.swapQuote = function () { asks.push([...arguments]); return real.apply(this, arguments); };
+    app.swapGo();
+    await until(() => !app._swapRun && !app.state.swapBusy && (app.state.screen !== 'swapConfirm' || (dearer && app.state.swapQuote && app.state.swapQuote !== q)), 15000);
+    c.W.swapQuote = real;
+    if (dearer) {
+      ok(c.W.balanceOf('usd') === before.usd && c.W.balanceOf('sat') === before.sat && c.W.heldIn('usd') === 0 && c.W.unitSwapsPending().length === 0,
+        name + 'refused before anything moved', JSON.stringify([c.W.balanceOf('usd'), before.usd, c.W.heldIn('usd')]));
+      ok(app.state.screen === 'swapConfirm' && asks.length === 1 && asks[0][2] === 1000 && asks[0][3].get === true && app.swapSpec().cta === 'CONFIRM NEW RATE',
+        name + 'asked again as typed, and the button reads CONFIRM NEW RATE', JSON.stringify([app.state.screen, asks.length, app.swapSpec().cta]));
+      ok(booksClose(c, start), name + 'the books close', JSON.stringify(booksMove(c, start)));
+    } else {
+      const left = before.usd - c.W.balanceOf('usd');
+      ok(app.state.screen === 'swapDone' && c.W.balanceOf('sat') === before.sat + 1000, name + 'it runs, ₿ 1,000 arriving', app.state.swapErr || app.state.screen);
+      ok(left <= q.spend, name + 'what left is no more than SPENDING', left + ' of ' + q.spend);
+      ok(booksClose(c, start), name + 'the books close', JSON.stringify(booksMove(c, start)));
+    }
+    app.state.screen = 'home';
+  }
+  // a quote asked ahead that the balance covers wins over a guess that says it does not (sats typed for dollars land under)
+  {
+    const probe = page({ mintOpts: { units: ['sat', 'usd'], satFeeReserve: 0 } });
+    await probe.W.connect(MINT, { remember: true });
+    await fund(probe, 5000, 'sat');
+    const need = (await probe.W.swapQuote('sat', 'usd', 1000, { worth: true })).spend;
+    const { c, app } = await typedSwap({ mintOpts: { satFeeReserve: 0 }, fund: [[need, 'sat']], from: 'sat', unit: 'SATS', typed: '1000' });
+    ok(need < 1000 && app.swapMode() === 'worth' && !!app.swapShort(), '₿ 1,000 typed for dollars with ₿ ' + need + ' held: the guess says short', String(need));
+    Object.assign(app, { SWAP_AHEAD_GAP_MS: 0, SWAP_AHEAD_PER_MIN: 0 });
+    app.swapAheadAsk();
+    await until(() => app._swapAhead && app._swapAhead.q, 5000);
+    ok(!app.swapShort() && app.swapShortLabel() === '', 'the mint quotes it within the balance: not short', JSON.stringify(app._swapAhead && app._swapAhead.q && app._swapAhead.q.spend));
+    app.swapNext(false);
+    ok(app.state.screen === 'swapConfirm' && app.state.swapQuote === app._swapAhead.q, 'and NEXT opens the confirmation on that quote');
+    const from = books(c);
+    const r = await runIt(app);
+    ok(r && r.state === 'done' && c.W.balanceOf('sat') === 0, 'it swaps every sat held', JSON.stringify([r && r.state, c.W.balanceOf('sat')]));
+    ok(booksClose(c, from), 'the books close', JSON.stringify(booksMove(c, from)));
+    app.state.screen = 'home';
+  }
+  // the guess lets it through, the mint does not: the confirmation says so, and back on the keypad its figure
+  {
+    const { c, app } = await typedSwap({ fund: [[30000, 'sat']], from: 'sat', typed: '23.50' });
+    const k = Object.keys(c.W._swapSeen).find((x) => /\|sat\|usd$/.test(x));
+    c.W._swapSeen[k] = c.W._swapSeen[k].map((p) => Object.assign({}, p, { fee: 0, amount: Math.floor(p.amount * 0.95) }));
+    ok(!app.swapShort(), 'a stale pair says $ 23.50 would fit');
+    app.swapNext(false);
+    await until(() => !app.state.swapQuoting);
+    const spec = app.swapSpec();
+    ok(!app.state.swapQuote && /^Not enough bitcoin: with the mint’s fee this swap needs ₿ [\d,]+, and you hold ₿ 30,000\. You can get up to \$ 2\d\.\d\d\.$/.test(spec.warn)
+      && spec.cta === 'CHANGE AMOUNT', 'the mint’s quote is short: its words, and CHANGE AMOUNT', spec.warn);
+    spec.go();
+    ok(app.state.screen === 'amount' && /^NOT ENOUGH · UP TO \$ 2\d\.\d\d$/.test(app.swapShortLabel()), 'back on the keypad: NOT ENOUGH, up to the mint’s figure', app.swapShortLabel());
+    ok(c.W.balanceOf('sat') === 30000, 'and nothing moved');
+    app.state.screen = 'home';
+  }
+
   await part2();
 
   console.log('');
@@ -449,7 +693,9 @@ async function part2() {
   // the stand-in: the swap calls, keeping cents and sats apart
   const st = { usd: 4205, sat: 50000, online: true, runAs: 'done' };
   const asked = [];
-  const quote = (from, to, amount) => {
+  const quote = (from, to, given, opts) => {
+    // `worth`: the amount is what arrives is valued at, the fee on top; otherwise (all of it) what leaves, the fee in it
+    const amount = opts && opts.worth ? given + 2 : given;
     const q = { id: 'uswap-' + asked.length, mint: 'https://forge.example.com', from, to, total: amount, amount: amount - 2, fee: 2,
       get: from === 'usd' ? Math.floor((amount - 2) / 100 / 81786 * 1e8) : Math.floor((amount - 2) * 81786 / 1e8 * 100),
       rate: { usdPerBtc: 81786, by: 'forge.example.com' }, market: 80000, spread: 0.022, spreadWarn: true,
@@ -472,7 +718,7 @@ async function part2() {
     balanceOf: (u) => (u === 'usd' ? st.usd : st.sat), heldIn: () => 0, recoveringIn: () => 0,
     mintRate: () => ({ usdPerBtc: 81786 }),
     unitSwapsPending: () => (st.runAs === 'pending' && st.ran && !st.cleared ? [{ id: st.heldId || 'p', at: 1, from: { unit: 'usd', amount: 1000 }, to: { unit: 'sat', amount: 1220 } }] : []),
-    swapQuote(from, to, amount) { asked.push([from, to, amount]); return Promise.resolve(quote(from, to, amount)); },
+    swapQuote(from, to, amount, opts) { asked.push([from, to, amount]); return Promise.resolve(quote(from, to, amount, opts)); },
     sweepMelts() { st.sweeps = (st.sweeps || 0) + 1; if (st.clearAt && st.sweeps >= st.clearAt) st.cleared = true; return Promise.resolve([]); },
     recoverSwaps() { return Promise.resolve([]); },
     swapRun(q, stage) {
@@ -510,8 +756,8 @@ async function part2() {
   await settle(); await settle();
   ok(A.state.screen === 'swapConfirm' && JSON.stringify(asked.pop()) === '["usd","sat",1000]', 'NEXT: the confirmation, the rate asked for 1,000 cents');
   const t = text();
-  ok(/YOU ARE GETTING \$ 9\.98 in BITCOIN \(₿ 12,2\d\d\) YOU ARE SPENDING \$ 10\.00 in DOLLARS FEE \$ 0\.02 \(₿ \d+\) \S+’S RATE/.test(t),
-    'YOU ARE GETTING, YOU ARE SPENDING, FEE, in that order', t.slice(0, 400));
+  ok(/RECEIVING \$ 10\.00 in BITCOIN \(₿ 12,2\d\d\) FEE \$ 0\.02 \(₿ \d+\) SPENDING \$ 10\.02 in DOLLARS \S+’S RATE/.test(t),
+    'RECEIVING the $ 10.00 typed, FEE, SPENDING the two together, in that order', t.slice(0, 400));
   ok(/FORGE’S RATE ₿ 1 = \$ 81,786 Rate held for 00:5\d Market ₿ 1 = \$ 80,000/.test(t), 'the mint’s RATE, the time it is held for, and the market price far off', t.slice(0, 500));
   ok(!/NETWORK|TOTAL/.test(t), 'no NETWORK row and no TOTAL');
   v = A.renderVals();
@@ -522,7 +768,7 @@ async function part2() {
   A._preSettle = null;
   v.cfGo();
   await settle(); await settle();
-  ok(A.state.screen === 'swapDone' && /SWAPPED/.test(text()) && /−\$ 10\.00/.test(text()) && /\+₿ 12,2\d\d/.test(text()), 'SWAPPED: −$ 10.00 and +₿', text().slice(0, 300));
+  ok(A.state.screen === 'swapDone' && /SWAPPED/.test(text()) && /−\$ 10\.02/.test(text()) && /\+₿ 12,2\d\d/.test(text()), 'SWAPPED: −$ 10.02 (the $ 10.00 and its fee) and +₿', text().slice(0, 300));
   A.renderVals().swapDoneGo();
   await settle();
   ok(A.state.screen === 'home' && A.state.animLane === 'both', 'DISMISS: home, both lanes counting');
