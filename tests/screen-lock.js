@@ -352,7 +352,7 @@ const PIN = { 'foxy.pin.v1': JSON.stringify({ salt: 'aa', hash: 'bb' }) };
     /* ---- a return's work waits for the lock --------------------------
      *
      * The seed sits behind Face ID. On a return with the face lock on, the
-     * lock asked for a face and, five milliseconds later, the Foxy ID's
+     * lock asked for a face and, five milliseconds later, the Cashu ID's
      * inbox (`inboxWake`) asked the phone for the seed: the keychain put up
      * its own Face ID, that was the one answered, the lock's lost, and the
      * lock screen asked for a face a second time (a phone log). */

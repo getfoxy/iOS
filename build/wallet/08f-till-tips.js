@@ -1,28 +1,28 @@
   /* ---- tips at the till, and the keeper's list of cashier codes ---------------
    *
    * The keeper says, as its till opens, whether it takes tips and who they go to
-   * (26m-till.js, 26p-till-tips.js): itself, one Foxy ID, or a group of up to
+   * (26m-till.js, 26p-till-tips.js): itself, one Cashu ID, or a group of up to
    * eight, each with a whole percentage, the percentages adding up to 100. The
    * answer is `tips`:
    *
    *     { on, to: 'self' | 'one' | 'group', ids: [{ id, nostr, name, pct }] }
    *
-   * `id` the Foxy ID's key (33 bytes, hex), `nostr` its delivery key (32), as a
+   * `id` the Cashu ID's key (33 bytes, hex), `nostr` its delivery key (32), as a
    * contact keeps them (08e-cashu-id.js `cidKeep`), so a contact removed later is
    * still paid. Each CASHIER CODE has its own answer, the till's by default, kept
    * on this phone's row of the code; the code itself says only whether its till
-   * offers tips (`tips: true`), so nobody's Foxy ID is printed at a counter.
+   * offers tips (`tips: true`), so nobody's Cashu ID is printed at a counter.
    *
    * A payment with a tip is ONE payment for the total. Once it is in, the tip
    * part is passed on (`tipForward`): to the keeper, nothing more than a word on
-   * the sale's row; to one person, a Foxy ID payment of the whole tip; to a
+   * the sale's row; to one person, a Cashu ID payment of the whole tip; to a
    * group, one payment per share. Each share is the tip times its percentage,
    * rounded down to a whole sat or cent, and what rounding leaves goes to the
    * first share, so the shares add up to the tip exactly. A share smaller than
    * `TIP_MIN` waits, kept for that ID (`K.tillTipCarry`), and goes with the next
    * tip to the same ID at the same mint in the same unit.
    *
-   * Each payment to a Foxy ID is a job (`K.tillTipJobs`), made from the
+   * Each payment to a Cashu ID is a job (`K.tillTipJobs`), made from the
    * keeper's balance at the mint the sale landed at, one at a time, tried again
    * a minute later while it fails, ten failures at most, and at once when the
    * route comes back. With no route, or the phone at another mint than the
@@ -85,20 +85,20 @@
     var raw = Array.isArray(t.ids) ? t.ids : [];
     if (!raw.length) throw new Error(to === 'one' ? 'Pick who the tips go to.' : 'Add someone to the group first.');
     if (to === 'one' && raw.length !== 1) throw new Error('One person takes the tips.');
-    if (raw.length > TIP_IDS_MAX) throw new Error('A group is ' + TIP_IDS_MAX + ' Foxy IDs at most.');
+    if (raw.length > TIP_IDS_MAX) throw new Error('A group is ' + TIP_IDS_MAX + ' Cashu IDs at most.');
     var seen = Object.create(null);
     var ids = raw.map(function (r) {
       var id = String((r && r.id) || '').toLowerCase();
-      if (!CID_HEX33.test(id)) throw new Error('That is not a Foxy ID.');
+      if (!CID_HEX33.test(id)) throw new Error('That is not a Cashu ID.');
       var nostr = String((r && r.nostr) || '').toLowerCase();
       if (!CID_HEX32.test(nostr)) {
         var c = cidContactOf(id);
         nostr = c ? String(c.cid.nostr || '').toLowerCase() : '';
       }
-      if (!CID_HEX32.test(nostr)) throw new Error('That Foxy ID is not one of your contacts. Add it first.');
+      if (!CID_HEX32.test(nostr)) throw new Error('That Cashu ID is not one of your contacts. Add it first.');
       var name = cidCleanName(r && r.name);
-      if (!name) throw new Error('Name every Foxy ID that takes tips.');
-      if (seen[id]) throw new Error((to === 'group' ? 'The same Foxy ID is in the group twice' : 'That Foxy ID is there twice') + ' (' + name + ').');
+      if (!name) throw new Error('Name every Cashu ID that takes tips.');
+      if (seen[id]) throw new Error((to === 'group' ? 'The same Cashu ID is in the group twice' : 'That Cashu ID is there twice') + ' (' + name + ').');
       seen[id] = true;
       var pct = to === 'one' ? 100 : Number(r && r.pct);
       if (!(Math.floor(pct) === pct && pct >= 1 && pct <= 100)) throw new Error('Each share is a whole percentage from 1 to 100 (' + name + ').');
@@ -134,7 +134,7 @@
     var clean = tipsCheck(t);
     mustSave(K.tillTips, clean);
     console.log('[foxy] till: tips ' + (!clean.on ? 'off' : clean.to === 'self' ? 'on, kept by this phone'
-      : clean.to === 'one' ? 'on, to one Foxy ID' : 'on, split among ' + clean.ids.length + ' Foxy IDs'));
+      : clean.to === 'one' ? 'on, to one Cashu ID' : 'on, split among ' + clean.ids.length + ' Cashu IDs'));
     return clean;
   }
 
@@ -313,7 +313,7 @@
       if (/being made/i.test(why)) return null;
       var tries = (Number(r.tries) || 0) + 1;
       // what no number of tries changes: their ID is this phone's own, or not an ID
-      if (tries >= TIP_TRIES_MAX || /your own Foxy ID|not a Foxy ID/i.test(why)) return tipFail(r, why);
+      if (tries >= TIP_TRIES_MAX || /your own Cashu ID|not a Cashu ID/i.test(why)) return tipFail(r, why);
       tipJobAmend(r.id, { tries: tries, why: why.slice(0, 160) });
       console.warn('[foxy] till: a tip for ' + r.name + ' was not sent yet (' + tries + ' of ' + TIP_TRIES_MAX + '):', why);
       return null;

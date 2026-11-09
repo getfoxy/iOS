@@ -6640,7 +6640,7 @@
     // how this card writes a piece's secret, for taking it back with no card to ask
     // (format 5, a card of 1.23 that holds both units, writes its secrets as format 4 does, and is filed as 4)
     if (card.info && card.info.format) row.format = cardAllFormat(card.info.format) ? CARD_FORMAT_ALL : card.info.format;
-    /* Its software as last read, and whether that wants its PIN before any load (1.21 and on, `pinFirst`): SEND > FLASHCARD asks
+    /* Its software as last read, and whether that wants its PIN before any load (1.21 and on, `pinFirst`): SEND > FOXY CARD asks
      * the PIN ahead only of cards known to want it (26f-flashcard.js `fcSendPinFirst`). A row from before this was kept has neither. */
     if (card.info) {
       row.pinFirst = !!card.info.pinFirst;
@@ -8900,7 +8900,7 @@
 
   /* ---- a card at another mint, loaded from this phone -----------------------------------------------------------------
    *
-   * SEND > FLASHCARD and ADD FUNDS for a card whose money is at another mint than this phone's (26f-flashcard.js, `fcXlBegin`).
+   * SEND > FOXY CARD and ADD FUNDS for a card whose money is at another mint than this phone's (26f-flashcard.js, `fcXlBegin`).
    * The money crosses by Lightning, as a move between this phone's own mints does (14-moving-between-mints.js): the card's mint
    * makes an invoice for the amount in the card's unit, and this phone's mint pays it from this phone's balance. Then, on a visit
    * to the card's mint (`cardVisit`), the invoice is claimed there and the pieces for the card are made of it (`cardPrepare`),

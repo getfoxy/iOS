@@ -33,7 +33,7 @@ final class NativeSeedTests: XCTestCase {
             // a card's owner key, which stays in native code: its public half, and signatures for a fixed
             // list of labels (CardOwner, in Foxy/Keychain/NUT13.swift)
             "cardOwnerKey", "cardOwnerSign",
-            // the Foxy ID (Foxy/Keychain/CashuID.swift): public keys, one-time signatures, the proved name, a payment's base
+            // the Cashu ID (Foxy/Keychain/CashuID.swift): public keys, one-time signatures, the proved name, a payment's base
             "cashuIdPublic", "cashuIdSign", "cashuIdTag", "cashuIdEphemeral",
             // and the ID key's own signature, for a delivery paid to it unblinded that the receiver takes anyway
             "cashuIdSignUnblinded",

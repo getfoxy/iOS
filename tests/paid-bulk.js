@@ -142,7 +142,7 @@ const sec = (d) => Math.floor(d.getTime() / 1000);
       '1: the times as history says them', JSON.stringify(rows.map((r) => r.time)));
     ok(rows.every((r) => r.mint === 'Forge'), '1: the mint each went into', JSON.stringify(rows.map((r) => r.mint)));
     ok(rows[1] && rows[1].who === 'From Alice' && rows[0] && rows[0].who === 'for lunch',
-      '1: the payer’s name (a Foxy ID) or the note', JSON.stringify(rows.map((r) => r.who)));
+      '1: the payer’s name (a Cashu ID) or the note', JSON.stringify(rows.map((r) => r.who)));
     ok(v.paidRestDone === 'DISMISS' && typeof v.paidSeeHistory === 'function' && typeof v.dismissPaid === 'function',
       '1: DISMISS and SEE HISTORY', v.paidRestDone);
     ok(a._paidQueue.length === 2 && a._paidQueue.every((q) => q.said), '1: both stay queued until dismissed, each said');
@@ -154,7 +154,7 @@ const sec = (d) => Math.floor(d.getTime() / 1000);
     let v3 = a.view();
     ok(a.raised === 1 && (v3.paidBulkRows || []).length === 3 && v3.paidHeadline === '$ 9.02',
       '3: a third from the history pass joins the list, the total grows', JSON.stringify({ r: a.raised, n: (v3.paidBulkRows || []).length, h: v3.paidHeadline }));
-    // and one the wallet says itself (a Foxy ID payment collected, a tap)
+    // and one the wallet says itself (a Cashu ID payment collected, a tap)
     a.announcePayment({ dir: 'in', sats: 500, hash: 'h4', at: sec(today) + 120, memo: 'From Bob' });
     await tick();
     v3 = a.view();

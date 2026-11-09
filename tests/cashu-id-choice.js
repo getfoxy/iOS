@@ -1,10 +1,10 @@
 'use strict';
-/* cashu-id-choice.js — a payment to this phone's Foxy ID at a mint it does not use: the receiver's choice, and dollars.
+/* cashu-id-choice.js — a payment to this phone's Cashu ID at a mint it does not use: the receiver's choice, and dollars.
  *
  *     node tests/cashu-id-choice.js
  *
  * The payer cannot know which mints the receiver uses, so the receiver decides (build/wallet/08e-cashu-id.js `cidForeign`,
- * docs/FOXY-ID.md "Receiving from a mint you don't use"). The way home is quoted first, and the delivery waits for a card:
+ * docs/CASHU-ID.md "Receiving from a mint you don't use"). The way home is quoted first, and the delivery waits for a card:
  *
  *   C1  it waits, and the app is told once (`_onCashuIdOffer`) with what the card says: who, how much, where, the fee of
  *       BRING IT HOME, and whether SEND IT BACK can be offered; read again, the mint is not asked again

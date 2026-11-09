@@ -128,11 +128,11 @@ enum SeedActions {
         // it gets here, so this is belt and braces.
         case P2PK.Failure.badIndex:
             return "outside the lock-key window"
-        // a Foxy ID's one-time key (CashuID.swift)
+        // a Cashu ID's one-time key (CashuID.swift)
         case CashuID.Failure.notLocked:
-            return "That ecash is not locked to this Foxy ID."
+            return "That ecash is not locked to this Cashu ID."
         case CashuID.Failure.badPoint, CashuID.Failure.badTweak:
-            return "That is not a payment to this Foxy ID."
+            return "That is not a payment to this Cashu ID."
         default:
             // NUT13: an invalid BIP-32 child or r = 0, about 1 in 2^127, never a different key instead
             return "the secrets could not be derived"
@@ -471,7 +471,7 @@ enum SeedActions {
         }
     }
 
-    // MARK: The Foxy ID (CashuID.swift)
+    // MARK: The Cashu ID (CashuID.swift)
 
     /// cashuIdSign's request, checked (NativeSeedBridge.cashuIdSignCheck).
     struct CashuIdSignRequest: Equatable {
@@ -533,7 +533,7 @@ enum SeedActions {
     }
 
     /// cashuIdSignUnblinded {secrets} → {"sigs"}: signatures by the ID key itself, over secrets locked to the ID
-    /// as it is (not blinded), for one delivery the receiver chose to take anyway (TAKE IT ANYWAY, docs/FOXY-ID.md).
+    /// as it is (not blinded), for one delivery the receiver chose to take anyway (TAKE IT ANYWAY, docs/CASHU-ID.md).
     /// Nothing else is signed by the ID key but the binding of its delivery key. Logged every time it signs; the
     /// key is never answered.
     static func cashuIdSignUnblinded(secrets: [String], env: SeedEnvironment) -> SeedReply {
@@ -541,7 +541,7 @@ enum SeedActions {
               secrets.allSatisfy({ CashuID.lockOf($0) != nil }) else { return .refuse("bad request") }
         do {
             let sigs = try CashuID.signUnblinded(seed: try readSavedSeed(env), secrets: secrets)
-            print("[foxy] foxy id: the ID key itself signed \(sigs.count) piece(s) of one delivery paid to it unblinded,"
+            print("[foxy] cashu id: the ID key itself signed \(sigs.count) piece(s) of one delivery paid to it unblinded,"
                   + " on the receiver's TAKE IT ANYWAY")
             return .answer(CashuID.signReply(sigs))
         } catch {
@@ -549,7 +549,7 @@ enum SeedActions {
         }
     }
 
-    /// cashuIdShop → a shop's collection signed (docs/FOXY-ID.md, "Shops"): collect {"pub", "sig"}, the ID key over
+    /// cashuIdShop → a shop's collection signed (docs/CASHU-ID.md, "Shops"): collect {"pub", "sig"}, the ID key over
     /// SHA-256("foxy-shop-collect-v1" ‖ nonce ‖ host ‖ path); quote {"sig", "legacy"}, NUT-20's two signatures by d + r for a
     /// quote locked to ID + r·G; proofs {"sigs"}, NUT-11's by d + r for secrets locked to ID + r·G. The digests are made
     /// here; no key, and no d + r, is ever answered.

@@ -5,7 +5,7 @@
  *
  * A place on the card has eight bytes for the keyset a piece is of. A mint's
  * older keysets are named by eight bytes; its newer ones (NUT-02's second
- * kind) by thirty-three, with a short form of eight. The other flashcard
+ * kind) by thirty-three, with a short form of eight. The other Foxy Card
  * suites run at a mint of the older kind. This one runs at the newer, which
  * is what the mints in use had become by the time a card was first tried
  * against one: every piece was refused as a kind the card could not hold.

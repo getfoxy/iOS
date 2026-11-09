@@ -195,7 +195,7 @@
           // paid by a card while this phone was offline: received, and settled with the mint the next time it is online
           : t.cardWaits ? 'Paid by card \u00b7 settles online'
           // paid from a card (SEND on the card's screen), not from this phone's balance
-          : (t.fromCard && t.dir === 'out' && !t.pending) ? 'Paid from the EcashCard'
+          : (t.fromCard && t.dir === 'out' && !t.pending) ? 'Paid from the Foxy Card'
           /* A payment that is "pending" has left: what is waiting is the other
            * side taking it. The word alone read as if nothing had happened
            * yet. */
@@ -733,7 +733,7 @@
       contactAll: this.contactRows(),
       contactLetter: (this.contactRows()[0] || {}).ini || '',
       contactRecents: this.contactRows().slice(0, 3),
-      // PASTE A FOXY ID and SCAN A FOXY ID, on the empty CONTACTS (26o-cashu-id.js); not offered where the wallet
+      // PASTE A CASHU ID and SCAN A CASHU ID, on the empty CONTACTS (26o-cashu-id.js); not offered where the wallet
       // cannot read an ID, nor SCAN where it cannot scan. PASTE reads the clipboard.
       ctAddShown: !!(window.FoxyWallet && window.FoxyWallet.cashuIdCheck),
       ctAddGo: () => this.cidClipboardAdd(),
@@ -759,13 +759,13 @@
       ctQueryInput: (e) => this.setState({ ctQuery: e.target.value }),
       ctFocusRef: this._refCt || (this._refCt = (el) => this.autoFocus('ct', el)),
       ctEmpty: (s.ctQuery || '').trim().toLowerCase().length === 0,
-      contactsEmptyText: 'Ask another Foxy user to share their Foxy ID with you to add them as a contact.',
+      contactsEmptyText: 'Ask another Foxy user to share their Cashu ID with you to add them as a contact.',
       contactsEmpty: s.walletLive ? this.contactRows().length === 0 : !!s.fresh,
       contactsAny: s.walletLive ? this.contactRows().length > 0 : !s.fresh,
       ctResults: (function (qq) {
         if (!qq || s.fresh) return [];
         return (s.contacts || []).filter(c => c.name.toLowerCase().indexOf(qq) >= 0 || c.handle.toLowerCase().indexOf(qq) >= 0)
-          .map(c => ({ name: c.name, handle: c.cid ? 'FOXY ID' : c.handle, initial: c.name.charAt(0), tint: c.tint }));
+          .map(c => ({ name: c.name, handle: c.cid ? 'CASHU ID' : c.handle, initial: c.name.charAt(0), tint: c.tint }));
       })((s.ctQuery || '').trim().toLowerCase()),
       ctHasResults: (function (qq) {
         if (!qq || s.fresh) return false;
@@ -789,7 +789,7 @@
         return !hit && qq.indexOf('@') < 0;
       })((s.ctQuery || '').trim().toLowerCase()),
       payContact: () => {
-        // the first match a Foxy ID: paid as one (26o-cashu-id.js)
+        // the first match a Cashu ID: paid as one (26o-cashu-id.js)
         const q0 = (this.state.ctQuery || '').trim().toLowerCase();
         const first = q0 ? (s.contacts || []).filter(c => c.name.toLowerCase().indexOf(q0) >= 0 || c.handle.toLowerCase().indexOf(q0) >= 0)[0] : null;
         if (first && first.cid) { this.cidPayStart(first); return; }

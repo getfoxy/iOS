@@ -31,8 +31,8 @@
     classify: function (text) {
       // a cashier code (08d-till.js), by its address alone: one that has ended is still named, and refused as one
       if (tillUrlShape(text)) return 'till';
-      /* a Foxy ID (08e-cashu-id.js), by its prefix: one mistyped or cut short is still named, and refused as one
-       * ("That is not a Foxy ID.") rather than as not a payment */
+      /* a Cashu ID (08e-cashu-id.js), by its prefix: one mistyped or cut short is still named, and refused as one
+       * ("That is not a Cashu ID.") rather than as not a payment */
       if (/^foxyid1[A-Za-z0-9_-]{8,200}$/i.test(String(text || '').trim())) return 'cashuid';
       var t = FoxyWallet.unwrap(text).replace(/^lightning:/i, '');
       if (/^ln(bc|tb|bcrt)\w{20,}$/i.test(t)) return 'invoice';

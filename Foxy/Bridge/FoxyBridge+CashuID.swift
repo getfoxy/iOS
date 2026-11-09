@@ -1,8 +1,8 @@
 import Foundation
 
-/// The Foxy ID's inbox (docs/FOXY-ID.md).
+/// The Cashu ID's inbox (docs/CASHU-ID.md).
 ///
-/// A Foxy ID names a Nostr key for this wallet's deliveries: the delivery key Q,
+/// A Cashu ID names a Nostr key for this wallet's deliveries: the delivery key Q,
 /// derived from the seed at its own path (CashuID.swift) and used for nothing
 /// else on Nostr. A payer gift-wraps each payment not to Q but to one of the
 /// sixteen keys Q moves to on the UTC day it posts (`CashuID.dropTweak`), and a
@@ -154,13 +154,13 @@ extension FoxyBridge {
             for i in wanted.lasting.indices { for j in wanted.lasting[i].secrets.indices { NUT13.wipe(&wanted.lasting[i].secrets[j]) } }
         }
         guard cashuIdTicket == ticket else { resolve(id: id, text: "0", error: nil); return }
-        guard let inbox = NostrInbox(asks: wanted.days, label: "foxy id inbox", pages: Self.cashuIdPages,
+        guard let inbox = NostrInbox(asks: wanted.days, label: "cashu id inbox", pages: Self.cashuIdPages,
                                      onPayment: { [weak self] body in self?.cashuIdArrived(body) }) else {
-            resolve(id: id, text: nil, error: "The Foxy ID's inbox could not be made.")
+            resolve(id: id, text: nil, error: "The Cashu ID's inbox could not be made.")
             return
         }
         let lasting = wanted.lasting.isEmpty ? nil
-            : NostrInbox(asks: wanted.lasting, label: "foxy id any wallet", pages: Self.cashuIdPages, everyRelay: true,
+            : NostrInbox(asks: wanted.lasting, label: "cashu id any wallet", pages: Self.cashuIdPages, everyRelay: true,
                          onPayment: { [weak self] body in self?.cashuIdArrived(body) })
         lasting?.onEnded = { [weak self] in
             // only now does the page count these requests as asked (a listen put away before this asks them again)
@@ -169,14 +169,14 @@ extension FoxyBridge {
         }
         cashuIdInbox = inbox
         cashuIdAnswer = { [weak self] count in self?.resolve(id: id, text: String(count), error: nil) }
-        print("[foxy] foxy id inbox: \(wanted.days.count) REQ(s) of the day's keys" + (lasting == nil ? "" : ", the ANY WALLET keys later"))
+        print("[foxy] cashu id inbox: \(wanted.days.count) REQ(s) of the day's keys" + (lasting == nil ? "" : ", the ANY WALLET keys later"))
         inbox.open { [weak self, weak inbox] ok in
             guard let self, let inbox, self.cashuIdInbox === inbox else { return }
             if !ok {
                 inbox.close()
                 self.cashuIdInbox = nil
             }
-            print("[foxy] foxy id inbox: " + (ok ? "every REQ answered; listening" : "not listening: no relay answered every REQ"))
+            print("[foxy] cashu id inbox: " + (ok ? "every REQ answered; listening" : "not listening: no relay answered every REQ"))
             let waiting = self.cashuIdAnswer
             self.cashuIdAnswer = nil
             waiting?(ok ? 1 : 0)
@@ -197,7 +197,7 @@ extension FoxyBridge {
             lasting.open { [weak self, weak lasting] ok in
                 guard let self, let lasting, self.cashuIdLasting === lasting else { return }
                 if !ok { lasting.close(); self.cashuIdLasting = nil }
-                print("[foxy] foxy id any wallet: " + (ok ? "listening" : "not listening: no relay answered"))
+                print("[foxy] cashu id any wallet: " + (ok ? "listening" : "not listening: no relay answered"))
             }
         }
     }
@@ -235,14 +235,14 @@ extension FoxyBridge {
         defer { NUT13.wipe(&secret) }
         let current = which == .delivery ? cashuIdTicket : cashuIdCopiesTicket
         guard current == ticket else { resolve(id: id, text: "0", error: nil); return }
-        let label = which == .delivery ? "foxy id inbox" : "foxy id copies"
+        let label = which == .delivery ? "cashu id inbox" : "cashu id copies"
         guard let inbox = NostrInbox(secret: secret, since: since, label: label, pages: Self.cashuIdPages, onPayment: { [weak self] body in
             switch which {
             case .delivery: self?.cashuIdArrived(body)
             case .copies: self?.cashuIdCopyArrived(body)
             }
         }) else {
-            resolve(id: id, text: nil, error: "The Foxy ID's inbox could not be made.")
+            resolve(id: id, text: nil, error: "The Cashu ID's inbox could not be made.")
             return
         }
         let answer: (Int) -> Void = { [weak self] count in self?.resolve(id: id, text: String(count), error: nil) }
@@ -300,7 +300,7 @@ extension FoxyBridge {
             waiting = cashuIdCopiesAnswer; cashuIdCopiesAnswer = nil
         }
         if let open {
-            print("[foxy] foxy id: closing the " + (which == .delivery ? "inbox" : "copies' inbox"))
+            print("[foxy] cashu id: closing the " + (which == .delivery ? "inbox" : "copies' inbox"))
             open.close()
         }
         waiting?(0)
@@ -309,7 +309,7 @@ extension FoxyBridge {
     /// One delivery. Nobody to answer, as with any payment over Nostr; the page
     /// decides whether it is one it takes (`_cashuIdArrived`).
     private func cashuIdArrived(_ payment: String) {
-        print("[foxy] foxy id: a delivery arrived (\(payment.utf8.count) bytes)")
+        print("[foxy] cashu id: a delivery arrived (\(payment.utf8.count) bytes)")
         evaluate("window.FoxyWallet && window.FoxyWallet._cashuIdArrived && window.FoxyWallet._cashuIdArrived("
                  + Self.literalStatic(payment) + ")")
     }
@@ -317,7 +317,7 @@ extension FoxyBridge {
     /// One of this phone's own copies, read back after a restore. The page
     /// believes it only where this seed made it (`cidCopyArrived`).
     private func cashuIdCopyArrived(_ copy: String) {
-        print("[foxy] foxy id: a copy of a payment arrived (\(copy.utf8.count) bytes)")
+        print("[foxy] cashu id: a copy of a payment arrived (\(copy.utf8.count) bytes)")
         evaluate("window.FoxyWallet && window.FoxyWallet._cashuIdCopy && window.FoxyWallet._cashuIdCopy("
                  + Self.literalStatic(copy) + ")")
     }

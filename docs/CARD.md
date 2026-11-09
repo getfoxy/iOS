@@ -70,7 +70,7 @@ nothing from this: the receiver always asks the mint first.
   (`tests/flashcard-transfer.js`, `tests/flashcard-switch.js`).
 - **Every card can be taken back.** A card is set up so that the phone that
   loaded it can take its money back after its date (fourteen days from when it
-  was put on) if the card is lost. Set-up asks nothing about it, and FLASHCARD
+  was put on) if the card is lost. Set-up asks nothing about it, and FOXY CARD
   lists the cards this phone loaded, with TAKE BACK for any past its date
   (`FC_RECOVERABLE` in `build/app/26f-flashcard.js`). A cash card set up before
   reads and pays as what it is.
@@ -132,12 +132,12 @@ it, can tell one card from another.
 - **On a phone without Foxy**, or with a build that has no entitlements file, the
   same tap opens the page on the site in Safari, which says what the card is.
 - **A card whose tag is switched off raises nothing.** It is read as it always
-  was, by MENU > FLASHCARD and the sheets that ask for it.
+  was, by MENU > FOXY CARD and the sheets that ask for it.
 
 iOS hands Foxy the address and no session with the card. Foxy checks the address
 (`Foxy/Flashcard/CardAddress.swift`) and tells its page one thing, that a card
 was tapped. Nothing of the address goes with it. The page then does what
-MENU > FLASHCARD does: it goes to the Flashcard screen and begins the tap
+MENU > FOXY CARD does: it goes to the Foxy Card screen and begins the tap
 (TAP TO READ, and the phone's own sheet), and the card, which is usually
 still behind the phone, is read by that sheet. A card that is no longer there is
 asked for like any other: hold it again.
@@ -147,7 +147,7 @@ Whether it does that depends on what is on the screen, and one function says
 
 | on the screen | what happens |
 |---|---|
-| HOME; HISTORY, CONTACTS, a transaction, LOGS, SWITCH, or the Flashcard screen itself with no sheet up | the tap begins; a drawer or the list of apps that sell bitcoin is shut first |
+| HOME; HISTORY, CONTACTS, a transaction, LOGS, SWITCH, or the Foxy Card screen itself with no sheet up | the tap begins; a drawer or the list of apps that sell bitcoin is shut first |
 | Foxy is locked (its PIN pad or Face ID is up), or still starting (the launch screens, the first-run warning, the Tor gate's screens) | the request is kept, and acted on once the person is in, if that is within a minute; after that it lapses |
 | a send or receive, an amount being typed, a confirmation, a sending or paid screen, a split bill, a token, a restore or a backup, a card sheet or any of a card's flows, a notice, or anything else drawn over the screen | ignored: a card resting behind the phone must never pull a person out of a payment |
 | a second request while one waits or is being acted on | the same tap, ignored |
@@ -172,7 +172,7 @@ payment (`THREAT-MODEL.md` §1).
 
 ## Setting up a card
 
-1. MENU, then FLASHCARD. It goes straight to Apple's sheet, with no screen of
+1. MENU, then FOXY CARD. It goes straight to Apple's sheet, with no screen of
    Foxy's first. Tap a new card behind the phone.
 2. The card's screen reads `This card is new. Set it up to put money on it.`
    Press **SET UP THIS CARD**.
@@ -226,7 +226,7 @@ Figures typed in dollars offline were turned into sats at the last price this ph
 again from the dollars just before the write, at this phone's own price and only one less than a day old (`fcRatePrice`):
 typed at a price half today's, the card still takes the dollars meant, not twice them. With no such price the set-up is
 refused with **NO BITCOIN PRICE**, TRY AGAIN and BACK, and nothing is written. CARD LIMITS does the same for a bitcoin card's
-limits typed in dollars, and SEND > FLASHCARD in dollars to a bitcoin card loads the sats those dollars are at the price of
+limits typed in dollars, and SEND > FOXY CARD in dollars to a bitcoin card loads the sats those dollars are at the price of
 the tap. TRY AGAIN writes to the card the set-up began on and no other: another card held up is **THAT IS ANOTHER CARD**,
 with nothing written to it. The kept entries, the PIN among them, live only in the page's memory and are forgotten as Foxy
 locks or is put away; a TRY AGAIN left on the screen then says to start again, and a set-up still being typed goes back to
@@ -426,7 +426,7 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
   If the money came off and the reset did not, `EMPTY, BUT NOT RESET` says so, with `TAP CARD` to finish. The wallet's
   own refusals are the usual cards: `MONEY ON THE CARD`, `THE CARD IS OWED CHANGE`, `MONEY ON ITS WAY`, `WRONG PIN`,
   `CARD BLOCKED`.
-- **FLASHCARD on the send screen.** The fifth button, under TYPE (the five are a little shorter, so the camera pane and
+- **FOXY CARD on the send screen.** The fifth button, under TYPE (the five are a little shorter, so the camera pane and
   everything above it are as they were). It puts money onto a card held to this phone, any card: SET AMOUNT first (the keypad
   every amount is typed on), NEXT, and the sheet at once. The card is read, and a card with no PIN has its pieces made and
   written in that tap. A card with a PIN ends the sheet `Enter the card's PIN` with nothing made; the pad comes up (`CARD PIN`,
@@ -570,7 +570,7 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
    pieces, every command the size it always was. The sheet's "Writing i of n"
    changes at most every half second. While a card's sheet is up, the page's
    background work waits for it (`cardAfter`): the held quote sweep, the
-   Foxy ID's inbox opened again, the small-change top-up, the adding up of
+   Cashu ID's inbox opened again, the small-change top-up, the adding up of
    the books. A write that went whole is not followed by a read: the card is
    known from what was read before and what went on (`cardAfterWrite`). Any
    other write reads it again. The card's proof of its key (AUTH, 0.6 s on a
@@ -605,7 +605,7 @@ and the line under the figure reads MORE THAN THE CARD CAN TAKE; NEXT pressed
 all the same says the words of the refusal above. A load needs its pieces and
 the four places a write keeps back, so a card with fewer than five places free
 takes nothing, and one with few takes the amount rounded up to fewer, larger
-pieces. FLASHCARD on the send screen has no card on show and is capped by
+pieces. FOXY CARD on the send screen has no card on show and is capped by
 this phone's balance alone, as it was.
 
 ## Paying at a till
@@ -695,7 +695,7 @@ exactly, are said in that first tap, with no pad.)
 7. Change, where there is any, is made after the swap, from the phone's own pile,
    and is owed to the card for its next tap (*Change*).
 
-The holder's own read of a card (MENU, then FLASHCARD) is not a payment and asks
+The holder's own read of a card (MENU, then FOXY CARD) is not a payment and asks
 the mint for its word on the pieces, because that is something to show. It does
 it after the sheet has ended: the card's screen comes up with the card's own
 figures at once, and the line under its title says `Verifying…` until the mint
@@ -870,7 +870,7 @@ Every screen of the card flows has a render snapshot in `tests/snapshots/render`
 
 SEND on the card's own screen opens the phone's SEND MONEY in card mode
 (`fcOutMode`, 26f-flashcard.js): WITHDRAW, PASTE, CONTACTS and TYPE. What is read
-goes to the phone's own confirmation with a FROM / FLASHCARD row and NEXT for
+goes to the phone's own confirmation with a FROM / FOXY CARD row and NEXT for
 SEND. NEXT reads the payment's total off the card exactly as a till reads it
 (the PIN, the per tap limit and its wait, the card's own change), and the pieces
 the card pays are held for that payment alone (`cardOutHold`, K.held
@@ -879,7 +879,7 @@ are made into pieces for the card and owed to it (`cardOutBack`), and its next t
 puts them back. Tests: `tests/flashcard-send.js`.
 
 **On chain.** A bitcoin address goes to the phone's own on-chain confirmation
-(26b-onchain.js). It shows NETWORK ON-CHAIN, the amount, FROM FLASHCARD, the
+(26b-onchain.js). It shows NETWORK ON-CHAIN, the amount, FROM FOXY CARD, the
 reserve of the fee option chosen as FEE (dollars, the sats under them) and the
 phone's line `A payment on chain is not instant. It is done when it confirms.`
 NEXT (`fcOcNext`) reads the card for the amount plus that reserve, with the
@@ -1165,7 +1165,7 @@ one way of paying:
    payment is in HISTORY.
 
    **No other payment's PAYMENT RECEIVED comes up while a card is being read or
-   written.** One rose over the Flashcard screen with the phone's sheet up under it,
+   written.** One rose over the Foxy Card screen with the phone's sheet up under it,
    and the sheet came down. Any confirmation that comes while a tap is in progress
    (the phone's sheet, the screen behind it, the pause between two taps of one flow),
    while the pieces for a tap are being made (GETTING IT READY, TAKING IT BACK), while
@@ -1338,7 +1338,7 @@ What it means for the holder:
 - **If a till never hands the change over**, the card's owner fetches it. The change
   is at the mint, locked to the card's key, so nobody can spend it but the card;
   and the card still has what each piece is made of until the piece is written
-  back. So the owner's phone, reading the card on its FLASHCARD screen, reads the
+  back. So the owner's phone, reading the card on its FOXY CARD screen, reads the
   openings too (`GET_CHANGE`, no PIN), makes the blinded message each one was, and
   asks the mint for the signatures it already gave for them (NUT-09, `POST
   /v1/restore`, which answers the outputs it knows and no others). What comes
@@ -2049,7 +2049,7 @@ holds them; without it the stage says it is skipped.
 
 ## Where it is in the code
 
-- Screens: `build/app/26f-flashcard.js`, and the FLASHCARD block of
+- Screens: `build/app/26f-flashcard.js`, and the FOXY CARD block of
   `build/markup.html`.
 - The wallet's side: `build/wallet/08a-flashcard.js` (reading, signing, pieces,
   the clock a tap gives a card),

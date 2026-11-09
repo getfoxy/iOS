@@ -226,11 +226,11 @@ check "settle quiet"   1 node tests/settle-quiet.js
 check "retry/re-arm"   1 node tests/retry-and-rearm.js
 check "onion fallback" 1 node tests/onion-fallback.js
 check "https delivery" 1 node tests/https-delivery.js
-check "foxy id"       1 node tests/cashu-id.js
-check "foxy id, other mints" 1 node tests/cashu-id-choice.js
-check "foxy id, screens" 1 node tests/cashu-id-ui.js
-check "foxy id, any wallet" 1 node tests/cashu-id-any.js
-check "foxy id, drop boxes" 1 node tests/attack-dropbox-2026-11-06.js
+check "cashu id"       1 node tests/cashu-id.js
+check "cashu id, other mints" 1 node tests/cashu-id-choice.js
+check "cashu id, screens" 1 node tests/cashu-id-ui.js
+check "cashu id, any wallet" 1 node tests/cashu-id-any.js
+check "cashu id, drop boxes" 1 node tests/attack-dropbox-2026-11-06.js
 # SHOPS: a shop's sales collected, cases 1 to 9 and 11 to 12 (2,000 sales at 50 ms a mint call); FOXY_SHOP_10K=1 adds the 10,000
 check "shops, collecting" 1 node tests/shop-collect.js
 check "reminder"       1 node tests/remind.js

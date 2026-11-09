@@ -191,7 +191,7 @@ extension FoxyBridge {
         return .ok(SeedActions.CashuIdSignUnblindedRequest(secrets: secrets))
     }
 
-    /// cashuIdShop {kind, ...}: a shop's collection (docs/FOXY-ID.md, "Shops").
+    /// cashuIdShop {kind, ...}: a shop's collection (docs/CASHU-ID.md, "Shops").
     ///   collect {nonce: 64 hex, host, path?}: a host of lowercase letters, digits, dots and dashes, and the shop's path ("" or "/…");
     ///   quote {r: 64 hex, quote, pubkey: a point, outputs: 1 to 256 of {amount, B_: a point}};
     ///   proofs {r: 64 hex, secrets: 1 to 100 P2PK secrets, not SIG_ALL}.
@@ -510,7 +510,7 @@ extension FoxyBridge {
         }
     }
 
-    // MARK: The Foxy ID (CashuID.swift)
+    // MARK: The Cashu ID (CashuID.swift)
 
     /// {} → {"id", "nostr", "sig"}: the ID's public key, its delivery key's, and the ID key's signature binding them.
     func handleCashuIdPublic(id: String, body: [String: Any]) {

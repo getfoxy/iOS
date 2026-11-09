@@ -1,6 +1,6 @@
-    /* ---- the Foxy ID (08e-cashu-id.js, docs/FOXY-ID.md) -------------
+    /* ---- the Cashu ID (08e-cashu-id.js, docs/CASHU-ID.md) -------------
      *
-     * For the screens. MY FOXY ID shows `cashuIdMine` (its `text` is what the
+     * For the screens. MY CASHU ID shows `cashuIdMine` (its `text` is what the
      * QR holds); a pasted or scanned ID is read by `cashuIdCheck` and kept as
      * a contact by `cashuIdAdd`; `cashuIdPay` pays one; the phone hands what
      * arrives to `_cashuIdArrived`, and this seed's own copies, after a restore,
@@ -9,7 +9,7 @@
      * answered by `cashuIdDecide`; a remembered answer (`cashuIdChoices`) runs
      * by itself. */
 
-    /* A one-time request (no screen shows it now: MY FOXY ID has no ANY WALLET
+    /* A one-time request (no screen shows it now: MY CASHU ID has no ANY WALLET
      * button): a standard NUT-18 request any Cashu wallet pays, `opts.unit` 'sat' or
      * 'usd', no amount, this phone's mints that honour a lock (the default first), locked to a fresh key of the seed's
      * lock pool, delivered over Nostr to the ID's delivery key. Resolves { text (creqA…), id, pub, unit, mints, target };
@@ -24,7 +24,7 @@
     /* This phone's own ID: { text, id, nostr, sig }, from the seed's keys. */
     cashuIdMine: function () { return cidMine(); },
 
-    /* MY FOXY ID was shown: from now on the phone listens for payments to it
+    /* MY CASHU ID was shown: from now on the phone listens for payments to it
      * (`cidListenNow`), at once and after every connect, and names itself to
      * the contacts it pays. */
     cashuIdShown: function () {
@@ -38,14 +38,14 @@
     /* An ID string read: { id, nostr }, or null. `cashuIdProblem` says why
      * not in a sentence, '' for a good one. Never throws. */
     cashuIdDecode: function (text) { var r = cidRead(text); return r.id ? { id: r.id, nostr: r.nostr } : null; },
-    cashuIdProblem: function (text) { var r = cidRead(text); return r.id ? '' : String(r.why || 'That is not a Foxy ID.'); },
+    cashuIdProblem: function (text) { var r = cidRead(text); return r.id ? '' : String(r.why || 'That is not a Cashu ID.'); },
 
     /* An ID string before it is kept: { id, nostr, text, own, name } (`name`
      * the contact's where this ID is one already). Rejects with the sentence for
      * one that is not an ID, a version 1 string among them. */
     cashuIdCheck: function (text) {
       var r = cidRead(text);
-      if (!r.id) return Promise.reject(new Error(String(r.why || 'That is not a Foxy ID.')));
+      if (!r.id) return Promise.reject(new Error(String(r.why || 'That is not a Cashu ID.')));
       return cidMine().then(function (mine) { return mine; }, function () { return null; }).then(function (mine) {
         var known = cidContactOf(r.id);
         return { id: r.id, nostr: r.nostr, text: cidEncode(r.id, r.nostr, r.sig),
@@ -58,14 +58,14 @@
      * ID itself signed. This phone's own is refused. */
     cashuIdAdd: function (text, name) {
       var r = cidRead(text);
-      if (!r.id) return Promise.reject(new Error(String(r.why || 'That is not a Foxy ID.')));
+      if (!r.id) return Promise.reject(new Error(String(r.why || 'That is not a Cashu ID.')));
       return cidMine().then(function (mine) {
-        if (mine.id === r.id) throw new Error('That is your own Foxy ID.');
+        if (mine.id === r.id) throw new Error('That is your own Cashu ID.');
         return cidKeep(r, name);
       });
     },
 
-    /* The contacts that are Foxy IDs, newest first. */
+    /* The contacts that are Cashu IDs, newest first. */
     cashuIdContacts: function () { return cidContactsNow(); },
 
     /* Pay a contact: `who` its ID string or ID key, `amount` in sats or, with
@@ -93,7 +93,7 @@
       // read before the mint was connected for real: held until it is ('held', `cidHoldEarly`)
       if (cidHoldEarly(body)) return Promise.resolve('held');
       return cidArrived(body).then(null, function (e) {
-        console.warn('[foxy] foxy id: a delivery could not be read:', (e && e.message) || e);
+        console.warn('[foxy] cashu id: a delivery could not be read:', (e && e.message) || e);
         return 'refused';
       });
     },
@@ -131,7 +131,7 @@
      * `cidCarry`): { mint, unit, amount, toUnit?, name?, hash?, before? }. Dollars land as dollars at a default mint that
      * issues them and as sats at one that does not; sats as sats. It goes by the carry-home job, so a crossing that dies
      * after its melt is finished on the next launch, connection or return. Resolves 'taken' once home, 'away' while it
-     * is still that mint's, 'refused' for nothing to bring. What a Foxy ID payment's BRING IT HOME does, for any other
+     * is still that mint's, 'refused' for nothing to bring. What a Cashu ID payment's BRING IT HOME does, for any other
      * arrival at another mint to use. */
     bringHome: function (delivery) { return cidCarry(delivery || {}); },
 

@@ -12,7 +12,7 @@
  *   the wallet          `cardSetUp` with the holder's two numbers, `cardSetUpFor` (the first paying phone, no owner, no key
  *                       of its own), `cardGuestLook` (VIEW AS GUEST, nothing kept) and `cardClaim` (TIE OWNERSHIP);
  *   the screens         driven as a person drives them (flashcard-ui-kit.js): the owner's set-up, its PIN pads, YES and NO
- *                       and SET AMOUNT for each; SEND > FLASHCARD to a new card, which this phone sets up for its holder and does not
+ *                       and SET AMOUNT for each; SEND > FOXY CARD to a new card, which this phone sets up for its holder and does not
  *                       own; VIEW AS GUEST and TIE OWNERSHIP TO THIS PHONE; RESTORE LOST CARD; CARD at the top left of home
  *                       and HOME at the top left of the card's screen, and a swipe that does the same with nothing drawn for it,
  *                       HISTORY first in each MENU, a tap asked for every time;
@@ -595,7 +595,7 @@ function amt(a) {
        'SKIP on MAX PER SECOND: no limit, the chip chosen not taken, and the no-PIN amount kept', JSON.stringify(chose));
   }
 
-  /* ---- B6: SEND > FLASHCARD to a new card: this phone sets it up for its holder, and does not own it -------------------- */
+  /* ---- B6: SEND > FOXY CARD to a new card: this phone sets it up for its holder, and does not own it -------------------- */
   const cash = card4(H, 22);
   {
     const payer = appOn(R);
@@ -604,7 +604,7 @@ function amt(a) {
     R.nfc = cash;
     cash.tap();
     payer.fcSendCard();
-    ok(payer.state.screen === 'amount' && payer.state.flow === 'cardSend', 'SEND > FLASHCARD asks for the amount first');
+    ok(payer.state.screen === 'amount' && payer.state.flow === 'cardSend', 'SEND > FOXY CARD asks for the amount first');
     keyIn(payer, 1500);
     await until('the welcome', () => !!welcome(payer));
     ok(payer.state.screen === 'fcWelcome' && welcome(payer).buttons === 'SET UP CARD,CANCEL' && !pad(payer)
@@ -617,7 +617,7 @@ function amt(a) {
     await until('the welcome again', () => !!welcome(payer));
     welcome(payer).press('SET UP CARD');
     ok(named(payer) && named(payer).title === 'NAME CARD' && named(payer).skipShown && payer.state.stack.slice(-1)[0] === 'fcWelcome' && !pad(payer),
-       'a card set up for its holder from SEND > FLASHCARD is asked NAME CARD first too, over the welcome', JSON.stringify(payer.state.stack));
+       'a card set up for its holder from SEND > FOXY CARD is asked NAME CARD first too, over the welcome', JSON.stringify(payer.state.stack));
     named(payer).back();
     ok(!named(payer) && payer.state.screen === 'fcWelcome' && welcome(payer), 'whose back button is the welcome again');
     welcome(payer).press('SET UP CARD');
@@ -651,7 +651,7 @@ function amt(a) {
     // (the app's success screen, ON THE CARD, as every load that ends at Home: the design's rule)
     ok(payer.state.screen === 'paid' && payer.state.paidSays === 'ON THE CARD' && payer.state.paidAmount === 1500, 'and what went on, on the success screen as any money put on a card is said', JSON.stringify([payer.state.screen, payer.state.paidSays, payer.state.paidAmount]));
     payer.setState({ screen: 'home', stack: [] }); if (payer.paidDismissed) payer.paidDismissed(); await new Promise((ok2) => setTimeout(ok2, 100));
-    // read on the same phone's FLASHCARD screen: somebody else's card
+    // read on the same phone's FOXY CARD screen: somebody else's card
     cash.tap();
     payer.goFlashcard();
     await until('the cash card to be read', () => payer.state.fc && payer.state.fc.key === cash.key);
@@ -670,7 +670,7 @@ function amt(a) {
     keyIn(payer, 500);
     await until('the refusal', () => !!card(payer));
     ok(card(payer).title === 'NOT ON THIS CARD' && /its holder sets it up on their own Foxy first/i.test(card(payer).reason) && !pad(payer) && R.W.cardOwed().length === 0 && new21.state.pinState === 0,
-       'SEND > FLASHCARD to a new card of 1.21 says plainly that its holder sets it up first, and nothing is made or written', card(payer).reason);
+       'SEND > FOXY CARD to a new card of 1.21 says plainly that its holder sets it up first, and nothing is made or written', card(payer).reason);
     card(payer).press('CLOSE');
   }
 
@@ -768,7 +768,7 @@ function amt(a) {
   /* ---- B10: CARD at the top left of home, HOME at the top left of the card's screen, the swipe for each, HISTORY in each MENU, a tap asked for -- */
   {
     const CLOCK = 'M12 7v5l3.5 2M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.5 8.5 0 0 0 12 3.5Z';
-    // a phone with no card: CARD is there all the same, and opens the card's screen asking for a card, as MENU > FLASHCARD did
+    // a phone with no card: CARD is there all the same, and opens the card's screen asking for a card, as MENU > FOXY CARD did
     const fresh = await funded({ sharedMint: H.mint, words: 'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong' }, 0);
     const a = appOn(fresh);
     // (home's CARD button and its MENU's HISTORY are pinned on the mounted app: tests/home-shield.js; CARD is `goFlashcard`)
@@ -781,7 +781,7 @@ function amt(a) {
     a.goFlashcard();
     ok(a.state.screen === 'flashcard' && fresh.sheet.some((x) => /^begin: /.test(x)), 'CARD asks for a card to be tapped, on the card’s screen', fresh.sheet.join(' / '));
     await until('the new card to be read', () => a.state.fc && a.state.fc.key === blank.key && !(a._fcTaps > 0));
-    ok(vals(a).fcNew && vals(a).fcNewSetUp, 'and a new card tapped shows its set-up, as MENU > FLASHCARD did');
+    ok(vals(a).fcNew && vals(a).fcNewSetUp, 'and a new card tapped shows its set-up, as MENU > FOXY CARD did');
     ok(typeof vals(a).fcHome === 'function' && vals(a).fcMenuItems.length === 0, 'the card’s screen has HOME at the top left; a new card has no menu');
     vals(a).fcHome();
     ok(a.state.screen === 'home' && !a.state.fc && a.state.stack.length === 0, 'HOME is home again');
@@ -941,7 +941,7 @@ function amt(a) {
     ok((await why(R.W.cardSetUpFor(elsewhere, { pin: '7777', tapLimit: 999 }))) === 'has-pin' && elsewhere.state.tapLimit === 0,
        'a card another phone set up for its holder is not set up again here: money goes on it with its PIN');
 
-    // the screens: SEND > FLASHCARD, cut before the holder's numbers, TRY AGAIN writes them and then the money
+    // the screens: SEND > FOXY CARD, cut before the holder's numbers, TRY AGAIN writes them and then the money
     // SET AMOUNT for the first, $2.00 without the PIN in 24 hours (NO PIN AMOUNT, this phone's own, skipped), and $10 a second on MAX PER SECOND for the second ($30.00 on one payment)
     const wheelSet = (a) => {
       if (speed(a)) { speed(a).pick(10).next(); return; }
@@ -982,7 +982,7 @@ function amt(a) {
        'TRY AGAIN takes the set-up up again: the holder’s two numbers are on the card with the money, and still no owner', JSON.stringify([u1.state.tapLimit, u1.state.noPinLimit]));
     if (card(payer)) card(payer).press('DONE');
 
-    // cut before the record and left: this phone's FLASHCARD screen does not offer to set it up as its own
+    // cut before the record and left: this phone's FOXY CARD screen does not offer to set it up as its own
     const u2 = card4(H, 22);
     R.nfc = u2;
     payer.setState({ screen: 'home', stack: [], fc: null });
@@ -1005,7 +1005,7 @@ function amt(a) {
     await until('the cut card read', () => payer.state.fc && payer.state.fc.key === u2.key);
     let v = vals(payer);
     ok(v.fcNew && !v.fcNewSetUp && v.fcNewLine === 'Its set-up for the person who holds it was cut short. Send it money to finish it.',
-       'its FLASHCARD screen on the phone that began it: no SET UP CARD, and a line saying to send it money to finish', v.fcNewLine);
+       'its FOXY CARD screen on the phone that began it: no SET UP CARD, and a line saying to send it money to finish', v.fcNewLine);
     payer.fcSetUp();
     ok(!pad(payer) && card(payer) && /Send it money to finish/.test(card(payer).reason) && !u2.state.owner,
        'and the owner’s set-up is not run on it from there', card(payer) && card(payer).all);

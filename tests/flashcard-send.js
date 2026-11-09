@@ -6,7 +6,7 @@
  * The card's screen has DEPOSIT and WITHDRAW, and WITHDRAW goes straight to SET AMOUNT ("How much to withdraw?"). The card
  * mode of the app's own SEND MONEY screen is no longer on the card's screen (it was SEND's, and SCAN's and PASTE's, until
  * 2026-10-30); it is kept, and opened here by its own entry (`fcOutOpen`), as the other screens of the app may yet open it: the camera as ever, the card's WITHDRAW at the top of the rows, PASTE, CONTACTS and TYPE,
- * and no SEND ECASH or FLASHCARD. What is read goes to the app's own confirmation, with a FROM / FLASHCARD row and NEXT
+ * and no SEND ECASH or FOXY CARD. What is read goes to the app's own confirmation, with a FROM / FOXY CARD row and NEXT
  * for PAY; NEXT reads the payment's total (its amount and the fee the confirmation showed) off the card exactly as a
  * till reads a card that pays it, and the pieces the card pays are held for that payment and melted, those and no others.
  * A payment that is not made puts them back on the card at its next tap, as a till's refusal does.
@@ -152,7 +152,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
        'it opens the send screen, in card mode, over the card’s screen', JSON.stringify({ screen: s.screen, from: s.sendFrom, stack: s.stack }));
     const v = sendVals();
     ok(v.clWdOn === true && v.clEcashOn === false && v.clCardOn === false && v.clPasteOn && v.clContactsOn && v.clTypeOn && typeof v.goWithdraw === 'function',
-       'its values: WITHDRAW on, SEND ECASH and FLASHCARD off, PASTE, CONTACTS and TYPE as ever');
+       'its values: WITHDRAW on, SEND ECASH and FOXY CARD off, PASTE, CONTACTS and TYPE as ever');
     ok(rowsShown(v).join() === 'WITHDRAW,PASTE,CONTACTS,TYPE', 'the rows a person sees are WITHDRAW, PASTE, CONTACTS and TYPE, in that order', rowsShown(v).join());
     holder.syncPreview();
     ok(camera.length === 1 && camera[0] === pane, 'and the camera is asked for over the screen’s pane, as on any SEND MONEY');
@@ -172,13 +172,13 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     holder.fcOutOpen();
     ok(holder.state.screen === 'flashcard' && holder.toasts.indexOf('There is nothing on this card.') >= 0, 'on a card with nothing on it it says so, and goes nowhere');
     holder.state.fc = real;
-    // home's own SEND is this phone's, with SEND ECASH and FLASHCARD and no WITHDRAW
+    // home's own SEND is this phone's, with SEND ECASH and FOXY CARD and no WITHDRAW
     holder.setState({ screen: 'home', stack: [] });
     update();
     holder.setState((p) => ({ screen: 'sendHow', stack: p.stack.concat([p.screen]), flow: 'send', sendFrom: '' }));
     update();
     const v = sendVals();
-    ok(!holder.fcOutMode() && rowsShown(v).join() === 'PASTE,SEND ECASH,CONTACTS,TYPE,FOXY CARD,BANK ACCOUNT', 'home’s SEND is as it was: PASTE, SEND ECASH, CONTACTS, TYPE, FLASHCARD and BANK ACCOUNT', rowsShown(v).join());
+    ok(!holder.fcOutMode() && rowsShown(v).join() === 'PASTE,SEND ECASH,CONTACTS,TYPE,FOXY CARD,BANK ACCOUNT', 'home’s SEND is as it was: PASTE, SEND ECASH, CONTACTS, TYPE, FOXY CARD and BANK ACCOUNT', rowsShown(v).join());
   }
 
   /* ---- 4: an invoice pasted in card mode, to the confirmation ------------------------------------------------- */
@@ -192,9 +192,9 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     const labels = spec.rows.map((r) => r.label);
     const from = spec.rows.find((r) => r.label === 'FROM') || {};
     ok(holder.state.screen === 'sendConfirm' && holder.state.sendFrom === 'card' && holder.fcOutMode(), 'a pasted invoice reaches its confirmation, still in card mode');
-    // (the design: DELIVERED TO, then NETWORK / FROM / ARRIVES / FEE two by two, FROM saying FLASHCARD and nothing under it)
+    // (the design: DELIVERED TO, then NETWORK / FROM / ARRIVES / FEE two by two, FROM saying FOXY CARD and nothing under it)
     ok(labels.join() === 'DELIVERED TO,NETWORK,FROM,ARRIVES,FEE' && spec.rows.slice(1).every((r) => r.basis === '50%') && from.value === 'FOXY CARD' && from.sub === '',
-       'with FROM / FLASHCARD after NETWORK, in a grid of four with ARRIVES and FEE', labels.join() + ' | ' + from.value + ' ' + from.sub);
+       'with FROM / FOXY CARD after NETWORK, in a grid of four with ARRIVES and FEE', labels.join() + ' | ' + from.value + ' ' + from.sub);
     const feeRow = spec.rows.find((r) => r.label === 'FEE') || {};
     ok(spec.cta === 'NEXT' && !spec.ctaBusy && feeRow.value === '~₿ 10' && feeRow.sub === '' && !feeRow.sub2Shown && spec.secondary.label === 'ADD A NOTE',
        'and the buttons read ADD A NOTE and NEXT, with the fee the mint quoted as ~₿ 10 and nothing under it', spec.cta + ' | ' + feeRow.value);
@@ -205,9 +205,9 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     const plain = holder.confirmSpec();
     // (PAY and what leaves on the keeper's 1l, 2026-11-06)
     ok(/^PAY /.test(plain.cta) && !plain.rows.some((r) => r.label === 'FROM'), 'out of card mode the same invoice says PAY and has no FROM row', plain.cta);
-    // PAYING FROM BITCOIN said the opposite of FROM FLASHCARD: in card mode it is gone, and a payment from this phone keeps it where it was
+    // PAYING FROM BITCOIN said the opposite of FROM FOXY CARD: in card mode it is gone, and a payment from this phone keeps it where it was
     ok(labels.indexOf('PAYING FROM') < 0 && labels.join() === 'DELIVERED TO,NETWORK,FROM,ARRIVES,FEE',
-       'in card mode the confirmation has FROM / FLASHCARD and no PAYING FROM', labels.join());
+       'in card mode the confirmation has FROM / FOXY CARD and no PAYING FROM', labels.join());
     const plainLabels = plain.rows.map((r) => r.label);
     ok(plainLabels.join() === 'DELIVERED TO,PAYING FROM,NETWORK,ARRIVES,FEE' && plain.rows[1].value === 'BITCOIN',
        'and a payment from this phone has its rows as before, PAYING FROM BITCOIN second', plainLabels.join());
@@ -241,8 +241,8 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     ok(holder.state.sendPhase === 'settled' && !card(holder), 'the person sees PAYMENT SENT, with nothing over it');
     // what HISTORY says of it: the app's own words for the entry (16-history-lists.js, 26-render-history-and-contacts.js)
     const appText = ['16-history-lists.js', '26-render-history-and-contacts.js'].map((f) => fs.readFileSync(path.join(__dirname, '..', 'build', 'app', f), 'utf8')).join('\n');
-    ok(/'paid from card': 'Paid from card'/.test(appText) && /fromCard: t\.fromCard \|\| ''/.test(appText) && /t\.fromCard && t\.dir === 'out'[^\n]*'Paid from the EcashCard'/.test(appText),
-       'and HISTORY says it was paid from the Flashcard, under the payee’s name as every payment has');
+    ok(/'paid from card': 'Paid from card'/.test(appText) && /fromCard: t\.fromCard \|\| ''/.test(appText) && /t\.fromCard && t\.dir === 'out'[^\n]*'Paid from the Foxy Card'/.test(appText),
+       'and HISTORY says it was paid from the Foxy Card, under the payee’s name as every payment has');
   }
 
   /* ---- 6: the mint refuses the melt: every piece goes back on the card ---------------------------------------- */
@@ -683,7 +683,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
   }
 
   /* ---- 21: a payment from the card that fails with nothing of the card's held: its TRY AGAIN is a new tap of the card,
-   *           never a payment from this phone's balance under a confirmation that says FROM FLASHCARD --------------------- */
+   *           never a payment from this phone's balance under a confirmation that says FROM FOXY CARD --------------------- */
   {
     await toCard();
     holder.fcOutOpen();
@@ -764,7 +764,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
 
   /* ---- 22: at a mint with two balances (dollars and bitcoin): a card pays in bitcoin, and card mode alone changes ----
    * The mint issues sat and usd (fakeMint `units`), this phone holds dollars as well as bitcoin, and its sends have no
-   * balance remembered yet. In card mode the confirmation is the card's: FROM FLASHCARD and NEXT, with no CURRENCY question
+   * balance remembered yet. In card mode the confirmation is the card's: FROM FOXY CARD and NEXT, with no CURRENCY question
    * first, no WALLET button and no RATE row, and the card's sats pay. The dollars are not touched. Out of card mode the same
    * invoice gets the two-balance CONFIRM PAYMENT again, with its WALLET button. */
   {
@@ -802,7 +802,7 @@ const addressServer = (m) => (/^https:\/\/addr\.test\//.test(String(m.url)) ? '2
     const labels = sp.rows.map((r) => r.label);
     ok(!sp.wallet && labels.indexOf('RATE') < 0 && labels.indexOf('PAYING FROM') < 0 && sp.cta === 'NEXT'
        && sp.rows.some((r) => r.label === 'FROM' && r.value === 'FOXY CARD'),
-       'SEND from the card at a two-unit mint: FROM FLASHCARD and NEXT, with no WALLET button and no RATE row', labels.join() + ' | ' + sp.cta);
+       'SEND from the card at a two-unit mint: FROM FOXY CARD and NEXT, with no WALLET button and no RATE row', labels.join() + ' | ' + sp.cta);
     ok(!two.state.feeQ && !!two._feeQuote && (two._feeQuote.unit === undefined || two._feeQuote.unit === 'sat'),
        'and its fee was asked once, in sats: no quote of both balances', JSON.stringify(two._feeQuote && { unit: two._feeQuote.unit, fee: two._feeQuote.feeReserve }));
     sp.go();

@@ -1688,7 +1688,7 @@ nostr31 = {'secp256k1_ecdh', 'secp256k1_ec_pubkey_parse', 'secp256k1_keypair_cre
            'secp256k1_keypair_xonly_pub', 'secp256k1_xonly_pubkey_serialize', 'secp256k1_xonly_pubkey_parse',
            'secp256k1_schnorrsig_sign32', 'secp256k1_schnorrsig_verify'}
 NOSTR_DIR = os.path.join('Foxy', 'Nostr')
-# and what NUT13.swift alone may call for the Foxy ID (CashuID.swift): d·E, NUT-28's blinding, the delivery key's
+# and what NUT13.swift alone may call for the Cashu ID (CashuID.swift): d·E, NUT-28's blinding, the delivery key's
 # x-only half, and NUT-11's BIP-340 signature by a payment's one-time key, which never leaves native code
 cashuid31 = {'secp256k1_ec_pubkey_parse', 'secp256k1_ec_pubkey_tweak_mul', 'secp256k1_keypair_create',
              'secp256k1_keypair_xonly_pub', 'secp256k1_xonly_pubkey_serialize', 'secp256k1_schnorrsig_sign32',
@@ -1857,14 +1857,14 @@ actions32 = ['seedStatus', 'seedCreate', 'seedMigrate', 'countersImport', 'count
              'p2pkReserve', 'p2pkPubkeys', 'p2pkKey',
              # a card's owner key, from the seed and the card's key: its public half, and signatures for a fixed list of labels
              'cardOwnerKey', 'cardOwnerSign',
-             # the Foxy ID: its public keys, signatures by a payment's one-time key (never the key), the payer's
+             # the Cashu ID: its public keys, signatures by a payment's one-time key (never the key), the payer's
              # proved name, and the base of this phone's own throwaway keys for what it pays
              'cashuIdPublic', 'cashuIdSign', 'cashuIdTag', 'cashuIdEphemeral',
              # and the ID key's own signature, for a delivery paid to it unblinded that the receiver takes anyway
              'cashuIdSignUnblinded',
              # and a shop's collection: the ID key over a shop's nonce, and the ID key moved by an order's r
              'cashuIdShop']
-# a shop's collection signs with the ID key moved by an order's r, and only for the key that move names (FOXY-ID.md, Shops):
+# a shop's collection signs with the ID key moved by an order's r, and only for the key that move names (CASHU-ID.md, Shops):
 # r a number above 0 and below n, the quote's key and every secret's lock exactly ID + r·G, the collect digest made natively
 cid32 = read32('Foxy', 'Keychain', 'CashuID.swift')
 for need32 in ('guard NUT13.isScalar(r, ctx) else { throw Failure.badTweak }',

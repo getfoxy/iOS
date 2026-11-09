@@ -234,7 +234,7 @@ class Component extends DCLogic {
    *
    * A row's tap shuts the drawer and arms `menuReturn`. The first screen that is not home marks it as away, and home
    * reached again after that, by back, CANCEL, DONE or the edge swipe, opens the drawer once and lets it go. A row whose
-   * tap puts something over home instead (a stage such as MY FOXY ID, a card, a PIN pad) opens the drawer again when
+   * tap puts something over home instead (a stage such as MY CASHU ID, a card, a PIN pad) opens the drawer again when
    * that is closed (`menuReturnSoon`, from `hideStage`, a card's close and `pinDismiss`); one whose tap is an answer
    * that takes its time (a face, the phone's own words) hands its promise back, and the drawer opens when that is over
    * (`menuReturnSettle`). A tap that put nothing anywhere (a toast) leaves nothing armed (`menuReturnCheck`).
@@ -405,7 +405,7 @@ class Component extends DCLogic {
     if (s.screen === 'fcOuConfirm') return this.fcOuSpec();
     // dollars into bitcoin or back, at this mint (26i-swap.js)
     if (s.screen === 'swapConfirm') return this.swapSpec();
-    // paying a contact's Foxy ID (26o-cashu-id.js)
+    // paying a contact's Cashu ID (26o-cashu-id.js)
     if (s.screen === 'cidConfirm') return this.cidSpec();
     // sendConfirm
     const W = window.FoxyWallet;
@@ -413,7 +413,7 @@ class Component extends DCLogic {
     if (s.screen === 'sendConfirm' && (s.recipientKind === 'invoice' || s.recipientKind === 'email')
         && this.pfAway && this.pfAway('send') && !(this.cardSendNow && this.cardSendNow())) return this.payAwaySpec();
     /* At a mint with two balances: the owner's CONFIRM PAYMENT, with its WALLET button. Not paying from a card, which holds
-     * one kind of money and pays in it: that is the confirmation below, with FROM FLASHCARD and NEXT, and no WALLET button
+     * one kind of money and pays in it: that is the confirmation below, with FROM FOXY CARD and NEXT, and no WALLET button
      * (a dollar card's says the mint's price under its amount, since it pays a bitcoin invoice in dollars). */
     if (s.screen === 'sendConfirm' && (s.recipientKind === 'invoice' || s.recipientKind === 'email')
         && this.twoUnitsOn && this.twoUnitsOn() && !this.cardSendNow()) return this.confirmTwoSpec();
@@ -445,7 +445,7 @@ class Component extends DCLogic {
     const cfig = (n) => (cardUsd ? { main: this.unitFigure(n, 'usd'), sub: '' } : this.money(n));
     const rows = [
       this.cfRow('DELIVERED TO', this.sendToText()),
-      // (from a card the FROM FLASHCARD row below says where it is paid from, and PAYING FROM BITCOIN would say otherwise)
+      // (from a card the FROM FOXY CARD row below says where it is paid from, and PAYING FROM BITCOIN would say otherwise)
       // (with a choice on PAY FROM, the mint and the balance at it: 26l-pay-from.js)
       out ? null : this.cfRow('PAYING FROM', (this.pfMany && this.pfMany('send')) ? this.pfLabel(this.pfHome(), 'sat') : (s.payFrom || 'BITCOIN'), { half: true }),
       this.cfRow('NETWORK', s.recipientKind === 'address' ? 'ON-CHAIN' : 'LIGHTNING', { half: true }),
@@ -879,7 +879,7 @@ class Component extends DCLogic {
   }
 
   /* A card on CURRENCY: the balance for this payment, and this one only. */
-  /* Except setting up a Flashcard (`currencyFlow: 'card'`, 26f-flashcard.js `fcUnitAsk`): the pick is what that card will
+  /* Except setting up a Foxy Card (`currencyFlow: 'card'`, 26f-flashcard.js `fcUnitAsk`): the pick is what that card will
    * hold, and nothing of this phone's own choice is written. Back to the card's screen, and on with the set-up. */
   currencyPick(unit) {
     const s = this.state;

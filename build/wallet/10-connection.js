@@ -105,7 +105,7 @@
      * mint is not removed yet: an invoice asked for and not yet paid or collected, a payment arriving and not yet swapped
      * in, a card's load whose pieces are at it, a payment still routing, a
      * transfer in flight from or to it, a payment being brought home from or to it, a swap between its two balances, an
-     * on-chain address there still watched, a payment to a Foxy ID still waiting to be collected, a till open at it, a
+     * on-chain address there still watched, a payment to a Cashu ID still waiting to be collected, a till open at it, a
      * cashier code that names it while the code lives, and a cashier's till at it. Local, and at once. */
     mintRemoveHolds: function (url) {
       var c = canonicalMint(String(url || ''));
@@ -148,7 +148,7 @@
         if (r && at(r.mint) && Number(r.at) > watchFrom) add('An on-chain address there is still watched.');
       });
       (load(K.onchainOut, []) || []).forEach(function (r) { if (r && at(r.mint)) add('An on-chain payment from there has not confirmed.'); });
-      cidOutboxRows().forEach(function (r) { if (tokenAt(r.token)) add('A payment to a Foxy ID from there is not collected yet.'); });
+      cidOutboxRows().forEach(function (r) { if (tokenAt(r.token)) add('A payment to a Cashu ID from there is not collected yet.'); });
       var till = tillKeeperNow();
       if (till && till.mints.some(at)) add('Your till is open at it.');
       (load(K.tillPasses, []) || []).forEach(function (r) {

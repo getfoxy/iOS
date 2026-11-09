@@ -383,7 +383,7 @@ function link(hash, opts) {
 
 // ---- the page: act, keep or ignore ----------------------------------------------------------
 //
-// The class is the app's own parts (flashcard-ui-kit.js builds it as the flashcard suites do) with the card's tap stood in for,
+// The class is the app's own parts (flashcard-ui-kit.js builds it as the Foxy Card suites do) with the card's tap stood in for,
 // so these are about what the page decides. tests/flashcard-screens.js has it begin a real tap.
 const { appOn } = require('./flashcard-ui-kit');
 
@@ -417,7 +417,7 @@ const BUSY_SCREENS = ['amount', 'bkStart', 'confirm', 'crossConfirm', 'depConfir
   'payFrom',
   // and SWAP's confirmation and SWAPPED: a swap being decided, and one just made
   'swapConfirm', 'swapDone',
-  // a Foxy ID payment being decided (26o-cashu-id.js)
+  // a Cashu ID payment being decided (26o-cashu-id.js)
   'cidConfirm',
   // SEND > BANK ACCOUNT's username or River's invoice being given (26q-bank.js)
   'bankAsk',
@@ -537,7 +537,7 @@ const nap = (ms) => new Promise((go) => setTimeout(go, ms));
     ok(at().screen === 'switchMint' && at().transfer === true && at().pick === true, 'a transfer\'s step and a card\'s pick are read off the state');
   }
 
-  // ---- from home, nothing in the way: act, and what MENU > FLASHCARD does ----
+  // ---- from home, nothing in the way: act, and what MENU > FOXY CARD does ----
   {
     const { app } = pageApp();
     cardLines.length = 0;

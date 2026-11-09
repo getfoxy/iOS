@@ -1,5 +1,5 @@
 {
-  "about": "SHOPS (docs/FOXY-ID.md): P′ = ID + r·G, its key d + r, the collect digest SHA-256(\"foxy-shop-collect-v1\" ‖ nonce ‖ host ‖ the request’s full path: the link’s path joined with the call’s, no trailing slash, no query), NUT-20’s amended and legacy messages; made by tests/harness.js",
+  "about": "SHOPS (docs/CASHU-ID.md): P′ = ID + r·G, its key d + r, the collect digest SHA-256(\"foxy-shop-collect-v1\" ‖ nonce ‖ host ‖ the request’s full path: the link’s path joined with the call’s, no trailing slash, no query), NUT-20’s amended and legacy messages; made by tests/harness.js",
   "words": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
   "id": "0365233b8ef683341a31e9cd29dcbc2612c5f4e07bb5dbad2d2e7d64fefc0bd896",
   "r": "1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",

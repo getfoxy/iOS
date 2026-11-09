@@ -1,12 +1,12 @@
-  /* ---- the Foxy ID: MY FOXY ID, a contact added by paste, a contact paid ---------------------------------------------
+  /* ---- the Cashu ID: MY CASHU ID, a contact added by paste, a contact paid ---------------------------------------------
    *
-   * The wallet's half is 08e-cashu-id.js and docs/FOXY-ID.md. Here:
+   * The wallet's half is 08e-cashu-id.js and docs/CASHU-ID.md. Here:
    *
-   *   MY FOXY ID (the menu, and home's round button at the top left)
+   *   MY CASHU ID (the menu, and home's round button at the top left)
    *                                the stage screen that shows a code to be scanned (`stageScreen`), with SHARE above DONE,
    *                                the share sheet the app uses for a token; the ID string is the code.
    *   a pasted or scanned ID ..... NAME THIS CONTACT?, a card with a field (`blockedCard` `field`); your own is said to be
-   *                                yours, a mistyped one is refused ("That is not a Foxy ID.").
+   *                                yours, a mistyped one is refused ("That is not a Cashu ID.").
    *   paying one ................. CONTACTS (from SEND or the menu) → SET AMOUNT → the confirmation, which says once that the money
    *                                comes back after thirty days if it is not collected → sent over Nostr.
    *   money at another mint ...... PAID AT ANOTHER MINT, a card with three answers (`cidOfferCard`): BRING IT HOME (its fee
@@ -19,24 +19,24 @@
    *
    * The payment is made at the mint this phone is on, from the balance the keypad is in (dollars first, as a send is). */
 
-  /* MY FOXY ID: the code, once the phone has given its two keys. Opening it is what makes this phone listen for payments
+  /* MY CASHU ID: the code, once the phone has given its two keys. Opening it is what makes this phone listen for payments
    * to it (`cashuIdShown`): an ID nobody was shown has nothing to listen for. */
   cidShow() {
     const W = window.FoxyWallet;
-    if (!W || !W.cashuIdMine) { this.toast('This Foxy has no Foxy ID.', true); return; }
+    if (!W || !W.cashuIdMine) { this.toast('This Foxy has no Cashu ID.', true); return; }
     const run = (this._cidShowRun = (this._cidShowRun || 0) + 1);
-    this.stageScreen('cashuId', { art: '', title: 'MY FOXY ID', body: 'Reading it from your seed', dots: true, button: 'CANCEL',
+    this.stageScreen('cashuId', { art: '', title: 'MY CASHU ID', body: 'Reading it from your seed', dots: true, button: 'CANCEL',
       go: () => { if (this._cidShowRun === run) this._cidShowRun = 0; } });
     Promise.resolve(W.cashuIdMine()).then((mine) => {
       if (this._cidShowRun !== run) return;
-      if (!mine || !mine.text) throw new Error('No Foxy ID was read.');
+      if (!mine || !mine.text) throw new Error('No Cashu ID was read.');
       this.cidShowCode(mine.text);
       if (W.cashuIdShown) Promise.resolve(W.cashuIdShown()).catch(() => {});
     }).catch((e) => {
       if (this._cidShowRun !== run) return;
       this._cidShowRun = 0;
       this.hideStage('cashuId');
-      this.blockedCard('cidNone', { title: 'NO FOXY ID', reason: (W.reason ? W.reason(e) : String((e && e.message) || e)) });
+      this.blockedCard('cidNone', { title: 'NO CASHU ID', reason: (W.reason ? W.reason(e) : String((e && e.message) || e)) });
     });
   }
 
@@ -44,7 +44,7 @@
   cidShowCode(text) {
     const W = window.FoxyWallet;
     this.stageScreen('cashuId', {
-      art: '', title: 'MY FOXY ID', qr: String(text),
+      art: '', title: 'MY CASHU ID', qr: String(text),
       body: 'Another Foxy scans or pastes this to add you to their contacts and pay you. Each payment is locked to a new key only you can open.',
       above: 'SHARE',
       aboveGo: () => { if (!W || !W.share || !W.share(String(text))) this.toast('Sharing is not available here.', true); },
@@ -68,7 +68,7 @@
         if (this.refreshBalance) this.refreshBalance();
         this.loadHistory();
         const st = String((r && r.state) || '');
-        if (st === 'taken') this.toast('Taken. The mint can link this payment to your Foxy ID.');
+        if (st === 'taken') this.toast('Taken. The mint can link this payment to your Cashu ID.');
         else if (st === 'gone' || st === 'seen') this.toast('That payment is no longer waiting.', true);
         else this.toast(String((r && r.why) || '') || 'That did not work.', true);
       }).catch((e) => {
@@ -84,23 +84,23 @@
     });
   }
 
-  /* A card with a field to paste a Foxy ID into, NEXT handing the text to `read`; CANCEL shuts it. Shared with the till's
+  /* A card with a field to paste a Cashu ID into, NEXT handing the text to `read`; CANCEL shuts it. Shared with the till's
    * (26p-till-tips.js, `tillIdPaste`) so the two stay the same card. */
   cidPasteCard(kind, read) {
     this.blockedCard(kind, {
-      tone: 'ask', title: 'PASTE A FOXY ID',
-      reason: 'The Foxy ID they shared from MY FOXY ID. It starts foxyid1.',
+      tone: 'ask', title: 'PASTE A CASHU ID',
+      reason: 'The Cashu ID they shared from MY CASHU ID. It starts foxyid1.',
       field: { value: '', placeholder: 'foxyid1…', max: 400 },
       retry: 'NEXT', go: (text) => read(text),
       shut: { label: 'CANCEL' },
     });
   }
 
-  /* PASTE A FOXY ID and SCAN A FOXY ID, on the empty CONTACTS: the ID is read as a pasted or scanned one
+  /* PASTE A CASHU ID and SCAN A CASHU ID, on the empty CONTACTS: the ID is read as a pasted or scanned one
    * is (`cidAddAsk`), which goes on to NAME THIS CONTACT?. */
   cidPasteAsk() { this.cidPasteCard('cidPaste', (text) => this.cidAddAsk(text)); }
 
-  /* PASTE A FOXY ID, tapped: the clipboard read through the bridge, as home's PASTE reads it (iOS asks its paste
+  /* PASTE A CASHU ID, tapped: the clipboard read through the bridge, as home's PASTE reads it (iOS asks its paste
    * question there), and the first foxyid1 string on it straight to NAME THIS CONTACT?. A clipboard with none is
    * THAT WON'T WORK; a page with no clipboard to read gets the card with a field. */
   cidClipboardAdd() {
@@ -111,7 +111,7 @@
       if (!m) {
         this.blockedCard('cidBad', {
           tone: 'warn', title: 'THAT WON\u2019T WORK',
-          reason: String(text || '').trim() ? 'That is not a Foxy ID.' : 'Nothing on the clipboard.',
+          reason: String(text || '').trim() ? 'That is not a Cashu ID.' : 'Nothing on the clipboard.',
           chip: 'Ask them to share it again.',
         });
         return;
@@ -123,10 +123,10 @@
   cidScanAsk() {
     const W = window.FoxyWallet;
     if (!W || !W.scan) return;
-    Promise.resolve(W.scan('Scan a Foxy ID')).then((text) => { if (String(text || '').trim()) this.cidAddAsk(text); }).catch(() => {});
+    Promise.resolve(W.scan('Scan a Cashu ID')).then((text) => { if (String(text || '').trim()) this.cidAddAsk(text); }).catch(() => {});
   }
 
-  /* A Foxy ID scanned or pasted (`acceptTarget`): NAME THIS CONTACT?, or why not. */
+  /* A Cashu ID scanned or pasted (`acceptTarget`): NAME THIS CONTACT?, or why not. */
   cidAddAsk(text) {
     const W = window.FoxyWallet;
     if (!W || !W.cashuIdCheck) return false;
@@ -134,7 +134,7 @@
     Promise.resolve(W.cashuIdCheck(t)).then((r) => {
       if (r.own) {
         this.blockedCard('cidOwn', {
-          tone: 'warn', title: 'THIS IS YOUR FOXY ID',
+          tone: 'warn', title: 'THIS IS YOUR CASHU ID',
           reason: 'Share it with someone else so they can add you and pay you.',
         });
         return;
@@ -143,7 +143,7 @@
     }).catch((e) => {
       this.blockedCard('cidBad', {
         tone: 'warn', title: 'THAT WON’T WORK',
-        reason: (W.reason ? W.reason(e) : String((e && e.message) || e)) || 'That is not a Foxy ID.',
+        reason: (W.reason ? W.reason(e) : String((e && e.message) || e)) || 'That is not a Cashu ID.',
         chip: 'Ask them to share it again.',
       });
     });
@@ -154,8 +154,8 @@
   cidNameAsk(text, known) {
     this.blockedCard('cidName', {
       tone: 'ask', title: 'NAME THIS CONTACT?',
-      reason: known ? 'You have this Foxy ID as ' + known + '. A new name replaces it.'
-        : 'A Foxy ID from another Foxy. Give it a name to find it in your contacts.',
+      reason: known ? 'You have this Cashu ID as ' + known + '. A new name replaces it.'
+        : 'A Cashu ID from another Foxy. Give it a name to find it in your contacts.',
       field: { value: known || '', placeholder: 'Name', max: 40 },
       retry: 'SAVE',
       go: (name) => this.cidAddGo(text, name),
@@ -173,12 +173,12 @@
     }).catch((e) => this.toast(W.reason ? W.reason(e) : String((e && e.message) || e), true));
   }
 
-  /* A contact that is a Foxy ID, tapped: SET AMOUNT for it, dollars first. */
+  /* A contact that is a Cashu ID, tapped: SET AMOUNT for it, dollars first. */
   cidPayStart(c) {
     if (this.offlineNow && this.offlineNow()) { this.offlineNo('Paying a contact'); return; }
     this.setState(p => ({
       screen: 'amount', stack: p.stack.concat([p.screen]), flow: 'send',
-      recipient: String(c.handle || ''), recipientKind: 'cashuid', recipientName: String(c.name || 'Foxy ID'),
+      recipient: String(c.handle || ''), recipientKind: 'cashuid', recipientName: String(c.name || 'Cashu ID'),
       asset: '', network: '', amount: '', unit: 'USD', ctSearch: false,
       wallet: '', walletAuto: false, walletTapped: false, feeQ: null, cidBusy: false, cidErr: '',
     }));
@@ -215,8 +215,8 @@
     const rows = [
       this.cfRow('TO', name.toUpperCase()),
       this.cfRow('PAYING FROM', String(at).toUpperCase() + (unit === 'usd' ? ' · DOLLARS' : ''), { half: true }),
-      this.cfRow('NETWORK', 'FOXY ID', { half: true }),
-      // not a promise of when: their phone has to be listening, and the relays have to keep it (FOXY-ID.md)
+      this.cfRow('NETWORK', 'CASHU ID', { half: true }),
+      // not a promise of when: their phone has to be listening, and the relays have to keep it (CASHU-ID.md)
       this.cfRow('GOES BY', 'NOSTR, SENT DAILY', { ink: 'var(--acc)', half: true }),
     ];
     if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
@@ -295,8 +295,8 @@
       const at = (this.mintNameOf && this.mintNameOf(o.mint)) || o.host || 'another mint';
       const usd = o.unit === 'usd';
       const row = {
-        name: 'From ' + (o.name || 'a Foxy ID'), party: 'From ' + (o.name || 'a Foxy ID'), note: '',
-        hash: 'cid-waiting-' + o.key, dir: 'in', sats: usd ? 0 : Math.round(Number(o.amount) || 0), fee: 0, rail: 'Foxy ID',
+        name: 'From ' + (o.name || 'a Cashu ID'), party: 'From ' + (o.name || 'a Cashu ID'), note: '',
+        hash: 'cid-waiting-' + o.key, dir: 'in', sats: usd ? 0 : Math.round(Number(o.amount) || 0), fee: 0, rail: 'Cashu ID',
         time: this.txLabel ? this.txLabel(new Date(Number(o.at) || Date.now()), now) : '', atMs: Number(o.at) || 0,
         pending: true, cidWait: true, cidKey: o.key, cidLine: 'At ' + at + ' \u00b7 tap to decide', mint: o.mint, token: '',
       };
@@ -323,7 +323,7 @@
     if (!v || !v.key) return;
     const unit = v.unit === 'usd' ? 'usd' : 'sat';
     const at = (this.mintNameOf && this.mintNameOf(v.mint)) || v.host || 'another mint';
-    const who = v.name || 'A Foxy ID';
+    const who = v.name || 'A Cashu ID';
     let reason = who + ' sent you ' + this.cidMoney(v.amount, unit) + ' at ' + at + ', a mint you don\u2019t use.';
     if (v.others > 0) {
       reason += '\n' + (v.others === 1 ? 'One more payment waits there' : v.others + ' more payments wait there')
@@ -396,14 +396,14 @@
     };
     this.blockedCard('cidChoices', {
       tone: 'ask', title: 'OTHER MINTS',
-      reason: 'What Foxy does by itself with a payment to your Foxy ID at a mint you don\u2019t use. Tap one to forget it: the next payment there asks again.',
+      reason: 'What Foxy does by itself with a payment to your Cashu ID at a mint you don\u2019t use. Tap one to forget it: the next payment there asks again.',
       pills: list.map((c) => ({ label: c.host + ' \u00b7 ' + (said[c.choice] || c.choice), tap: () => forget(c.host) })),
       pillsFirst: true,
       also: list.length > 1 ? { label: 'FORGET ALL', tap: () => forget('') } : null,
     });
   }
 
-  /* A payment to this phone's Foxy ID that every check on the phone has passed, while the mint swaps it: said at once,
+  /* A payment to this phone's Cashu ID that every check on the phone has passed, while the mint swaps it: said at once,
    * as arriving and never as received. The money is not counted until the swap lands, and PAYMENT RECEIVED follows
    * then (`_onCashuIdPaid`). Three to six seconds sooner than that, which is the mint's check and swap over Tor. */
   cidArrivingSaid(v) {
@@ -414,7 +414,7 @@
     this.toast(this.stageMoney(amount, unit) + (who ? ' from ' + who : '') + ' is arriving');
   }
 
-  /* On every return to the foreground (`inboxWake`): the phone closed the Foxy ID's inbox as Foxy went away. */
+  /* On every return to the foreground (`inboxWake`): the phone closed the Cashu ID's inbox as Foxy went away. */
   cidWake() {
     const W = window.FoxyWallet;
     if (!W) return;

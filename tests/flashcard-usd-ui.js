@@ -32,7 +32,7 @@
  *      of the very pieces melted, and the receiver nothing; refused there, PAID IN DOLLARS with every cent the card paid;
  *      a quote about to run out asked again before the card is touched; the agreement felt as a step, not a refusal
  *   18 a wrong PIN, then TRY AGAIN: the pad still says the dollars a dollar card pays
- *   19 FLASHCARD on the send screen while this phone sends from dollars: a bitcoin card is loaded with sats, as ever
+ *   19 FOXY CARD on the send screen while this phone sends from dollars: a bitcoin card is loaded with sats, as ever
  *   20 what is owed to a bitcoin card and a dollar card at once is said in one unit, the card's on show
  *   21 the rest of a dollar card's screens, each in dollars: a payment held and let go (that card's alone), one cut short,
  *      the log and its receipts, TAKE BACK, a reset cut short, a withdrawal cut short
@@ -899,7 +899,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     ok(!sp.wallet && sp.cta === 'NEXT' && rows.join() === 'DELIVERED TO,NETWORK,FROM,ARRIVES,FEE' && !rate && sp.secondary.label === 'ADD A NOTE'
        && /^~\$ \d+\.\d\d$/.test(fee.value) && fee.sub === '' && /^\$ \d+\.\d\d$/.test(sp.amount) && /^at \$ [\d,]+ per bitcoin$/.test(sp.amountSub)
        && sp.amountSub === 'at $ ' + holder.group(Math.round(holder._feeQuote.rate.usdPerBtc)) + ' per bitcoin',
-       'FROM FLASHCARD: the dollars it costs, at the mint’s price under them, the fee as ~$, ADD A NOTE and NEXT', JSON.stringify([sp.amount, sp.amountSub, fee.value, rows]));
+       'FROM FOXY CARD: the dollars it costs, at the mint’s price under them, the fee as ~$, ADD A NOTE and NEXT', JSON.stringify([sp.amount, sp.amountSub, fee.value, rows]));
     const at = H.trace.length;
     k.tap();
     sp.go();
@@ -1152,7 +1152,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     booksGood('TRY AGAIN in dollars', H, R);
   }
 
-  /* ---- 19: FLASHCARD on the send screen while this phone sends from dollars ----------------------------------------- */
+  /* ---- 19: FOXY CARD on the send screen while this phone sends from dollars ----------------------------------------- */
   {
     const { H, R, holder } = await world();
     const k = newCard(R, undefined, { format: 4 });
@@ -1164,7 +1164,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
     holder.price = 80000;
     const satBefore = sats(H), usdBefore = usd(H);
     holder.fcSendCard();
-    ok(holder.usdKeypad(), 'FLASHCARD from dollars: the dollar keypad');
+    ok(holder.usdKeypad(), 'FOXY CARD from dollars: the dollar keypad');
     holder.state.amount = '1.00';
     k.tap();
     holder.fcAmountNext();
@@ -1174,7 +1174,7 @@ const tapDone = (a, ctx) => until('the tap to be over', () => !(a._fcTaps > 0) &
        'a bitcoin card held to it is loaded with the sats those dollars are, from this phone’s bitcoin, as it always was',
        JSON.stringify({ card: k.balance(), sat: satBefore - sats(H), usd: usd(H) - usdBefore, up: card(holder) && card(holder).all }));
     shut(holder);
-    booksGood('FLASHCARD from dollars, a bitcoin card', H, R);
+    booksGood('FOXY CARD from dollars, a bitcoin card', H, R);
   }
 
   /* ---- 20: owed to a bitcoin card and a dollar card at once --------------------------------------------------------- */

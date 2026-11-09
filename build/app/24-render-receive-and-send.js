@@ -504,7 +504,7 @@
      * people learn. Dimmed, still tappable, and it says why. */
     const off = this.offlineNow();
     /* Paying from a card (SEND on the card's own screen, 26f-flashcard.js `fcOutOpen`): the same screen and camera, with the
-     * card's WITHDRAW at the top of the rows, and SEND ECASH and FLASHCARD gone (neither is a payment from the card).
+     * card's WITHDRAW at the top of the rows, and SEND ECASH and FOXY CARD gone (neither is a payment from the card).
      * PASTE, CONTACTS and TYPE read what they read as ever; what they lead to is paid from the card (`fcOutNext`). */
     const cardOut = !!(this.fcOutMode && this.fcOutMode());
     return {
@@ -555,7 +555,7 @@
       // and offline the two that need a network are dimmed, not removed
       clTypeDim: off ? '0.38' : '1',
       clContactsDim: off ? '0.38' : '1',
-      /* FLASHCARD, last: money onto a card held to this phone (26f-flashcard.js, `fcSendCard`). The card is written to
+      /* FOXY CARD, last: money onto a card held to this phone (26f-flashcard.js, `fcSendCard`). The card is written to
        * through the mint, so it is dimmed offline too, and says why when pressed. */
       clCardOn: !cardOut,
       clCardDim: off ? '0.38' : '1',

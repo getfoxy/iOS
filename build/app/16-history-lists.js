@@ -8,11 +8,11 @@
         .localeCompare(String(b.name || b.handle), undefined, { sensitivity: 'base' }));
     return list.map(c => ({
       name: c.name || c.handle,
-      // a Foxy ID is a hundred characters nobody reads: said as what it is (26o-cashu-id.js)
-      handle: c.cid ? 'FOXY ID' : c.handle,
+      // a Cashu ID is a hundred characters nobody reads: said as what it is (26o-cashu-id.js)
+      handle: c.cid ? 'CASHU ID' : c.handle,
       ini: String(c.name || c.handle).charAt(0).toUpperCase(),
       tint: c.tint || 'var(--acc)',
-      // a Foxy ID goes to the amount (`cidPayStart`), from the menu's CONTACTS and from SEND's alike, as an address does
+      // a Cashu ID goes to the amount (`cidPayStart`), from the menu's CONTACTS and from SEND's alike, as an address does
       tap: c.cid ? () => this.cidPayStart(c) : () => this.setState(p => ({
         screen: 'amount',
         stack: p.stack.concat([p.screen]),
@@ -702,7 +702,7 @@
         });
       }
 
-      /* Payments to this phone’s Foxy ID at a mint it does not use, waiting for an answer (26o-cashu-id.js): listed
+      /* Payments to this phone’s Cashu ID at a mint it does not use, waiting for an answer (26o-cashu-id.js): listed
        * where they arrived, pending, in no balance. */
       (this.cidWaitingRows ? this.cidWaitingRows() : []).forEach(t => {
         const d = new Date(t.atMs || Date.now());
@@ -724,7 +724,7 @@
       const merged = W.book().map((c, i) => Object.assign({
         name: c.name, handle: c.handle,
         tint: ['var(--acc)', '#5B45D0', '#0E9E93', '#D4409A', '#2E7CF6', '#E0602E'][i % 6],
-      // a Foxy ID's two keys go with its name: they are how it is paid (26o-cashu-id.js)
+      // a Cashu ID's two keys go with its name: they are how it is paid (26o-cashu-id.js)
       }, c.cid ? { cid: c.cid } : {}));
 
       // Everything settled that has not been announced yet. Incoming ones queue
@@ -783,7 +783,7 @@
         if (tags.change) { this.txIsNew(t.hash); return; }
         /* Money moved between this phone and a card somebody was holding to
          * it: a top-up, a withdrawal, a renewal, a lost card taken back. The
-         * FLASHCARD screens say how each went, at the moment it did, and a
+         * FOXY CARD screens say how each went, at the moment it did, and a
          * confirmation screen a second later would say it twice. A payment
          * taken from a card is not this: it is tagged apart and announced like
          * any other. */

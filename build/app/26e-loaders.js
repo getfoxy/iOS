@@ -44,7 +44,7 @@
       + '<div style="position:absolute;left:50%;top:50%;width:3px;height:7px;margin:-7px 0 0 -1.5px;border-radius:2px;background:#13333C;transform-origin:50% 100%;transform:rotate(90deg)"></div>'
       + '</div></div>',
     /* A card held to the phone: its outline, its chip, and the contactless
-     * mark breathing beside it (the FLASHCARD screens, 26f-flashcard.js). */
+     * mark breathing beside it (the FOXY CARD screens, 26f-flashcard.js). */
     card: '<div style="position:relative;width:150px;height:96px;border-radius:14px;border:3px dashed #13333C;background:rgba(255,255,255,.45);animation:offlineFade 2.4s ease-in-out infinite">'
       + '<div style="position:absolute;left:16px;top:30px;width:30px;height:24px;border-radius:5px;border:3px solid #13333C;box-sizing:border-box"></div>'
       + '<svg viewBox="0 0 24 24" fill="none" stroke="#13333C" stroke-width="2.2" stroke-linecap="round" style="position:absolute;right:14px;top:24px;width:44px;height:44px">'
@@ -237,7 +237,7 @@
     if (this.syncPreview) this.syncPreview();
     // a card screen coming down may be the end of a card flow, and what waited for it is raised (26f-flashcard.js)
     if (was === 'card' || was === 'cardReady' || was === 'cardBack' || was === 'cardAgain') this.cardFlowMayHaveEnded();
-    // a stage a menu row opened (MY FOXY ID): the menu again, unless another stage takes its place (01-ui-basics.js)
+    // a stage a menu row opened (MY CASHU ID): the menu again, unless another stage takes its place (01-ui-basics.js)
     if (this.menuReturnSoon) this.menuReturnSoon();
     return true;
   }

@@ -14,7 +14,7 @@
  *                 and BACK with every entry kept, a route lost between NEXT and the tap, TAP TO FINISH, and the card set up
  *                 with what was chosen once the route is back;
  *   the price     figures typed in dollars offline are written at the tap's price, under a day old, or refused (NO BITCOIN
- *                 PRICE): the set-up, CARD LIMITS and SEND > FLASHCARD; TRY AGAIN with another card is THAT IS ANOTHER CARD;
+ *                 PRICE): the set-up, CARD LIMITS and SEND > FOXY CARD; TRY AGAIN with another card is THAT IS ANOTHER CARD;
  *                 the kept entries are forgotten as Foxy locks or is put away;
  *   the keypad    `syncUnit` (09-melt-paste-switch.js) lifted out of the app: a limit's keypad stays in dollars offline at the
  *                 last price seen, a dollar card's never goes to sats, sats only where no price was ever seen, and a send
@@ -324,7 +324,7 @@ const up = (c) => c.W._privacy({ tor: 'up', progress: 100, everUp: true, unprote
     ok(/this\.fcSuForget\(\)/.test(lock) && /this\.fcSuForget\(\)/.test(put), 'the lock and a put-away both forget a set-up’s kept entries');
   }
   {
-    // SEND > FLASHCARD in dollars to a bitcoin card: its sats worked out again at the tap's price, not at NEXT's
+    // SEND > FOXY CARD in dollars to a bitcoin card: its sats worked out again at the tap's price, not at NEXT's
     const H = await funded({}, 20000);
     const a = appOn(H);
     a.price = 60000;

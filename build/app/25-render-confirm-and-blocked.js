@@ -195,7 +195,7 @@
       grey: { bg: 'linear-gradient(160deg,#2A3034,#1C2124)', ink: 'rgba(255,255,255,.55)', inkRgb: '255,255,255',
         blend: 'normal', edge: 'rgba(255,255,255,.1)', badgeBg: 'rgba(255,255,255,.14)', badgeInk: 'rgba(255,255,255,.55)' },
     };
-    // (setting up a Flashcard: what the card will hold, `fcUnitAsk`; nothing of this phone's own choice is written for it)
+    // (setting up a Foxy Card: what the card will hold, `fcUnitAsk`; nothing of this phone's own choice is written for it)
     const cardFlow = s.currencyFlow === 'card';
     /* (a card of software 1.23 asked which of its currencies, 26f-flashcard.js `fcPickUnit`: its own question, its own balances, and a
      * currency that cannot do what is asked greyed with why: `curCard` { question, foot, bal, short, mark }) */

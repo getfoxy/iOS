@@ -1,10 +1,10 @@
 'use strict';
-/* attack-dropbox-2026-11-06.js — what the relays can tie together from a Foxy ID's listens, before and after the
- * drop boxes (docs/FOXY-ID.md "The drop boxes", CashuID.swift `dropTweak`, 08e-cashu-id.js `cidListenPlan`).
+/* attack-dropbox-2026-11-06.js — what the relays can tie together from a Cashu ID's listens, before and after the
+ * drop boxes (docs/CASHU-ID.md "The drop boxes", CashuID.swift `dropTweak`, 08e-cashu-id.js `cidListenPlan`).
  *
  *     node tests/attack-dropbox-2026-11-06.js
  *
- * THE WORLD. Receive-only phones, each with a Foxy ID, open Foxy a Poisson number of times a day (mean 4, some days
+ * THE WORLD. Receive-only phones, each with a Cashu ID, open Foxy a Poisson number of times a day (mean 4, some days
  * none) for 21 days. Every open is a listen: one REQ, or one per three days of keys, on a fresh circuit. The relays
  * all compare notes and see every REQ's keys and when it came; nothing else ties two REQs (the circuit is new).
  *

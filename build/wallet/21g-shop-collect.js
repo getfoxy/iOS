@@ -1,4 +1,4 @@
-    /* ---- SHOPS (08g-shop-collect.js, docs/FOXY-ID.md "Shops") -------------
+    /* ---- SHOPS (08g-shop-collect.js, docs/CASHU-ID.md "Shops") -------------
      *
      * For the screens. SHOPS lists `shops()`; ADD A SHOP reads a link with
      * `shopRead` and keeps it with `shopAdd`; REMOVE is `shopRemove`. The phone

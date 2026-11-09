@@ -716,7 +716,7 @@ async function world(feePpk, sats, make) {
     holder.fcLimitSpec().go();
     await until('the limit to be set', () => holder.toasts.some((t) => /Per second limit set/.test(t)));
     ok(V.card.state.tapLimit === 500 && V.H.W.cardPaceUsd(V.card.key) === 0.5, 'the card is given the sats, and the phone keeps the dollars', V.card.state.tapLimit + ' sats, $' + V.H.W.cardPaceUsd(V.card.key));
-    /* the price moves, and the holder opens FLASHCARD again: the phone signs no limit the keeper did not say yes to, and the sats
+    /* the price moves, and the holder opens FOXY CARD again: the phone signs no limit the keeper did not say yes to, and the sats
      * a dollar limit becomes are the page's sum, so a plain read leaves the card as it is (`repeg`, 08a-flashcard.js) */
     holder.price = 50000;
     holder.setState({ fc: null, screen: 'home', stack: [] });

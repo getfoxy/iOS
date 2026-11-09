@@ -136,15 +136,15 @@ final class NetDiaryTests: XCTestCase {
         XCTAssertTrue(kept.contains("m.test@usd"), kept)
     }
 
-    /// A Foxy ID string, a NUT-18 request and the nprofile a Foxy ID is delivered to name a person: none reaches the log.
+    /// A Cashu ID string, a NUT-18 request and the nprofile a Cashu ID is delivered to name a person: none reaches the log.
     func testRedactionTakesOutACashuIDAndItsAddress() {
         let id = "foxyid1AgNlIzuO9oM0GjHpzSncvCYSxfTge7XbrS0ufWT-_AvYlmZtyOXIU-UVU9JX7nrzYmsmyeEdPbEa6ASNFPd48g26cTqHsw"
         let request = "creqA" + String(repeating: "pWFpaGI0NThkN2", count: 3)
         let requestB = "CREQB1" + String(repeating: "QYQQWAR", count: 4)
         let profile = "nprofile1qqsrhuxx8l9ex335q7he0f09aej04zpazpl0ne2cgukyawd24mayt8gpp4mhxue69uhhytnc9e3k7mgpz4mhxue69uhkg6nzv9ejuumpv34kytnrdaksjlyr9p"
-        let kept = LogRedaction.redact("[foxy] foxy id \(id) to \(profile) and \(request) \(requestB)")
+        let kept = LogRedaction.redact("[foxy] cashu id \(id) to \(profile) and \(request) \(requestB)")
         XCTAssertFalse(kept.contains(id) || kept.contains(profile) || kept.contains(request) || kept.contains(requestB), kept)
-        XCTAssertTrue(kept.contains("<foxy id,") && kept.contains("<nostr profile,") && kept.contains("<payment request,"), kept)
+        XCTAssertTrue(kept.contains("<cashu id,") && kept.contains("<nostr profile,") && kept.contains("<payment request,"), kept)
     }
 
     /// A Release build's lines name no host: `host` and the first eight hex

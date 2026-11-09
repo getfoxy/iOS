@@ -3,7 +3,7 @@ import Foundation
 /// The address a Foxy card raises when it is held to a phone, and the one thing the
 /// phone says to the page about it.
 ///
-/// Every Flashcard of card software 1.19 answers as an NFC tag that carries one
+/// Every Foxy Card of card software 1.19 answers as an NFC tag that carries one
 /// address, `https://getfoxy.io/card`, the same on every card. There is no part of it
 /// that belongs to one card, and there must never be one: the address is not an
 /// identity, only a way to open Foxy. With the screen on, iOS reads the tag by
@@ -12,7 +12,7 @@ import Foundation
 /// tools/flashcard.entitlements), or Safari, where the page on the site says what
 /// the card is, when no such app is installed. iOS gives the app that address and
 /// no session with the card, so Foxy can do one thing: tell the page a card was
-/// tapped, and the page does what MENU > FLASHCARD does if it is a moment for it
+/// tapped, and the page does what MENU > FOXY CARD does if it is a moment for it
 /// (build/app/26f-flashcard.js, `cardTapped`).
 ///
 /// Nothing of the address reaches the page, and nothing of it is kept or logged.

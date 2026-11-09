@@ -45,7 +45,7 @@ User-Agent and no cookies.
   for everyone who asks.
 - **Block explorers.** The mempool.space and Blockstream onion services, then
   mempool.space and blockstream.info, for the newest Bitcoin block header.
-  Foxy uses it as the clock for the Foxy Flashcard. It asks when Tor connects,
+  Foxy uses it as the clock for the Foxy Card. It asks when Tor connects,
   when the app comes back to the front, and when a card is tapped.
 - **Nostr relays and onion addresses.** When you pay or are paid through a
   payment request, the payment travels to the other person through a Tor onion
@@ -56,7 +56,7 @@ User-Agent and no cookies.
   request, Foxy delivers to the onion address or the relays the request names.
   Over Nostr the payment is encrypted to the receiver (NIP-44 inside NIP-59
   gift wraps), so a relay sees an encrypted message. Over an onion address it
-  travels inside Tor from end to end. A payment to your Foxy ID is left at
+  travels inside Tor from end to end. A payment to your Cashu ID is left at
   keys that change every day, and Foxy asks one relay, picked at random, for
   only that day's keys, so a relay that does not know your ID cannot tie one
   day you opened Foxy to another by what was asked (anyone who has your ID can
@@ -114,11 +114,11 @@ Three exceptions leave Foxy's Tor:
   advertises a random identifier made for that one payment while its invoice
   screen is open, or only after you tap TAP TO PAY when BLUETOOTH TAP is off
   in settings. A paying phone only listens.
-- **NFC.** Foxy talks to a Foxy Flashcard over NFC while you hold the card to
-  the iPhone, and iOS lets it talk only to the Foxy card applet. A Flashcard's
+- **NFC.** Foxy talks to a Foxy Card over NFC while you hold the card to
+  the iPhone, and iOS lets it talk only to the Foxy card applet. A Foxy Card's
   web address (getfoxy.io/card) opens Foxy; to allow that, iOS checks
   getfoxy.io's association file through Apple's servers.
-- **The Flashcard.** A Foxy Flashcard answers any NFC reader held to it.
+- **The Foxy Card.** A Foxy Card answers any NFC reader held to it.
   Without a PIN, a reader can see how much the card holds and the card's
   public key. That key is the same every time, so two readers could tell it is
   the same card. Spending needs the card itself, and its PIN where one is
@@ -129,7 +129,7 @@ Three exceptions leave Foxy's Tor:
   Foxy PIN, if you set one, is stored as a salted hash.
 - **Notifications.** "Payment sent" and "Payment received" notifications are
   created on the iPhone itself and carry no amount. Foxy asks for permission
-  the first time one is due. With a Foxy ID in use, Foxy also sets a reminder
+  the first time one is due. With a Cashu ID in use, Foxy also sets a reminder
   after 15 days away: if notifications are already allowed it is simply on,
   otherwise Foxy asks once ("Foxy can remind you after 15 days away, so a
   payment waiting for you is not missed."). The one notification,
@@ -174,8 +174,8 @@ learn from each operation.
 | Camera | Scanning QR codes, asked the first time you scan |
 | Bluetooth | Tap to pay, asked the first time an invoice screen opens or you tap TAP TO PAY |
 | Face ID | FACE ID LOCK and the seed's protection, asked the first time Foxy uses Face ID |
-| Notifications | "Payment sent" and "Payment received", asked the first time one is due; and a reminder after 15 days away with a Foxy ID in use, on when notifications are already allowed, otherwise asked once; made on the phone, sent by nobody |
-| NFC tag reading | The Foxy Flashcard, limited to the Foxy card applet |
+| Notifications | "Payment sent" and "Payment received", asked the first time one is due; and a reminder after 15 days away with a Cashu ID in use, on when notifications are already allowed, otherwise asked once; made on the phone, sent by nobody |
+| NFC tag reading | The Foxy Card, limited to the Foxy card applet |
 
 These are all the permissions Foxy asks for. Foxy does not use location,
 contacts, photos, the microphone or tracking, and it reads no advertising or
@@ -184,7 +184,7 @@ device identifier.
 ## The getfoxy.io website
 
 getfoxy.io is a separate website run by Island Bitcoin. The app sends it
-nothing. A Flashcard held to a phone without Foxy opens getfoxy.io/flashcard
+nothing. A Foxy Card held to a phone without Foxy opens getfoxy.io/flashcard
 in the browser. Like any website, its server receives your IP address and
 browser type with the request. It keeps no visitor log and uses no analytics.
 Its pages load their fonts from Google Fonts, so your browser also contacts

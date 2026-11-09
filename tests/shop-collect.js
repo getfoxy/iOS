@@ -1,6 +1,6 @@
 'use strict';
 /* shop-collect.js — SHOPS: the keeper's Foxy collects a shop's sales and pays its collaborators
- * (build/wallet/08g-shop-collect.js, docs/FOXY-ID.md "Shops").
+ * (build/wallet/08g-shop-collect.js, docs/CASHU-ID.md "Shops").
  *
  *     node tests/shop-collect.js                      # cases 1 to 9 (about seven minutes: 2,000 sales at 50 ms a mint call)
  *     FOXY_SHOP_10K=1 node tests/shop-collect.js      # and the 10,000 (about half an hour of this machine's curve
@@ -8,7 +8,7 @@
  *     FOXY_SHOP_ONLY=3,8  FOXY_SHOP_N=200  FOXY_SHOP_MS=0   # some cases, fewer sales, no latency
  *
  * A fake shop engine answers the three calls (challenge, collect in pages of 200, collected) and checks the keeper's
- * signature as the engine does: BIP-340 by the shop's Foxy ID over SHA-256("foxy-shop-collect-v1" ‖ nonce ‖ host). Its
+ * signature as the engine does: BIP-340 by the shop's Cashu ID over SHA-256("foxy-shop-collect-v1" ‖ nonce ‖ host). Its
  * orders are invoices at harness.js's fake mint locked (NUT-20) to P′ = ID + r·G, or ecash locked (NUT-11) to P′. The
  * phone's seed side is harness.js's model of CashuID.swift (`cashuIdShop`), held here to the fixture FoxyTests holds
  * libsecp256k1 to (tests/fixtures/shop-collect-vectors.json).
@@ -245,7 +245,7 @@ async function run() {
     const ask = (m) => A.phone.answer(A.window, Object.assign({ action: 'cashuIdShop' }, m));
     const q = ask({ kind: 'quote', r: V.r, quote: V.quote, pubkey: V.moved, outputs: V.outputs });
     ok(!q[1] && CT.verifyMintQuoteSignature(V.moved, V.quote, V.outputs, JSON.parse(q[0]).legacy) === true, '2 cashuIdShop quote: signed by d + r');
-    ok(ask({ kind: 'quote', r: V.r, quote: V.quote, pubkey: V.id, outputs: V.outputs })[1] === 'That ecash is not locked to this Foxy ID.', '2 a quote locked to the ID itself: refused');
+    ok(ask({ kind: 'quote', r: V.r, quote: V.quote, pubkey: V.id, outputs: V.outputs })[1] === 'That ecash is not locked to this Cashu ID.', '2 a quote locked to the ID itself: refused');
     ok(!!ask({ kind: 'quote', r: '00'.repeat(32), quote: V.quote, pubkey: V.moved, outputs: V.outputs })[1], '2 r = 0: refused');
     const c = ask({ kind: 'collect', nonce: V.nonce, host: V.host, path: '/api/shop/collect' });
     ok(!c[1] && JSON.parse(c[0]).pub === V.id && CT.schnorrVerifyDigest(JSON.parse(c[0]).sig, V.collectDigest, V.id) === true, '2 cashuIdShop collect: the ID key over the digest');
@@ -304,11 +304,11 @@ async function run() {
     const dOrders = ordersOf(d);
     ok(!!d && d.n === 6 && d.total === total && dOrders.length === 6 && dOrders.reduce((s, x) => s + x[1], 0) === d.total
       && d.name === 'Fox Prints' && d.host === 'shop.test' && d.at > 0, '3 its detail: the shop, the time, the count, the total, every order with its amount', d && d.list.slice(0, 60));
-    ok(!!d && d.ids.length === 2 && d.ids[0][1] === 'Ana' && /^Foxy ID /.test(d.ids[1][1]) && dOrders.every((x) => x[2].indexOf(0) >= 0),
+    ok(!!d && d.ids.length === 2 && d.ids[0][1] === 'Ana' && /^Cashu ID /.test(d.ids[1][1]) && dOrders.every((x) => x[2].indexOf(0) >= 0),
       '3 and which collaborators each order paid, by name where they are a contact', JSON.stringify(d && d.ids));
     ok(rows.filter((e) => e.dir === 'in').length === 1, '3 no other received row (the swap that took the ecash in is folded into it)');
     const sent = rows.filter((e) => e.dir === 'out');
-    ok(sent.length === 2 && sent.some((e) => /^To Ana · Fox Prints$/.test(e.memo) && e.sats === owedAna) && sent.some((e) => /^To Foxy ID .* · Fox Prints$/.test(e.memo) && e.sats === owedBen),
+    ok(sent.length === 2 && sent.some((e) => /^To Ana · Fox Prints$/.test(e.memo) && e.sats === owedAna) && sent.some((e) => /^To Cashu ID .* · Fox Prints$/.test(e.memo) && e.sats === owedBen),
       '3 one sent row a collaborator, their whole share', JSON.stringify(sent.map((e) => [e.memo, e.sats])));
     const outbox = A.store('foxy.cid.outbox', []);
     ok(outbox.length === 2 && outbox.some((x) => x.contact === ana.id && x.amount === owedAna && /Fox Prints · your share of 6 sales/.test(x.note))
@@ -355,7 +355,7 @@ async function run() {
     const out5 = A.store('foxy.cid.outbox', []).length;
     const n5 = await A.W.shopCollectNow();
     ok(n5 === 1 && !!good.collected && (await balance(A)) === bal5 + 600, '4 among five that are refused, the good one is collected', String(n5));
-    ok(!liar.collected && !stale.collected && !greedy.collected && !badId.collected && !away.collected, '4 a lie about PAID, an invoice locked elsewhere, splits over the amount, a bad Foxy ID, a mint not chosen: none collected');
+    ok(!liar.collected && !stale.collected && !greedy.collected && !badId.collected && !away.collected, '4 a lie about PAID, an invoice locked elsewhere, splits over the amount, a bad Cashu ID, a mint not chosen: none collected');
     ok(A.store('foxy.cid.outbox', []).length === out5, '4 and no collaborator paid for any of them');
 
     /* the host taken off SHOPS is never asked again */

@@ -235,12 +235,12 @@ you added for testing. Debugger detached and Console.app streaming, as in the
 setup above, unless a step says otherwise.
 
 **Menu paths.** The menu has four sections, each open until tapped shut:
-WALLET (MY FOXY ID, HISTORY, CONTACTS, HIDE BALANCE), MINTS (SWITCH/ADD MINTS, TRANSFER MONEY), TOOLS (POINT OF SALE, SPLIT A
+WALLET (MY CASHU ID, HISTORY, CONTACTS, HIDE BALANCE), MINTS (SWITCH/ADD MINTS, TRANSFER MONEY), TOOLS (POINT OF SALE, SPLIT A
 BILL) and SETTINGS (BLUETOOTH TAP, SET PIN, FACE ID LOCK, BACKUP,
 RESTORE, RESTORE LOST CARD, TEST LOGS). BACKUP ACCOUNT is at the very top while
 the wallet holds money and the words are not verified; BACKUP is always under
 SETTINGS. LOGS is TEST LOGS; SPLIT is SPLIT A BILL; the card is MENU → FOXY CARD
-(home's top-left button is MY FOXY ID, with a head-and-shoulders drawing).
+(home's top-left button is MY CASHU ID, with a head-and-shoulders drawing).
 
 ### A. Tor, the network, and what leaves the phone
 
@@ -860,8 +860,8 @@ swaps. The first step also needs a mint that pays out on chain.*
 
 #### A shop's sales, collected (SHOPS)
 
-*Needs the demo shop set up with this phone's Foxy ID as the shop's, at a mint
-this phone has chosen, two collaborators' Foxy IDs (one of them a contact on
+*Needs the demo shop set up with this phone's Cashu ID as the shop's, at a mint
+this phone has chosen, two collaborators' Cashu IDs (one of them a contact on
 this phone), and three or more test orders paid. The money is the shop's
 buyers': run it with sats the keeper agreed to move.*
 
@@ -1289,10 +1289,10 @@ what it did.
 
 #### 13r. The reminder after 15 days away
 
-Needs a phone with a Foxy ID in use (MENU → MY FOXY ID has been opened, or the words were restored) and a Debug build run
+Needs a phone with a Cashu ID in use (MENU → MY CASHU ID has been opened, or the words were restored) and a Debug build run
 with `-FoxyReminderMinutes 2`.
 
-1. Open MENU → MY FOXY ID, close it, put Foxy away and bring it back. **Pass:** no card over the code; at the return a card says "Foxy can remind you after 15 days away, so a payment
+1. Open MENU → MY CASHU ID, close it, put Foxy away and bring it back. **Pass:** no card over the code; at the return a card says "Foxy can remind you after 15 days away, so a payment
    waiting for you is not missed." with TURN ON and NOT NOW. (If notifications were already allowed for payments, no
    card: the switch is simply on.)
 2. TURN ON. **Pass:** iOS asks its own notification question once; MENU → SETTINGS has no reminder row (it opens with FACE ID LOCK,
@@ -1301,18 +1301,18 @@ with `-FoxyReminderMinutes 2`.
    for you." Tapping it opens Foxy.
 4. Open Foxy, leave it again after one minute, and wait 90 seconds. **Pass:** nothing yet (each coming and going starts the
    wait again); it comes 2 minutes after the last.
-5. A phone with no Foxy ID in use. **Pass:** no card.
+5. A phone with no Cashu ID in use. **Pass:** no card.
 
-#### 13s. Home's MY FOXY ID button, and a contact from the menu
+#### 13s. Home's MY CASHU ID button, and a contact from the menu
 
-Needs a phone with a Foxy ID contact saved, and a phone that has never opened MY FOXY ID (a fresh install will do).
+Needs a phone with a Cashu ID contact saved, and a phone that has never opened MY CASHU ID (a fresh install will do).
 
 1. On home, look at the top left. **Pass:** a round button the size and look of the menu button at the top right, with a
    head-and-shoulders drawing, and no number on its corner. No chat button anywhere, and no CHAT in the menu.
-2. Tap it. **Pass:** MY FOXY ID, the code with SHARE and DONE, the same screen as MENU → MY FOXY ID. DONE goes back to
+2. Tap it. **Pass:** MY CASHU ID, the code with SHARE and DONE, the same screen as MENU → MY CASHU ID. DONE goes back to
    home with the menu shut. On the fresh install the first tap reads the ID from the words first (Face ID if it is on),
    as the menu row does.
-3. MENU → CONTACTS, tap the Foxy ID contact. **Pass:** SET AMOUNT, "How much to send to <name>?", with no messages
+3. MENU → CONTACTS, tap the Cashu ID contact. **Pass:** SET AMOUNT, "How much to send to <name>?", with no messages
    screen in between; back returns to CONTACTS. No unread counts and no NEW MESSAGES on CONTACTS.
 4. On a phone that had the earlier build with messages, open Foxy once. **Pass:** nothing of the old conversations
    anywhere, and paying a contact still works.
@@ -1630,9 +1630,9 @@ and load it), a phone whose build carries the NFC entitlement
 
 #### 23a. A new card
 
-1. MENU, FLASHCARD, and hold a new card to the top of the phone. There is no
+1. MENU, FOXY CARD, and hold a new card to the top of the phone. There is no
    screen between the menu and the phone's own sheet. **Pass:** the sheet
-   says to hold the card, then the FLASHCARD screen shows the card with NO
+   says to hold the card, then the FOXY CARD screen shows the card with NO
    PIN YET on its face, CARD BALANCE with one line saying the card is new,
    and SET UP THIS CARD. Note how long the read takes.
 2. Hold a bank card to the phone instead. **Pass:** the sheet does not react
@@ -1643,8 +1643,8 @@ and load it), a phone whose build carries the NFC entitlement
    them: the card's screen is not seen behind the second pad as it comes up. Nothing is read between the PIN and
    the tap, nothing is asked about a lost card (cards are cash for now), and
    nothing is read after it. **Pass:** the card's screen stays up, with the line `The card is set
-   up.` (Back from it is where you were; MENU, FLASHCARD, tap, shows the same screen.) The screen is home's shape: history and a cross
-   at the top with FLASHCARD and "Verified Just Now" between them, the card
+   up.` (Back from it is where you were; MENU, FOXY CARD, tap, shows the same screen.) The screen is home's shape: history and a cross
+   at the top with FOXY CARD and "Verified Just Now" between them, the card
    with its limit line on it at the bottom left (`NO LIMIT`), and the card's mint over MINT with a balance of 0 in the bitcoin pill,
    over ADD FUNDS, WITHDRAW, CHANGE PIN and LIMITS.
 
@@ -1659,14 +1659,14 @@ and load it), a phone whose build carries the NFC entitlement
    the top left. **Pass:** both open CARD HISTORY with that one entry and no
    others; tapping the mint's tile in the pill does nothing.
 3. Add again with a wrong PIN. **Pass:** WRONG PIN with the tries left; a line
-   on the FLASHCARD screen says the money is waiting; TRY AGAIN with the right
+   on the FOXY CARD screen says the money is waiting; TRY AGAIN with the right
    PIN puts it on.
 4. With the card loaded, turn on airplane mode, wait a few minutes, and read
    it again. **Pass:** under the title it says when it was last verified
    ("Verified 5 Minutes Ago"), not "Just Now". Turn airplane mode off.
 5. WITHDRAW, ALL OF IT, the PIN, tap. **Pass:** the card's screen is back, with no card raised over it,
    and the balance in the pill counts down to 0 over about a second; if the card had a daily limit, the
-   line under the balance says the whole of it is left. Tap the card again from MENU, FLASHCARD: it reads
+   line under the balance says the whole of it is left. Tap the card again from MENU, FOXY CARD: it reads
    the same.
 6. Load it again, WITHDRAW, ALL OF IT, and take the card away while the sheet
    is still counting pieces. **Pass:** TAP THE CARD AGAIN says how much came off
@@ -1678,7 +1678,7 @@ and load it), a phone whose build carries the NFC entitlement
    amount. **Pass:** the figure is red, the line under it reads MORE THAN THE
    CARD CAN TAKE and NEXT is grey; pressed anyway it says the card has no room
    for that. No GETTING IT READY screen and no tap come up, and the phone's
-   balance is as it was. FLASHCARD from the send screen, with no card on show,
+   balance is as it was. FOXY CARD from the send screen, with no card on show,
    is capped by the balance alone.
 
 #### 23c. Paying another phone
@@ -1858,7 +1858,7 @@ Needs the same card software as 23c-2.
 A card with the newer software, set up and loaded by this build. An older card
 (1.3 and before) is still paid with as in 23a to 23c.
 
-1. FLASHCARD reads it: its screen is as any card's. Load it: the money goes on
+1. FOXY CARD reads it: its screen is as any card's. Load it: the money goes on
    in one tap, as before.
 2. A till asks for an amount the card holds exact pieces for (most amounts,
    after a load): **one tap**, PAYMENT RECEIVED, and no TAP AGAIN for change.
@@ -1894,7 +1894,7 @@ A card with the newer software, set up and loaded by this build. An older card
    took: note the milliseconds for the pieces (it was 79 a piece) and for the
    outputs. A load of thirty pieces: note the time (it was about 60 ms a piece).
 2. **The limit is hidden.** Set a per tap limit on the holder's phone. Read
-   the card on a second phone (FLASHCARD in its menu). **Pass:** it shows the
+   the card on a second phone (FOXY CARD in its menu). **Pass:** it shows the
    daily limit or `NO DAILY LIMIT`, and no per tap limit.
 3. Charge it over the limit on the second phone. **Pass:** `Over per tap
    limit`, then `x2` and `x3` as it goes on, then PAYMENT RECEIVED.
@@ -2051,7 +2051,7 @@ from two block explorers over Tor and shows it to a card whose clock is behind.
 Needs a card on software 1.16 (`01 10` at SELECT), the holder's phone, and a second phone to be the till. Nothing here has run
 on a real card.
 
-1. **Set up with no PIN.** MENU, FLASHCARD, a new 1.16 card, SET UP THIS CARD. **Pass:** no pad: the sheet comes up at once, and
+1. **Set up with no PIN.** MENU, FOXY CARD, a new 1.16 card, SET UP THIS CARD. **Pass:** no pad: the sheet comes up at once, and
    one tap sets the card up: the card's screen, `The card is set up.` The card's screen has **ADD PIN** where CHANGE PIN was,
    and LIMITS, and the line on the card's face reads `NO LIMIT | NO PIN`. A card of 1.15 or before is asked for a PIN
    (CHOOSE A PIN, TYPE IT AGAIN) as it always was.
@@ -2078,12 +2078,12 @@ on a real card.
 10. **An older card at a till.** Charge a 1.15 card. **Pass:** it too is tapped first and ends that tap asking for the PIN;
     the second tap pays. Note that this costs a tap more than it did.
 
-#### 23c-11. Software 1.17: RESET CARD, the row, and FLASHCARD on the send screen
+#### 23c-11. Software 1.17: RESET CARD, the row, and FOXY CARD on the send screen
 
 Needs a card on software 1.17 (`01 11` at SELECT), the holder's phone, and (for 6, 8 and 9) a second phone. Nothing here has run
 on a real card. The sheet's lines are short from this release: `Tap behind the phone.`, `Keep holding.`, `Hold for change.`, `Done.`
 
-1. **The card's screen.** MENU, FLASHCARD, tap the card. **Pass:** under FLASHCARD two lines, `Verified At 11:42am` (the time the
+1. **The card's screen.** MENU, FOXY CARD, tap the card. **Pass:** under FOXY CARD two lines, `Verified At 11:42am` (the time the
    mint's word was had, in the phone's clock) and `Block #970809` (the block the card's clock is at; `No block yet` on a card
    shown none). A round button at the top left (the clock: HISTORY), and under ADD FUNDS and WITHDRAW a row of three round buttons
    with their labels under them, the size and the look of NOTE, COPY, SCAN and CARD on the receive screen: RESET, CHANGE PIN
@@ -2096,7 +2096,7 @@ on a real card. The sheet's lines are short from this release: `Tap behind the p
    phone and a large one: the margins hold. Nothing is under the balance in the pill but the figures.
 3. **RESET on an empty card.** The first button of the row. **Pass:** one warning (the PIN, the owner, the limits and the log are
    wiped, a new key, then anyone's to set up; nothing about money). CANCEL changes nothing. CONTINUE: no PIN is asked, the sheet
-   comes up and says `Keep holding.`, one tap, Home with `The card is reset.` Tap the card again from FLASHCARD. **Pass:** it reads as
+   comes up and says `Keep holding.`, one tap, Home with `The card is reset.` Tap the card again from FOXY CARD. **Pass:** it reads as
    new (SET UP THIS CARD), and a second phone can set it up as its own.
 4. **With money on it and a PIN.** Put some on, RESET CARD. **Pass:** the warning adds that the money comes off to this phone
    first; CONTINUE asks for the PIN (`RESET CARD` on its button); one tap takes the money off and resets the card; Home. The money
@@ -2107,7 +2107,7 @@ on a real card. The sheet's lines are short from this release: `Tap behind the p
    is still at the top left). A card of 1.16 has none either: its row is CHANGE PIN (or ADD PIN) and LIMITS.
 7. **Cut short.** Lift the card as the money comes off. **Pass:** `EMPTY, BUT NOT RESET` says the money is in the phone, and TAP
    CARD finishes it.
-8. **FLASHCARD on the send screen.** Send, and below TYPE a fifth button, FLASHCARD; the five buttons fit with the camera pane as
+8. **FOXY CARD on the send screen.** Send, and below TYPE a fifth button, FOXY CARD; the five buttons fit with the camera pane as
    tall as before. Press it: SET AMOUNT, NEXT. **Pass:** the sheet comes up at once. A card with no PIN has the money in that
    tap: Home, and a card `ON THE CARD`.
 9. **A card with a PIN.** Same, with a card that has one (any phone's). **Pass:** the sheet ends `Enter the card's PIN` in no red,
@@ -2126,7 +2126,7 @@ on a real card. The sheet's lines are short from this release: `Tap behind the p
    holding a few sats and no more.
 2. Put Foxy away in the middle of a tap. **Pass:** the sheet goes; on return
    nothing is half-done that the next tap does not finish.
-3. On a build without the entitlement: MENU, FLASHCARD. **Pass:** NO CARD
+3. On a build without the entitlement: MENU, FOXY CARD. **Pass:** NO CARD
    READER, and nothing else.
 
 #### 23e. A card's address opens Foxy
@@ -2142,13 +2142,13 @@ entitlements, never committed) makes iOS ask the site directly, for a test build
 1. **The lock screen.** Lock the phone, wake it so the screen is on and still locked, and hold the card to the top of it. **Pass:**
    iOS raises a banner that offers Foxy, not Safari. Tap it: the phone asks to be unlocked, Foxy opens, and with Foxy's own PIN or
    Face ID on it asks for that first, with nothing of the card's screen showing behind the lock. Once you are in, within a minute,
-   the Flashcard screen's tap begins by itself (TAP TO READ and the phone's sheet) and reads the card, which is still held.
+   the Foxy Card screen's tap begins by itself (TAP TO READ and the phone's sheet) and reads the card, which is still held.
    The log has `kept until Foxy is open, it is locked` and then `opening the card screen from home, after N s kept`.
 2. **Foxy's home screen.** With Foxy open at home and unlocked, hold the card to the phone. **Pass:** the banner comes up over Foxy;
-   a tap on it goes to the Flashcard screen's tap at once, and the card is read; back is home. Note whether iOS raises the banner
+   a tap on it goes to the Foxy Card screen's tap at once, and the card is read; back is home. Note whether iOS raises the banner
    again by itself while the card rests there after the read, and if it does what a tap on it does (it should read the card again).
-3. **Screens where nothing is in progress.** From HISTORY, and again from the Flashcard screen itself with no sheet up, hold the card
-   and tap the banner. **Pass:** the tap begins, the card is read, and back from the Flashcard screen is where you were.
+3. **Screens where nothing is in progress.** From HISTORY, and again from the Foxy Card screen itself with no sheet up, hold the card
+   and tap the banner. **Pass:** the tap begins, the card is read, and back from the Foxy Card screen is where you were.
 4. **In the middle of a payment: ignored.** Start a send and stop at its confirmation, hold the card and tap the banner. **Pass:** Foxy
    comes forward and nothing changes: the confirmation is as it was, with no sheet and no card screen. The log has `ignored, the screen
    is sendConfirm`. Do the same with an amount half typed on the keypad, with a receive invoice on screen, with a split bill, with a
@@ -2162,7 +2162,7 @@ entitlements, never committed) makes iOS ask the site directly, for a test build
 7. **A phone without Foxy sees the page.** On a phone that has no Foxy, hold the card. **Pass:** the banner offers Safari and the page
    on the site opens, saying what the card is. Compare the address on two different cards: **Pass:** it is the same on both.
 8. **A card whose tag is switched off raises nothing.** Hold the second card to a phone with Foxy closed. **Pass:** no banner. MENU,
-   FLASHCARD still reads it.
+   FOXY CARD still reads it.
 9. **The address by hand.** Put `https://getfoxy.io/card` in Notes and tap it; then `https://getfoxy.io/card?x=1`; then
    `https://getfoxy.io/cards`. **Pass:** the first two do what a tap on the banner does. The third opens Safari, or, if the site's
    association file lists it, opens Foxy and does nothing: only `/card` is the card's. A Debug build in a simulator does the first
@@ -2179,9 +2179,9 @@ lines are `card: wrote …` (each write) and `card: its proofs: …` (each check
 1. **A load.** Set up a card, ADD FUNDS 2,000 sats (thirty-two pieces), the owner's tap. **Pass:** the card's screen is back with the
    balance counted up and `Verified At <time>`; the log has `card: wrote 32 piece(s), 32 with the mint’s proof (32 kept by
    the card), in N ms`. Write down the pieces and N: that is how long a load takes, and the sheet ends at a minute.
-2. **Read on the same phone.** MENU, FLASHCARD, tap. **Pass:** `Verified At`, and the read's line has a `proofs` of a millisecond or
+2. **Read on the same phone.** MENU, FOXY CARD, tap. **Pass:** `Verified At`, and the read's line has a `proofs` of a millisecond or
    so: the phone wrote every piece itself, from the mint's answer, and asks the card for no proof.
-3. **Read on a second phone.** Same mint, other words: MENU, FLASHCARD, tap. **Pass:** `Verifying…`, then `Verified At <time>` once the mint
+3. **Read on a second phone.** Same mint, other words: MENU, FOXY CARD, tap. **Pass:** `Verifying…`, then `Verified At <time>` once the mint
    and the proofs have both answered. The read's line has `proofs N` (two pieces to a command) and the check's `card: its proofs: 32
    piece(s) proven (32 checked now), 0 with no proof, 0 that cannot be checked here, 0 that fail, in N ms`. Tap again: `proofs` is a millisecond or so and it says `(0 checked now)`.
 4. **A card loaded by a build that sends no proofs.** Read it on a phone that did not load it. **Pass:** `Not Verified` in amber (not red), the log's `N with no
@@ -2438,7 +2438,7 @@ claimed on it (a fresh install); step 2 a phone that has.*
 cashier a new one. Old codes still work on tills still on the old build until they end, and on those the replay in step 3
 is still open.*
 
-*Three phones: a keeper (POINT OF SALE open, tips on, to ONE PERSON, a Foxy ID contact on a fourth wallet or a second
+*Three phones: a keeper (POINT OF SALE open, tips on, to ONE PERSON, a Cashu ID contact on a fourth wallet or a second
 Foxy) and two cashiers. A payer: a fourth Foxy, or another Cashu wallet. Test money only.*
 
 1. **One code each.** On the keeper, CASHIER CODES, ADD A CASHIER twice (names Front and Patio). **Pass:** two LIVE rows;
@@ -2468,7 +2468,7 @@ Foxy) and two cashiers. A payer: a fourth Foxy, or another Cashu wallet. Test mo
 only.*
 
 1. **Two while closed.** Close Foxy fully. From the other wallet pay this phone
-   twice (two payments to its Foxy ID, which it collects on opening). Open
+   twice (two payments to its Cashu ID, which it collects on opening). Open
    Foxy.
    **Pass:** one green RECEIVED screen, the yellow flash once, the total of both
    in large figures, and a row for each, newest first, with its amount, its
@@ -2525,12 +2525,12 @@ only.*
 
 #### 22r. Four set-up flows from the 2026-11-08 walkthrough
 
-1. **PASTE A FOXY ID on an empty CONTACTS.** *A Foxy with no contacts; a second Foxy's MY FOXY ID copied with SHARE >
-   Copy.* MENU > CONTACTS. **Pass:** NO CONTACTS YET!, PASTE A FOXY ID and SCAN A FOXY ID, and no round search button at
-   the bottom left. Tap PASTE A FOXY ID. **Pass:** iOS asks to allow the paste (Allow Paste); then NAME THIS CONTACT? at
+1. **PASTE A CASHU ID on an empty CONTACTS.** *A Foxy with no contacts; a second Foxy's MY CASHU ID copied with SHARE >
+   Copy.* MENU > CONTACTS. **Pass:** NO CONTACTS YET!, PASTE A CASHU ID and SCAN A CASHU ID, and no round search button at
+   the bottom left. Tap PASTE A CASHU ID. **Pass:** iOS asks to allow the paste (Allow Paste); then NAME THIS CONTACT? at
    once, with no field to paste into. SAVE as Ana. **Pass:** Ana is on CONTACTS and the search button is back. With text
-   on the clipboard that is not a Foxy ID (copy an invoice), delete Foxy's contacts again or use a fresh wallet: **Pass:**
-   THAT WON’T WORK, `That is not a Foxy ID.`; with the paste refused at the iOS prompt, THAT WON’T WORK, `Nothing on the
+   on the clipboard that is not a Cashu ID (copy an invoice), delete Foxy's contacts again or use a fresh wallet: **Pass:**
+   THAT WON’T WORK, `That is not a Cashu ID.`; with the paste refused at the iOS prompt, THAT WON’T WORK, `Nothing on the
    clipboard.`
 2. **SET A LOCK FIRST sets the lock.** *A Foxy with no PIN and FACE ID LOCK off.* MENU > POINT OF SALE. **Pass:** SET A
    LOCK FIRST with CREATE PIN, USE FACE ID and CANCEL. CANCEL: the menu again, nothing set. Again, CREATE PIN: CHOOSE A
@@ -2557,7 +2557,7 @@ only.*
 
 *A new card (software 1.21 or later) and this phone with a route. Test money only; nothing is loaded.*
 
-1. **The defaults.** FLASHCARD, tap the new card, SET UP CARD, a name, a PIN twice (and DOLLARS or BITCOIN where CURRENCY is
+1. **The defaults.** FOXY CARD, tap the new card, SET UP CARD, a name, a PIN twice (and DOLLARS or BITCOIN where CURRENCY is
    asked). **Pass:** NO PIN AMOUNT shows `$10.00` (the dollar sign, not ₿); NEXT; the next screen is titled NO PIN MAXIMUM,
    asks `What’s the most this card should pay in total before asking for a PIN?` (`… in 24 hours …` on a card of 1.25) and
    shows `$30.00`. Back, type $4.00, NEXT: it shows `$12.00`. NEXT: MAX PER SECOND at `$10`.
@@ -2651,9 +2651,9 @@ been used on a phone. Update the table when a section is run.
    PAY are what leaves, never less. PAYING FROM's pill at the foot: no chevron
    with one balance; at a mint with two it opens DOLLARS/BITCOIN; with money at
    two mints it opens PAY FROM, and NEXT comes back with the pill naming it.
-3. **A request (1m).** A Foxy over Tor, a tap, a website, a Foxy ID. **Pass:**
+3. **A request (1m).** A Foxy over Tor, a tap, a website, a Cashu ID. **Pass:**
    the button reads PAY and what leaves on every one; a website's host is
-   under RECEIVER; a Foxy ID's name is; the ✕ on a tap's screen leaves the
+   under RECEIVER; a Cashu ID's name is; the ✕ on a tap's screen leaves the
    other phone saying the payer cancelled.
 4. **PAY FROM (1p).** **Pass:** a tile per balance with its name, its balance
    line, a tick on the one chosen, its fee line with the ₿ or $ badge,

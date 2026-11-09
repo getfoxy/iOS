@@ -248,12 +248,12 @@ function stubWallet(o) {
       return { live: all.filter((v) => v.text), past: all.filter((v) => !v.text) };
     },
     tillPassEnd(id) { calls.passEnds.push(id); const x = W.passes.find((y) => y.id === id && !y.endedAt); if (x) x.endedAt = Date.now(); return !!x; },
-    // ---- Foxy ID contacts, for who the tips go to (08e-cashu-id.js) ----
+    // ---- Cashu ID contacts, for who the tips go to (08e-cashu-id.js) ----
     cids: [],
     cashuIdContacts() { return W.cids.slice(); },
     cashuIdCheck(text) {
       const hit = (W.idTexts || {})[String(text).trim()];
-      if (!hit) return Promise.reject(new Error('That is not a Foxy ID.'));
+      if (!hit) return Promise.reject(new Error('That is not a Cashu ID.'));
       const known = W.cids.find((c) => c.cid.id === hit.id);
       return Promise.resolve({ id: hit.id, nostr: hit.nostr, text, own: !!hit.own, name: known ? known.name : '' });
     },
@@ -1938,8 +1938,8 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     await pressCard('YES'); await pressCard('ONE PERSON');
     let rm = mr();
     ok(A.state.screen === 'switchMint' && A.state.tillList === 'person' && rm.mintTitle === 'TIPS GO TO' && rm.mintRows.map((r) => r.name).join() === 'Ana,Ben'
-      && rm.tillAddLabel === 'PASTE A FOXY ID' && rm.tillNextLabel === 'SCAN A FOXY ID' && rm.mintPickers === false,
-      'ONE PERSON: the SWITCH MINT list of Foxy ID contacts, PASTE and SCAN under it', JSON.stringify([rm.mintTitle, rm.mintRows.map((r) => r.name), rm.tillAddLabel, rm.tillNextLabel]));
+      && rm.tillAddLabel === 'PASTE A CASHU ID' && rm.tillNextLabel === 'SCAN A CASHU ID' && rm.mintPickers === false,
+      'ONE PERSON: the SWITCH MINT list of Cashu ID contacts, PASTE and SCAN under it', JSON.stringify([rm.mintTitle, rm.mintRows.map((r) => r.name), rm.tillAddLabel, rm.tillNextLabel]));
     A.back(); await settle();
     ok(/TIPS GO TO/.test(card()) && A.state.screen !== 'switchMint', 'back off it: TIPS GO TO again');
     await pressCard('ONE PERSON');
@@ -1953,15 +1953,15 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     W.idTexts = { foxyid1dee: { id: ID(4), nostr: NO(4) }, foxyid1me: { id: ID(5), nostr: NO(5), own: true } };
     await openTill(W);
     await pressCard('YES'); await pressCard('ONE PERSON');
-    ok(mr().mintNowLine === 'No Foxy ID contacts yet. Paste or scan one.', 'with no contacts, the line says to paste or scan one');
+    ok(mr().mintNowLine === 'No Cashu ID contacts yet. Paste or scan one.', 'with no contacts, the line says to paste or scan one');
     mr().tillAdd(); await settle();
-    ok(/PASTE A FOXY ID/.test(card()) && !!A._blockedEl.querySelector('input'), 'PASTE A FOXY ID: a card with a field');
+    ok(/PASTE A CASHU ID/.test(card()) && !!A._blockedEl.querySelector('input'), 'PASTE A CASHU ID: a card with a field');
     await typeInCard('foxyid1me', 'NEXT'); await settle();
-    ok(/THIS IS YOUR FOXY ID/.test(card()) && /MYSELF/.test(card()), 'this phone’s own: pick MYSELF instead', card());
+    ok(/THIS IS YOUR CASHU ID/.test(card()) && /MYSELF/.test(card()), 'this phone’s own: pick MYSELF instead', card());
     shutCard(); await settle();
     mr().tillAdd(); await settle();
     await typeInCard('nonsense', 'NEXT'); await settle();
-    ok(/THAT WON’T WORK/.test(card()) && /not a Foxy ID/.test(card()), 'one that is not an ID is refused in the contacts’ words', card());
+    ok(/THAT WON’T WORK/.test(card()) && /not a Cashu ID/.test(card()), 'one that is not an ID is refused in the contacts’ words', card());
     shutCard(); await settle();
     mr().tillAdd(); await settle();
     await typeInCard('foxyid1dee', 'NEXT'); await settle();

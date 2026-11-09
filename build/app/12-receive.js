@@ -371,7 +371,7 @@
     this.syncInbox();
     // and the till's inbox and outbox, which the phone closed with the rest (26m-till.js, `tillWake`)
     if (this.tillWake) this.tillWake();
-    // and the Foxy ID's, closed the same way (26o-cashu-id.js, `cidWake`)
+    // and the Cashu ID's, closed the same way (26o-cashu-id.js, `cidWake`)
     if (this.cidWake) this.cidWake();
   }
 
@@ -1146,7 +1146,7 @@
      * Outside it, a cashier code asks whether to work the keeper's till (`tillJoinAsk`). */
     if (this.state.till && this.tillAccept) return this.tillAccept(t, kind);
     if (kind === 'till') return this.tillJoinAsk ? this.tillJoinAsk(t) : false;
-    // another Foxy's Foxy ID: NAME THIS CONTACT? (26o-cashu-id.js)
+    // another Foxy's Cashu ID: NAME THIS CONTACT? (26o-cashu-id.js)
     if (kind === 'cashuid') return this.cidAddAsk ? this.cidAddAsk(t) : false;
     /* Paying from a card (SEND on the card's screen, 26f-flashcard.js): a card pays Lightning, an invoice or an address,
      * and a bitcoin address on chain where the mint pays on chain (`fcOutAddress`, which asks it first). A Cashu payment
@@ -1156,7 +1156,7 @@
     if (cardOut && kind === 'request') {
       this.blockedCard('fcOutNot', {
         tone: 'warn', title: 'THAT WON\u2019T WORK',
-        reason: 'This is a Cashu payment request. An EcashCard pays Lightning: ask them for an invoice, or WITHDRAW to this phone and pay from there.',
+        reason: 'This is a Cashu payment request. A Foxy Card pays Lightning: ask them for an invoice, or WITHDRAW to this phone and pay from there.',
         chip: 'Nothing was taken from the card.',
       });
       return false;
@@ -1216,7 +1216,7 @@
     if (!sats && cardOut) {
       this.blockedCard('fcOutNot', {
         tone: 'warn', title: 'THAT WON\u2019T WORK',
-        reason: 'This invoice names no amount. An EcashCard pays an invoice for an amount: ask them for one, or pay their Lightning address.',
+        reason: 'This invoice names no amount. A Foxy Card pays an invoice for an amount: ask them for one, or pay their Lightning address.',
         chip: 'Nothing was taken from the card.',
       });
       return false;
@@ -1406,7 +1406,7 @@
     // a banner over the app you are already looking at is just noise
     const away = document.visibilityState !== 'visible';
 
-    /* Not while a card is being read or written. A confirmation rose over the Flashcard screen with the phone's sheet up under it, and the
+    /* Not while a card is being read or written. A confirmation rose over the Foxy Card screen with the phone's sheet up under it, and the
      * sheet came down. It is kept in the queue of confirmations, in its place, and raised when the card flow is over (`keepForCardFlow`,
      * 26f-flashcard.js). Not the payment the card flow is itself making, whose confirmation the flow holds (below), and not a Foxy that is
      * away: nothing is being tapped, and the banner is what that person needs. `again` is a held confirmation being let go; `cardDone` one

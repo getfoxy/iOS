@@ -3,14 +3,14 @@
  *
  *     node tests/flashcard-cross-mint-load.js
  *
- * A card's money is at the mint its record names. A phone at another mint, online, puts money on it there: SEND > FLASHCARD from
+ * A card's money is at the mint its record names. A phone at another mint, online, puts money on it there: SEND > FOXY CARD from
  * home, or ADD FUNDS on the card's own screen. The card is read once; the card's mint makes an invoice for the amount in the card's
  * unit, and this phone's mint quotes paying it from this phone's balance. What goes on the card, the most that leaves this phone and
  * the fee are shown on a confirmation before anything moves. PUT ... ON CARD pays the invoice from here, claims it at the card's mint
  * on a visit there, makes the pieces for the card there, and writes them in one more tap under the card's PIN. The phone is home
  * after. Offline it is refused in one sentence, with nothing asked of anybody.
  *
- *   1  the owner's own bitcoin card of 1.21 at mint A, the phone at mint B: SEND > FLASHCARD asks the PIN before the card, the one
+ *   1  the owner's own bitcoin card of 1.21 at mint A, the phone at mint B: SEND > FOXY CARD asks the PIN before the card, the one
  *      tap that reads it brings the confirmation (nothing signed, nothing moved, the phone still at B), and PUT ... ON CARD asks no
  *      PIN again and writes the card in one more tap: the card up by the amount, B down by the amount and the fee the mint kept,
  *      nothing left at A, the phone home at B, and the load's row the card's (left out of home's list)
@@ -159,14 +159,14 @@ async function world(o) {
 }
 
 (async () => {
-  /* ---- 1: the owner's own bitcoin card at A, SEND > FLASHCARD from B ------------------------------------------------ */
+  /* ---- 1: the owner's own bitcoin card at A, SEND > FOXY CARD from B ------------------------------------------------ */
   {
     const { R, a, k } = await world({ own: true, onCard: 2000, atB: 4000 });
     const atA = R.W.balanceAt(MINT), atB = R.W.balanceAt(MINT2), cardBefore = k.balance();
     R.sheet.length = 0;
     k.sent.length = 0;
     a.fcSendCard();
-    ok(a.state.screen === 'amount' && a.state.flow === 'cardSend', 'SEND > FLASHCARD asks for the amount first');
+    ok(a.state.screen === 'amount' && a.state.flow === 'cardSend', 'SEND > FOXY CARD asks for the amount first');
     keyIn(a, 1000);
     ok(!!pad(a) && pad(a).title === 'CARD PIN' && pad(a).cta === 'TAP CARD' && begins(R) === 0,
        'a phone that knows a card asks the PIN before the card is asked for', pad(a) && pad(a).cta);
@@ -507,7 +507,7 @@ async function world(o) {
     withPick(a);
     await usdAtB(R, a, 3000);
     const satB = R.W.balanceAt(MINT2);
-    // SEND > FLASHCARD from home, not started in either balance
+    // SEND > FOXY CARD from home, not started in either balance
     R.sheet.length = 0;
     a.fcSendCard();
     a.state.amount = '1.00'; a.state.unit = 'USD';

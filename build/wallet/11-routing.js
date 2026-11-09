@@ -553,7 +553,7 @@
           return ids;
         };
         var owedBefore = owedOut();
-        /* The Foxy ID's: what its inbox read before this connect is taken now, not at the end of the catch-up below
+        /* The Cashu ID's: what its inbox read before this connect is taken now, not at the end of the catch-up below
          * (`cidOnConnect`). Not on a visit. */
         if (!opts || opts.remember !== false) cidOnConnect();
         /* Anything paid while the app was away is still sitting at the mint;

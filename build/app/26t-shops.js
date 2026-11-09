@@ -1,8 +1,8 @@
-  /* ---- SHOPS: the shops this phone collects for (08g-shop-collect.js, docs/FOXY-ID.md "Shops") --------------------------
+  /* ---- SHOPS: the shops this phone collects for (08g-shop-collect.js, docs/CASHU-ID.md "Shops") --------------------------
    *
-   *   SHOPS (the menu's WALLET, under MY FOXY ID) ... the SWITCH MINT list in a mode of its own (`tillList` 'shops', as the
+   *   SHOPS (the menu's WALLET, under MY CASHU ID) ... the SWITCH MINT list in a mode of its own (`tillList` 'shops', as the
    *                                till's lists are): each shop a row, its name, and under it its host, when it was last
-   *                                collected from and the collaborators it paid by name (a contact's, or the Foxy ID's
+   *                                collected from and the collaborators it paid by name (a contact's, or the Cashu ID's
    *                                start), so an ID swapped at the shop shows here; COLLECTING n OF N on it while it runs.
    *                                PASTE A SHOP LINK and SCAN A SHOP LINK add one; a row tapped shows it, with REMOVE.
    *   a collection ................ said once as it starts ("Collecting N sales from <shop>") and once as it ends ("N sales
@@ -12,7 +12,7 @@
 
   shopsOpen() { this.tillListGo('shops'); }
 
-  // "Ana, Ben, Foxy ID 1a2b3c4d" for the collaborators a shop has paid, newest first
+  // "Ana, Ben, Cashu ID 1a2b3c4d" for the collaborators a shop has paid, newest first
   shopPaidWords(paid) {
     const names = (paid || []).map((p) => String((p && p.name) || '')).filter(Boolean);
     if (!names.length) return '';
@@ -39,7 +39,7 @@
     return {
       title: 'SHOPS',
       line: rows.length ? 'Foxy collects their sales when it opens and every ten minutes, and pays each collaborator their share.'
-        : 'Add the link your shop shows its keeper. Its sales come to your Foxy ID here.',
+        : 'Add the link your shop shows its keeper. Its sales come to your Cashu ID here.',
       rows, past: [],
       add: { shown: true, label: 'PASTE A SHOP LINK', tap: () => this.shopPaste() },
       next: { shown: true, on: true, label: 'SCAN A SHOP LINK', tap: () => this.shopScan() },

@@ -3,7 +3,7 @@
  *
  *     node tests/remind.js
  *
- *   1  the wallet: nothing with no Foxy ID in use; with one, the phone is asked without iOS's question (`ask: false`) and
+ *   1  the wallet: nothing with no Cashu ID in use; with one, the phone is asked without iOS's question (`ask: false`) and
  *      "ok" turns it on with no card, "needs" asks for the card, "refused" ends the question; asked once, never again
  *   2  turning on names the fixed 15 days; refused leaves it off; off cancels; NOT NOW is remembered
  *   3  SETTINGS: no reminder row, with an ID in use or not (the keeper, 2026-11-08); it opens with FACE ID LOCK, SET PIN, BLUETOOTH TAP
@@ -108,7 +108,7 @@ function stubWallet() {
     lastToken: () => ({}), clearLastToken() {}, pendingMelts: () => [], splitPending: () => null,
     stopPreview() {}, stopPasteButton() {}, notify() {},
     share(text) { calls.shares.push(String(text)); return true; },
-    // ---- the Foxy ID's contract (build/wallet/21c-cashu-id.js) ----
+    // ---- the Cashu ID's contract (build/wallet/21c-cashu-id.js) ----
     cashuIdMine: () => Promise.resolve({ text: ID_MINE, id: REAL.cashuIdDecode(ID_MINE).id, nostr: REAL.cashuIdDecode(ID_MINE).nostr }),
     cashuIdShown() { calls.shown += 1; return Promise.resolve(1); },
     cashuIdListen() { calls.listens += 1; return Promise.resolve(1); },
@@ -248,7 +248,7 @@ function remindStub(o) {
   const ROW = 'REMIND ME AFTER 15 DAYS';
 
   {
-    // no row at all (the keeper, 2026-11-08), with a Foxy ID in use or without, on or off; SETTINGS opens with FACE ID LOCK, SET PIN, BLUETOOTH TAP
+    // no row at all (the keeper, 2026-11-08), with a Cashu ID in use or without, on or off; SETTINGS opens with FACE ID LOCK, SET PIN, BLUETOOTH TAP
     for (const st of [{ eligible: true, on: true }, { eligible: true, on: false }, { eligible: false }]) {
       const W = remindStub(st);
       await fresh(W);
@@ -290,12 +290,12 @@ function remindStub(o) {
     ok(card() === '' && W.calls.said.on === 0, 'status "' + st + '": no card');
   }
   {
-    // MY FOXY ID being shown never puts the card over its code; the next return past the lock asks
+    // MY CASHU ID being shown never puts the card over its code; the next return past the lock asks
     const W = remindStub({ eligible: true, status: 'ask' });
     await fresh(W, { open0: true });
-    V().menuItems.find((m) => m.label === 'MY FOXY ID').tap();
+    V().menuItems.find((m) => m.label === 'MY CASHU ID').tap();
     await settle(); await settle();
-    ok(card() === '' && !(A._cardQueue || []).length, 'showing MY FOXY ID puts no card over its code', card());
+    ok(card() === '' && !(A._cardQueue || []).length, 'showing MY CASHU ID puts no card over its code', card());
     A.wakeWork();
     await settle();
     ok(/REMIND YOU\?/.test(card()), 'the next return asks', card());

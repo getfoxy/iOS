@@ -1,4 +1,4 @@
-  /* ---- FLASHCARD: a card that holds ecash ----------------------------------
+  /* ---- FOXY CARD: a card that holds ecash ----------------------------------
    *
    * The screens over the wallet's card functions (build/wallet/08a-flashcard.js
    * and 21a-flashcard.js). These places use them:
@@ -19,7 +19,7 @@
    *                                      address and iOS opens Foxy with it:
    *                                      the same as CARD on home, if it is
    *                                      a moment for it (`cardTapped`);
-   *   SEND > FLASHCARD                   money onto any card held to this phone
+   *   SEND > FOXY CARD                   money onto any card held to this phone
    *                                      (`fcSendCard`);
    *   RESET (software 1.17)              the first of the row of round buttons
    *                                      under the holder's card (`fcReset`).
@@ -129,7 +129,7 @@
    * was put on) if the card is lost or blocked. Set-up asks nothing about it:
    * there is no "like cash" card to choose. This switch is the list that makes
    * that true for a person: the cards this phone loaded are shown on the
-   * FLASHCARD screen, with TAKE BACK for any past its date, and the screen
+   * FOXY CARD screen, with TAKE BACK for any past its date, and the screen
    * with no card on it is opened first, since a lost card cannot be tapped.
    * False hides the list and that screen as they once were
    * (tests/flashcard-screens.js runs both ways); a card is set up recoverable
@@ -839,7 +839,7 @@
   }
 
   /* The unit a card's amount is typed in. ADD FUNDS, WITHDRAW and LIMITS are in the card's own unit: a dollar card's are
-   * cents, typed in dollars. FLASHCARD on the send screen has no card on show: it is in the balance the money comes from,
+   * cents, typed in dollars. FOXY CARD on the send screen has no card on show: it is in the balance the money comes from,
    * dollars where this phone sends from its dollars at a mint with two, and the card tapped must hold that kind. */
   fcTypedUnitFor(flow) {
     // (a card of 1.23's limit: dollars, or dollars and sats where it holds bitcoin, `fcLimitUnit`)
@@ -866,7 +866,7 @@
   /* ADD FUNDS: does the card on show have the room for `sats`? The wallet's
    * answer ({ ok, why, … }, `cardLoadFits`) to the amount typed, for the card
    * read a moment ago, or null where there is none to ask about: no card on
-   * show (FLASHCARD on the send screen), a card other than the one read last,
+   * show (FOXY CARD on the send screen), a card other than the one read last,
    * or a wallet that cannot say. The keypad asks as it is typed
    * (`renderContext`), and NEXT asks again (`fcAmountNext`). */
   fcLoadFits(sats) {
@@ -886,11 +886,11 @@
     // in the unit it is typed in: sats for a bitcoin card, whatever the screen showed; cents, exactly, for a dollar card
     const unit = this.fcTypedUnit();
     const sats = this.fcTyped();
-    // FLASHCARD on the send screen has no card on show: the card is the one held to the phone when NEXT is pressed
+    // FOXY CARD on the send screen has no card on show: the card is the one held to the phone when NEXT is pressed
     if (!fc && flow !== 'cardSend') { this.back(); return; }
     // DEPOSIT on a card of both currencies: the amount was typed first, and which pays is asked now
     if (flow === 'cardAdd' && this._fcAddFirst) { this.fcAddWhich(); return; }
-    /* SEND > FLASHCARD from home at a mint with two balances, the send not started in either: the figure is kept in both (dollars
+    /* SEND > FOXY CARD from home at a mint with two balances, the send not started in either: the figure is kept in both (dollars
      * exactly or at the price, and sats), and the card held to the phone decides (`fcSendRun`, `fig`): the one currency it holds, or,
      * for a card that takes both, the question which, where both of this phone's balances could pay. */
     if (flow === 'cardSend' && this.twoUnitsOn && this.twoUnitsOn() && !(this.walletNow && this.walletNow('send'))) {
@@ -3079,7 +3079,7 @@
      * put pieces on with no PIN. Tapped first without one; a card that asks for
      * it after all is given it on the next tap. */
     if (!opt.pin && !pinFirst && this.fcOwedAfterPaying()) { this.fcWriteRun('', Object.assign({}, opt, { change: true })); return; }
-    // money made for a card that has no PIN (FLASHCARD on the send screen): nothing to ask, whoever holds it writes it
+    // money made for a card that has no PIN (FOXY CARD on the send screen): nothing to ask, whoever holds it writes it
     if (opt.noPin) { this.fcWriteRun('', opt); return; }
     const sum = this.fcOwedSum(opt.unit);
     const owed = sum.amount;
@@ -3460,7 +3460,7 @@
       });
       return;
     }
-    /* What it now holds is said to its holder by the FLASHCARD screen itself: the balance counts up to it, and no card is raised over
+    /* What it now holds is said to its holder by the FOXY CARD screen itself: the balance counts up to it, and no card is raised over
      * it. The two things the balance cannot say are said in a line: that the card was moved to this phone's mint by the same tap, and
      * that more than was asked for went on. */
     if (this.state.screen === 'flashcard' && !(o && o.renewed)) {
@@ -3471,7 +3471,7 @@
       if (note) this.toast(note);
       return;
     }
-    /* Money put on a card that is not on show (FLASHCARD on the send screen, which leaves the person at Home) or renewed ends on the
+    /* Money put on a card that is not on show (FOXY CARD on the send screen, which leaves the person at Home) or renewed ends on the
      * app's own success screen, ON THE CARD, with its flash, as a payment does (24-render-receive-and-send.js, `renderPaid`): the sheet
      * that said it was out of place among the other endings (the design's rule). What the balance cannot say goes in a line after. */
     // nothing went on (a read after a write that put nothing, a reset): nothing to celebrate
@@ -3609,7 +3609,7 @@
       }, (e) => this.fcFailed(e, { again: () => this.fcRead(open), cancelled: own ? (er) => this.fcCancelled(own, er) : null }));
   }
 
-  /* What a card said, kept for the screen. Only on the FLASHCARD screen, or
+  /* What a card said, kept for the screen. Only on the FOXY CARD screen, or
    * on the way to it (`open`): a payer's card read at the till is not left
    * on show in the menu. */
   fcShow(card, open) {
@@ -5883,7 +5883,7 @@
    *
    * A new design takes the next code and adds its drawing. 001 is Foxy's, a
    * picture; 002 is the beaker, drawn in CSS and SVG and animated
-   * (build/markup.html, the card on the FLASHCARD screen, and the face behind
+   * (build/markup.html, the card on the FOXY CARD screen, and the face behind
    * the sheet in 26h-tap-screen.js). FL1 is the first Flash design, drawn in
    * CSS and kept as it was: it is no shop design. A card encoded before the
    * digits names its design as FX1 or EL1, and FC_DESIGN_ALIASES reads those as
@@ -5897,7 +5897,7 @@
   };
   FC_DESIGN_ALIASES = { FX1: '001', EL1: '002' };
   FC_DESIGN = 'FL1';
-  /* EL1's face, the block build/markup.html holds inside the card on the FLASHCARD screen, for the face behind the sheet (26h-tap-screen.js);
+  /* EL1's face, the block build/markup.html holds inside the card on the FOXY CARD screen, for the face behind the sheet (26h-tap-screen.js);
    * shown only under [data-card-design="002"]. The two must stay the same. */
   FC_EL1_FACE = '<div data-el1 style="position:absolute;inset:0;overflow:hidden;border-radius:inherit;background:radial-gradient(120% 90% at 50% 100%,#1A1D20 0%,#0B0C0D 60%,#050505 100%);font-family:Sora,sans-serif"><div style="position:absolute;inset:0;background:linear-gradient(115deg,rgba(255,255,255,0) 30%,rgba(255,255,255,.06) 46%,rgba(255,255,255,0) 60%);pointer-events:none"></div><div style="position:absolute;left:7.69cqw;top:7.69cqw;width:13.08cqw;height:10.38cqw;border-radius:1.92cqw;background-image:linear-gradient(90deg,transparent 32%,rgba(90,55,10,.3) 32% 34%,transparent 34% 66%,rgba(90,55,10,.3) 66% 68%,transparent 68%),linear-gradient(0deg,transparent 48%,rgba(90,55,10,.3) 48% 52%,transparent 52%),linear-gradient(135deg,#F6D58A,#C9963F)"></div><div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:29.81cqw;height:44.23cqw"><div style="position:absolute;inset:0;animation:foxyEl1Sway 3.2s ease-in-out infinite;transform-origin:50% 90%"><div style="position:absolute;left:16.4%;width:67.2%;top:30%;height:22.9%;overflow:hidden"><div style="position:absolute;left:-25%;width:150%;top:0;bottom:-40%;transform-origin:50% 41%;animation:foxyEl1Slosh 3.2s ease-in-out infinite"><svg viewBox="0 0 237 147" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%"><g style="animation:foxyEl1FlowB 4.6s linear infinite"><path d="M0 147 L0 51 L0 58.6 L3 58.1 L6 57.4 L9 56.5 L12 55.6 L15 54.5 L18 53.3 L21 52.0 L24 50.8 L27 49.5 L30 48.3 L33 47.1 L36 46.0 L39 45.1 L42 44.3 L45 43.7 L48 43.3 L51 43.0 L54 43.0 L57 43.2 L60 43.5 L63 44.1 L66 44.8 L69 45.7 L72 46.7 L75 47.8 L78 49.0 L81 50.3 L84 51.6 L87 52.8 L90 54.0 L93 55.2 L96 56.2 L99 57.1 L102 57.8 L105 58.4 L108 58.8 L111 59.0 L114 59.0 L117 58.8 L120 58.3 L123 57.7 L126 57.0 L129 56.1 L132 55.0 L135 53.9 L138 52.6 L141 51.4 L144 50.1 L147 48.9 L150 47.7 L153 46.6 L156 45.6 L159 44.7 L162 44.0 L165 43.5 L168 43.1 L171 43.0 L174 43.1 L177 43.3 L180 43.8 L183 44.4 L186 45.2 L189 46.2 L192 47.3 L195 48.4 L198 49.7 L201 50.9 L204 52.2 L207 53.4 L210 54.6 L213 55.7 L216 56.7 L219 57.5 L222 58.1 L225 58.6 L228 58.9 L231 59.0 L234 58.9 L237 58.6 L240 58.1 L243 57.4 L246 56.5 L249 55.6 L252 54.5 L255 53.3 L258 52.0 L261 50.8 L264 49.5 L267 48.3 L270 47.1 L273 46.0 L276 45.1 L279 44.3 L282 43.7 L285 43.3 L288 43.0 L291 43.0 L294 43.2 L297 43.5 L300 44.1 L303 44.8 L306 45.7 L309 46.7 L312 47.8 L315 49.0 L318 50.3 L321 51.6 L324 52.8 L327 54.0 L330 55.2 L333 56.2 L336 57.1 L339 57.8 L342 58.4 L345 58.8 L348 59.0 L351 59.0 L354 58.8 L357 58.3 L360 57.7 L363 57.0 L366 56.1 L369 55.0 L372 53.9 L375 52.6 L378 51.4 L381 50.1 L384 48.9 L387 47.7 L390 46.6 L393 45.6 L396 44.7 L399 44.0 L402 43.5 L405 43.1 L408 43.0 L411 43.1 L414 43.3 L417 43.8 L420 44.4 L423 45.2 L426 46.2 L429 47.3 L432 48.4 L435 49.7 L438 50.9 L441 52.2 L444 53.4 L447 54.6 L450 55.7 L453 56.7 L456 57.5 L459 58.1 L462 58.6 L465 58.9 L468 59.0 L471 58.9 L474 58.6 L474 147 Z" fill="#FFA24D"></path></g><g style="animation:foxyEl1Flow 2.8s linear infinite"><path d="M0 147 L0 55 L0 55.0 L3 56.0 L6 56.9 L9 57.8 L12 58.6 L15 59.3 L18 59.9 L21 60.4 L24 60.7 L27 60.9 L30 61.0 L33 60.9 L36 60.7 L39 60.3 L42 59.8 L45 59.1 L48 58.4 L51 57.5 L54 56.6 L57 55.7 L60 54.8 L63 53.8 L66 52.9 L69 52.0 L72 51.2 L75 50.6 L78 50.0 L81 49.5 L84 49.2 L87 49.0 L90 49.0 L93 49.1 L96 49.4 L99 49.8 L102 50.4 L105 51.1 L108 51.8 L111 52.7 L114 53.6 L117 54.5 L120 55.5 L123 56.4 L126 57.3 L129 58.2 L132 58.9 L135 59.6 L138 60.2 L141 60.6 L144 60.9 L147 61.0 L150 61.0 L153 60.8 L156 60.5 L159 60.0 L162 59.4 L165 58.8 L168 58.0 L171 57.1 L174 56.2 L177 55.2 L180 54.3 L183 53.4 L186 52.5 L189 51.6 L192 50.9 L195 50.2 L198 49.7 L201 49.3 L204 49.1 L207 49.0 L210 49.1 L213 49.3 L216 49.6 L219 50.1 L222 50.7 L225 51.4 L228 52.2 L231 53.1 L234 54.0 L237 55.0 L240 56.0 L243 56.9 L246 57.8 L249 58.6 L252 59.3 L255 59.9 L258 60.4 L261 60.7 L264 60.9 L267 61.0 L270 60.9 L273 60.7 L276 60.3 L279 59.8 L282 59.1 L285 58.4 L288 57.5 L291 56.6 L294 55.7 L297 54.8 L300 53.8 L303 52.9 L306 52.0 L309 51.2 L312 50.6 L315 50.0 L318 49.5 L321 49.2 L324 49.0 L327 49.0 L330 49.1 L333 49.4 L336 49.8 L339 50.4 L342 51.1 L345 51.8 L348 52.7 L351 53.6 L354 54.5 L357 55.5 L360 56.4 L363 57.3 L366 58.2 L369 58.9 L372 59.6 L375 60.2 L378 60.6 L381 60.9 L384 61.0 L387 61.0 L390 60.8 L393 60.5 L396 60.0 L399 59.4 L402 58.8 L405 58.0 L408 57.1 L411 56.2 L414 55.2 L417 54.3 L420 53.4 L423 52.5 L426 51.6 L429 50.9 L432 50.2 L435 49.7 L438 49.3 L441 49.1 L444 49.0 L447 49.1 L450 49.3 L453 49.6 L456 50.1 L459 50.7 L462 51.4 L465 52.2 L468 53.1 L471 54.0 L474 55.0 L474 147 Z" fill="#F68200"></path></g></svg></div></div><img src="img/card-el1-beaker.png" alt="" style="position:absolute;inset:0;width:100%;height:100%"></div><div style="position:absolute;left:20%;right:13%;top:18%;bottom:9.5%;overflow:hidden;border-radius:0 0 3.46cqw 3.46cqw;pointer-events:none"><span style="position:absolute;left:4%;bottom:-4%;width:1.35cqw;height:1.35cqw;border-radius:50%;border:0.38cqw solid #FFFFFF;background:rgba(255,255,255,.35);box-shadow:0 0 0.77cqw rgba(255,255,255,.4);box-sizing:border-box;opacity:0;animation:foxyEl1Bub 5.2s cubic-bezier(.4,0,.6,1) -2.91s infinite"></span><span style="position:absolute;left:9%;bottom:-4%;width:0.77cqw;height:0.77cqw;border-radius:50%;border:0.38cqw solid #FFFFFF;background:rgba(255,255,255,.35);box-shadow:0 0 0.77cqw rgba(255,255,255,.4);box-sizing:border-box;opacity:0;animation:foxyEl1Bub 4.4s cubic-bezier(.4,0,.6,1) -4.07s infinite"></span><span style="position:absolute;left:76%;bottom:-4%;width:1.15cqw;height:1.15cqw;border-radius:50%;border:0.38cqw solid #FFFFFF;background:rgba(255,255,255,.35);box-shadow:0 0 0.77cqw rgba(255,255,255,.4);box-sizing:border-box;opacity:0;animation:foxyEl1Bub 5.8s cubic-bezier(.4,0,.6,1) -4.04s infinite"></span><span style="position:absolute;left:84%;bottom:-4%;width:0.77cqw;height:0.77cqw;border-radius:50%;border:0.38cqw solid #FFFFFF;background:rgba(255,255,255,.35);box-shadow:0 0 0.77cqw rgba(255,255,255,.4);box-sizing:border-box;opacity:0;animation:foxyEl1Bub 4.8s cubic-bezier(.4,0,.6,1) -0.49s infinite"></span><span style="position:absolute;left:90%;bottom:-4%;width:0.96cqw;height:0.96cqw;border-radius:50%;border:0.38cqw solid #FFFFFF;background:rgba(255,255,255,.35);box-shadow:0 0 0.77cqw rgba(255,255,255,.4);box-sizing:border-box;opacity:0;animation:foxyEl1Bub 6.2s cubic-bezier(.4,0,.6,1) -1.06s infinite"></span><span style="position:absolute;left:40%;bottom:-4%;width:0.58cqw;height:0.58cqw;border-radius:50%;border:0.38cqw solid #FFFFFF;background:rgba(255,255,255,.35);box-shadow:0 0 0.77cqw rgba(255,255,255,.4);box-sizing:border-box;opacity:0;animation:foxyEl1Bub 3.6s cubic-bezier(.4,0,.6,1) -0.63s infinite"></span><span style="position:absolute;left:56%;bottom:-4%;width:0.77cqw;height:0.77cqw;border-radius:50%;border:0.38cqw solid #FFFFFF;background:rgba(255,255,255,.35);box-shadow:0 0 0.77cqw rgba(255,255,255,.4);box-sizing:border-box;opacity:0;animation:foxyEl1Bub 4.2s cubic-bezier(.4,0,.6,1) -2.56s infinite"></span><span style="position:absolute;left:14%;bottom:-4%;width:0.58cqw;height:0.58cqw;border-radius:50%;border:0.38cqw solid #FFFFFF;background:rgba(255,255,255,.35);box-shadow:0 0 0.77cqw rgba(255,255,255,.4);box-sizing:border-box;opacity:0;animation:foxyEl1Bub 5s cubic-bezier(.4,0,.6,1) -1.0s infinite"></span></div></div><div style="position:absolute;right:7.69cqw;bottom:5.77cqw;display:flex;flex-direction:column;align-items:center;gap:1.54cqw"><svg viewBox="0 0 28 34" style="width:5.96cqw;height:7.31cqw" fill="none" stroke="#EB6A2E" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v24M8 5h9a5.5 5.5 0 0 1 0 11H8M8 16h10a6.5 6.5 0 0 1 0 13H8M12 1.5v3.5M16.5 1.5v3.5M12 29v3.5M16.5 29v3.5"></path></svg><span style="font-weight:700;font-size:2.5cqw;letter-spacing:.32em;color:#BDBDBD">BEARER</span></div></div>';
   /* The design this phone gives the cards it sets up, written on its own file
@@ -6013,7 +6013,7 @@
       });
   }
 
-  /* ---- FLASHCARD on the send screen -----------------------------------------------
+  /* ---- FOXY CARD on the send screen -----------------------------------------------
    *
    * Money onto a card held to this phone, any card: the amount first (the keypad every amount is typed on), and NEXT brings
    * the sheet up at once. A card with no PIN takes the money in that tap. A card with a PIN ends the sheet asking for it,
@@ -6038,7 +6038,7 @@
     }, (pin) => this.fcSendRun(sats, pin, unit, alt));
   }
 
-  /* Whether SEND > FLASHCARD from home asks the card's PIN before the card is asked for: only where the card is known to want it, a
+  /* Whether SEND > FOXY CARD from home asks the card's PIN before the card is asked for: only where the card is known to want it, a
    * card of 1.21 or later (`pinFirst`) with a PIN. Known from the last card read in this run (the wallet's `cardLastRead`) where that
    * is a card of this phone's own (on file) or the card on screen: the card most likely to be held to it. Otherwise from the cards on
    * file that say what they were when last read (`pinFirst`, written by the wallet's `cardRemember`): every one of those 1.21 or
@@ -6203,7 +6203,7 @@
     }
   }
 
-  /* SEND > FLASHCARD not started in a currency (`fig`: the figure in each): which the card read takes it in. A card of software 1.23 that
+  /* SEND > FOXY CARD not started in a currency (`fig`: the figure in each): which the card read takes it in. A card of software 1.23 that
    * takes both (its owner set it up here for both, or it holds both or may: `cardHold`, `cardUnits`) is sent the one of this phone's
    * balances that covers the figure, or asks which (`ask`) where both do; any other card its own currency, as it always was (a one-currency
    * card of 1.23 its owner set up here: that one). Where nothing covers it, the currency that came nearest, and the wallet says it is short. */
@@ -6261,7 +6261,7 @@
 
   /* ---- a card at another mint, loaded from this phone ---------------------------------------------------------------
    *
-   * SEND > FLASHCARD (home) and ADD FUNDS (the card's screen) for a card whose money is at another mint than this phone's. Its money
+   * SEND > FOXY CARD (home) and ADD FUNDS (the card's screen) for a card whose money is at another mint than this phone's. Its money
    * stays where it is: this phone's money goes there by Lightning and is made into pieces for the card at the card's mint (the wallet's
    * `cardLoadQuote`, `cardLoadAcross`, 08a-flashcard.js). The card is read once (SEND's tap, or the card on screen), and then:
    *
@@ -6299,7 +6299,7 @@
     return (card && card.record && card.record.unit === 'usd') ? 'usd' : 'sat';
   }
 
-  /* SEND > FLASHCARD's tap found the card at another mint (`fcSendRun`): the figure typed, in the card's unit, and the balance of this
+  /* SEND > FOXY CARD's tap found the card at another mint (`fcSendRun`): the figure typed, in the card's unit, and the balance of this
    * phone's that pays. A dollar card is loaded with the dollars typed (a figure typed in sats is not a dollar amount: said, and nothing
    * is asked); a bitcoin card with the sats typed, or with the sats the dollars typed are at this phone's price, as at its own mint. */
   /* A card of both, the send not started in a currency (`fig`): which goes on the card is asked first, as at its own mint (`chosen`), with
@@ -6580,7 +6580,7 @@
 
   /* ---- a new card, set up by the first phone that sends it money (software 1.22) ------------------------------------
    *
-   * SEND > FLASHCARD to a card that has no PIN and no owner: the card's holder may have no phone, and this one sets the card up
+   * SEND > FOXY CARD to a card that has no PIN and no owner: the card's holder may have no phone, and this one sets the card up
    * for them, with the set-up's own steps (26j-card-wheel.js): the holder types their PIN twice here, and chooses the two numbers.
    * The card holds what is being sent. Then one tap: the PIN, the record with no key of this phone's in it (a cash card: its
    * money cannot be got back if it is lost), the numbers, and the money, under the holder's PIN. This phone does not become its
@@ -6640,7 +6640,7 @@
 
   /* ---- a card with no owner, on any Foxy (software 1.22) ----------------------------------------------------------
    *
-   * A card with a PIN and no owner is its holder's, who may have no phone. Read on the FLASHCARD screen of any Foxy, it shows what
+   * A card with a PIN and no owner is its holder's, who may have no phone. Read on the FOXY CARD screen of any Foxy, it shows what
    * it holds at once (nothing of that is held for), and two buttons:
    *
    *   VIEW AS GUEST                  its PIN, then a held tap: the card answers Keep holding for some seconds and then gives its
@@ -6852,7 +6852,7 @@
 
   /* ---- home and the card --------------------------------------------------------------------------------------------
    *
-   * CARD, the third of home's buttons under the balance (home's round button at the top left was CARD, and is MY FOXY ID now), opens the
+   * CARD, the third of home's buttons under the balance (home's round button at the top left was CARD, and is MY CASHU ID now), opens the
    * card's screen as a card's address does (`goFlashcard`), which asks for the card to be tapped; nothing of a card is shown before it has been read. The card's screen has the HOME
    * button in the same place, which comes back home (`fcGoHome`). A swipe does the same (`fcSwipe`): to the left on home is CARD,
    * to the right on the card's screen is HOME; nothing is drawn for it and nothing of a card is kept for it. */
@@ -6943,7 +6943,7 @@
   /* ---- paying from the card (SEND on the card's screen) ----------------------------------------------------------
    *
    * SEND on a card's screen opens the app's own SEND MONEY screen in card mode: the camera as ever, PASTE, CONTACTS and
-   * TYPE, and the card's WITHDRAW at the top; SEND ECASH and FLASHCARD are not there. What is read goes to the same
+   * TYPE, and the card's WITHDRAW at the top; SEND ECASH and FOXY CARD are not there. What is read goes to the same
    * confirmation, with the card in a FROM row and NEXT for PAY. NEXT reads the payment's total (the amount and the fee the
    * confirmation showed) off the card exactly as a till reads a card that pays it (`fcPayRun`, with `send`): the PIN,
    * the per tap limit's wait, the card's own change, a tap taken up again. The pieces the card pays this phone are held
@@ -6952,7 +6952,7 @@
    * does, and the screen says NOT PAID.
    *
    * A bitcoin address is paid on chain the same way, where the mint pays on chain (`fcOutAddress`): the phone's own
-   * on-chain confirmation (26b-onchain.js) with the FROM FLASHCARD row and NEXT, the card read for the amount and the fee
+   * on-chain confirmation (26b-onchain.js) with the FROM FOXY CARD row and NEXT, the card read for the amount and the fee
    * option's reserve (`fcOcNext`), and the phone's own on-chain melt made with the held pieces (`fcOcPay`). PENDING is then
    * the phone's to follow, for as long as it follows any payment on chain. What comes back after the card has gone (the
    * reserve the transaction did not use, or all of it where the mint does not take it) is the card's, owed to it and put
@@ -7219,7 +7219,7 @@
       if (known && !(limits && limits.send)) {
         this.blockedCard('fcOutNot', {
           tone: 'warn', title: 'THAT WON\u2019T WORK',
-          reason: this.mintName() + ' does not pay bitcoin addresses, so an EcashCard cannot pay one from here. '
+          reason: this.mintName() + ' does not pay bitcoin addresses, so a Foxy Card cannot pay one from here. '
             + 'Ask them for a Lightning invoice, or WITHDRAW to this phone and pay from a mint that does.',
           chip: 'Nothing was taken from the card.',
         });
@@ -7498,7 +7498,7 @@
     this.fcWriteAsk({});
   }
 
-  /* flashcard: the card that was tapped, or the invitation to tap one. */
+  /* The Foxy Card screen (`flashcard`): the card that was tapped, or the invitation to tap one. */
   /** @param {RenderContext} c */
   renderFlashcard(c) {
     const { s, sc } = c;

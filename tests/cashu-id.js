@@ -1,9 +1,9 @@
 'use strict';
-/* cashu-id.js — the Foxy ID, the wallet's half (build/wallet/08e-cashu-id.js).
+/* cashu-id.js — the Cashu ID, the wallet's half (build/wallet/08e-cashu-id.js).
  *
  *     node tests/cashu-id.js
  *
- * A wallet shows MY FOXY ID; another Foxy keeps it as a contact and pays it by
+ * A wallet shows MY CASHU ID; another Foxy keeps it as a contact and pays it by
  * NUT-28 (pay-to-blinded-key), as cashu-ts does with `blindKeys`: for each piece
  * a throwaway key e, E = e·G on the proof (`p2pk_e`), the ID blinded at slot 0
  * and the payer's refund key at slot 1 (rᵢ = SHA-256("Cashu_P2BK_v1" ‖ x(e·P) ‖ i),
@@ -184,8 +184,8 @@ async function run() {
   /* ---- the string ------------------------------------------------------ */
   ok(/^foxyid1[A-Za-z0-9_-]{179}$/.test(mine.text) && mine.text.length === 186, 'the ID string: foxyid1 and 179 characters of base64url (version 2, signed)', mine.text);
   ok(mine.text === A.W._cashuIdEncode(V.id, V.nostr, V.bindSig), 'built from the two keys and the signature');
-  const docs = fs.readFileSync(path.join(__dirname, '..', 'docs', 'FOXY-ID.md'), 'utf8');
-  ok(docs.indexOf(mine.text) >= 0, 'the ID string of the vectors’ words is the one FOXY-ID.md shows', mine.text);
+  const docs = fs.readFileSync(path.join(__dirname, '..', 'docs', 'CASHU-ID.md'), 'utf8');
+  ok(docs.indexOf(mine.text) >= 0, 'the ID string of the vectors’ words is the one CASHU-ID.md shows', mine.text);
   const dec = A.W.cashuIdDecode(mine.text);
   ok(dec && dec.id === V.id && dec.nostr === V.nostr, 'and read back to them');
   ok(A.W.classify(mine.text) === 'cashuid' && A.W.classify('  ' + mine.text + '\n') === 'cashuid', 'classify says cashuid');
@@ -193,15 +193,15 @@ async function run() {
   let refused = 0;
   for (let at = 7; at < mine.text.length; at++) if (A.W.cashuIdDecode(flip(mine.text, at)) === null) refused += 1;
   ok(refused === mine.text.length - 7, 'one character changed anywhere is refused', String(refused));
-  ok(A.W.cashuIdProblem(flip(mine.text, 40)) === 'That is not a Foxy ID.', 'in those words');
-  ok(A.W.classify(flip(mine.text, 40)) === 'cashuid' && A.W.classify(mine.text.slice(0, 60)) === 'cashuid', 'a mistyped or cut one is still named a Foxy ID');
+  ok(A.W.cashuIdProblem(flip(mine.text, 40)) === 'That is not a Cashu ID.', 'in those words');
+  ok(A.W.classify(flip(mine.text, 40)) === 'cashuid' && A.W.classify(mine.text.slice(0, 60)) === 'cashuid', 'a mistyped or cut one is still named a Cashu ID');
   ok(A.W.cashuIdDecode(mine.text.slice(0, 60)) === null && A.W.cashuIdDecode(mine.text + 'A') === null, 'cut short or too long: refused');
   const v1 = A.W._cashuIdEncode(V.id, V.nostr);
-  ok(v1.length === 101 && A.W.cashuIdDecode(v1) === null && A.W.cashuIdProblem(v1) === 'That is not a Foxy ID.' && A.W.classify(v1) === 'cashuid',
-    'version 1 (no signature, 101 characters) is refused: That is not a Foxy ID.', A.W.cashuIdProblem(v1));
+  ok(v1.length === 101 && A.W.cashuIdDecode(v1) === null && A.W.cashuIdProblem(v1) === 'That is not a Cashu ID.' && A.W.classify(v1) === 'cashuid',
+    'version 1 (no signature, 101 characters) is refused: That is not a Cashu ID.', A.W.cashuIdProblem(v1));
   let v1No = '';
   try { await A.W.cashuIdCheck(v1); } catch (e) { v1No = e.message; }
-  ok(v1No === 'That is not a Foxy ID.', 'and refused when pasted or scanned', v1No);
+  ok(v1No === 'That is not a Cashu ID.', 'and refused when pasted or scanned', v1No);
   const resum = (bytes) => 'foxyid1' + Buffer.from(bytes.concat([...crypto.createHash('sha256').update(Buffer.from(bytes)).digest().subarray(0, 4)])).toString('base64url');
   const v3 = resum([3].concat([...Buffer.from(V.id, 'hex')], [...Buffer.from(V.nostr, 'hex')], [...Buffer.from(V.bindSig, 'hex')]));
   ok(/newer Foxy/.test(A.W.cashuIdProblem(v3)), 'a newer version is said to be from a newer Foxy', A.W.cashuIdProblem(v3));
@@ -222,7 +222,7 @@ async function run() {
   ok(own.own === true, 'pasting your own ID is seen as yours');
   let ownNo = '';
   try { await A.W.cashuIdAdd(mine.text, 'Me'); } catch (e) { ownNo = e.message; }
-  ok(ownNo === 'That is your own Foxy ID.', 'and is not added', ownNo);
+  ok(ownNo === 'That is your own Cashu ID.', 'and is not added', ownNo);
   const check = await B.W.cashuIdCheck(mine.text);
   ok(check.own === false && check.name === '' && check.id === V.id && !('conflict' in check), 'on another phone it is a new ID');
   const added = await B.W.cashuIdAdd(mine.text, 'Alice');
@@ -235,7 +235,7 @@ async function run() {
   ok((await B.W.cashuIdCheck(mine.text)).name === 'Alice', 'and the check names it');
   let badNo = '';
   try { await B.W.cashuIdAdd(flip(mine.text, 50), 'X'); } catch (e) { badNo = e.message; }
-  ok(badNo === 'That is not a Foxy ID.', 'a mistyped one is refused at the add too', badNo);
+  ok(badNo === 'That is not a Cashu ID.', 'a mistyped one is refused at the add too', badNo);
   ok(B.W.cashuIdContacts().length === 1, 'cashuIdContacts lists the one');
 
   /* L1: Alice's ID with somebody else's delivery key and no signature (version 1) is not an ID at all */
@@ -243,7 +243,7 @@ async function run() {
   let swapNo = '', swapChk = '';
   try { await B.W.cashuIdCheck(swapped); } catch (e) { swapChk = e.message; }
   try { await B.W.cashuIdAdd(swapped, 'Alice'); } catch (e) { swapNo = e.message; }
-  ok(swapChk === 'That is not a Foxy ID.' && swapNo === 'That is not a Foxy ID.' && B.W.cashuIdContacts()[0].cid.nostr === V.nostr
+  ok(swapChk === 'That is not a Cashu ID.' && swapNo === 'That is not a Cashu ID.' && B.W.cashuIdContacts()[0].cid.nostr === V.nostr
     && B.W.cashuIdContacts()[0].cid.sig === V.bindSig, 'L1: an unsigned string naming a contact’s ID with another address is refused, the contact unchanged', swapNo);
 
   /* ---- paying a contact ---------------------------------------------------- */
@@ -314,7 +314,7 @@ async function run() {
   ok(B.phone.said.every((x) => x.text.indexOf(keysB.d.toString(16)) < 0 && x.text.indexOf(keysB.pay.toString(16)) < 0), 'no answer from the phone holds the ID key or the paying key');
   let selfNo = '';
   try { await A.W.cashuIdPay(mine.text, 10); } catch (e) { selfNo = e.message; }
-  ok(selfNo === 'That is your own Foxy ID.', 'paying your own ID is refused', selfNo);
+  ok(selfNo === 'That is your own Cashu ID.', 'paying your own ID is refused', selfNo);
 
   /* ---- receiving ---------------------------------------------------------- */
   const aBefore = await balance(A);
@@ -323,7 +323,7 @@ async function run() {
   ok((await balance(A)) === aBefore + 100, 'and holds 100 more', String(await balance(A)));
   ok(A.said.sign === 1, 'the phone signed for it once (the key itself never left it)');
   const inRow = logRows(A).filter((e) => e.dir === 'in')[0] || {};
-  ok(inRow.memo === 'From a Foxy ID' && inRow.cid === 'in', 'a payer that names nobody: From a Foxy ID', JSON.stringify(inRow));
+  ok(inRow.memo === 'From a Cashu ID' && inRow.cid === 'in', 'a payer that names nobody: From a Cashu ID', JSON.stringify(inRow));
   ok(A.phone.said.every((x) => x.text.indexOf(V.k) < 0 && x.text.indexOf(V.d) < 0 && x.text.indexOf(keysA.d.toString(16)) < 0),
     'no answer from the phone holds the ID key or a one-time key');
   ok(A.store('foxy.cid.seen', []).every((s) => /^[0-9a-f]{32}$/.test(s)), 'what was taken is remembered by a hash of each secret, not the secret');
@@ -350,7 +350,7 @@ async function run() {
   ok(!('cidPeer' in proved) && !('cidPeer' in inRow) && proved.cid === 'in', 'the row of a proved payer keeps no ID key, as the row of one that named nobody',
     JSON.stringify([proved.cidPeer, inRow.cidPeer]));
   ok(typeof A.W.cashuMsgPayments === 'undefined' && typeof A.W.cashuMsgSend === 'undefined' && typeof A.W._cashuMsgArrived === 'undefined',
-    'no messages between Foxy IDs in the wallet');
+    'no messages between Cashu IDs in the wallet');
   {
     // a message's first, as an older Foxy sends it to the delivery key, is no payment: refused, nothing kept
     const before = await balance(A);
@@ -369,14 +369,14 @@ async function run() {
   relay = [];
   await D.W.cashuIdPay(mine.text, 7);
   const spoof = envelope(relay[0].body, { from: bId.id });
-  ok((await A.W._cashuIdArrived(spoof)) === 'taken' && (logRows(A).filter((e) => e.dir === 'in')[0] || {}).memo === 'From a Foxy ID',
-    'H1: a delivery naming Bob with somebody else’s tag: From a Foxy ID, not From Bob');
+  ok((await A.W._cashuIdArrived(spoof)) === 'taken' && (logRows(A).filter((e) => e.dir === 'in')[0] || {}).memo === 'From a Cashu ID',
+    'H1: a delivery naming Bob with somebody else’s tag: From a Cashu ID, not From Bob');
   relay = [];
   await D.W.cashuIdPay(mine.text, 6);
   const noTag = JSON.parse(relay[0].body);
   delete noTag.tag;
   noTag.from = bId.id;
-  ok((await A.W._cashuIdArrived(JSON.stringify(noTag))) === 'taken' && (logRows(A).filter((e) => e.dir === 'in')[0] || {}).memo === 'From a Foxy ID',
+  ok((await A.W._cashuIdArrived(JSON.stringify(noTag))) === 'taken' && (logRows(A).filter((e) => e.dir === 'in')[0] || {}).memo === 'From a Cashu ID',
     'H1: and one naming Bob with no tag at all');
 
   /* ---- deliveries that are not this ID's ------------------------------------ */
@@ -388,7 +388,7 @@ async function run() {
   const pm3 = proofsOf(B, m3.token);
   const wrongE = envelope(relay[0].body, { token: reToken(B, MINT, 'sat', pm3.map((p) => Object.assign({}, p, { p2pk_e: msg1.E }))) });
   ok((await A.W._cashuIdArrived(wrongE)) === 'refused', 'the right pieces with another payment’s E are refused');
-  ok(A.phone.refusals.some((x) => x.action === 'cashuIdSign' && /not locked to this Foxy ID/.test(x.error)), 'by the phone: not locked to this Foxy ID');
+  ok(A.phone.refusals.some((x) => x.action === 'cashuIdSign' && /not locked to this Cashu ID/.test(x.error)), 'by the phone: not locked to this Cashu ID');
   ok(A.store('foxy.cid.inbox', []).length === 0, 'and nothing of it is kept');
   // a payment to C's ID delivered to A
   const cId = await C.W.cashuIdMine();
@@ -444,7 +444,7 @@ async function run() {
     const payload = JSON.stringify({ id: 'req1', memo: 'from another wallet', mint: MINT, unit: 'sat', proofs: op });
     const aMid = await balance(A);
     ok((await A.W._cashuIdArrived(payload)) === 'taken' && (await balance(A)) === aMid + 11, 'a NUT-18 payload from another wallet, no locktime or refund, is taken');
-    ok((logRows(A).filter((e) => e.dir === 'in')[0] || {}).memo === 'From a Foxy ID', 'and names nobody');
+    ok((logRows(A).filter((e) => e.dir === 'in')[0] || {}).memo === 'From a Cashu ID', 'and names nobody');
   }
 
   /* ---- with no route: kept, and taken when the route comes back -------------- */
@@ -467,7 +467,7 @@ async function run() {
   // a fresh page: A had shown nothing yet
   const A2opens = A.said.open.length;
   await A.W.cashuIdListen();
-  ok(A.said.open.length === A2opens, 'before MY FOXY ID was ever shown the phone is not asked to listen');
+  ok(A.said.open.length === A2opens, 'before MY CASHU ID was ever shown the phone is not asked to listen');
   await A.W.cashuIdShown();
   {
     const o = A.said.open[A.said.open.length - 1] || {};
@@ -902,10 +902,10 @@ async function run() {
     ok(F.every((x) => x === 'refused') && B3.W.cashuIdOutbox().length === 0, 'R5: forged copies (another key, index, locktime or contact, bad shape, another seed’s) are dropped', F.join(','));
     ok((await B3.W._cashuIdCopy(copyMsg.body)) === 'collected' && B3.W.cashuIdOutbox().length === 0, 'R4: and the real copy, once its money came back, is nothing to rebuild');
     ok((await A.W._cashuIdArrived(copyMsg.body)) === 'refused', 'R5: and a copy delivered to an ID’s delivery key is not a payment');
-    ok(/words/i.test(docs) && /recovery key/i.test(docs), 'and FOXY-ID.md says how a restore finds them');
+    ok(/words/i.test(docs) && /recovery key/i.test(docs), 'and CASHU-ID.md says how a restore finds them');
   }
 
-  /* L10: words restored on a phone: it listens without MY FOXY ID being opened */
+  /* L10: words restored on a phone: it listens without MY CASHU ID being opened */
   {
     const R = page(THIRD_WORDS);
     await R.W.seedReady();
@@ -929,7 +929,7 @@ async function run() {
     const o0 = Q.said.open.length;
     Q.W._privacy({ tor: 'connecting', progress: 40, everUp: true });
     Q.W._privacy({ tor: 'up', progress: 100, everUp: true });
-    ok(await until(() => Q.said.open.length === o0 + 1, 2000), 'S1: Tor coming up opens the Foxy ID inbox at once, not after the next connect',
+    ok(await until(() => Q.said.open.length === o0 + 1, 2000), 'S1: Tor coming up opens the Cashu ID inbox at once, not after the next connect',
       String(Q.said.open.length - o0));
     await wait(50);
     const o1 = Q.said.open.length;
@@ -1004,7 +1004,7 @@ async function run() {
       'DROP: the first to today’s, the second, the same envelope, to tomorrow’s', two.map(toDay).join(','));
     {
       ok(typeof JSON.parse(two[0].body).pad === 'string' && JSON.parse(two[0].body).pad !== JSON.parse(two[1].body).pad,
-        'DROP (L4): each wrap carries filler of its own random length (their NIP-44 size buckets often still match: FOXY-ID.md, Posting)',
+        'DROP (L4): each wrap carries filler of its own random length (their NIP-44 size buckets often still match: CASHU-ID.md, Posting)',
         [JSON.parse(two[0].body).pad.length, JSON.parse(two[1].body).pad.length].join(' '));
     }
     B.W._cashuIdAheadMs = 3600000;

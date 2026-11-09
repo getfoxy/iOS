@@ -187,14 +187,14 @@ nine askings and answered at the tenth, refused in a tap that paid and no paymen
 it. Of the wallet: set-up with the holder's two numbers, set-up for somebody else (no
 owner, no key of this phone's), VIEW AS GUEST (nothing kept) and TIE OWNERSHIP. Of the
 screens: CREATE A PIN and RE-ENTER PIN, YES and NO and the wheel with its seconds line,
-SEND > FLASHCARD to a new card that this phone sets up and does not own, VIEW AS GUEST
+SEND > FOXY CARD to a new card that this phone sets up and does not own, VIEW AS GUEST
 and TIE OWNERSHIP TO THIS PHONE, RESTORE LOST CARD, the swipe between home and the card,
 and no daily limit on the card's screen.
 
 **`flashcard-send.js`** holds SEND on a card's own screen: the card's tiles
 RECEIVE and SEND, SEND MONEY in card mode (WITHDRAW, PASTE, CONTACTS and TYPE,
 the camera as ever, and card mode gone however the flow is left), the
-confirmation's FROM / FLASHCARD row and NEXT, and NEXT reading the payment's
+confirmation's FROM / FOXY CARD row and NEXT, and NEXT reading the payment's
 total off the model card as a till reads it (the PIN, the per tap limit's
 wait, another card refused) before the app's own payment melts the pieces the
 card paid, held to one side for it (`cardOutHold`). A melt the mint refuses,
@@ -205,7 +205,7 @@ methods out of their files (`appOn(ctx, start, { send: true })`).
 
 **`flashcard-onchain.js`** holds SEND on a card's own screen to a bitcoin
 address, at a test mint that pays on chain (NUT-30): the phone's own on-chain
-confirmation with NETWORK ON-CHAIN, FROM / FLASHCARD, the fee's reserve in
+confirmation with NETWORK ON-CHAIN, FROM / FOXY CARD, the fee's reserve in
 dollars over its sats and NEXT; the card read for the amount and the reserve;
 its pieces held, then melted on chain by the wallet's own `onchainPay`, PENDING
 and followed. The reserve the transaction did not use, a melt the mint answers

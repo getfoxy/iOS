@@ -1,7 +1,7 @@
   /* ---- SHOPS: this phone collects a shop's sales and pays its collaborators ------------------------------------------
    *
-   * docs/FOXY-ID.md, "Shops", is the whole of it. A shop's engine holds no words and no money: it asks the mint for
-   * each order's invoice (NUT-04, NUT-20) locked to P′ = ID + r·G, the shop's Foxy ID (this phone's) moved by a random
+   * docs/CASHU-ID.md, "Shops", is the whole of it. A shop's engine holds no words and no money: it asks the mint for
+   * each order's invoice (NUT-04, NUT-20) locked to P′ = ID + r·G, the shop's Cashu ID (this phone's) moved by a random
    * r of the order's own, or for ecash locked to the same P′ (NUT-11). This phone, the keeper's, collects:
    *
    *   GET  /api/shop/collect/challenge                           → { nonce, at }
@@ -30,7 +30,7 @@
    * as collected earlier and never minted again.
    *
    * Refused, each with a log line and nothing done: a host not in SHOPS, splits over the amount, a split that is not a
-   * Foxy ID, a mint this phone has not chosen or that does not honour a lock, a quote or pieces the mint does not say
+   * Cashu ID, a mint this phone has not chosen or that does not honour a lock, a quote or pieces the mint does not say
    * are paid or unspent and locked to P′. */
 
   var SHOP_KEY = 'foxy.shops';
@@ -232,7 +232,7 @@
       var amount = satsOf(sp.amount);
       if (!Number.isSafeInteger(amount) || amount <= 0) return { order: order, why: 'a split has no amount' };
       var read = /** @type {any} */ (cidRead(String(sp.id || '')));
-      if (!read.id) return { order: order, why: 'a split names something that is not a valid Foxy ID' };
+      if (!read.id) return { order: order, why: 'a split names something that is not a valid Cashu ID' };
       out.splits.push({ read: read, amount: amount });
     }
     var sum = out.splits.reduce(function (n, s) { return n + s.amount; }, 0);
@@ -300,7 +300,7 @@
 
   function shopNameOf(read) {
     var contact = cidContactOf(read.id);
-    return (contact && contact.name) || ('Foxy ID ' + read.id.slice(2, 10));
+    return (contact && contact.name) || ('Cashu ID ' + read.id.slice(2, 10));
   }
 
   /* ---- taking the money in ---- */

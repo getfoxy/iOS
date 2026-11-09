@@ -568,7 +568,7 @@
     if (seedChanged) {
       secretEpoch++;
       dropLockPool();
-      // and the Foxy ID shown for the seed that went (08e-cashu-id.js)
+      // and the Cashu ID shown for the seed that went (08e-cashu-id.js)
       cidForget();
     }
     if (seedGone) nativeSeedKnown = false;
@@ -663,7 +663,7 @@
   }
 
   /* NUT-28's throwaway keys for a payment whose lock is blinded (`blindKeys`), by
-   * the lock key they are for: a payment to a Foxy ID makes them from its own
+   * the lock key they are for: a payment to a Cashu ID makes them from its own
    * seed (08e-cashu-id.js, `cidPieceKeys`), so that the same words find them
    * again. Without one, cashu-ts makes each at random, as for any other wallet. */
   var p2bkSources = Object.create(null);
@@ -905,7 +905,7 @@
           nativeSeedKnown = true;
           adoptedCandidates[candidate] = secretEpoch;
           console.log('[foxy] the phone adopted the restored seed');
-          // the Foxy ID the words give may be in somebody's contacts: listened for at once (08e-cashu-id.js)
+          // the Cashu ID the words give may be in somebody's contacts: listened for at once (08e-cashu-id.js)
           try { cidRestored(); } catch (x) {}
           return true;
         }

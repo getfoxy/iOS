@@ -4,7 +4,7 @@
  *     sh <card repository>/tools/cardsim/run.sh 47435      (in another terminal)
  *     node tests/flashcard-applet.js [port]
  *
- * The other flashcard suites tap a model of the card written in JavaScript
+ * The other Foxy Card suites tap a model of the card written in JavaScript
  * (flashcard-card.js), which flashcard-model.js holds to a recording of the
  * applet. This one has no model in it: every command the wallet builds goes
  * over a socket to the applet's own class, running in the JavaCard simulator

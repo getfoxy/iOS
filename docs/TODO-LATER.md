@@ -72,7 +72,7 @@ means one pass is all a partial recovery gets (`16a-onchain.js`).
 ## Several accounts in one Foxy
 
 Asked for 2026-11-09. One Foxy holds several accounts, each with its own words,
-its own Foxy ID, its own mints and balances, and a name the person gives it: a
+its own Cashu ID, its own mints and balances, and a name the person gives it: a
 personal one, and one for each business or website, so streams of money stay
 cleanly apart. An account shows the total across its mints; switching accounts
 switches everything (ID, drop boxes, shops collected from, history).
@@ -84,8 +84,46 @@ What arrived since the last look is shown on a notifications screen rather than
 only in each mint's history.
 
 Not designed yet: where the words of the other accounts live (the keychain holds
-one seed today), how the per-account Foxy ID inbox is listened to without
+one seed today), how the per-account Cashu ID inbox is listened to without
 multiplying relay traffic, and what the check-in costs over Tor with many mints.
+
+## Several Cashu IDs, one per purpose
+
+Asked for 2026-11-09. Foxy holds one Cashu ID per wallet today. The person
+should be able to make more from the same words, at the next index each time,
+name them (a market tip jar, a friend, a collaborator) and keep every one of
+them open: a holder of one ID can count only that ID's boxes, and an old ID
+keeps taking payments. Fifty is the expected number, growing over the years.
+
+- Up to fifty IDs, every one is asked at every open, as the one ID is today:
+  the average person hands out a few and should never wait. Above fifty,
+  listening scales by activity, as the one-time request keys already do: an
+  ID paid this week is asked at every open, a quiet one once a day, a dormant
+  one once a week. A payment to a box nobody collected returns to its payer
+  after thirty days, so a dormant ID checked weekly loses nothing.
+- All of a phone's IDs are asked together on the same circuits: a relay learns
+  that they share one listener, not who it is. Asking each on its own circuit
+  does not scale and the counts were possible for any holder already.
+- CHECK NOW under MY CASHU ID asks every known ID's boxes at once, for the
+  person who expects a payment from someone who has not paid in a while and
+  does not want to wait for the weekly turn.
+- Restore from the words must bring the IDs back. The words give the keys at
+  every index, not how many were made or their names. A restore scans a fixed
+  depth (the first hundred indexes) and listens on all of them for the thirty
+  days a payment waits, keeping any that receives; the names ride in the copies
+  the phone sends its own recovery key, read back while the relays still hold
+  them, otherwise an ID comes back as "Cashu ID 7" to be renamed.
+
+## Tip or donate to an artist from the shop
+
+Asked for 2026-11-09. Every collaborator in a shop's products file already has
+a Cashu ID, so a card's page on the shop can carry a TIP THE ARTIST button: the
+engine makes a Cashu request (and an invoice) locked to the artist's own
+one-time key, exactly as a sale is locked to the keeper's, and the tip goes to
+the artist directly, never through the keeper's phone. The artist's Foxy
+collects it the way a keeper collects sales. Needs: a tip route in the engine
+with the artist's ID as the lock, a tip page or a line under each card, and the
+artist's phone knowing the shop (the drop-box notice once that is built).
 
 ## Decided: not doing
 

@@ -338,7 +338,7 @@ const amountVals = (o) => app.renderAmount(Object.assign(
   /* The keypad's ceiling for ADD FUNDS is what this phone holds and what the card
    * can take. The card was read a moment ago, so the wallet can say whether its
    * free places hold what is typed (`fcLoadFits`); the line under the figure says
-   * which limit it is. FLASHCARD on the send screen has no card on show and is
+   * which limit it is. FOXY CARD on the send screen has no card on show and is
    * capped by the balance alone. */
   const asked = [];
   const on = (flow, amount, fits) => {
@@ -383,7 +383,7 @@ const amountVals = (o) => app.renderAmount(Object.assign(
   asked.length = 0;
   c = on('cardSend', '1000', FULL).renderContext();
   ok(c.roomOver === false && c.sendOver === false && asked.length === 0,
-     'FLASHCARD on the send screen has no card on show: not capped by room, and the wallet is not asked', JSON.stringify([c.roomOver, asked]));
+     'FOXY CARD on the send screen has no card on show: not capped by room, and the wallet is not asked', JSON.stringify([c.roomOver, asked]));
   c = on('send', '1000', FULL).renderContext();
   ok(c.roomOver === false && asked.length === 0, 'nor is any other keypad', JSON.stringify(asked));
   ok(amountVals({ val: 1, sendOver: true }).sendOverLabel === 'MORE THAN YOUR BALANCE', 'and the balance’s line is the one it always was');

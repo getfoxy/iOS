@@ -12,7 +12,7 @@
    * says it confirmed.
    *
    * From a card (SEND on the card's screen, 26f-flashcard.js `fcOutMode`):
-   * the same screens, held to what the card holds, with FROM FLASHCARD and
+   * the same screens, held to what the card holds, with FROM FOXY CARD and
    * NEXT, which reads the card (`fcOcNext`); the payout is this phone's own,
    * made with the card's pieces, and followed the same way.
    */

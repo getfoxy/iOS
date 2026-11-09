@@ -4,7 +4,7 @@
  *     node tests/flashcard-onchain.js
  *
  * In card mode (tests/flashcard-send.js) a bitcoin address goes to the phone's own on-chain confirmation (26b-onchain.js),
- * with FROM / FLASHCARD and NEXT for SEND. NEXT reads the amount and the reserve of the fee option chosen off the card as
+ * with FROM / FOXY CARD and NEXT for SEND. NEXT reads the amount and the reserve of the fee option chosen off the card as
  * a till reads a card; the card's pieces are held for the payment and handed to the mint by the phone's own on-chain melt
  * (16a-onchain.js `onchainPay`, with them), and the payment is then the phone's to follow, PENDING until the transaction
  * confirms. What comes back after the card has gone, the reserve the transaction did not use or all of it where the mint
@@ -133,7 +133,7 @@ const uri = (sats) => 'bitcoin:' + ADDRESS + '?amount=' + (sats / 1e8).toFixed(8
        'a bitcoin address read in card mode reaches the on-chain confirmation, still in card mode', holder.state.screen);
     ok(labels.join() === 'DELIVERED TO,NETWORK,FROM,ARRIVES,FEE' && row('NETWORK').value === 'ON-CHAIN'
        && row('FROM').value === 'FOXY CARD' && row('FROM').sub === 'm.test',
-       'its rows: NETWORK ON-CHAIN, then FROM / FLASHCARD / the card’s mint, and no PAYING FROM', labels.join());
+       'its rows: NETWORK ON-CHAIN, then FROM / FOXY CARD / the card’s mint, and no PAYING FROM', labels.join());
     ok(spec.amount === '$ 10.00' && spec.amountSub === '₿ 10,000', 'the amount, dollars first and the sats under', spec.amount + ' | ' + spec.amountSub);
     ok(row('FEE').value === 'UP TO $ 0.06' && row('FEE').sub === '₿ 64', 'the mint’s fee reserve as FEE, dollars first and the sats under', row('FEE').value + ' | ' + row('FEE').sub);
     const phoneSays = /chip: 'A payment on chain is not instant\. It is done when it confirms\.'/.test(fs.readFileSync(path.join(__dirname, '..', 'build', 'app', '26b-onchain.js'), 'utf8'));

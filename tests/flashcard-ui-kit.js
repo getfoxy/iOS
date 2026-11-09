@@ -1,5 +1,5 @@
 'use strict';
-/* flashcard-ui-kit.js — the FLASHCARD screens, made drivable.
+/* flashcard-ui-kit.js — the FOXY CARD screens, made drivable.
  *
  * The screens are build/app/26f-flashcard.js (and the screen behind the card
  * sheet, 26h-tap-screen.js) over the PIN pad, the cards and the stage screens

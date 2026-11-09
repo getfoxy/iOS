@@ -29,7 +29,7 @@
    * the card is sent is what it takes, whichever is typed: cents for a dollar card, sats for a bitcoin card.
    *   the tap            one tap writes all of it (`fcSetUpStepsRun`), with Keep holding on the sheet while the card holds
    *
-   * The same steps set a card up for somebody else, from SEND > FLASHCARD on a new card (`fcSendSetUp`): the holder types the
+   * The same steps set a card up for somebody else, from SEND > FOXY CARD on a new card (`fcSendSetUp`): the holder types the
    * PIN on this phone, and the words say it is theirs; what the card holds is what is being sent, so CURRENCY is not asked; and
    * the tap writes no owner and no key of this phone's, then the money under the holder's PIN.
    *
@@ -711,11 +711,11 @@
    *
    * The card's name, on this phone only (the wallet's `cardName`, kept on the card's row; the card is told nothing): asked first in the
    * set-up, right after SET UP CARD on the welcome (`fcWelcomeSetUp`), for this phone's card and for one set up for its holder from SEND
-   * > FLASHCARD alike; and again from RENAME CARD in the card's menu (`fcRename`), with the name it has filled in. The screen is SEND >
+   * > FOXY CARD alike; and again from RENAME CARD in the card's menu (`fcRename`), with the name it has filled in. The screen is SEND >
    * TYPE's: the one field, the keyboard up and the field focused on arrival, NEXT under it, grey until something is typed. In the set-up
    * SKIP under NEXT goes on with no name; NEXT goes on with the name, which is kept once the card is set up (`fcNameSettle`). The round
    * back button is the welcome again, or the card's screen from RENAME CARD. A name is cut at FC_NAME_MAX characters and trimmed;
-   * a card with none is called what it always was (26f-flashcard.js `fcName`, and FLASHCARD over its screen). */
+   * a card with none is called what it always was (26f-flashcard.js `fcName`, and FOXY CARD over its screen). */
   FC_NAME_MAX = 24;
 
   // `mode` 'su' (the set-up's step, `then` its next) or 'rename'; `key` the card's, where it is known
@@ -844,7 +844,7 @@
    *
    * What a new card is met with, the one way into its set-up: its picture, SET UP CARD and CANCEL. Drawn over the
    * card's screen for a card read there that this phone can set up (`fcWelcomeCard`; a set-up this phone began for a card's holder is
-   * finished by sending it money, and is not offered), and as a screen of its own, 'fcWelcome', for a new card met by SEND > FLASHCARD
+   * finished by sending it money, and is not offered), and as a screen of its own, 'fcWelcome', for a new card met by SEND > FOXY CARD
    * (`fcWelcomeSend`), whose SET UP CARD sets it up for its holder with the money being sent (`fcSendSetUp`). CANCEL is HOME from the card's
    * screen, and SEND's keypad from SEND. Restoring a lost card is home's MENU's (`fcRestoreLost`). */
   fcWelcomeCard(s) {

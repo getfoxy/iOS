@@ -1,5 +1,5 @@
 'use strict';
-/* flashcard-kit.js — what the flashcard suites share: a page with a phone and
+/* flashcard-kit.js — what the Foxy Card suites share: a page with a phone and
  * a mint behind it, and a card to tap on it. */
 const crypto = require('crypto');
 const { loadReal, fakeMint, nativePhone, PHONE_WORDS, cardGate } = require('./harness');

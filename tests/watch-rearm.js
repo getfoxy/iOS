@@ -450,7 +450,7 @@ async function run() {
   }
 
   // ---- a card being read or written: what is queued waits, in order, and is raised when it is over --------
-  /* A confirmation rose over the Flashcard screen with the phone's card sheet up under it. The queue does not move while a card is
+  /* A confirmation rose over the Foxy Card screen with the phone's card sheet up under it. The queue does not move while a card is
    * being tapped (the sheet or the screen behind it, the pause between two taps, the pieces for a tap being made, a PIN being asked
    * for a tap), loses nothing and does not age; the payment the card flow is itself making is not held by it; and nothing waits
    * for ever. */

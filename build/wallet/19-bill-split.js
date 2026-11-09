@@ -1663,7 +1663,7 @@
            * the card can sign for no piece written without it. */
           if (lockTo && opts && opts.sigAll) /** @type {any} */ (lockOut.options).sigFlag = 'SIG_ALL';
           /* NUT-28 (pay-to-blinded-key): every key of the lock blinded for each piece by a throwaway key of its own,
-           * whose public half goes on the proof (`p2pk_e`). A payment to a Foxy ID (08e-cashu-id.js) is made so. */
+           * whose public half goes on the proof (`p2pk_e`). A payment to a Cashu ID (08e-cashu-id.js) is made so. */
           if (lockTo && opts && opts.blindKeys) /** @type {any} */ (lockOut.options).blindKeys = true;
           if (lockTo && opts && Array.isArray(opts.denominations) && opts.denominations.length) {
             lockOut.denominations = opts.denominations.map(function (d) { return Math.round(Number(d)); });

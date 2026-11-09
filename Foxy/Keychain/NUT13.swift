@@ -991,9 +991,9 @@ enum CardOwner {
     }
 }
 
-// MARK: The Foxy ID's curve steps (CashuID.swift)
+// MARK: The Cashu ID's curve steps (CashuID.swift)
 
-/// What a Foxy ID needs of the curve beyond a BIP-32 child, kept here with the
+/// What a Cashu ID needs of the curve beyond a BIP-32 child, kept here with the
 /// rest of Foxy's curve so that one file touches libsecp256k1 for the seed: a
 /// point times a secret (the shared point d·E), NUT-28's blinding (P + r·G, and
 /// the negated point and key for a payer that blinded the other parity), a key's
@@ -1082,7 +1082,7 @@ extension NUT13 {
 
     /// A BIP-340 signature by `key` over a 32-byte digest, checked before it is
     /// answered: with fresh auxiliary randomness, or with `aux` where a signature
-    /// must come out the same each time (the Foxy ID's binding, all zeros).
+    /// must come out the same each time (the Cashu ID's binding, all zeros).
     static func schnorr(digest: [UInt8], key: [UInt8], _ ctx: OpaquePointer, aux fixed: [UInt8]? = nil) throws -> [UInt8] {
         guard digest.count == 32 else { throw Failure.platform }
         var pair = secp256k1_keypair()

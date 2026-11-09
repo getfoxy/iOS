@@ -206,13 +206,13 @@ const SERIES = { '1D': { pts: [[0, 60], [50, 40], [100, 20]], d: 'M0 60L50 40L10
 // a representative state of a screen, against the stand-in wallet
 const at = (screen, state, extra) => Object.assign({ wallet: true, state: Object.assign({ screen, stack: [] }, LIVE, state || {}) }, extra || {});
 
-/* Contacts that are Foxy IDs, and the empty CONTACTS, last so that the views before keep their numbers. */
+/* Contacts that are Cashu IDs, and the empty CONTACTS, last so that the views before keep their numbers. */
 function cashuIdViews() {
   const v = [];
   const add = (label, view) => v.push([label, view]);
   const CID_A = '02' + 'a1'.repeat(32);
   const ID_CONTACTS = CONTACTS.concat([{ name: 'Carol', handle: 'foxyid1' + 'C'.repeat(179), cid: { id: CID_A, nostr: 'c3'.repeat(32), sig: '' } }]);
-  add('contacts, a Foxy ID among them', at('contacts', { contacts: ID_CONTACTS }));
+  add('contacts, a Cashu ID among them', at('contacts', { contacts: ID_CONTACTS }));
   add('contacts, empty', at('contacts', { contacts: [], stack: ['home'] }, { wallet: { cashuIdCheck: () => Promise.resolve({}), scan: () => Promise.resolve('') } }));
   // the menu with BACKUP ACCOUNT at the very top: money in the wallet, the words not checked
   add('home, the menu with BACKUP ACCOUNT', at('home', { open0: true }, { wallet: { backedUp: () => false } }));
@@ -307,7 +307,7 @@ function representative(logic) {
     { amount: 2048, count: 2, want: 8 },
   ]) }));
   add('change, nothing held', at('change', {}, { wallet: PIECES([]) }));
-  /* FLASHCARD: the invitation to tap, and a card as each kind reads. Dates are
+  /* FOXY CARD: the invitation to tap, and a card as each kind reads. Dates are
    * fixed and far off, so no view turns on today's date; the state that does
    * (RENEW, in a card's last month) is tests/flashcard-screens.js's. */
   const CARDS = (over) => Object.assign({ cardSession: () => Promise.resolve(), cardOwed: () => [], cardsList: () => [] }, over || {});
@@ -344,7 +344,7 @@ function representative(logic) {
   const NEWCARD = { setUp: false, pinSet: false, hasRecord: false, pin: 'none', owner: false, ownedHere: false, balance: 0, count: 0, mint: '', check: 'none', design: '' };
   add('flashcard, a new card: WELCOME TO YOUR FOXY CARD', at('flashcard', { fc: FC(NEWCARD) }, { wallet: CARDS() }));
   add('flashcard, a set-up cut short: the welcome, saying so', at('flashcard', { fc: FC(Object.assign({}, NEWCARD, { pin: 'set', pinSet: true })) }, { wallet: CARDS() }));
-  add('fcWelcome, a new card met by SEND > FLASHCARD', at('fcWelcome', { fcWelcome: { sats: 1500, unit: 'sat', alt: null, info: null }, flow: 'cardSend', amount: '1500', unit: 'SATS' }, { wallet: CARDS() }));
+  add('fcWelcome, a new card met by SEND > FOXY CARD', at('fcWelcome', { fcWelcome: { sats: 1500, unit: 'sat', alt: null, info: null }, flow: 'cardSend', amount: '1500', unit: 'SATS' }, { wallet: CARDS() }));
   add('fcName, NAME CARD in the set-up, empty, SKIP under NEXT', at('fcName', { fcNaming: { mode: 'su', key: '' }, fcNameDraft: '' }));
   add('fcName, NAME CARD with a name typed', at('fcName', { fcNaming: { mode: 'su', key: '' }, fcNameDraft: 'Lunch card' }));
   add('fcName, RENAME CARD with the name filled in', at('fcName', { fcNaming: { mode: 'rename', key: '' }, fcNameDraft: 'Lunch card' }));
@@ -600,7 +600,7 @@ function representative(logic) {
   add('confirm, any amount, no invoice yet', at('confirm', { flow: 'receive', amount: '', unit: 'USD' }));
   add('confirm, dollars', at('confirm', { flow: 'receive', invoice: 'lnbc2100n1stub', amount: '1.34', unit: 'USD', asset: 'DOLLARS' }));
   /* Tips at the till (26p-till-tips.js): the till's receive with its tip buttons, none picked and $2 picked; who the tips go to (the
-   * SWITCH MINT list of Foxy ID contacts), a group's shares short of 100% and at it; and CASHIER CODES, two live and two under PAST.
+   * SWITCH MINT list of Cashu ID contacts), a group's shares short of 100% and at it; and CASHIER CODES, two live and two under PAST.
    * Fixed times, so the expiry words do not move. */
   const TIP_TILL = { role: 'keeper', since: 0, unit: 'sat', main: 'sat', mint: MINT, mints: [MINT],
     tips: { on: true, to: 'one', ids: [{ id: '02' + '1'.repeat(64), nostr: '1'.repeat(64), name: 'Ana', pct: 100 }] } };
@@ -732,8 +732,8 @@ function representative(logic) {
     { wallet: Object.assign({}, OFFLINE, { trustedWaiting: () => [{ id: 'r1', sats: 4900, at: 1 }] }) }));
   add('txDetail, a payment at risk', at('txDetail', { tx: TX_AT_RISK }));
   // a payment to the ID at a mint this phone does not use, too small to bring home yet: a row in HISTORY, nothing asked
-  add('history, a Foxy ID payment waiting at another mint', at('history', { history: [{ label: 'TODAY', items: [
-    { name: 'From Carol', party: 'From Carol', dir: 'in', time: '10:40', sats: 5, fee: 0, rail: 'Foxy ID', hash: 'cid-waiting-cid:k1',
+  add('history, a Cashu ID payment waiting at another mint', at('history', { history: [{ label: 'TODAY', items: [
+    { name: 'From Carol', party: 'From Carol', dir: 'in', time: '10:40', sats: 5, fee: 0, rail: 'Cashu ID', hash: 'cid-waiting-cid:k1',
       pending: true, cidWait: true, cidKey: 'cid:k1', cidLine: 'At home.example.com \u00b7 tap to decide', note: '', token: '', mint: 'https://home.example.com' }, TX_IN] }] }));
   // a card's payment taken offline: in the list, its detail, and the amber ring on home while it waits
   add('history, a card payment taken offline, waiting for the mint', at('history', {
@@ -855,8 +855,8 @@ function representative(logic) {
   add('two balances: settings', at('home', Object.assign({ open0: true }, TWO_LIVE),
     { wallet: TWO({ walletChoice: () => ({ hold: 'both', recv: '', send: '' }) }) }));
   // SETTINGS open with the two till caps (26j-till-caps.js): what one payer may hand this phone offline, and what it holds in all
-  // SETTINGS with a Foxy ID in use: FACE ID LOCK, SET PIN, BLUETOOTH TAP, no reminder row (26o-remind.js)
-  add('settings, a Foxy ID in use, no reminder row', at('home', { open0: true },
+  // SETTINGS with a Cashu ID in use: FACE ID LOCK, SET PIN, BLUETOOTH TAP, no reminder row (26o-remind.js)
+  add('settings, a Cashu ID in use, no reminder row', at('home', { open0: true },
     { wallet: { remindView: () => ({ eligible: true, on: true }) } }));
   add('settings, what it takes offline', at('home', { open0: true },
     { wallet: { tillCaps: () => ({ payerSats: 66000, holdSats: 396000, promptSats: 198000, payerSet: false, holdSet: true }) } }));
@@ -1009,9 +1009,9 @@ function representative(logic) {
   add('two balances: SET AMOUNT, a swap not enough with the fee', at('amount', Object.assign({ flow: 'swap', swapFrom: 'usd', swapTo: 'sat',
     unit: 'USD', amount: '45.00' }, TWO_LIVE), { wallet: TWO({ mintRate: () => ({ usdPerBtc: 81786, at: Date.now() }),
     swapGuess: () => ({ need: 4602, fits: 4203 }) }) }));
-  /* The same address paid from a card (SEND on the card's screen): FROM / FLASHCARD in place of PAYING FROM, the fee's sats
+  /* The same address paid from a card (SEND on the card's screen): FROM / FOXY CARD in place of PAYING FROM, the fee's sats
    * under it, and NEXT, which reads the card for the amount and the reserve (26f-flashcard.js, `fcOcNext`). */
-  add('ocConfirm, from a card: FROM FLASHCARD and NEXT', at('ocConfirm',
+  add('ocConfirm, from a card: FROM FOXY CARD and NEXT', at('ocConfirm',
     Object.assign({ ocPlan: OC_PLAN() }, OC, { sendFrom: 'card', fc: FC({ balance: 60000 }), stack: ['flashcard'] }),
     { wallet: CARDS({ cardOutTotal: (amount, reserve) => amount + reserve }),
       // card mode needs the card's screen under the flow, a stack the other views do not have: no slide in or out of it (`syncSlide`)
@@ -1118,13 +1118,13 @@ function representative(logic) {
   /* SHOPS (26t-shops.js): the shops this phone collects for, none yet, one being collected from; and a collection's row. */
   const SHOPS_W = (list) => ({ wallet: { shops: () => list } });
   const SHOP_ONE = { id: 'shop.example.com', url: 'https://shop.example.com', host: 'shop.example.com', name: 'Fox Prints', onion: false, at: 1,
-    lastAt: Date.UTC(2026, 10, 8, 10, 42), lastN: 12, lastWhy: '', paid: [{ id: '02aa', name: 'Ana', n: 12, at: 1 }, { id: '03bb', name: 'Foxy ID 1a2b3c4d', n: 4, at: 1 }] };
+    lastAt: Date.UTC(2026, 10, 8, 10, 42), lastN: 12, lastWhy: '', paid: [{ id: '02aa', name: 'Ana', n: 12, at: 1 }, { id: '03bb', name: 'Cashu ID 1a2b3c4d', n: 4, at: 1 }] };
   add('SHOPS, none yet', at('switchMint', { tillList: 'shops' }, SHOPS_W([])));
   add('SHOPS, one shop and the collaborators it paid', at('switchMint', { tillList: 'shops' }, SHOPS_W([SHOP_ONE])));
   add('SHOPS, collecting 340 of 1,000', at('switchMint', { tillList: 'shops', shopProg: { id: 'shop.example.com', n: 340, of: 1000 } }, SHOPS_W([SHOP_ONE])));
   add('txDetail, a shop collection: SALES with every order', at('txDetail', { tx: { dir: 'in', sats: 7400, feeSats: 0, hash: 'shop-k1-0', memo: '3 sales from Fox Prints',
     stamp: 'Today, 10:42', mint: 'https://forge.example.com', shop: { name: 'Fox Prints', host: 'shop.example.com', at: Date.UTC(2026, 10, 8, 10, 42), n: 3, total: 7400, unit: 'sat',
-      ids: [['aaaaaaaaaaaaaaaa', 'Ana'], ['bbbbbbbbbbbbbbbb', 'Foxy ID 1a2b3c4d']], list: 'A-1001,2100,0.1;A-1002,2100,0;A-1003,3200;' } } }));
+      ids: [['aaaaaaaaaaaaaaaa', 'Ana'], ['bbbbbbbbbbbbbbbb', 'Cashu ID 1a2b3c4d']], list: 'A-1001,2100,0.1;A-1002,2100,0;A-1003,3200;' } } }));
   /* SEND > BANK ACCOUNT (26q-bank.js): the exchanges on the mint list, the username screen in each state its lookup leaves it,
    * River's paste screen, SET AMOUNT straight to the address kept with CHANGE EXCHANGE, and the sent screen for each. */
   const BANK_W = (over) => ({ wallet: Object.assign({
@@ -1247,7 +1247,7 @@ function cards() {
   const yes = (a) => { const b = Array.from(a._blockedEl.querySelectorAll('div')).find((d) => d.textContent === 'YES, DELETE' && !d.children.length); if (b) b.click(); };
   add('card: clear history, are you sure', (a) => a.askClear('history'));
   add('card: clear history, are you triple sure', (a) => { a.askClear('history'); yes(a); });
-  // the Foxy ID (26o-cashu-id.js): MY FOXY ID's code with SHARE, and the card a pasted one asks with
+  // the Cashu ID (26o-cashu-id.js): MY CASHU ID's code with SHARE, and the card a pasted one asks with
   const CID_TEXT = 'foxyid1' + 'A'.repeat(94);
   // tips at the till (26p-till-tips.js): the questions, a group row's share, a code's name, a code again with END, and END's ask
   // (ACCEPT TIPS? itself is a screen now: with the screens, 'tillTips')
@@ -1255,18 +1255,18 @@ function cards() {
   // POINT OF SALE with no lock: SET A LOCK FIRST, with CREATE PIN and USE FACE ID (26m-till.js `tillGate`)
   add('card: SET A LOCK FIRST, with CREATE PIN and USE FACE ID', (a) => a.tillGate(() => {}, 'To open the till.'),
     { wallet: { screenLocked: () => false, pinIsSet: () => false, pinSet() {}, setSeedProtection: () => Promise.resolve() } });
-  add('card: PASTE A FOXY ID', (a) => a.tillIdPaste());
+  add('card: PASTE A CASHU ID', (a) => a.tillIdPaste());
   add('card: a share of the group', (a) => { a.setState({ tillGroup: [{ id: 'g1', nostr: '1'.repeat(64), name: 'Ana', pct: 60 }] }); a.tillGroupRow('g1'); });
   add('card: NAME THIS CODE?', (a) => a.tillCodeAdd());
   add('stage: a cashier code again, with END', (a) => a.tillCodeOpen({ id: 'a1', text: 'https://getfoxy.io/till#AAAA', exp: 1793159200, tips: { on: true, to: 'one', names: ['Ana'] } }, 'Front'));
   add('card: END THIS CODE?', (a) => a.tillCodeEndAsk({ id: 'a1' }, 'Front'));
-  add('stage: MY FOXY ID', (a) => a.cidShowCode(CID_TEXT));
+  add('stage: MY CASHU ID', (a) => a.cidShowCode(CID_TEXT));
   add('card: NAME THIS CONTACT?', (a) => a.cidNameAsk(CID_TEXT, ''));
   add('card: NAME THIS CONTACT?, a contact already', (a) => a.cidNameAsk(CID_TEXT, 'Alice'));
-  add('card: your own Foxy ID', (a) => a.cidAddAsk(CID_TEXT), { wallet: { cashuIdCheck: () => Promise.resolve({ own: true, name: '' }) } });
-  // a version 1 string, with no signature of the ID's own: not a Foxy ID
-  add('card: a version 1 Foxy ID', (a) => a.cidAddAsk(CID_TEXT), { wallet: { cashuIdCheck: () => Promise.reject(new Error('That is not a Foxy ID.')) } });
-  // a payment to the Foxy ID at a mint this phone does not use: its three answers and the tick, too small, in dollars; and SETTINGS > OTHER MINTS
+  add('card: your own Cashu ID', (a) => a.cidAddAsk(CID_TEXT), { wallet: { cashuIdCheck: () => Promise.resolve({ own: true, name: '' }) } });
+  // a version 1 string, with no signature of the ID's own: not a Cashu ID
+  add('card: a version 1 Cashu ID', (a) => a.cidAddAsk(CID_TEXT), { wallet: { cashuIdCheck: () => Promise.reject(new Error('That is not a Cashu ID.')) } });
+  // a payment to the Cashu ID at a mint this phone does not use: its three answers and the tick, too small, in dollars; and SETTINGS > OTHER MINTS
   const CID_OFFER = { key: 'cid:k1', name: 'Carol', mint: 'https://home.example.com', host: 'home.example.com', unit: 'sat', amount: 300, at: 0, drop: 0,
     back: true, lands: 290, toUnit: 'sat', fee: 10, why: '', small: false, others: 0, total: 300, choice: '' };
   add('card: paid at another mint', (a) => a.cidOfferCard(CID_OFFER));
@@ -1358,7 +1358,7 @@ function cards() {
   add('card: reset, the money came off and the reset did not', (a) => a.blockedCard('fc-reset-part', { tone: 'warn', title: 'EMPTY, BUT NOT RESET',
     reason: '$1.31 (\u20bf2,048) came off the card into this phone. The card is not reset yet: tap it again to finish.', chip: 'Hold it still until the phone says to remove it.',
     retry: 'TAP CARD', go: () => {}, shut: { label: 'LATER' } }));
-  // FLASHCARD on the send screen: the PIN of a card that has one, for the second tap
+  // FOXY CARD on the send screen: the PIN of a card that has one, for the second tap
   add('overlay: a card\u2019s PIN, to put money on it from the send screen', (a) => a.fcSendAsk(500));
   // the card's own log, opened from its line on the card's screen
   add('card: this card\u2019s own log', (a) => { a.state.fc = { log: { taps: 41, sats: 213400, refused: 0, tampers: 0, since: { taps: 2, sats: 15360, refused: 0, tampers: 0 },
@@ -1495,7 +1495,7 @@ function cards() {
   // money a card is owed from a payment it made from this phone, said at launch until a tap puts it on (26f-flashcard.js)
   add('card: your card has money waiting', (a) => a.fcMoneyWaiting(),
     { wallet: { cardSession: () => Promise.resolve(), cardOwed: () => [{ id: 'o1', card: '02' + 'a1'.repeat(31), sats: 32, kind: 'change', out: true, payment: 'onchain-q1' }] } });
-  /* The EcashCard screen of 2026-10-30: the card standing up, DEPOSIT and WITHDRAW, TRANSFER in its MENU above RESET and its flow
+  /* The Foxy Card screen of 2026-10-30: the card standing up, DEPOSIT and WITHDRAW, TRANSFER in its MENU above RESET and its flow
    * (the confirmation where the money becomes bitcoin, CARD MOVED), a dollar card, and the two lines a card connected with money on
    * it (software 1.24) and a TRANSFER cut short leave on the card's screen. */
   {

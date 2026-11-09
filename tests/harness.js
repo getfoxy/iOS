@@ -1061,9 +1061,9 @@ function p2pkAt(parent, index) {
   return { priv: child.key.toString('hex'), pub: secpPublic(child.key).toString('hex') };
 }
 
-/* ---- the Foxy ID (Foxy/Keychain/CashuID.swift) ---------------------------
+/* ---- the Cashu ID (Foxy/Keychain/CashuID.swift) ---------------------------
  *
- * The phone's half, written here a second time from docs/FOXY-ID.md with
+ * The phone's half, written here a second time from docs/CASHU-ID.md with
  * nothing but node's crypto and BigInt: the keys at m/129373'/20'/0'/0'/0',
  * /1'/0'/0' and /2'/0'/0' (every level hardened), NUT-28's blinding (the shared
  * x of d·E by a plain double-and-add, rᵢ = SHA-256("Cashu_P2BK_v1" ‖ Zx ‖ i) with
@@ -1786,8 +1786,8 @@ function nativePhone(opts) {
       const keys = [];
       for (const p of pieces) {
         let t = null;
-        try { t = cashuIdOneTime(d, p.e.toLowerCase(), lockOf(p.secret)); } catch (x) { return no('That is not a payment to this Foxy ID.'); }
-        if (!t) return no('That ecash is not locked to this Foxy ID.');
+        try { t = cashuIdOneTime(d, p.e.toLowerCase(), lockOf(p.secret)); } catch (x) { return no('That is not a payment to this Cashu ID.'); }
+        if (!t) return no('That ecash is not locked to this Cashu ID.');
         keys.push(t.k);
       }
       phone.cashuIdSigned = (phone.cashuIdSigned || 0) + pieces.length;
@@ -1812,7 +1812,7 @@ function nativePhone(opts) {
       if (!words()) return no(SAYS.noSeed);
       if (!unlock('cashuIdSignUnblinded', 'read')) return no(SAYS.unreadable);
       const k = cashuIdKeys(seedNow());
-      if (!secrets.every((t) => lockOf(t).slice(2) === k.id.slice(2))) return no('That ecash is not locked to this Foxy ID.');
+      if (!secrets.every((t) => lockOf(t).slice(2) === k.id.slice(2))) return no('That ecash is not locked to this Cashu ID.');
       phone.cashuIdSignedBare = (phone.cashuIdSignedBare || 0) + secrets.length;
       return ok({ sigs: secrets.map((t) => schnorrSign(k.d, crypto.createHash('sha256').update(t, 'utf8').digest())) });
     },
@@ -1823,7 +1823,7 @@ function nativePhone(opts) {
       if (!words()) return no(SAYS.noSeed);
       if (!unlock('cashuIdTag', 'read')) return no(SAYS.unreadable);
       try { return ok({ tag: cashuIdTag(cashuIdKeys(seedNow()).d, m.peer.toLowerCase(), m.e.toLowerCase()) }); }
-      catch (x) { return no('That is not a payment to this Foxy ID.'); }
+      catch (x) { return no('That is not a payment to this Cashu ID.'); }
     },
     /* handleCashuIdEphemeral, SeedActions.cashuIdEphemeral: a payment's base. */
     cashuIdEphemeral(m) {
@@ -1867,16 +1867,16 @@ function nativePhone(opts) {
       const sign = (key, digest) => (phone.fastSign && !phone.slowShop ? String(phone.fastSign(Buffer.from(digest).toString('hex'), n32(key).toString('hex'))) : schnorrSign(key, digest));
       if (m.kind === 'collect') return ok({ pub: k.id, sig: schnorrSign(k.d, shopCollectDigest(m.nonce.toLowerCase(), m.host, m.path || '')) });
       const r = BigInt('0x' + m.r);
-      if (r === 0n || r >= SECP_ORDER) return no('That is not a payment to this Foxy ID.');
+      if (r === 0n || r >= SECP_ORDER) return no('That is not a payment to this Cashu ID.');
       const key = shopMovedKey(k.d, m.r);
-      if (key === 0n) return no('That is not a payment to this Foxy ID.');
+      if (key === 0n) return no('That is not a payment to this Cashu ID.');
       const P = phone.fastPub && !phone.slowShop ? Buffer.from(phone.fastPub(n32(key).toString('hex'))).toString('hex') : ptBytes(ptMul(key, SECP_G)).toString('hex');
       if (m.kind === 'quote') {
-        if (m.pubkey.toLowerCase() !== P) return no('That ecash is not locked to this Foxy ID.');
+        if (m.pubkey.toLowerCase() !== P) return no('That ecash is not locked to this Cashu ID.');
         const dg = shopQuoteDigests(m.quote, m.outputs);
         return ok({ sig: sign(key, dg.amended), legacy: sign(key, dg.legacy) });
       }
-      if (!m.secrets.every((t) => lockOf(t) === P)) return no('That ecash is not locked to this Foxy ID.');
+      if (!m.secrets.every((t) => lockOf(t) === P)) return no('That ecash is not locked to this Cashu ID.');
       return ok({ sigs: m.secrets.map((t) => sign(key, crypto.createHash('sha256').update(t, 'utf8').digest())) });
     },
     /* handleCardOwnerKey, SeedActions.cardOwnerKey: the owner PUBLIC key for a

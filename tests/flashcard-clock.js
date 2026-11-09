@@ -18,7 +18,7 @@
  *      3b a daily limit through the wallet, turning when a block of a day later reaches the card and not when a till says;
  *      3c a new record (an empty card told its mint) that keeps the clock
  *   4  the record, the log and the receipts a card of 1.15 gives (77 bytes and 20), and one before it (73 and 16)
- *   5  the FLASHCARD screen: the block line under its title, and a log that shows the phone's time beside the block's
+ *   5  the FOXY CARD screen: the block line under its title, and a log that shows the phone's time beside the block's
  *
  * The headers named TIP, OLD and GENESIS are real, and public: this checks their hashes with a sha256 of its own. */
 const crypto = require('crypto');

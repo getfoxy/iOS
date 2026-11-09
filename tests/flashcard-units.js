@@ -44,7 +44,7 @@
  *      shows two pills at nothing from the moment set-up ends, the ceiling said for both and SWAP greyed with its reason while a
  *      side is empty; DOLLARS or BITCOIN one pill and no question; a phone that did not set it up shows what the card holds
  *   18 what the owner found: ADD FUNDS asks the PIN of a card of 1.21 and on from the card just read, and a load the card refuses
- *      for want of it asks for it; SEND > FLASHCARD to a card of both in the currency the send was started in, or asked once the card
+ *      for want of it asks for it; SEND > FOXY CARD to a card of both in the currency the send was started in, or asked once the card
  *      is read, a card of one currency still refusing the other; the card's SEND asks the way to pay first and the currency only on
  *      the confirmation, where both could pay
  *   19 ADD FUNDS as the owner pressed it on the card's screen of a 1.23 card of both: the PIN pad before any card sheet, then one tap
@@ -1318,7 +1318,7 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       await until('the sats to go on', () => !(a._fcTaps > 0) && a.state.fc && a.state.fc.bal && a.state.fc.bal.sat >= 3000);
       await uiSettle();
       ok(a.state.fc.bal.sat >= 3000 && a.state.fc.only === 'sat', 'and the sats go on, the card still one of bitcoin', JSON.stringify(a.state.fc.bal));
-      // SEND > FLASHCARD from this phone's dollars, with no price to turn them into sats: refused before anything is made
+      // SEND > FOXY CARD from this phone's dollars, with no price to turn them into sats: refused before anything is made
       c.tap();
       const read = await H.W.cardLook(c, { mine: true, price: PRICE });
       let no = null;
@@ -1361,7 +1361,7 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       v.curBack();
     }
 
-    // a set-up for somebody else (SEND > FLASHCARD to a new card of 1.23) asks no currency: the card holds what is sent
+    // a set-up for somebody else (SEND > FOXY CARD to a new card of 1.23) asks no currency: the card holds what is sent
     {
       const a = screens();
       const c = newCard(H, undefined, { format: 4, software: 23 });
@@ -1467,7 +1467,7 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
     }
   }
 
-  /* ---- 18: what the owner found trying the card screens (ADD FUNDS's PIN, SEND > FLASHCARD to a card of both, the card's SEND) ---- */
+  /* ---- 18: what the keeper found trying the card screens (ADD FUNDS's PIN, SEND > FOXY CARD to a card of both, the card's SEND) ---- */
   if (want(18)) {
     const H = await funded({ units: ['sat', 'usd'] }, 50000);
     await fundUsd(H, 20000);
@@ -1528,7 +1528,7 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       ok(a.state.fc.bal.usd === 250 && (H.W.cardOwed() || []).length === 0, 'and they go on with it, nothing left owed and nothing made twice', JSON.stringify(a.state.fc.bal));
     }
 
-    // SEND > FLASHCARD from home onto a card set up for both: in the currency the send was started in, or asked where it was not
+    // SEND > FOXY CARD from home onto a card set up for both: in the currency the send was started in, or asked where it was not
     {
       const sendTo = async (c, wallet, amount, unit) => {
         const a = phone();

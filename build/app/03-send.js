@@ -852,7 +852,7 @@
 
       // not enough money needs a different amount, not another attempt
       /* From a card, another attempt is NEXT again, a new tap of the card (`fcOutNext`): never `startSend`, which pays from
-       * this phone's own balance under a confirmation that says FROM FLASHCARD. */
+       * this phone's own balance under a confirmation that says FROM FOXY CARD. */
       const again = (kind === 'sendFail') ? null : card ? () => this.fcOutNext() : () => this.startSend();
 
       /* CLOSE must not strand you on the sending screen.

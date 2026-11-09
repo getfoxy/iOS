@@ -115,7 +115,7 @@
     }
     const typed = () => (field ? field.value.trim() : undefined);
 
-    /* `spec.tick`: a box to tick, { label, on }, for an answer that can be kept for next time (a Foxy ID payment at
+    /* `spec.tick`: a box to tick, { label, on }, for an answer that can be kept for next time (a Cashu ID payment at
      * another mint's "Always do this for <mint>", 26o-cashu-id.js). Whether it is ticked goes to every button's callback. */
     let tickOn = !!(spec.tick && spec.tick.on);
     if (spec.tick && spec.tick.label) {

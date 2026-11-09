@@ -1,5 +1,5 @@
 'use strict';
-/* flashcard-screens.js — the FLASHCARD screens, driven as a person drives them.
+/* flashcard-screens.js — the FOXY CARD screens, driven as a person drives them.
  *
  *     node tests/flashcard-screens.js
  *
@@ -116,9 +116,9 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   await holder.refreshBalance();
   const c = newCard(H);
 
-  /* ---- MENU > FLASHCARD, and a new card ------------------------------------ */
+  /* ---- MENU > FOXY CARD, and a new card ------------------------------------ */
   holder.goFlashcard();
-  ok(H.sheet.length === 1 && /^begin: Tap behind the phone\.$/.test(H.sheet[0]), 'FLASHCARD in the menu asks for the card at once, with no screen to read first', H.sheet[0]);
+  ok(H.sheet.length === 1 && /^begin: Tap behind the phone\.$/.test(H.sheet[0]), 'FOXY CARD in the menu asks for the card at once, with no screen to read first', H.sheet[0]);
   await settle();
   ok(holder.state.screen === 'home' && !holder.state.fc && !card(holder) && stage(H) === 'cardLearn',
      'the sheet dismissed, with no card ever tied to this phone: the person is where they were, with no screen for no card but the one that says what a Foxy Card is (tests/card-cancel.js)');
@@ -204,7 +204,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   holder.offline = false;
   {
     /* The card's room, asked of the wallet for the card read a moment ago: the keypad refuses an amount the card has no room for
-     * (`fcLoadFits`), at NEXT in the wallet's own words, and the card is not asked, nor any money made. FLASHCARD from the send
+     * (`fcLoadFits`), at NEXT in the wallet's own words, and the card is not asked, nor any money made. FOXY CARD from the send
      * screen has no card on show and is not asked about room. */
     const real = holder._fcCard;
     const FULL = 'The card has no room for that. Take some money off it first.';
@@ -221,7 +221,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     holder._fcCard = real;
     const other = holder.state.fc;
     holder.state.fc = null;
-    ok(holder.fcLoadFits(100) === null, 'with no card on show there is nothing to ask about (FLASHCARD from the send screen)');
+    ok(holder.fcLoadFits(100) === null, 'with no card on show there is nothing to ask about (FOXY CARD from the send screen)');
     holder.state.fc = Object.assign({}, other, { key: 'not-this-card' });
     ok(holder.fcLoadFits(100) === null, 'nor for a card other than the one read last');
     holder.state.fc = other;
@@ -1998,7 +1998,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
 
   /* ---- the change a till never handed over, on its owner's screen ----------------------------------------------------------
    * A card of software 1.12 makes a payment's change itself; if its till never taps it again, its owner's phone fetches the change
-   * from the mint and puts it on (tests/flashcard-owed.js has the wallet's side). The FLASHCARD screen says so in one line under the
+   * from the mint and puts it on (tests/flashcard-owed.js has the wallet's side). The FOXY CARD screen says so in one line under the
    * balance, in dollars first and the sats after, for each state the change is in. */
   {
     const { makeCard } = require('./flashcard-card');
@@ -2467,7 +2467,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     ok(wrote && c.balance() === before + 500, 'and the next tap puts them on', String(c.balance()));
   }
 
-  /* ---- software 1.17: RESET CARD, the row under the card, the block, and FLASHCARD on the send screen --------------------------
+  /* ---- software 1.17: RESET CARD, the row under the card, the block, and FOXY CARD on the send screen --------------------------
    * The card of 1.17 can be reset by its owner: a warning, then one tap (the money on it comes off to this phone first, and a
    * locked card or one that holds money and has a PIN asks for the PIN on the pad), and the person is home with a line. The
    * row of RESET, CHANGE PIN and LIMITS is drawn as the receive screen's row, HOME is the round button at the top left and HISTORY the first row of its menu; the card's clock is said as a block under
@@ -2688,7 +2688,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       W.cardEmptyAndReset = real;
     }
 
-    /* FLASHCARD on the send screen: any card, the amount first, the sheet at once */
+    /* FOXY CARD on the send screen: any card, the amount first, the sheet at once */
     {
       const free = newCard(H2, undefined, { format: 4 });
       // a card of 1.21, whose every load wants its PIN
@@ -2704,7 +2704,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       H2.sheet.length = 0;
       owner.fcSendCard();
       ok(owner.state.screen === 'amount' && owner.state.flow === 'cardSend' && owner.state.stack.slice(-1)[0] === 'sendHow' && !card(owner) && !pad(owner),
-         'FLASHCARD on the send screen asks the amount first, on the keypad every amount is typed on; back from it is the send screen');
+         'FOXY CARD on the send screen asks the amount first, on the keypad every amount is typed on; back from it is the send screen');
       ok(!H2.sheet.some((x) => /^begin:/.test(x)), 'and no sheet has come up yet');
       keyIn(owner, 999999);
       ok(owner.state.screen === 'amount' && /^You have /.test(owner.toasts.slice(-1)[0]), 'more than the phone holds goes no further', owner.toasts.slice(-1)[0]);
@@ -2776,7 +2776,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
 
     /* Which card the PIN-first rule asks (`fcPinInfo`): off the card's screen the last card read by any flow, never the card on the
      * screen this phone was last on; on it the card shown where that is the one last read. A till whose owner had opened his own 1.21
-     * card and swiped home asked a customer's 1.20 card with no PIN for one, for its change. And SEND > FLASHCARD asks ahead only of a
+     * card and swiped home asked a customer's 1.20 card with no PIN for one, for its change. And SEND > FOXY CARD asks ahead only of a
      * card known to want it (`fcSendPinFirst`): the last card read, or else the cards on file that say what they were. */
     {
       ok(H2.W.cardsKnown()[n.key] && H2.W.cardsKnown()[n.key].software === '1.' + n.version && H2.W.cardsKnown()[n.key].pinFirst === false,
@@ -2805,7 +2805,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       ok(owner.fcCardPinFirst() === true, 'on the card’s screen, the card shown when it is the one last read');
       last = { key: stranger.key, info: stranger.info, at: Date.now() };
       ok(owner.fcCardPinFirst() === false, 'and the card last read when another has been read since', String(owner.fcCardPinFirst()));
-      // SEND > FLASHCARD (from home: no card on screen)
+      // SEND > FOXY CARD (from home: no card on screen)
       owner.setState({ screen: 'home', stack: [], fc: null });
       const ahead = [];
       file = { [own.key]: { pinFirst: true, software: '1.21' }, [new21.key]: { mint: 'm' } };
@@ -2826,7 +2826,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       file = { a: { pinFirst: true, software: '1.21' }, b: { pinFirst: false, software: '1.20' } };
       ahead.push(owner.fcSendPinFirst());                    // none read, one of them of 1.20
       ok(ahead.join() === 'true,false,false,false,false,true,false',
-         'SEND > FLASHCARD asks the PIN ahead of this phone’s own 1.21 card with a PIN just read, not of one with no PIN, nor of a card that is not its own; with none of its own read, only where every card on file that says is 1.21 and on, and one does',
+         'SEND > FOXY CARD asks the PIN ahead of this phone’s own 1.21 card with a PIN just read, not of one with no PIN, nor of a card that is not its own; with none of its own read, only where every card on file that says is 1.21 and on, and one does',
          ahead.join());
       /* the edge swipe back off the card's screen leaves the card behind, as HOME does; a screen above it comes back to it (the app's
        * own `back`, 01-ui-basics.js, lifted out of its file: the kit's stands in for it everywhere else) */
@@ -3168,7 +3168,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   /* ---- a card held to the phone: its address opens Foxy (build/app/26f-flashcard.js, `cardTapped`) ---------------------------------
    *
    * A Foxy card answers as a tag that carries one address, and iOS opens Foxy with it when the person taps the banner. The phone
-   * tells the page one thing, that a card was tapped (FoxyWallet._cardTapped), and the page does what MENU > FLASHCARD does if it is
+   * tells the page one thing, that a card was tapped (FoxyWallet._cardTapped), and the page does what MENU > FOXY CARD does if it is
    * a moment for it. The tap is the real one here, against the model of the card; tests/deep-links.js holds the rule for every
    * screen, and what the phone may pass on. */
   {
@@ -3202,7 +3202,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
        'from home the tap begins at once, the phone’s sheet asked for in the menu’s own words, with the screen for it up and the drawer shut', F.sheet[0]);
     await until('the card to be read', () => !!app.state.fc);
     ok(app.state.screen === 'flashcard' && app.state.stack.slice(-1)[0] === 'home' && !stage(F),
-       'and a card read is the card’s screen, with home behind it, exactly as MENU > FLASHCARD leaves it');
+       'and a card read is the card’s screen, with home behind it, exactly as MENU > FOXY CARD leaves it');
     await settle();
 
     /* from a screen where nothing is in progress: the same, and back is where the person was */
@@ -3236,7 +3236,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     quiet();
     app.goFlashcard();
     app.cardTapped();
-    ok(begins() === one + 2, 'MENU > FLASHCARD and the card’s address together are one tap');
+    ok(begins() === one + 2, 'MENU > FOXY CARD and the card’s address together are one tap');
     await until('the card to be read', () => !!app.state.fc && !stage(F));
     await settle();
 

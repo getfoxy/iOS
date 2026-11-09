@@ -178,7 +178,7 @@
       tillNextShown: L ? !!L.next.shown : cardList || s.tillPick === 'set',
       tillNext: L ? L.next.tap : cardList ? () => this.fcListNext() : () => this.tillSetNext(),
       tillNextLabel: L ? L.next.label : 'NEXT',
-      // the till's lists' second button (ADD, PASTE A FOXY ID), and CASHIER CODES' PAST
+      // the till's lists' second button (ADD, PASTE A CASHU ID), and CASHIER CODES' PAST
       tillAddShown: !!(L && L.add.shown),
       tillAddLabel: L ? L.add.label : '',
       tillAdd: L ? L.add.tap : () => {},
