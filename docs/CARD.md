@@ -560,7 +560,7 @@ This is the phone's side; the card's is in the card repository's `FOXY-CARD-SPEC
    pieces, every command the size it always was. The sheet's "Writing i of n"
    changes at most every half second. While a card's sheet is up, the page's
    background work waits for it (`cardAfter`): the held quote sweep, the
-   Cashu ID's inbox opened again, the small-change top-up, the adding up of
+   Foxy ID's inbox opened again, the small-change top-up, the adding up of
    the books. A write that went whole is not followed by a read: the card is
    known from what was read before and what went on (`cardAfterWrite`). Any
    other write reads it again. The card's proof of its key (AUTH, 0.6 s on a

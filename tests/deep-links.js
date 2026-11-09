@@ -417,7 +417,7 @@ const BUSY_SCREENS = ['amount', 'bkStart', 'confirm', 'crossConfirm', 'depConfir
   'payFrom',
   // and SWAP's confirmation and SWAPPED: a swap being decided, and one just made
   'swapConfirm', 'swapDone',
-  // a Cashu ID payment being decided (26o-cashu-id.js)
+  // a Foxy ID payment being decided (26o-cashu-id.js)
   'cidConfirm',
   // SEND > BANK ACCOUNT's username or River's invoice being given (26q-bank.js)
   'bankAsk',

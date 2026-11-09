@@ -8,7 +8,7 @@
  *      page; a transfer from dollars says what it becomes
  *   2  1l, a Lightning invoice: RECEIVER GETS, FEE, PAYING, RECEIVER (the invoice shortened); PAYING FROM's pill at the
  *      foot, which opens nothing with one balance and PAY FROM with a choice; PAY and what leaves; no MORE DETAILS
- *   3  1m, a Cashu request over Tor: the same with no RECEIVER; a Cashu ID payment names the contact there instead
+ *   3  1m, a Cashu request over Tor: the same with no RECEIVER; a Foxy ID payment names the contact there instead
  *   4  1p, PAY FROM: the tiles' name, balance line, tick on the one chosen only, the fee line with its badge,
  *      CALCULATING… while asked, NOT ENOUGH kept as a tag, no CHEAPEST and no question line
  *
@@ -224,7 +224,7 @@ const inOrder = (text, words) => {
     eq([A.state.screen, A.state.payFromReopen], ['payFrom', true], '1l: the pill opens PAY FROM');
   } catch (e) { ok(false, 'the section ran to its end', String(e && e.message)); }
 
-  // ---- 3. 1m: a Cashu request over Tor, and a Cashu ID ---------------------------------------------
+  // ---- 3. 1m: a Cashu request over Tor, and a Foxy ID ---------------------------------------------
   try {
     const req = { id: 'r1', unit: 'sat', sats: 750, amount: 750, mints: [MINT], transports: ['onion'], delivery: { kind: 'onion', target: 'x.onion' } };
     await fresh(wallet(), { screen: 'reqOffer', stack: ['home'], req: req, cfMore: '' });
@@ -250,12 +250,12 @@ const inOrder = (text, words) => {
     await fresh(wallet(), { screen: 'cidConfirm', stack: ['home'], recipient: 'cashuid1x', recipientKind: 'cashuid', recipientName: 'Ada',
       cidAmount: 750, cidUnit: 'sat', cidBusy: false, cidErr: '', cfMore: '' });
     const c = V();
-    eq(c.cfStack.map((x) => x.label), ['RECEIVER GETS', 'FEE', 'PAYING', 'RECEIVER'], '1m, a Cashu ID: the contact where the invoice would be');
-    eq(c.cfStack[3].value, 'ADA', '1m, a Cashu ID: its name');
-    eq([c.cfMoreShown, c.cfSecondaryShown, c.cfCloseShown, c.cfFromMany], [false, false, true, false], '1m, a Cashu ID: CANCEL is the X; the pill opens nothing');
+    eq(c.cfStack.map((x) => x.label), ['RECEIVER GETS', 'FEE', 'PAYING', 'RECEIVER'], '1m, a Foxy ID: the contact where the invoice would be');
+    eq(c.cfStack[3].value, 'ADA', '1m, a Foxy ID: its name');
+    eq([c.cfMoreShown, c.cfSecondaryShown, c.cfCloseShown, c.cfFromMany], [false, false, true, false], '1m, a Foxy ID: CANCEL is the X; the pill opens nothing');
     c.cfClose();
     await settle();
-    eq(A.state.screen, 'home', '1m, a Cashu ID: the X goes home');
+    eq(A.state.screen, 'home', '1m, a Foxy ID: the X goes home');
   } catch (e) { ok(false, 'the section ran to its end', String(e && e.message)); }
 
   // ---- 3b. what leaves, said as it is: the review's points ---------------------------------------
@@ -344,10 +344,10 @@ const inOrder = (text, words) => {
     A.pfTap(A.pfKey(MINT, 'sat')); A.pfNext(); await settle();
     eq([A.state.screen, V().cfFromWord], ['reqOffer', FORGE + ' · BITCOIN'], '1m: another picked: back, the pill naming it');
 
-    // the Cashu ID's PAY says what leaves too
+    // the Foxy ID's PAY says what leaves too
     await fresh(wallet(), { screen: 'cidConfirm', stack: ['home'], recipient: 'cashuid1x', recipientKind: 'cashuid', recipientName: 'Ada',
       cidAmount: 750, cidUnit: 'sat', cidBusy: false, cidErr: '', cfMore: '', note: '' });
-    eq(V().cfCtaLabel, 'PAY ' + money(752), '1m, a Cashu ID: PAY and what leaves');
+    eq(V().cfCtaLabel, 'PAY ' + money(752), '1m, a Foxy ID: PAY and what leaves');
 
     // a dollar transfer's RECEIVING at the source's own rate, so MOVING less FEE comes to it
     await fresh(wallet({ units: ['sat', 'usd'] }), { screen: 'trConfirm', stack: ['home'], trFrom: MINT, trTo: AWAY, trUnit: 'usd', trSats: 5000, trErr: '',

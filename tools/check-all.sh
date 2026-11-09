@@ -226,11 +226,11 @@ check "settle quiet"   1 node tests/settle-quiet.js
 check "retry/re-arm"   1 node tests/retry-and-rearm.js
 check "onion fallback" 1 node tests/onion-fallback.js
 check "https delivery" 1 node tests/https-delivery.js
-check "cashu id"       1 node tests/cashu-id.js
-check "cashu id, other mints" 1 node tests/cashu-id-choice.js
-check "cashu id, screens" 1 node tests/cashu-id-ui.js
-check "cashu id, any wallet" 1 node tests/cashu-id-any.js
-check "cashu id, drop boxes" 1 node tests/attack-dropbox-2026-11-06.js
+check "foxy id"       1 node tests/cashu-id.js
+check "foxy id, other mints" 1 node tests/cashu-id-choice.js
+check "foxy id, screens" 1 node tests/cashu-id-ui.js
+check "foxy id, any wallet" 1 node tests/cashu-id-any.js
+check "foxy id, drop boxes" 1 node tests/attack-dropbox-2026-11-06.js
 check "reminder"       1 node tests/remind.js
 check "every field above the keyboard" 1 node tests/keyboard-lift.js
 check "amountless"     1 node tests/amountless-invoice.js

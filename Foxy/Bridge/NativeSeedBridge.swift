@@ -463,7 +463,7 @@ extension FoxyBridge {
         }
     }
 
-    // MARK: The Cashu ID (CashuID.swift)
+    // MARK: The Foxy ID (CashuID.swift)
 
     /// {} → {"id", "nostr", "sig"}: the ID's public key, its delivery key's, and the ID key's signature binding them.
     func handleCashuIdPublic(id: String, body: [String: Any]) {

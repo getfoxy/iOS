@@ -1,5 +1,5 @@
 {
-  "about": "The Cashu ID's arithmetic (Foxy/Keychain/CashuID.swift, build/wallet/08e-cashu-id.js, docs/CASHU-ID.md). nut28: NUT-28 (pay-to-blinded-key)'s own vectors, copied from cashubtc/nuts tests/28-tests.md; the receiver's key there has the other parity (pG is 03, P is 02), so its one-time keys are skNeg. foxy: the phone words of tests/harness.js (PHONE_WORDS), made by tests/harness.js's BigInt arithmetic and held to cashu-ts 4.11.0's deriveP2BKBlindedPubkeys in tests/cashu-id.js. FoxyTests/CashuIDTests.swift holds libsecp256k1 to both.",
+  "about": "The Foxy ID's arithmetic (Foxy/Keychain/CashuID.swift, build/wallet/08e-cashu-id.js, docs/FOXY-ID.md). nut28: NUT-28 (pay-to-blinded-key)'s own vectors, copied from cashubtc/nuts tests/28-tests.md; the receiver's key there has the other parity (pG is 03, P is 02), so its one-time keys are skNeg. foxy: the phone words of tests/harness.js (PHONE_WORDS), made by tests/harness.js's BigInt arithmetic and held to cashu-ts 4.11.0's deriveP2BKBlindedPubkeys in tests/cashu-id.js. FoxyTests/CashuIDTests.swift holds libsecp256k1 to both.",
   "nut28": {
     "e": "1cedb9df0c6872188b560ace9e35fd55c2532d53e19ae65b46159073886482ca",
     "E": "02a8cda4cf448bfce9a9e46e588c06ea1780fcb94e3bbdf3277f42995d403a8b0c",

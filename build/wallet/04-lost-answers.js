@@ -471,7 +471,7 @@
    * its own pocket without being asked. Stepped down until it fits;
    * `lands` is what would arrive. */
   /* In units: a job taken in dollars (`job.unit`, a payment to this phone's
-   * Cashu ID at a mint it does not use, 08e-cashu-id.js `bringHome`) melts its
+   * Foxy ID at a mint it does not use, 08e-cashu-id.js `bringHome`) melts its
    * dollars there, and lands as `job.toUnit` at home, dollars at a home that
    * issues them and sats at one that does not. The budget is in the job's unit
    * and what lands in the other, so a step down across units is in proportion,
@@ -549,7 +549,7 @@
         finally { walkCalling = was; }
       }).then(function (done) {
         dropCarryJob(id);
-        // a payment to this phone's Cashu ID at a mint it does not use: its row at home says so, with the fee (08e-cashu-id.js)
+        // a payment to this phone's Foxy ID at a mint it does not use: its row at home says so, with the fee (08e-cashu-id.js)
         if (job.cid) { try { cidCameHome(job, pl.mintQuote.quote, Number(done && done.sats) || lands, done); } catch (x) {} }
         return { state: 'home', sats: Number(done && done.sats) || lands, done: done, job: job, quote: pl.mintQuote.quote };
       }, function (e) {

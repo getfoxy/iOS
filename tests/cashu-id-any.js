@@ -1,5 +1,5 @@
 'use strict';
-/* cashu-id-any.js — the one-time request for a wallet that cannot blind (once the ANY WALLET button; the wallet keeps it, no screen shows it), and a payment paid to the ID key itself (build/wallet/08e-cashu-id.js, docs/CASHU-ID.md).
+/* cashu-id-any.js — the one-time request for a wallet that cannot blind (once the ANY WALLET button; the wallet keeps it, no screen shows it), and a payment paid to the ID key itself (build/wallet/08e-cashu-id.js, docs/FOXY-ID.md).
  *
  *     node tests/cashu-id-any.js
  *
@@ -273,7 +273,7 @@ async function run() {
   // the phone itself refuses a blinded key on the unblinded action
   const asked = A.phone.answer(A.window, { action: 'cashuIdSignUnblinded', id: 'x', secrets: [blinded[0].secret] });
   const ans = await Promise.resolve(asked);
-  ok(!ans[0] && /not locked to this Cashu ID/.test(String(ans[1])), 'the phone’s unblinded action signs nothing locked to a blinded key', JSON.stringify(ans));
+  ok(!ans[0] && /not locked to this Foxy ID/.test(String(ans[1])), 'the phone’s unblinded action signs nothing locked to a blinded key', JSON.stringify(ans));
   void keysA;
 }
 

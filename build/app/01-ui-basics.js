@@ -234,7 +234,7 @@ class Component extends DCLogic {
    *
    * A row's tap shuts the drawer and arms `menuReturn`. The first screen that is not home marks it as away, and home
    * reached again after that, by back, CANCEL, DONE or the edge swipe, opens the drawer once and lets it go. A row whose
-   * tap puts something over home instead (a stage such as MY CASHU ID, a card, a PIN pad) opens the drawer again when
+   * tap puts something over home instead (a stage such as MY FOXY ID, a card, a PIN pad) opens the drawer again when
    * that is closed (`menuReturnSoon`, from `hideStage`, a card's close and `pinDismiss`); one whose tap is an answer
    * that takes its time (a face, the phone's own words) hands its promise back, and the drawer opens when that is over
    * (`menuReturnSettle`). A tap that put nothing anywhere (a toast) leaves nothing armed (`menuReturnCheck`).
@@ -405,7 +405,7 @@ class Component extends DCLogic {
     if (s.screen === 'fcOuConfirm') return this.fcOuSpec();
     // dollars into bitcoin or back, at this mint (26i-swap.js)
     if (s.screen === 'swapConfirm') return this.swapSpec();
-    // paying a contact's Cashu ID (26o-cashu-id.js)
+    // paying a contact's Foxy ID (26o-cashu-id.js)
     if (s.screen === 'cidConfirm') return this.cidSpec();
     // sendConfirm
     const W = window.FoxyWallet;

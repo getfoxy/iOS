@@ -157,7 +157,7 @@
   }
 
   /* One payment's row: its amount in its unit, when (ms), the mint it went into (NOW AT another, where it landed elsewhere),
-   * and the payer's name (a Cashu ID's "From …", as history names it) or the note. */
+   * and the payer's name (a Foxy ID's "From …", as history names it) or the note. */
   /** @param {any} ev */
   paidRowOf(ev) {
     const W = window.FoxyWallet;
@@ -263,7 +263,7 @@
       clearTimeout(this._arrivingT);
       this._arrivingT = setTimeout(() => { if (this.refreshBalance) this.refreshBalance(); }, 0);
     };
-    // a payment to this phone's Cashu ID taken in: read again, as any payment is (26o-cashu-id.js)
+    // a payment to this phone's Foxy ID taken in: read again, as any payment is (26o-cashu-id.js)
     W._onCashuIdPaid = () => { if (this.refreshBalance) this.refreshBalance(); if (this.loadHistory) this.loadHistory(); };
     // and one checked here while the mint swaps it, said as arriving (26o-cashu-id.js)
     W._onCashuIdArriving = (v) => { if (this.cidArrivingSaid) this.cidArrivingSaid(v); };
@@ -503,9 +503,9 @@
   }
 
   /* A return's work past the lock (`watchWake`): what was left waiting while Foxy was away, and the inboxes the phone
-   * closed as it went. Some of it reads the seed (a token redeemed, a share claimed, the Cashu ID's inbox). */
+   * closed as it went. Some of it reads the seed (a token redeemed, a share claimed, the Foxy ID's inbox). */
   wakeWork() {
-    // the reminder after fifteen days away, asked once when the Cashu ID is in use (26o-remind.js)
+    // the reminder after fifteen days away, asked once when the Foxy ID is in use (26o-remind.js)
     if (this.remindMaybeAsk) this.remindMaybeAsk();
     // a token still waiting to be redeemed is asked about again, after a wait
     this.claimWatchResume();

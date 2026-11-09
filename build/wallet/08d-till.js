@@ -99,7 +99,7 @@
    *     K = L + t·G,  t = SHA-256("foxy-till-lock-v1" ‖ L (33 bytes) ‖ n),
    *
    * once more with 0xFF appended where t is 0 or not below the group order, as
-   * the Cashu ID's drop boxes are moved (08e-cashu-id.js `cidDropKey`). The
+   * the Foxy ID's drop boxes are moved (08e-cashu-id.js `cidDropKey`). The
    * delivery names n, and the keeper spends with l + t, l the private half of
    * L. L keeps its own parity (a compressed key), so the move needs no
    * negation. A payment to one request's K is nobody else's: another request,
@@ -265,7 +265,7 @@
     if (j.exp > nowS + TILL_PASS_MS / 1000 + TILL_PASS_SLACK_S) return bad;
     /* Whether the cashier's till offers tips: true or nothing. Who they go to is
      * not in the code (the keeper's phone keeps that, on its row of the code),
-     * so a code at a counter names nobody's Cashu ID. */
+     * so a code at a counter names nobody's Foxy ID. */
     if (j.tips !== undefined && typeof j.tips !== 'boolean') return bad;
     var out = { v: TILL_CODE_V, id: j.id, mint: mints[0], mints: mints, unit: j.unit, main: main, lock: j.lock, to: j.to, exp: j.exp };
     if (j.tips === true) out.tips = true;

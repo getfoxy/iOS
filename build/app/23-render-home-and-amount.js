@@ -645,7 +645,7 @@
         : s.flow === 'cardSuTap' ? 'What is the most this card should pay each second?'
         : s.flow === 'receive' ? 'How much to receive?'
         : s.flow === 'swap' ? 'How much to swap?'
-        // a contact's Cashu ID (26o-cashu-id.js)
+        // a contact's Foxy ID (26o-cashu-id.js)
         : (s.flow === 'send' && s.recipientKind === 'cashuid') ? this.cidAmountQuestion()
         // an exchange's account, from SEND > BANK ACCOUNT (26q-bank.js)
         : (s.flow === 'send' && this.bankNow && this.bankNow()) ? this.bankAmountQuestion()
@@ -716,7 +716,7 @@
          * which is the same wall the split screen's minimum was. */
         if (sendOver) return;
         if (val <= 0) { this.toast('Type an amount first.', true); return; }
-        // a contact's Cashu ID: its own confirmation (26o-cashu-id.js)
+        // a contact's Foxy ID: its own confirmation (26o-cashu-id.js)
         if (this.state.flow === 'send' && this.state.recipientKind === 'cashuid') {
           if (this.keypadWallet) this.keypadWallet();
           this.cidNext();

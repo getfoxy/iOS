@@ -236,7 +236,7 @@ class Component extends DCLogic {
    *
    * A row's tap shuts the drawer and arms `menuReturn`. The first screen that is not home marks it as away, and home
    * reached again after that, by back, CANCEL, DONE or the edge swipe, opens the drawer once and lets it go. A row whose
-   * tap puts something over home instead (a stage such as MY CASHU ID, a card, a PIN pad) opens the drawer again when
+   * tap puts something over home instead (a stage such as MY FOXY ID, a card, a PIN pad) opens the drawer again when
    * that is closed (`menuReturnSoon`, from `hideStage`, a card's close and `pinDismiss`); one whose tap is an answer
    * that takes its time (a face, the phone's own words) hands its promise back, and the drawer opens when that is over
    * (`menuReturnSettle`). A tap that put nothing anywhere (a toast) leaves nothing armed (`menuReturnCheck`).
@@ -407,7 +407,7 @@ class Component extends DCLogic {
     if (s.screen === 'fcOuConfirm') return this.fcOuSpec();
     // dollars into bitcoin or back, at this mint (26i-swap.js)
     if (s.screen === 'swapConfirm') return this.swapSpec();
-    // paying a contact's Cashu ID (26o-cashu-id.js)
+    // paying a contact's Foxy ID (26o-cashu-id.js)
     if (s.screen === 'cidConfirm') return this.cidSpec();
     // sendConfirm
     const W = window.FoxyWallet;
@@ -8596,7 +8596,7 @@ class Component extends DCLogic {
     }
     const typed = () => (field ? field.value.trim() : undefined);
 
-    /* `spec.tick`: a box to tick, { label, on }, for an answer that can be kept for next time (a Cashu ID payment at
+    /* `spec.tick`: a box to tick, { label, on }, for an answer that can be kept for next time (a Foxy ID payment at
      * another mint's "Always do this for <mint>", 26o-cashu-id.js). Whether it is ticked goes to every button's callback. */
     let tickOn = !!(spec.tick && spec.tick.on);
     if (spec.tick && spec.tick.label) {
@@ -10257,7 +10257,7 @@ class Component extends DCLogic {
     this.syncInbox();
     // and the till's inbox and outbox, which the phone closed with the rest (26m-till.js, `tillWake`)
     if (this.tillWake) this.tillWake();
-    // and the Cashu ID's, closed the same way (26o-cashu-id.js, `cidWake`)
+    // and the Foxy ID's, closed the same way (26o-cashu-id.js, `cidWake`)
     if (this.cidWake) this.cidWake();
   }
 
@@ -11032,7 +11032,7 @@ class Component extends DCLogic {
      * Outside it, a cashier code asks whether to work the keeper's till (`tillJoinAsk`). */
     if (this.state.till && this.tillAccept) return this.tillAccept(t, kind);
     if (kind === 'till') return this.tillJoinAsk ? this.tillJoinAsk(t) : false;
-    // another Foxy's Cashu ID: NAME THIS CONTACT? (26o-cashu-id.js)
+    // another Foxy's Foxy ID: NAME THIS CONTACT? (26o-cashu-id.js)
     if (kind === 'cashuid') return this.cidAddAsk ? this.cidAddAsk(t) : false;
     /* Paying from a card (SEND on the card's screen, 26f-flashcard.js): a card pays Lightning, an invoice or an address,
      * and a bitcoin address on chain where the mint pays on chain (`fcOutAddress`, which asks it first). A Cashu payment
@@ -12132,7 +12132,7 @@ class Component extends DCLogic {
   }
 
   /* One payment's row: its amount in its unit, when (ms), the mint it went into (NOW AT another, where it landed elsewhere),
-   * and the payer's name (a Cashu ID's "From …", as history names it) or the note. */
+   * and the payer's name (a Foxy ID's "From …", as history names it) or the note. */
   /** @param {any} ev */
   paidRowOf(ev) {
     const W = window.FoxyWallet;
@@ -12238,7 +12238,7 @@ class Component extends DCLogic {
       clearTimeout(this._arrivingT);
       this._arrivingT = setTimeout(() => { if (this.refreshBalance) this.refreshBalance(); }, 0);
     };
-    // a payment to this phone's Cashu ID taken in: read again, as any payment is (26o-cashu-id.js)
+    // a payment to this phone's Foxy ID taken in: read again, as any payment is (26o-cashu-id.js)
     W._onCashuIdPaid = () => { if (this.refreshBalance) this.refreshBalance(); if (this.loadHistory) this.loadHistory(); };
     // and one checked here while the mint swaps it, said as arriving (26o-cashu-id.js)
     W._onCashuIdArriving = (v) => { if (this.cidArrivingSaid) this.cidArrivingSaid(v); };
@@ -12478,9 +12478,9 @@ class Component extends DCLogic {
   }
 
   /* A return's work past the lock (`watchWake`): what was left waiting while Foxy was away, and the inboxes the phone
-   * closed as it went. Some of it reads the seed (a token redeemed, a share claimed, the Cashu ID's inbox). */
+   * closed as it went. Some of it reads the seed (a token redeemed, a share claimed, the Foxy ID's inbox). */
   wakeWork() {
-    // the reminder after fifteen days away, asked once when the Cashu ID is in use (26o-remind.js)
+    // the reminder after fifteen days away, asked once when the Foxy ID is in use (26o-remind.js)
     if (this.remindMaybeAsk) this.remindMaybeAsk();
     // a token still waiting to be redeemed is asked about again, after a wait
     this.claimWatchResume();
@@ -12885,11 +12885,11 @@ class Component extends DCLogic {
         .localeCompare(String(b.name || b.handle), undefined, { sensitivity: 'base' }));
     return list.map(c => ({
       name: c.name || c.handle,
-      // a Cashu ID is a hundred characters nobody reads: said as what it is (26o-cashu-id.js)
-      handle: c.cid ? 'CASHU ID' : c.handle,
+      // a Foxy ID is a hundred characters nobody reads: said as what it is (26o-cashu-id.js)
+      handle: c.cid ? 'FOXY ID' : c.handle,
       ini: String(c.name || c.handle).charAt(0).toUpperCase(),
       tint: c.tint || 'var(--acc)',
-      // a Cashu ID goes to the amount (`cidPayStart`), from the menu's CONTACTS and from SEND's alike, as an address does
+      // a Foxy ID goes to the amount (`cidPayStart`), from the menu's CONTACTS and from SEND's alike, as an address does
       tap: c.cid ? () => this.cidPayStart(c) : () => this.setState(p => ({
         screen: 'amount',
         stack: p.stack.concat([p.screen]),
@@ -13579,7 +13579,7 @@ class Component extends DCLogic {
         });
       }
 
-      /* Payments to this phone’s Cashu ID at a mint it does not use, waiting for an answer (26o-cashu-id.js): listed
+      /* Payments to this phone’s Foxy ID at a mint it does not use, waiting for an answer (26o-cashu-id.js): listed
        * where they arrived, pending, in no balance. */
       (this.cidWaitingRows ? this.cidWaitingRows() : []).forEach(t => {
         const d = new Date(t.atMs || Date.now());
@@ -13601,7 +13601,7 @@ class Component extends DCLogic {
       const merged = W.book().map((c, i) => Object.assign({
         name: c.name, handle: c.handle,
         tint: ['var(--acc)', '#5B45D0', '#0E9E93', '#D4409A', '#2E7CF6', '#E0602E'][i % 6],
-      // a Cashu ID's two keys go with its name: they are how it is paid (26o-cashu-id.js)
+      // a Foxy ID's two keys go with its name: they are how it is paid (26o-cashu-id.js)
       }, c.cid ? { cid: c.cid } : {}));
 
       // Everything settled that has not been announced yet. Incoming ones queue
@@ -16396,7 +16396,7 @@ class Component extends DCLogic {
       settings: 'M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4ZM19.2 13.4l1.8 1.4-1.9 3.3-2.1-.8a7.3 7.3 0 0 1-2 1.2l-.3 2.2h-3.8l-.3-2.2a7.3 7.3 0 0 1-2-1.2l-2.1.8-1.9-3.3 1.8-1.4a7.3 7.3 0 0 1 0-2.8L3.6 9.2l1.9-3.3 2.1.8a7.3 7.3 0 0 1 2-1.2l.3-2.2h3.8l.3 2.2a7.3 7.3 0 0 1 2 1.2l2.1-.8 1.9 3.3-1.8 1.4a7.3 7.3 0 0 1 0 2.8Z',
       close: 'M6 6l12 12M18 6L6 18',
       bars: 'M4 7h16M4 12h16M4 17h16',
-      // a QR code: three finder squares and a few dots (MY CASHU ID)
+      // a QR code: three finder squares and a few dots (MY FOXY ID)
       qr: 'M3.5 3.5h7v7h-7zM13.5 3.5h7v7h-7zM3.5 13.5h7v7h-7zM13.5 13.5h3v3h-3zM20.5 13.5v3M17.5 20.5h3M13.5 20.5h1',
       // a face in a frame: the corners of a viewfinder, two eyes and a smile
       faceid: 'M4 8.5v-3a1.5 1.5 0 0 1 1.5-1.5h3M15.5 4h3A1.5 1.5 0 0 1 20 5.5v3'
@@ -16429,7 +16429,7 @@ class Component extends DCLogic {
       mint: 'M3.5 9 12 4l8.5 5M5.5 9.5v7.5M9.8 9.5v7.5M14.2 9.5v7.5M18.5 9.5v7.5M3.5 20h17',
       // a wrench (the menu's TOOLS)
       tools: 'M14.6 3.8a4.6 4.6 0 0 0-4.3 6.2l-6.1 6.1a2 2 0 0 0 2.8 2.8l6.1-6.1a4.6 4.6 0 0 0 6.2-4.3l-2.6 2.6-2.6-.6-.6-2.6Z',
-      // a head over a pair of shoulders: a person's own profile (MY CASHU ID, and home's round button at the top left)
+      // a head over a pair of shoulders: a person's own profile (MY FOXY ID, and home's round button at the top left)
       profile: 'M12 12.2a4.1 4.1 0 1 0 0-8.2 4.1 4.1 0 0 0 0 8.2ZM4.5 20.5c0-3.9 3.4-6.4 7.5-6.4s7.5 2.5 7.5 6.4',
     };
     /* A row that opens something: the drawer shuts, and the screen it opens goes back to the menu when it is left
@@ -16454,7 +16454,7 @@ class Component extends DCLogic {
     v.rot0 = this.state.open0 ? 'rotate(90deg)' : 'rotate(0deg)';
     // opened or shut by hand: nothing is waiting to open it again
     v.toggleMenu = () => this.setState(p => ({ open0: !p.open0, menuReturn: null }));
-    /* Home's round button at the top left, the menu button's twin: MY CASHU ID (26o-cashu-id.js, `cidShow`), the same
+    /* Home's round button at the top left, the menu button's twin: MY FOXY ID (26o-cashu-id.js, `cidShow`), the same
      * screen as the menu's row. Opened from home, not the menu, so nothing is armed: DONE goes back to home. */
     v.cidHomeGo = () => this.cidShow();
     /* SCAN and PASTE are the two ways money arrives at a phone, so they are on
@@ -16484,7 +16484,7 @@ class Component extends DCLogic {
     const twoHere = this.twoUnitsOn();
     v.homeButtonsTwo = !twoHere ? [] : v.homeButtons.map(b => Object.assign({ dim: '1' }, b));
     /* The menu drawer, from the right: everything that is not RECEIVE, SEND,
-     * SCAN, PASTE or MY CASHU ID's round button, in its sections (below). */
+     * SCAN, PASTE or MY FOXY ID's round button, in its sections (below). */
     /* A balance with no verified backup: the menu button and BACKUP glow red,
      * so the way to fix it is visible from home. */
     // a balance in either unit: dollars are lost with the words as surely as sats
@@ -16589,11 +16589,11 @@ class Component extends DCLogic {
       v.menuRingInk2 = v.histRingInk2;
       v.menuRing = v.histRing;
     }
-    /* The drawer, in this order (docs/CASHU-ID.md "The screens" has it too):
+    /* The drawer, in this order (docs/FOXY-ID.md "The screens" has it too):
      *
      *   BACKUP ACCOUNT, at the very top and only while the wallet holds a balance and its words have not been checked
      *     (`unbacked`), with the backup's red ring
-     *   WALLET:   MY CASHU ID · HISTORY · CONTACTS · HIDE BALANCE
+     *   WALLET:   MY FOXY ID · HISTORY · CONTACTS · HIDE BALANCE
      *   MINTS:    SWITCH/ADD MINTS · TRANSFER MONEY (money at two mints or more) · and, at a mint with two balances, SWAP
      *             and CURRENCIES · OTHER MINTS (only while an answer is remembered)
      *   TOOLS:    POINT OF SALE · SPLIT A BILL   (WITHDRAW TO BANK left the menu 2026-11-05; the send screen's BANK ACCOUNT stays)
@@ -16602,7 +16602,7 @@ class Component extends DCLogic {
      *
      * Every section is open until it is tapped shut (`menuShut`, which remembers the shut ones while Foxy is open). Each
      * heading after the first has the gap over it that the eye sees between MENU and WALLET (`headTop`). The card is home's CARD button
-     * (`homeButtons`), not a row here; SWAP is a row here, not home's. MY CASHU ID is also home's round button at the top
+     * (`homeButtons`), not a row here; SWAP is a row here, not home's. MY FOXY ID is also home's round button at the top
      * left (`cidHomeGo`), and CONTACTS is the full list, a contact opening its payment. YOUR CHANGE is not a row any
      * more: the change screen (`goChange`) stays. BLUETOOTH TAP is a switch in SETTINGS (26d-tap.js, `tapAutoArms`).
      * A screen opened from a row goes back to the menu when it is left (01-ui-basics.js, `menuReturnArm`).
@@ -16635,8 +16635,8 @@ class Component extends DCLogic {
       glow: 'alertGlow 10.4s ease-in-out infinite',
       ringInk: backupRing.ringInk, ringInk2: backupRing.ringInk2, ring: backupRing.ring };
     const walletRows = [
-      /* MY CASHU ID (26o-cashu-id.js): the code another Foxy adds this one by, with SHARE. */
-      { label: 'MY CASHU ID', path: MENU_ICON.profile, tap: shut(() => this.cidShow()) },
+      /* MY FOXY ID (26o-cashu-id.js): the code another Foxy adds this one by, with SHARE. */
+      { label: 'MY FOXY ID', path: MENU_ICON.profile, tap: shut(() => this.cidShow()) },
       { label: 'HISTORY', path: MENU_ICON.history, tap: shut(() => this.go('history')),
         ringInk: v.histRingInk, ringInk2: v.histRingInk2, ring: v.histRing },
       { label: 'CONTACTS', path: MENU_ICON.contacts, tap: shut(v.goContacts) },
@@ -16713,7 +16713,7 @@ class Component extends DCLogic {
     const capRows = this.tillCapRows ? this.tillCapRows(MENU_ICON.receive, shut) : [];
     const settingRows = /** @type {any[]} */ ([]).concat(
       // FACE ID, SET PIN, then BLUETOOTH TAP (the keeper, 2026-11-08). The reminder after 15 days away has no row: it stays as it was
-      // by default, asked once when a Cashu ID is in use (26o-remind.js, `remindMaybeAsk`).
+      // by default, asked once when a Foxy ID is in use (26o-remind.js, `remindMaybeAsk`).
       [faceRow, pinRow],
       /* Whether an invoice goes on the air by itself. A switch, and the drawer stays open so it can be seen to move. */
       [Object.assign({ label: 'BLUETOOTH TAP', path: MENU_ICON.change,
@@ -17726,7 +17726,7 @@ class Component extends DCLogic {
         : s.flow === 'cardSuTap' ? 'What is the most this card should pay each second?'
         : s.flow === 'receive' ? 'How much to receive?'
         : s.flow === 'swap' ? 'How much to swap?'
-        // a contact's Cashu ID (26o-cashu-id.js)
+        // a contact's Foxy ID (26o-cashu-id.js)
         : (s.flow === 'send' && s.recipientKind === 'cashuid') ? this.cidAmountQuestion()
         // an exchange's account, from SEND > BANK ACCOUNT (26q-bank.js)
         : (s.flow === 'send' && this.bankNow && this.bankNow()) ? this.bankAmountQuestion()
@@ -17797,7 +17797,7 @@ class Component extends DCLogic {
          * which is the same wall the split screen's minimum was. */
         if (sendOver) return;
         if (val <= 0) { this.toast('Type an amount first.', true); return; }
-        // a contact's Cashu ID: its own confirmation (26o-cashu-id.js)
+        // a contact's Foxy ID: its own confirmation (26o-cashu-id.js)
         if (this.state.flow === 'send' && this.state.recipientKind === 'cashuid') {
           if (this.keypadWallet) this.keypadWallet();
           this.cidNext();
@@ -20334,7 +20334,7 @@ class Component extends DCLogic {
       contactAll: this.contactRows(),
       contactLetter: (this.contactRows()[0] || {}).ini || '',
       contactRecents: this.contactRows().slice(0, 3),
-      // PASTE A CASHU ID and SCAN A CASHU ID, on the empty CONTACTS (26o-cashu-id.js); not offered where the wallet
+      // PASTE A FOXY ID and SCAN A FOXY ID, on the empty CONTACTS (26o-cashu-id.js); not offered where the wallet
       // cannot read an ID, nor SCAN where it cannot scan. PASTE reads the clipboard.
       ctAddShown: !!(window.FoxyWallet && window.FoxyWallet.cashuIdCheck),
       ctAddGo: () => this.cidClipboardAdd(),
@@ -20360,13 +20360,13 @@ class Component extends DCLogic {
       ctQueryInput: (e) => this.setState({ ctQuery: e.target.value }),
       ctFocusRef: this._refCt || (this._refCt = (el) => this.autoFocus('ct', el)),
       ctEmpty: (s.ctQuery || '').trim().toLowerCase().length === 0,
-      contactsEmptyText: 'Ask another Foxy user to share their Cashu ID with you to add them as a contact.',
+      contactsEmptyText: 'Ask another Foxy user to share their Foxy ID with you to add them as a contact.',
       contactsEmpty: s.walletLive ? this.contactRows().length === 0 : !!s.fresh,
       contactsAny: s.walletLive ? this.contactRows().length > 0 : !s.fresh,
       ctResults: (function (qq) {
         if (!qq || s.fresh) return [];
         return (s.contacts || []).filter(c => c.name.toLowerCase().indexOf(qq) >= 0 || c.handle.toLowerCase().indexOf(qq) >= 0)
-          .map(c => ({ name: c.name, handle: c.cid ? 'CASHU ID' : c.handle, initial: c.name.charAt(0), tint: c.tint }));
+          .map(c => ({ name: c.name, handle: c.cid ? 'FOXY ID' : c.handle, initial: c.name.charAt(0), tint: c.tint }));
       })((s.ctQuery || '').trim().toLowerCase()),
       ctHasResults: (function (qq) {
         if (!qq || s.fresh) return false;
@@ -20390,7 +20390,7 @@ class Component extends DCLogic {
         return !hit && qq.indexOf('@') < 0;
       })((s.ctQuery || '').trim().toLowerCase()),
       payContact: () => {
-        // the first match a Cashu ID: paid as one (26o-cashu-id.js)
+        // the first match a Foxy ID: paid as one (26o-cashu-id.js)
         const q0 = (this.state.ctQuery || '').trim().toLowerCase();
         const first = q0 ? (s.contacts || []).filter(c => c.name.toLowerCase().indexOf(q0) >= 0 || c.handle.toLowerCase().indexOf(q0) >= 0)[0] : null;
         if (first && first.cid) { this.cidPayStart(first); return; }
@@ -25486,7 +25486,7 @@ class Component extends DCLogic {
     if (this.syncPreview) this.syncPreview();
     // a card screen coming down may be the end of a card flow, and what waited for it is raised (26f-flashcard.js)
     if (was === 'card' || was === 'cardReady' || was === 'cardBack' || was === 'cardAgain') this.cardFlowMayHaveEnded();
-    // a stage a menu row opened (MY CASHU ID): the menu again, unless another stage takes its place (01-ui-basics.js)
+    // a stage a menu row opened (MY FOXY ID): the menu again, unless another stage takes its place (01-ui-basics.js)
     if (this.menuReturnSoon) this.menuReturnSoon();
     return true;
   }
@@ -32523,7 +32523,7 @@ class Component extends DCLogic {
 
   /* ---- home and the card --------------------------------------------------------------------------------------------
    *
-   * CARD, the third of home's buttons under the balance (home's round button at the top left was CARD, and is MY CASHU ID now), opens the
+   * CARD, the third of home's buttons under the balance (home's round button at the top left was CARD, and is MY FOXY ID now), opens the
    * card's screen as a card's address does (`goFlashcard`), which asks for the card to be tapped; nothing of a card is shown before it has been read. The card's screen has the HOME
    * button in the same place, which comes back home (`fcGoHome`). A swipe does the same (`fcSwipe`): to the left on home is CARD,
    * to the right on the card's screen is HOME; nothing is drawn for it and nothing of a card is kept for it. */
@@ -38586,15 +38586,15 @@ class Component extends DCLogic {
           : 'It is in this phone at ' + this.mintNameOf(from) + ', not moved to ' + name + ': ' + why, true);
       });
   }
-  /* ---- the Cashu ID: MY CASHU ID, a contact added by paste, a contact paid ---------------------------------------------
+  /* ---- the Foxy ID: MY FOXY ID, a contact added by paste, a contact paid ---------------------------------------------
    *
-   * The wallet's half is 08e-cashu-id.js and docs/CASHU-ID.md. Here:
+   * The wallet's half is 08e-cashu-id.js and docs/FOXY-ID.md. Here:
    *
-   *   MY CASHU ID (the menu, and home's round button at the top left)
+   *   MY FOXY ID (the menu, and home's round button at the top left)
    *                                the stage screen that shows a code to be scanned (`stageScreen`), with SHARE above DONE,
    *                                the share sheet the app uses for a token; the ID string is the code.
    *   a pasted or scanned ID ..... NAME THIS CONTACT?, a card with a field (`blockedCard` `field`); your own is said to be
-   *                                yours, a mistyped one is refused ("That is not a Cashu ID.").
+   *                                yours, a mistyped one is refused ("That is not a Foxy ID.").
    *   paying one ................. CONTACTS (from SEND or the menu) → SET AMOUNT → the confirmation, which says once that the money
    *                                comes back after thirty days if it is not collected → sent over Nostr.
    *   money at another mint ...... PAID AT ANOTHER MINT, a card with three answers (`cidOfferCard`): BRING IT HOME (its fee
@@ -38607,24 +38607,24 @@ class Component extends DCLogic {
    *
    * The payment is made at the mint this phone is on, from the balance the keypad is in (dollars first, as a send is). */
 
-  /* MY CASHU ID: the code, once the phone has given its two keys. Opening it is what makes this phone listen for payments
+  /* MY FOXY ID: the code, once the phone has given its two keys. Opening it is what makes this phone listen for payments
    * to it (`cashuIdShown`): an ID nobody was shown has nothing to listen for. */
   cidShow() {
     const W = window.FoxyWallet;
-    if (!W || !W.cashuIdMine) { this.toast('This Foxy has no Cashu ID.', true); return; }
+    if (!W || !W.cashuIdMine) { this.toast('This Foxy has no Foxy ID.', true); return; }
     const run = (this._cidShowRun = (this._cidShowRun || 0) + 1);
-    this.stageScreen('cashuId', { art: '', title: 'MY CASHU ID', body: 'Reading it from your seed', dots: true, button: 'CANCEL',
+    this.stageScreen('cashuId', { art: '', title: 'MY FOXY ID', body: 'Reading it from your seed', dots: true, button: 'CANCEL',
       go: () => { if (this._cidShowRun === run) this._cidShowRun = 0; } });
     Promise.resolve(W.cashuIdMine()).then((mine) => {
       if (this._cidShowRun !== run) return;
-      if (!mine || !mine.text) throw new Error('No Cashu ID was read.');
+      if (!mine || !mine.text) throw new Error('No Foxy ID was read.');
       this.cidShowCode(mine.text);
       if (W.cashuIdShown) Promise.resolve(W.cashuIdShown()).catch(() => {});
     }).catch((e) => {
       if (this._cidShowRun !== run) return;
       this._cidShowRun = 0;
       this.hideStage('cashuId');
-      this.blockedCard('cidNone', { title: 'NO CASHU ID', reason: (W.reason ? W.reason(e) : String((e && e.message) || e)) });
+      this.blockedCard('cidNone', { title: 'NO FOXY ID', reason: (W.reason ? W.reason(e) : String((e && e.message) || e)) });
     });
   }
 
@@ -38632,7 +38632,7 @@ class Component extends DCLogic {
   cidShowCode(text) {
     const W = window.FoxyWallet;
     this.stageScreen('cashuId', {
-      art: '', title: 'MY CASHU ID', qr: String(text),
+      art: '', title: 'MY FOXY ID', qr: String(text),
       body: 'Another Foxy scans or pastes this to add you to their contacts and pay you. Each payment is locked to a new key only you can open.',
       above: 'SHARE',
       aboveGo: () => { if (!W || !W.share || !W.share(String(text))) this.toast('Sharing is not available here.', true); },
@@ -38656,7 +38656,7 @@ class Component extends DCLogic {
         if (this.refreshBalance) this.refreshBalance();
         this.loadHistory();
         const st = String((r && r.state) || '');
-        if (st === 'taken') this.toast('Taken. The mint can link this payment to your Cashu ID.');
+        if (st === 'taken') this.toast('Taken. The mint can link this payment to your Foxy ID.');
         else if (st === 'gone' || st === 'seen') this.toast('That payment is no longer waiting.', true);
         else this.toast(String((r && r.why) || '') || 'That did not work.', true);
       }).catch((e) => {
@@ -38672,23 +38672,23 @@ class Component extends DCLogic {
     });
   }
 
-  /* A card with a field to paste a Cashu ID into, NEXT handing the text to `read`; CANCEL shuts it. Shared with the till's
+  /* A card with a field to paste a Foxy ID into, NEXT handing the text to `read`; CANCEL shuts it. Shared with the till's
    * (26p-till-tips.js, `tillIdPaste`) so the two stay the same card. */
   cidPasteCard(kind, read) {
     this.blockedCard(kind, {
-      tone: 'ask', title: 'PASTE A CASHU ID',
-      reason: 'The Cashu ID they shared from MY CASHU ID. It starts foxyid1.',
+      tone: 'ask', title: 'PASTE A FOXY ID',
+      reason: 'The Foxy ID they shared from MY FOXY ID. It starts foxyid1.',
       field: { value: '', placeholder: 'foxyid1…', max: 400 },
       retry: 'NEXT', go: (text) => read(text),
       shut: { label: 'CANCEL' },
     });
   }
 
-  /* PASTE A CASHU ID and SCAN A CASHU ID, on the empty CONTACTS: the ID is read as a pasted or scanned one
+  /* PASTE A FOXY ID and SCAN A FOXY ID, on the empty CONTACTS: the ID is read as a pasted or scanned one
    * is (`cidAddAsk`), which goes on to NAME THIS CONTACT?. */
   cidPasteAsk() { this.cidPasteCard('cidPaste', (text) => this.cidAddAsk(text)); }
 
-  /* PASTE A CASHU ID, tapped: the clipboard read through the bridge, as home's PASTE reads it (iOS asks its paste
+  /* PASTE A FOXY ID, tapped: the clipboard read through the bridge, as home's PASTE reads it (iOS asks its paste
    * question there), and the first foxyid1 string on it straight to NAME THIS CONTACT?. A clipboard with none is
    * THAT WON'T WORK; a page with no clipboard to read gets the card with a field. */
   cidClipboardAdd() {
@@ -38699,7 +38699,7 @@ class Component extends DCLogic {
       if (!m) {
         this.blockedCard('cidBad', {
           tone: 'warn', title: 'THAT WON\u2019T WORK',
-          reason: String(text || '').trim() ? 'That is not a Cashu ID.' : 'Nothing on the clipboard.',
+          reason: String(text || '').trim() ? 'That is not a Foxy ID.' : 'Nothing on the clipboard.',
           chip: 'Ask them to share it again.',
         });
         return;
@@ -38711,10 +38711,10 @@ class Component extends DCLogic {
   cidScanAsk() {
     const W = window.FoxyWallet;
     if (!W || !W.scan) return;
-    Promise.resolve(W.scan('Scan a Cashu ID')).then((text) => { if (String(text || '').trim()) this.cidAddAsk(text); }).catch(() => {});
+    Promise.resolve(W.scan('Scan a Foxy ID')).then((text) => { if (String(text || '').trim()) this.cidAddAsk(text); }).catch(() => {});
   }
 
-  /* A Cashu ID scanned or pasted (`acceptTarget`): NAME THIS CONTACT?, or why not. */
+  /* A Foxy ID scanned or pasted (`acceptTarget`): NAME THIS CONTACT?, or why not. */
   cidAddAsk(text) {
     const W = window.FoxyWallet;
     if (!W || !W.cashuIdCheck) return false;
@@ -38722,7 +38722,7 @@ class Component extends DCLogic {
     Promise.resolve(W.cashuIdCheck(t)).then((r) => {
       if (r.own) {
         this.blockedCard('cidOwn', {
-          tone: 'warn', title: 'THIS IS YOUR CASHU ID',
+          tone: 'warn', title: 'THIS IS YOUR FOXY ID',
           reason: 'Share it with someone else so they can add you and pay you.',
         });
         return;
@@ -38731,7 +38731,7 @@ class Component extends DCLogic {
     }).catch((e) => {
       this.blockedCard('cidBad', {
         tone: 'warn', title: 'THAT WON’T WORK',
-        reason: (W.reason ? W.reason(e) : String((e && e.message) || e)) || 'That is not a Cashu ID.',
+        reason: (W.reason ? W.reason(e) : String((e && e.message) || e)) || 'That is not a Foxy ID.',
         chip: 'Ask them to share it again.',
       });
     });
@@ -38742,8 +38742,8 @@ class Component extends DCLogic {
   cidNameAsk(text, known) {
     this.blockedCard('cidName', {
       tone: 'ask', title: 'NAME THIS CONTACT?',
-      reason: known ? 'You have this Cashu ID as ' + known + '. A new name replaces it.'
-        : 'A Cashu ID from another Foxy. Give it a name to find it in your contacts.',
+      reason: known ? 'You have this Foxy ID as ' + known + '. A new name replaces it.'
+        : 'A Foxy ID from another Foxy. Give it a name to find it in your contacts.',
       field: { value: known || '', placeholder: 'Name', max: 40 },
       retry: 'SAVE',
       go: (name) => this.cidAddGo(text, name),
@@ -38761,12 +38761,12 @@ class Component extends DCLogic {
     }).catch((e) => this.toast(W.reason ? W.reason(e) : String((e && e.message) || e), true));
   }
 
-  /* A contact that is a Cashu ID, tapped: SET AMOUNT for it, dollars first. */
+  /* A contact that is a Foxy ID, tapped: SET AMOUNT for it, dollars first. */
   cidPayStart(c) {
     if (this.offlineNow && this.offlineNow()) { this.offlineNo('Paying a contact'); return; }
     this.setState(p => ({
       screen: 'amount', stack: p.stack.concat([p.screen]), flow: 'send',
-      recipient: String(c.handle || ''), recipientKind: 'cashuid', recipientName: String(c.name || 'Cashu ID'),
+      recipient: String(c.handle || ''), recipientKind: 'cashuid', recipientName: String(c.name || 'Foxy ID'),
       asset: '', network: '', amount: '', unit: 'USD', ctSearch: false,
       wallet: '', walletAuto: false, walletTapped: false, feeQ: null, cidBusy: false, cidErr: '',
     }));
@@ -38803,8 +38803,8 @@ class Component extends DCLogic {
     const rows = [
       this.cfRow('TO', name.toUpperCase()),
       this.cfRow('PAYING FROM', String(at).toUpperCase() + (unit === 'usd' ? ' · DOLLARS' : ''), { half: true }),
-      this.cfRow('NETWORK', 'CASHU ID', { half: true }),
-      // not a promise of when: their phone has to be listening, and the relays have to keep it (CASHU-ID.md)
+      this.cfRow('NETWORK', 'FOXY ID', { half: true }),
+      // not a promise of when: their phone has to be listening, and the relays have to keep it (FOXY-ID.md)
       this.cfRow('GOES BY', 'NOSTR, SENT DAILY', { ink: 'var(--acc)', half: true }),
     ];
     if ((s.note || '').trim()) rows.push(this.cfRow('NOTE', (s.note || '').trim()));
@@ -38883,8 +38883,8 @@ class Component extends DCLogic {
       const at = (this.mintNameOf && this.mintNameOf(o.mint)) || o.host || 'another mint';
       const usd = o.unit === 'usd';
       const row = {
-        name: 'From ' + (o.name || 'a Cashu ID'), party: 'From ' + (o.name || 'a Cashu ID'), note: '',
-        hash: 'cid-waiting-' + o.key, dir: 'in', sats: usd ? 0 : Math.round(Number(o.amount) || 0), fee: 0, rail: 'Cashu ID',
+        name: 'From ' + (o.name || 'a Foxy ID'), party: 'From ' + (o.name || 'a Foxy ID'), note: '',
+        hash: 'cid-waiting-' + o.key, dir: 'in', sats: usd ? 0 : Math.round(Number(o.amount) || 0), fee: 0, rail: 'Foxy ID',
         time: this.txLabel ? this.txLabel(new Date(Number(o.at) || Date.now()), now) : '', atMs: Number(o.at) || 0,
         pending: true, cidWait: true, cidKey: o.key, cidLine: 'At ' + at + ' \u00b7 tap to decide', mint: o.mint, token: '',
       };
@@ -38911,7 +38911,7 @@ class Component extends DCLogic {
     if (!v || !v.key) return;
     const unit = v.unit === 'usd' ? 'usd' : 'sat';
     const at = (this.mintNameOf && this.mintNameOf(v.mint)) || v.host || 'another mint';
-    const who = v.name || 'A Cashu ID';
+    const who = v.name || 'A Foxy ID';
     let reason = who + ' sent you ' + this.cidMoney(v.amount, unit) + ' at ' + at + ', a mint you don\u2019t use.';
     if (v.others > 0) {
       reason += '\n' + (v.others === 1 ? 'One more payment waits there' : v.others + ' more payments wait there')
@@ -38984,14 +38984,14 @@ class Component extends DCLogic {
     };
     this.blockedCard('cidChoices', {
       tone: 'ask', title: 'OTHER MINTS',
-      reason: 'What Foxy does by itself with a payment to your Cashu ID at a mint you don\u2019t use. Tap one to forget it: the next payment there asks again.',
+      reason: 'What Foxy does by itself with a payment to your Foxy ID at a mint you don\u2019t use. Tap one to forget it: the next payment there asks again.',
       pills: list.map((c) => ({ label: c.host + ' \u00b7 ' + (said[c.choice] || c.choice), tap: () => forget(c.host) })),
       pillsFirst: true,
       also: list.length > 1 ? { label: 'FORGET ALL', tap: () => forget('') } : null,
     });
   }
 
-  /* A payment to this phone's Cashu ID that every check on the phone has passed, while the mint swaps it: said at once,
+  /* A payment to this phone's Foxy ID that every check on the phone has passed, while the mint swaps it: said at once,
    * as arriving and never as received. The money is not counted until the swap lands, and PAYMENT RECEIVED follows
    * then (`_onCashuIdPaid`). Three to six seconds sooner than that, which is the mint's check and swap over Tor. */
   cidArrivingSaid(v) {
@@ -39002,7 +39002,7 @@ class Component extends DCLogic {
     this.toast(this.stageMoney(amount, unit) + (who ? ' from ' + who : '') + ' is arriving');
   }
 
-  /* On every return to the foreground (`inboxWake`): the phone closed the Cashu ID's inbox as Foxy went away. */
+  /* On every return to the foreground (`inboxWake`): the phone closed the Foxy ID's inbox as Foxy went away. */
   cidWake() {
     const W = window.FoxyWallet;
     if (!W) return;
@@ -39023,7 +39023,7 @@ class Component extends DCLogic {
   }
   /* ---- REMIND ME AFTER 15 DAYS (08i-remind.js, Reminder.swift) ----
    *
-   * Only on a phone whose Cashu ID is in use. The first time it is, a card asks once (`remindAskCard`) and says why;
+   * Only on a phone whose Foxy ID is in use. The first time it is, a card asks once (`remindAskCard`) and says why;
    * TURN ON has iOS ask its own question. Notifications already allowed for payments turn it on with no card. There is
    * no switch in SETTINGS (the keeper, 2026-11-08): it stays as this default has it. */
 
@@ -39050,7 +39050,7 @@ class Component extends DCLogic {
     });
   }
 
-  /* The ID is in use and nobody has been asked: the card, once. Called at every return past the lock (`wakeWork`), never over the code of MY CASHU ID. */
+  /* The ID is in use and nobody has been asked: the card, once. Called at every return past the lock (`wakeWork`), never over the code of MY FOXY ID. */
   remindMaybeAsk() {
     const W = window.FoxyWallet;
     if (!W || !W.remindStatus || this._remindAsking) return;
@@ -39081,10 +39081,10 @@ class Component extends DCLogic {
    *                           mint, the default currency) and for each new CASHIER CODE, the till's answer first. Its back
    *                           button is walking away from the question.
    *   TIPS GO TO ............ a card: MYSELF, ONE PERSON, GROUP.
-   *   ONE PERSON ............ the SWITCH MINT list (`tillList` 'person'): the Cashu ID contacts, PASTE A CASHU ID (a card
-   *                           with a field) and SCAN A CASHU ID; an ID that is not a contact is named first, on the
+   *   ONE PERSON ............ the SWITCH MINT list (`tillList` 'person'): the Foxy ID contacts, PASTE A FOXY ID (a card
+   *                           with a field) and SCAN A FOXY ID; an ID that is not a contact is named first, on the
    *                           contacts' own NAME THIS CONTACT? card, and kept as one.
-   *   GROUP ................. the same list (`tillList` 'group'): up to eight rows, each a Cashu ID and its share, ADD and
+   *   GROUP ................. the same list (`tillList` 'group'): up to eight rows, each a Foxy ID and its share, ADD and
    *                           SAVE, SAVE grey until the shares add up to 100%. A row tapped asks its share on a card with a
    *                           field, or REMOVE. A row added takes what is left of the 100%.
    *   the tip buttons ....... $1, $2, $5 and OTHER under the amount on the till's receive screen, where its tips are on: the
@@ -39248,20 +39248,20 @@ class Component extends DCLogic {
     this.setState((p) => ({ screen: (p.stack || []).length ? p.stack[p.stack.length - 1] : 'home', stack: (p.stack || []).slice(0, -1), tillList: false }));
   }
 
-  /* ONE PERSON (`for` 'one'), or a row to ADD to the group (`for` 'group'): the contacts that are Cashu IDs, and the two ways in
+  /* ONE PERSON (`for` 'one'), or a row to ADD to the group (`for` 'group'): the contacts that are Foxy IDs, and the two ways in
    * for one that is not. */
   tillPersonOpen(forWhat) {
     this.tillListGo('person', { tillPersonFor: forWhat === 'group' ? 'group' : 'one' });
   }
 
-  // the Cashu ID contacts, those in the group already left out
+  // the Foxy ID contacts, those in the group already left out
   tillPersonRows() {
     const W = window.FoxyWallet;
     let list = [];
     try { list = (W && W.cashuIdContacts) ? W.cashuIdContacts() : []; } catch (e) { list = []; }
     const inGroup = this.state.tillPersonFor === 'group' ? (this.state.tillGroup || []).map((r) => r.id) : [];
     return (Array.isArray(list) ? list : []).filter((c) => c && c.cid && inGroup.indexOf(c.cid.id) < 0)
-      .map((c) => ({ id: c.cid.id, nostr: c.cid.nostr, name: String(c.name || 'Cashu ID') }));
+      .map((c) => ({ id: c.cid.id, nostr: c.cid.nostr, name: String(c.name || 'Foxy ID') }));
   }
 
   // a person picked, a contact or an ID just named: the answer for ONE PERSON, or a row of the group
@@ -39269,7 +39269,7 @@ class Component extends DCLogic {
     if (!p || !p.id) return;
     if (this.state.tillPersonFor === 'group') {
       const rows = (this.state.tillGroup || []).filter((r) => r.id !== p.id);
-      if (rows.length >= this.TILL_GROUP_MAX) { this.toast('A group is ' + this.TILL_GROUP_MAX + ' Cashu IDs at most.', true); return; }
+      if (rows.length >= this.TILL_GROUP_MAX) { this.toast('A group is ' + this.TILL_GROUP_MAX + ' Foxy IDs at most.', true); return; }
       // what is left of the 100%, so the last one added makes it whole
       const left = Math.max(0, 100 - rows.reduce((n, r) => n + (Number(r.pct) || 0), 0));
       this.setState({ tillList: 'group', tillGroup: rows.concat([{ id: p.id, nostr: p.nostr, name: p.name, pct: left }]) });
@@ -39278,14 +39278,14 @@ class Component extends DCLogic {
     this.tillTipsDone({ on: true, to: 'one', ids: [{ id: p.id, nostr: p.nostr, name: p.name, pct: 100 }] });
   }
 
-  // PASTE A CASHU ID: a card with a field to paste it into
+  // PASTE A FOXY ID: a card with a field to paste it into
   tillIdPaste() { this.cidPasteCard('tillIdPaste', (text) => this.tillIdRead(text)); }
 
-  // SCAN A CASHU ID: the camera
+  // SCAN A FOXY ID: the camera
   tillIdScan() {
     const W = window.FoxyWallet;
     if (!W || !W.scan) return;
-    Promise.resolve(W.scan('Scan a Cashu ID')).then((text) => { if (String(text || '').trim()) this.tillIdRead(text); }).catch(() => {});
+    Promise.resolve(W.scan('Scan a Foxy ID')).then((text) => { if (String(text || '').trim()) this.tillIdRead(text); }).catch(() => {});
   }
 
   /* An ID pasted or scanned: refused in the contacts' own words; this phone's own is MYSELF; a contact is picked by its name; any
@@ -39297,15 +39297,15 @@ class Component extends DCLogic {
     Promise.resolve(W.cashuIdCheck(t)).then((r) => {
       if (r.own) {
         this.blockedCard('cidOwn', {
-          tone: 'warn', title: 'THIS IS YOUR CASHU ID',
-          reason: 'Tips to you need no Cashu ID: pick MYSELF instead.',
+          tone: 'warn', title: 'THIS IS YOUR FOXY ID',
+          reason: 'Tips to you need no Foxy ID: pick MYSELF instead.',
         });
         return;
       }
       if (r.name) { this.tillPersonPick({ id: r.id, nostr: r.nostr, name: r.name }); return; }
       this.blockedCard('cidName', {
         tone: 'ask', title: 'NAME THIS CONTACT?',
-        reason: 'A Cashu ID from another Foxy. Give it a name: its tips say who they went to.',
+        reason: 'A Foxy ID from another Foxy. Give it a name: its tips say who they went to.',
         field: { value: '', placeholder: 'Name', max: 40 },
         retry: 'SAVE', go: (name) => this.tillIdKeep(t, name),
         shut: { label: 'CANCEL' },
@@ -39313,7 +39313,7 @@ class Component extends DCLogic {
     }).catch((e) => {
       this.blockedCard('cidBad', {
         tone: 'warn', title: 'THAT WON’T WORK',
-        reason: (W.reason ? W.reason(e) : String((e && e.message) || e)) || 'That is not a Cashu ID.',
+        reason: (W.reason ? W.reason(e) : String((e && e.message) || e)) || 'That is not a Foxy ID.',
         chip: 'Ask them to share it again.',
       });
     });
@@ -39350,7 +39350,7 @@ class Component extends DCLogic {
     const row = (this.state.tillGroup || []).find((r) => r.id === id);
     if (!row) return;
     this.blockedCard('tillGroupRow', {
-      tone: 'ask', title: String(row.name || 'CASHU ID').toUpperCase(),
+      tone: 'ask', title: String(row.name || 'FOXY ID').toUpperCase(),
       reason: 'Its share of every tip, in whole percent. The shares add up to 100%.',
       field: { value: String(Number(row.pct) || ''), placeholder: '%', max: 3 },
       retry: 'SET', go: (v) => this.tillGroupPct(id, v),
@@ -39400,23 +39400,23 @@ class Component extends DCLogic {
       ink: 'rgba(var(--ink-rgb),.55)', busy: false, bg: 'var(--surface)', border: 'rgba(var(--ink-rgb),.12)',
     }, o, { initial: String(o.name || '?').slice(0, 1).toUpperCase() });
     if (mode === 'person') {
-      const rows = this.tillPersonRows().map((p) => plainRow({ name: p.name, host: 'Cashu ID', text: '', tap: () => this.tillPersonPick(p) }));
+      const rows = this.tillPersonRows().map((p) => plainRow({ name: p.name, host: 'Foxy ID', text: '', tap: () => this.tillPersonPick(p) }));
       return {
         title: s.tillPersonFor === 'group' ? 'ADD TO THE GROUP' : 'TIPS GO TO',
-        line: rows.length ? 'Pick a contact, or paste or scan their Cashu ID.' : 'No Cashu ID contacts yet. Paste or scan one.',
+        line: rows.length ? 'Pick a contact, or paste or scan their Foxy ID.' : 'No Foxy ID contacts yet. Paste or scan one.',
         rows, past: [],
-        add: { shown: true, label: 'PASTE A CASHU ID', tap: () => this.tillIdPaste() },
-        next: { shown: true, on: true, label: 'SCAN A CASHU ID', tap: () => this.tillIdScan() },
+        add: { shown: true, label: 'PASTE A FOXY ID', tap: () => this.tillIdPaste() },
+        next: { shown: true, on: true, label: 'SCAN A FOXY ID', tap: () => this.tillIdScan() },
       };
     }
     if (mode === 'group') {
       const g = s.tillGroup || [];
       const sum = this.tillGroupSum();
-      const rows = g.map((r) => plainRow({ name: r.name, host: 'Cashu ID', text: (Number(r.pct) || 0) + '%',
+      const rows = g.map((r) => plainRow({ name: r.name, host: 'Foxy ID', text: (Number(r.pct) || 0) + '%',
         ink: Number(r.pct) >= 1 ? 'var(--acc-ink)' : 'var(--bad)', tap: () => this.tillGroupRow(r.id) }));
       return {
         title: 'GROUP',
-        line: g.length ? 'The shares add up to ' + sum + '% of 100%. Tap one to change it.' : 'Up to ' + this.TILL_GROUP_MAX + ' Cashu IDs, each with its share of every tip.',
+        line: g.length ? 'The shares add up to ' + sum + '% of 100%. Tap one to change it.' : 'Up to ' + this.TILL_GROUP_MAX + ' Foxy IDs, each with its share of every tip.',
         rows, past: [],
         add: { shown: g.length < this.TILL_GROUP_MAX, label: 'ADD', tap: () => this.tillPersonOpen('group') },
         next: { shown: true, on: this.tillGroupReady(), label: 'SAVE', tap: () => this.tillGroupSave() },
@@ -40903,7 +40903,7 @@ class Component extends DCLogic {
       tillNextShown: L ? !!L.next.shown : cardList || s.tillPick === 'set',
       tillNext: L ? L.next.tap : cardList ? () => this.fcListNext() : () => this.tillSetNext(),
       tillNextLabel: L ? L.next.label : 'NEXT',
-      // the till's lists' second button (ADD, PASTE A CASHU ID), and CASHIER CODES' PAST
+      // the till's lists' second button (ADD, PASTE A FOXY ID), and CASHIER CODES' PAST
       tillAddShown: !!(L && L.add.shown),
       tillAddLabel: L ? L.add.label : '',
       tillAdd: L ? L.add.tap : () => {},

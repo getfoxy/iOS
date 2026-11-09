@@ -4,7 +4,7 @@ import CryptoKit
 /// What is taken out of a field log line before it is kept (FieldLog.write).
 ///
 /// These lines are meant to be copied into a message, which the system log
-/// never was. The shapes that carry money or a payee go (a token, an invoice, a payment request, a Cashu ID and the nprofile it is delivered to), and so does an
+/// never was. The shapes that carry money or a payee go (a token, an invoice, a payment request, a Foxy ID and the nprofile it is delivered to), and so does an
 /// onion address — this phone's inbox, or someone else's, is a name for a
 /// person. Sat amounts stay: they are what makes a report answerable, and the
 /// screens say so before anything is copied.
@@ -58,8 +58,8 @@ enum LogRedaction {
             (re("cashu[AB][A-Za-z0-9_=-]{20,}"), "cashu token"),
             (re("ln(bc|tb|bcrt)[0-9][a-z0-9]{30,}"), "lightning invoice"),
             (re("creq[A-Za-z0-9_=-]{20,}"), "payment request"),
-            // a Cashu ID (docs/CASHU-ID.md) names a person for as long as they keep it, and so does the nprofile it is delivered to
-            (re("foxyid1[A-Za-z0-9_-]{20,}"), "cashu id"),
+            // a Foxy ID (docs/FOXY-ID.md) names a person for as long as they keep it, and so does the nprofile it is delivered to
+            (re("foxyid1[A-Za-z0-9_-]{20,}"), "foxy id"),
             (re("\\bnprofile1[02-9ac-hj-np-z]{20,}"), "nostr profile"),
             // a Lightning address (name@host.tld) is a person; the host after it is the payee's, so the whole address goes
             (re("[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+"), "lightning address"),

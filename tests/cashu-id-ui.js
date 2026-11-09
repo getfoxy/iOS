@@ -1,28 +1,28 @@
 'use strict';
-/* cashu-id-ui.js — the Cashu ID, as a person sees it (build/app/26o-cashu-id.js).
+/* cashu-id-ui.js — the Foxy ID, as a person sees it (build/app/26o-cashu-id.js).
  *
  *     node tests/cashu-id-ui.js
  *
- *   1  MY CASHU ID is in the menu; it shows the ID's code on the stage screen with SHARE, which hands the string to the
+ *   1  MY FOXY ID is in the menu; it shows the ID's code on the stage screen with SHARE, which hands the string to the
  *      share sheet, and from then on the phone listens for payments to it
  *   2  an ID pasted or scanned (`acceptTarget`) asks NAME THIS CONTACT? with a field; SAVE keeps it under the name typed;
  *      one already a contact starts from its name; your own is said to be yours; a mistyped one is refused in words
- *   3  in CONTACTS an ID reads CASHU ID; tapped, from the menu's CONTACTS or SEND's, SET AMOUNT asks how much to send to them; NEXT, the confirmation names
+ *   3  in CONTACTS an ID reads FOXY ID; tapped, from the menu's CONTACTS or SEND's, SET AMOUNT asks how much to send to them; NEXT, the confirmation names
  *      them, says once that the money comes back to this phone after thirty days, and PAY pays them by `cashuIdPay`
  *   4  a payment at a mint this phone does not use: PAID AT ANOTHER MINT, with BRING IT HOME (its fee, or grey with why),
  *      KEEP IT THERE, SEND IT BACK where the payer proved who it is, DECIDE LATER and the tick "Always do this for <mint>";
  *      unanswered, a row in HISTORY (At <mint> · tap to decide) that opens it again; SETTINGS > OTHER MINTS lists what was
  *      remembered and forgets it
- *   5  MY CASHU ID has SHARE and DONE and no ANY WALLET button
+ *   5  MY FOXY ID has SHARE and DONE and no ANY WALLET button
  *   6  paid to the ID key itself: PAID TO YOUR ID KEY, "<name or Someone> paid you without blinding the key. …", LEAVE IT
  *      first (quiet) and TAKE IT ANYWAY, each answered to `cashuIdUnblinded`
- *   7  home's round button at the top left has MY CASHU ID's profile drawing and opens MY CASHU ID, nothing armed to open
- *      the menu after: DONE goes home; with no ID to read, NO CASHU ID as from the menu
+ *   7  home's round button at the top left has MY FOXY ID's profile drawing and opens MY FOXY ID, nothing armed to open
+ *      the menu after: DONE goes home; with no ID to read, NO FOXY ID as from the menu
  *   8  no messages: no chat or INBOX screen, no unread counts, no NEW MESSAGES in CONTACTS
- *   9  empty CONTACTS: its words, PASTE A CASHU ID (reading the clipboard, straight to the name; no ID on it is THAT WON'T
- *      WORK) and SCAN A CASHU ID, each where the wallet can do it; no search button until there is a contact
- *  10  no FOXY CARD and no CHAT in the menu; MY CASHU ID with the profile drawing; a screen opened from the menu goes back
- *      to the menu when it is left (MY CASHU ID's DONE too), a payment that ends on PAID does not, nor one that comes in
+ *   9  empty CONTACTS: its words, PASTE A FOXY ID (reading the clipboard, straight to the name; no ID on it is THAT WON'T
+ *      WORK) and SCAN A FOXY ID, each where the wallet can do it; no search button until there is a contact
+ *  10  no FOXY CARD and no CHAT in the menu; MY FOXY ID with the profile drawing; a screen opened from the menu goes back
+ *      to the menu when it is left (MY FOXY ID's DONE too), a payment that ends on PAID does not, nor one that comes in
  *      over home, nor a swap still going; a row that only says something (SWAP offline) leaves nothing armed
  *  11  the whole menu in the keeper's order (21-render-values.js): WALLET, MINTS, TOOLS, SETTINGS, OFFLINE LIMITS, every
  *      section open and each shutting in place, the gap above each heading the gap under MENU; BACKUP ACCOUNT at the very
@@ -128,7 +128,7 @@ function stubWallet() {
     lastToken: () => ({}), clearLastToken() {}, pendingMelts: () => [], splitPending: () => null,
     stopPreview() {}, stopPasteButton() {}, notify() {},
     share(text) { calls.shares.push(String(text)); return true; },
-    // ---- the Cashu ID's contract (build/wallet/21c-cashu-id.js) ----
+    // ---- the Foxy ID's contract (build/wallet/21c-cashu-id.js) ----
     cashuIdMine: () => Promise.resolve({ text: ID_MINE, id: REAL.cashuIdDecode(ID_MINE).id, nostr: REAL.cashuIdDecode(ID_MINE).nostr }),
     cashuIdShown() { calls.shown += 1; return Promise.resolve(1); },
     cashuIdListen() { calls.listens += 1; return Promise.resolve(1); },
@@ -207,16 +207,16 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
     await settle();
   };
 
-  // ---- 1 MY CASHU ID ----
+  // ---- 1 MY FOXY ID ----
   {
     const W = stubWallet();
     await fresh(W, { open0: true });
-    const row = V().menuItems.find((m) => m.label === 'MY CASHU ID');
-    ok(!!row, 'MY CASHU ID is a row of the menu', V().menuItems.map((m) => m.label).join(', '));
+    const row = V().menuItems.find((m) => m.label === 'MY FOXY ID');
+    ok(!!row, 'MY FOXY ID is a row of the menu', V().menuItems.map((m) => m.label).join(', '));
     row.tap();
     await settle();
     const st = stage();
-    ok(!!st && st.getAttribute('data-stage') === 'cashuId' && /MY CASHU ID/.test(st.textContent), 'it opens the stage screen MY CASHU ID');
+    ok(!!st && st.getAttribute('data-stage') === 'cashuId' && /MY FOXY ID/.test(st.textContent), 'it opens the stage screen MY FOXY ID');
     const img = st && st.querySelector('[data-stage-qr]');
     ok(!!img && String(img.getAttribute('src')).indexOf(encodeURIComponent(ID_MINE.slice(0, 24))) >= 0, 'with the ID string as its QR code');
     ok(/SHARE/.test(st.textContent) && /DONE/.test(st.textContent), 'SHARE and DONE');
@@ -246,24 +246,24 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
     ok((A.state.contacts || []).some((c) => c.cid && c.name === 'Alice'), 'the contacts are read again');
     A.acceptTarget(ID_ALICE);
     await settle();
-    ok(/You have this Cashu ID as Alice/.test(card()) && A._blockedEl.querySelector('input').value === 'Alice', 'pasted again, it starts from the name it has');
+    ok(/You have this Foxy ID as Alice/.test(card()) && A._blockedEl.querySelector('input').value === 'Alice', 'pasted again, it starts from the name it has');
     shutCard();
     A.acceptTarget(ID_MINE);
     await settle();
-    ok(/THIS IS YOUR CASHU ID/.test(card()), 'your own is said to be yours', card());
+    ok(/THIS IS YOUR FOXY ID/.test(card()), 'your own is said to be yours', card());
     shutCard();
     const bad = ID_ALICE.slice(0, 50) + (ID_ALICE[50] === 'A' ? 'B' : 'A') + ID_ALICE.slice(51);
     A.acceptTarget(bad);
     await settle();
-    ok(/THAT WON.T WORK/.test(card()) && /That is not a Cashu ID\./.test(card()), 'a mistyped one: That is not a Cashu ID.', card());
+    ok(/THAT WON.T WORK/.test(card()) && /That is not a Foxy ID\./.test(card()), 'a mistyped one: That is not a Foxy ID.', card());
     ok(W.calls.adds.length === 1, 'and nothing is added for either');
     shutCard();
     // version 1, with no signature of the ID's own: not an ID
-    ok(ID_ALICE_V1.length === 101 && REAL.classify(ID_ALICE_V1) === 'cashuid', 'a version 1 string is still named a Cashu ID');
+    ok(ID_ALICE_V1.length === 101 && REAL.classify(ID_ALICE_V1) === 'cashuid', 'a version 1 string is still named a Foxy ID');
     A.acceptTarget(ID_ALICE_V1);
     await settle();
-    ok(/THAT WON.T WORK/.test(card()) && /That is not a Cashu ID\./.test(card()) && !/NAME THIS CONTACT/.test(card()),
-      'a version 1 string, pasted or scanned: That is not a Cashu ID., with no name to type', card());
+    ok(/THAT WON.T WORK/.test(card()) && /That is not a Foxy ID\./.test(card()) && !/NAME THIS CONTACT/.test(card()),
+      'a version 1 string, pasted or scanned: That is not a Foxy ID., with no name to type', card());
     ok(W.calls.adds.length === 1, 'and nothing is added');
     shutCard();
   }
@@ -313,7 +313,7 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
     waiting = [offer({ key: 'cid:k2', back: false, name: '' })];
     W._onCashuIdOffer(waiting[0]);
     await settle();
-    ok(/A Cashu ID sent you 300 sats/.test(card()) && !/SEND IT BACK/.test(card()), 'an unproved payer: A Cashu ID, and no SEND IT BACK', card());
+    ok(/A Foxy ID sent you 300 sats/.test(card()) && !/SEND IT BACK/.test(card()), 'an unproved payer: A Foxy ID, and no SEND IT BACK', card());
     press(root(), 'KEEP IT THERE');
     await settle();
     ok(decided.length === 2 && decided[1].choice === 'keep' && decided[1].always === false, 'KEEP IT THERE, not remembered', JSON.stringify(decided[1]));
@@ -402,7 +402,7 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
     ok((A.state.contacts || []).some((c) => c.name === 'Alice' && c.cid && c.cid.id), 'the contacts the history pass writes keep the ID’s keys');
     const rows = V().contactAll;
     const alice = rows.find((r) => r.name === 'Alice');
-    ok(!!alice && alice.handle === 'CASHU ID', 'in CONTACTS the ID reads CASHU ID', JSON.stringify(rows.map((r) => r.handle)));
+    ok(!!alice && alice.handle === 'FOXY ID', 'in CONTACTS the ID reads FOXY ID', JSON.stringify(rows.map((r) => r.handle)));
     alice.tap();
     await settle();
     // from the menu's CONTACTS a contact goes to the amount: paying them is all a contact opens (16-history-lists.js)
@@ -425,7 +425,7 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
     const spec = A.confirmSpec();
     ok(spec.subtitle === 'If Alice has not collected it in 30 days it comes back to you, here or wherever your words are restored.',
       'R: it says once what happens if Alice does not collect it, and that the words bring it back too', spec.subtitle);
-    ok(spec.rows.some((r) => r.label === 'TO' && r.value === 'ALICE') && spec.rows.some((r) => r.label === 'NETWORK' && r.value === 'CASHU ID'), 'TO ALICE, NETWORK CASHU ID');
+    ok(spec.rows.some((r) => r.label === 'TO' && r.value === 'ALICE') && spec.rows.some((r) => r.label === 'NETWORK' && r.value === 'FOXY ID'), 'TO ALICE, NETWORK FOXY ID');
     ok(!spec.rows.some((r) => /WHEN THEY OPEN FOXY/.test(String(r.value))) && spec.rows.some((r) => r.label === 'GOES BY'),
       'M2: and promises no time it arrives', JSON.stringify(spec.rows.map((r) => r.label + ' ' + r.value)));
     // (PAY and what leaves: the keeper, 2026-11-06)
@@ -437,14 +437,14 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
     ok(!A.state.cidBusy, 'and the screen is no longer busy');
   }
 
-  // ---- 5 no ANY WALLET: MY CASHU ID shows its code with SHARE and DONE alone ----
+  // ---- 5 no ANY WALLET: MY FOXY ID shows its code with SHARE and DONE alone ----
   {
     const W = stubWallet();
     W.cashuIdAnyRequest = () => Promise.resolve({ text: 'creqAstub', id: 'id1', pub: '02' + '1'.repeat(64), unit: 'sat', mints: [MINT] });
     await fresh(W);
     A.cidShowCode(ID_MINE);
     await settle();
-    ok(/SHARE/.test(stage().textContent) && /DONE/.test(stage().textContent), 'MY CASHU ID has SHARE and DONE', stage().textContent.slice(-60));
+    ok(/SHARE/.test(stage().textContent) && /DONE/.test(stage().textContent), 'MY FOXY ID has SHARE and DONE', stage().textContent.slice(-60));
     ok(!/ANY WALLET/.test(stage().textContent), 'and no ANY WALLET, even where the wallet could make that request', stage().textContent.slice(-80));
     ok(typeof A.cidAnyShow === 'undefined' && typeof A.cidAnyShowCode === 'undefined', 'the screen it opened is gone');
     A.hideStage();
@@ -477,44 +477,44 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
     press(A._blockedEl, 'TAKE IT ANYWAY');
     await settle();
     ok(answers.length === 2 && answers[1].key === 'cid:b2' && answers[1].take === true, 'TAKE IT ANYWAY answers yes', JSON.stringify(answers));
-    ok(toasts.some((t) => /Taken\. The mint can link this payment to your Cashu ID\./.test(t)), 'and says what it costs', toasts.join(' | '));
+    ok(toasts.some((t) => /Taken\. The mint can link this payment to your Foxy ID\./.test(t)), 'and says what it costs', toasts.join(' | '));
   }
 
-  // ---- 7 home's round button at the top left: MY CASHU ID's profile drawing, opening MY CASHU ID ----
+  // ---- 7 home's round button at the top left: MY FOXY ID's profile drawing, opening MY FOXY ID ----
   {
     const PROFILE = 'M12 12.2a4.1 4.1 0 1 0 0-8.2 4.1 4.1 0 0 0 0 8.2ZM4.5 20.5c0-3.9 3.4-6.4 7.5-6.4s7.5 2.5 7.5 6.4';
     const W = stubWallet();
     await fresh(W);
     const home = () => w.document.querySelector('[data-template="home"]');
     const btn = () => home() && home().querySelector('[data-cashu-id-button]');
-    ok(!!btn() && btn().getAttribute('aria-label') === 'My Cashu ID' && btn().getAttribute('role') === 'button',
-      'home: a round button at the top left, said as My Cashu ID', btn() ? btn().outerHTML.slice(0, 200) : 'none');
+    ok(!!btn() && btn().getAttribute('aria-label') === 'My Foxy ID' && btn().getAttribute('role') === 'button',
+      'home: a round button at the top left, said as My Foxy ID', btn() ? btn().outerHTML.slice(0, 200) : 'none');
     ok(!!btn() && btn().style.left === '22px' && btn().style.top === '56px' && btn().style.width === '64px' && btn().style.height === '64px'
       && btn().style.borderRadius === '50%', 'where the chat button was, the menu button’s size and shape', btn() ? btn().getAttribute('style') : '');
     const menuBtn = home() && home().querySelector('[aria-label="Menu"]');
     ok(!!btn() && !!menuBtn && btn().style.background === menuBtn.style.background && btn().style.boxShadow === menuBtn.style.boxShadow
       && btn().style.border === menuBtn.style.border, 'and its style', btn() ? btn().style.background : '');
     const path = btn() && btn().querySelector('svg path');
-    ok(!!path && path.getAttribute('d') === PROFILE, 'drawn with MY CASHU ID’s profile, a head and shoulders', path ? path.getAttribute('d') : '');
+    ok(!!path && path.getAttribute('d') === PROFILE, 'drawn with MY FOXY ID’s profile, a head and shoulders', path ? path.getAttribute('d') : '');
     ok(!home().querySelector('[data-chat-button]') && !home().querySelector('[data-chat-badge]'), 'no chat button and no unread count on home');
     if (btn()) btn().dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
     await settle();
     const st = stage();
-    ok(!!st && st.getAttribute('data-stage') === 'cashuId' && /MY CASHU ID/.test(st.textContent) && /SHARE/.test(st.textContent) && /DONE/.test(st.textContent),
-      'tapped: MY CASHU ID, its code with SHARE and DONE', st ? st.textContent.slice(0, 120) : 'no stage');
+    ok(!!st && st.getAttribute('data-stage') === 'cashuId' && /MY FOXY ID/.test(st.textContent) && /SHARE/.test(st.textContent) && /DONE/.test(st.textContent),
+      'tapped: MY FOXY ID, its code with SHARE and DONE', st ? st.textContent.slice(0, 120) : 'no stage');
     ok(W.calls.shown === 1, 'showing it starts the listening, as from the menu');
     ok(!A.state.menuReturn && !A.state.open0, 'opened from home: nothing armed to open the menu', JSON.stringify(A.state.menuReturn));
     if (st) press(st, 'DONE');
     await settle(); await settle();
     ok(!stage() && A.state.screen === 'home' && !A.state.open0, 'DONE: back to home, the menu shut', JSON.stringify([!!stage(), A.state.screen, A.state.open0]));
     A.hideStage();
-    // no Cashu ID read yet: the same first-time path as the menu's row (`cidShow`)
+    // no Foxy ID read yet: the same first-time path as the menu's row (`cidShow`)
     const W2 = stubWallet();
     W2.cashuIdMine = () => Promise.reject(new Error('Your words are not on this phone.'));
     await fresh(W2);
     if (btn()) btn().dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
     await settle(); await settle();
-    ok(!stage() && /NO CASHU ID/.test(card()) && /Your words are not on this phone\./.test(card()), 'with no ID to read: NO CASHU ID and why, as the menu row says', card());
+    ok(!stage() && /NO FOXY ID/.test(card()) && /Your words are not on this phone\./.test(card()), 'with no ID to read: NO FOXY ID and why, as the menu row says', card());
     shutCard();
     A.hideStage();
   }
@@ -538,70 +538,70 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
     W.scan = () => Promise.resolve('');
     await fresh(W, { screen: 'contacts', stack: ['home'] });
     ok(V().contactsEmpty === true
-      && text().indexOf('Ask another Foxy user to share their Cashu ID with you to add them as a contact.') >= 0, 'empty CONTACTS: Ask another Foxy user to share their Cashu ID with you to add them as a contact.', text().slice(0, 300));
+      && text().indexOf('Ask another Foxy user to share their Foxy ID with you to add them as a contact.') >= 0, 'empty CONTACTS: Ask another Foxy user to share their Foxy ID with you to add them as a contact.', text().slice(0, 300));
     ok(text().indexOf('Anyone you pay is saved here automatically.') < 0, 'and the old words are gone');
-    ok(/PASTE A CASHU ID/.test(text()) && !/ADD A CASHU ID/.test(text()), 'with PASTE A CASHU ID (no ADD A CASHU ID)', text().slice(0, 300));
-    ok(/SCAN A CASHU ID/.test(text()), 'and SCAN A CASHU ID');
+    ok(/PASTE A FOXY ID/.test(text()) && !/ADD A FOXY ID/.test(text()), 'with PASTE A FOXY ID (no ADD A FOXY ID)', text().slice(0, 300));
+    ok(/SCAN A FOXY ID/.test(text()), 'and SCAN A FOXY ID');
     const searchBtn = () => !!(screen() && screen().querySelector('.fxShine1 circle'));
     ok(!searchBtn(), 'with nobody in CONTACTS the search button is hidden');
-    // PASTE A CASHU ID reads the clipboard through the bridge, the path home's PASTE takes, and goes straight to the name
+    // PASTE A FOXY ID reads the clipboard through the bridge, the path home's PASTE takes, and goes straight to the name
     W.clipboard = () => { W.calls.clip = (W.calls.clip || 0) + 1; return Promise.resolve('  ' + ID_ALICE + '\n'); };
-    press(screen(), 'PASTE A CASHU ID');
+    press(screen(), 'PASTE A FOXY ID');
     await settle();
-    ok(W.calls.clip === 1 && /NAME THIS CONTACT\?/.test(card()), 'PASTE A CASHU ID reads the clipboard once and asks NAME THIS CONTACT?', card());
+    ok(W.calls.clip === 1 && /NAME THIS CONTACT\?/.test(card()), 'PASTE A FOXY ID reads the clipboard once and asks NAME THIS CONTACT?', card());
     await typeIn('Alice', 'SAVE');
     ok(W.calls.adds.length === 1 && W.calls.adds[0][0] === ID_ALICE && W.calls.adds[0][1] === 'Alice', 'SAVE keeps the pasted ID under the name', JSON.stringify(W.calls.adds));
     ok(A.state.screen === 'contacts' && V().contactsEmpty === false && /Alice/.test(text()), 'the saved contact is on the CONTACTS list, the empty state gone', text().slice(0, 200));
     ok(searchBtn(), 'and with a contact the search button is back');
-    // a clipboard with no Cashu ID on it: the THAT WON'T WORK card, nothing kept
+    // a clipboard with no Foxy ID on it: the THAT WON'T WORK card, nothing kept
     const W2 = stubWallet();
     W2.clipboard = () => Promise.resolve('lnbc1notanid');
     await fresh(W2, { screen: 'contacts', stack: ['home'] });
-    press(screen(), 'PASTE A CASHU ID');
+    press(screen(), 'PASTE A FOXY ID');
     await settle();
     ok(/THAT WON’T WORK/.test(card()) && W2.calls.adds.length === 0, 'a clipboard with no foxyid1 string: THAT WON’T WORK', card());
     shutCard();
     const W2b = stubWallet();
     W2b.clipboard = () => Promise.resolve('');
     await fresh(W2b, { screen: 'contacts', stack: ['home'] });
-    press(screen(), 'PASTE A CASHU ID');
+    press(screen(), 'PASTE A FOXY ID');
     await settle();
     ok(/THAT WON’T WORK/.test(card()), 'and an empty clipboard the same', card());
     shutCard();
     // a page with no clipboard bridge falls back to the card with a field
     const W2c = stubWallet();
     await fresh(W2c, { screen: 'contacts', stack: ['home'] });
-    press(screen(), 'PASTE A CASHU ID');
+    press(screen(), 'PASTE A FOXY ID');
     await settle();
-    ok(/PASTE A CASHU ID/.test(card()), 'with no clipboard to read: the paste card with a field', card());
+    ok(/PASTE A FOXY ID/.test(card()), 'with no clipboard to read: the paste card with a field', card());
     await addFlow(W2c, ID_ALICE, 'Alice');
-    // SCAN A CASHU ID: the camera's text goes the same way
+    // SCAN A FOXY ID: the camera's text goes the same way
     const W3 = stubWallet();
     W3.scan = (what) => { W3.scanned = what; return Promise.resolve(ID_ALICE); };
     await fresh(W3, { screen: 'contacts', stack: ['home'] });
-    press(screen(), 'SCAN A CASHU ID');
+    press(screen(), 'SCAN A FOXY ID');
     await settle();
-    ok(W3.scanned === 'Scan a Cashu ID' && /NAME THIS CONTACT\?/.test(card()), 'SCAN A CASHU ID reads the camera, then NAME THIS CONTACT?', card());
+    ok(W3.scanned === 'Scan a Foxy ID' && /NAME THIS CONTACT\?/.test(card()), 'SCAN A FOXY ID reads the camera, then NAME THIS CONTACT?', card());
     shutCard();
     // a wallet that cannot read an ID offers neither button
     const W4 = stubWallet();
     delete W4.cashuIdCheck;
     await fresh(W4, { screen: 'contacts', stack: ['home'] });
-    ok(!/PASTE A CASHU ID/.test(text()) && !/SCAN A CASHU ID/.test(text()), 'where the wallet cannot read an ID: neither button');
+    ok(!/PASTE A FOXY ID/.test(text()) && !/SCAN A FOXY ID/.test(text()), 'where the wallet cannot read an ID: neither button');
     const W5 = stubWallet();
     await fresh(W5, { screen: 'contacts', stack: ['home'] });
-    ok(/PASTE A CASHU ID/.test(text()) && !/SCAN A CASHU ID/.test(text()), 'where it cannot scan: PASTE A CASHU ID alone');
+    ok(/PASTE A FOXY ID/.test(text()) && !/SCAN A FOXY ID/.test(text()), 'where it cannot scan: PASTE A FOXY ID alone');
   }
 
-  // ---- 10 no FOXY CARD and no CHAT in the menu; MY CASHU ID's profile; screens from the menu go back to it ----
+  // ---- 10 no FOXY CARD and no CHAT in the menu; MY FOXY ID's profile; screens from the menu go back to it ----
   {
     const W = stubWallet();
     await fresh(W, { open0: true });
     const PROFILE = 'M12 12.2a4.1 4.1 0 1 0 0-8.2 4.1 4.1 0 0 0 0 8.2ZM4.5 20.5c0-3.9 3.4-6.4 7.5-6.4s7.5 2.5 7.5 6.4';
     const items = V().menuItems;
-    ok(items[0].label === 'WALLET' && items[1].label === 'MY CASHU ID' && !items.some((m) => m.label === 'FOXY CARD'),
-      'MENU: WALLET, MY CASHU ID its first row, and no FOXY CARD (home’s CARD button opens the card)', items.map((m) => m.label).join());
-    ok(items[1].path === PROFILE, 'MY CASHU ID has the profile drawing, a head and shoulders', items[1].path);
+    ok(items[0].label === 'WALLET' && items[1].label === 'MY FOXY ID' && !items.some((m) => m.label === 'FOXY CARD'),
+      'MENU: WALLET, MY FOXY ID its first row, and no FOXY CARD (home’s CARD button opens the card)', items.map((m) => m.label).join());
+    ok(items[1].path === PROFILE, 'MY FOXY ID has the profile drawing, a head and shoulders', items[1].path);
     const rows = () => [...w.document.querySelectorAll('div')].filter((d) => d.style.height === '60px' && d.style.borderRadius === '18px');
     const row = (label) => rows().find((d) => d.textContent.trim() === label);
     const click = async (label) => { row(label).dispatchEvent(new w.MouseEvent('click', { bubbles: true })); await settle(); };
@@ -636,12 +636,12 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
     ok(!A.state.open0 && !A.state.menuReturn && A.state.hidden === true, 'HIDE BALANCE shuts the drawer and leaves nothing to return to', JSON.stringify([A.state.open0, A.state.menuReturn]));
     A.setState({ hidden: false }); await settle();
 
-    // MY CASHU ID is a stage over home: its DONE is the way back to the menu
+    // MY FOXY ID is a stage over home: its DONE is the way back to the menu
     A.setState({ open0: true }); await settle();
-    await click('MY CASHU ID'); await settle();
-    ok(!!stage() && !A.state.open0 && A.state.screen === 'home', 'MY CASHU ID: its screen over home, the drawer shut');
+    await click('MY FOXY ID'); await settle();
+    ok(!!stage() && !A.state.open0 && A.state.screen === 'home', 'MY FOXY ID: its screen over home, the drawer shut');
     press(stage(), 'DONE'); await settle(); await settle();
-    ok(!stage() && A.state.open0 === true && !A.state.menuReturn, 'MY CASHU ID’s DONE: the menu again', JSON.stringify([!!stage(), A.state.open0, A.state.menuReturn]));
+    ok(!stage() && A.state.open0 === true && !A.state.menuReturn, 'MY FOXY ID’s DONE: the menu again', JSON.stringify([!!stage(), A.state.open0, A.state.menuReturn]));
 
     // a row that only says something (SWAP offline: a toast) leaves nothing armed: RECEIVE and back does not open the drawer
     {
@@ -659,7 +659,7 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
 
     // a payment that comes in over home while a menu row's stage is up: dismissed, home with the drawer shut
     A.setState({ open0: true, screen: 'home', stack: [] }); await settle();
-    await click('MY CASHU ID'); await settle();
+    await click('MY FOXY ID'); await settle();
     A._returnTo = { screen: 'home', stack: [] };
     A.setState({ screen: 'paid', stack: [] }); await settle();
     ok(!A.state.menuReturn, 'PAID raised over home: an end, nothing armed', JSON.stringify(A.state.menuReturn));
@@ -725,7 +725,7 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
 
   // ---- 11 the whole menu: the keeper's order, every section open, BACKUP ACCOUNT's rule ----
   {
-    const ORDER = ['WALLET', 'MY CASHU ID', 'HISTORY', 'CONTACTS', 'HIDE BALANCE',
+    const ORDER = ['WALLET', 'MY FOXY ID', 'HISTORY', 'CONTACTS', 'HIDE BALANCE',
       'MINTS', 'SWITCH/ADD MINTS', 'TRANSFER MONEY',
       'TOOLS', 'POINT OF SALE', 'SPLIT A BILL',
       'SETTINGS', 'FACE ID LOCK', 'SET PIN', 'BLUETOOTH TAP', 'BACKUP', 'RESTORE', 'RESTORE LOST CARD', 'TEST LOGS',

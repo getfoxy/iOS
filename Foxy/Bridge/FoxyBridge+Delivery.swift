@@ -162,7 +162,7 @@ extension FoxyBridge {
         nostrInbox = nil
         // the till's too; the page opens them again on its wake (`tillListen`)
         closeTillInboxes()
-        // and the Cashu ID's; the page opens it again on its wake (`cashuIdListen`)
+        // and the Foxy ID's; the page opens it again on its wake (`cashuIdListen`)
         closeCashuIdInbox()
         // and any that were still answering for a payment on the wire: nothing
         // of this phone's survives backgrounding, and Tor is about to be told

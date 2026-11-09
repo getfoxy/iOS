@@ -3,8 +3,8 @@ import CryptoKit
 import CSecp256k1
 @testable import Foxy
 
-/// The Cashu ID's keys, NUT-28's blinding, a payment's one-time key, the payer's
-/// proved name and the payer's throwaway keys (CashuID.swift, docs/CASHU-ID.md),
+/// The Foxy ID's keys, NUT-28's blinding, a payment's one-time key, the payer's
+/// proved name and the payer's throwaway keys (CashuID.swift, docs/FOXY-ID.md),
 /// held to tests/fixtures/cashu-id-vectors.json: NUT-28's own vectors from the
 /// spec, and Foxy's made by tests/harness.js's BigInt arithmetic, which shares no
 /// code with libsecp256k1. tests/cashu-id.js holds cashu-ts's
@@ -207,7 +207,7 @@ final class CashuIDTests: XCTestCase {
         XCTAssertThrowsError(try CashuID.sign(seed: s, pieces: [CashuID.Piece(secret: one.secret, e: [2] + [UInt8](repeating: 0, count: 32))]))
     }
 
-    /// TAKE IT ANYWAY (docs/CASHU-ID.md, "Paid to the ID key itself"): the ID key's own signature, only over
+    /// TAKE IT ANYWAY (docs/FOXY-ID.md, "Paid to the ID key itself"): the ID key's own signature, only over
     /// secrets locked to the ID as it is, either parity, and nothing at all when one is anything else.
     func testSignsUnblindedOnlyWhatIsLockedToTheIdItself() throws {
         let v = try vectors().foxy
@@ -238,7 +238,7 @@ final class CashuIDTests: XCTestCase {
         XCTAssertNotNil(reply.text)
         XCTAssertFalse((reply.text ?? "").contains(v.d))
         XCTAssertEqual(SeedActions.cashuIdSignUnblinded(secrets: [secret(v.L, refund: v.refundBlinded)], env: env).error,
-                       "That ecash is not locked to this Cashu ID.")
+                       "That ecash is not locked to this Foxy ID.")
         XCTAssertEqual(SeedActions.cashuIdSignUnblinded(secrets: ["[\"HTLC\",{\"nonce\":\"00\",\"data\":\"\(v.id)\"}]"], env: env).error, "bad request")
         XCTAssertEqual(SeedActions.cashuIdSignUnblinded(secrets: [], env: env).error, "bad request")
     }
@@ -266,7 +266,7 @@ final class CashuIDTests: XCTestCase {
             XCTAssertFalse(reply.contains(v.recoverySecret))
         }
         XCTAssertEqual(SeedActions.cashuIdSign(pieces: [CashuID.Piece(secret: secret(v.id, refund: v.refund), e: try b(v.E))], env: env).error,
-                       "That ecash is not locked to this Cashu ID.")
+                       "That ecash is not locked to this Foxy ID.")
         XCTAssertEqual(SeedActions.cashuIdSign(pieces: [CashuID.Piece(secret: piece.secret, e: [1, 2, 3])], env: env).error, "bad request")
         XCTAssertEqual(SeedActions.cashuIdSign(pieces: [], env: env).error, "bad request")
         XCTAssertEqual(SeedActions.cashuIdTag(peer: [2, 3], e: try b(v.E), env: env).error, "bad request")

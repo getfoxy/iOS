@@ -729,7 +729,7 @@
       contactAll: this.contactRows(),
       contactLetter: (this.contactRows()[0] || {}).ini || '',
       contactRecents: this.contactRows().slice(0, 3),
-      // PASTE A CASHU ID and SCAN A CASHU ID, on the empty CONTACTS (26o-cashu-id.js); not offered where the wallet
+      // PASTE A FOXY ID and SCAN A FOXY ID, on the empty CONTACTS (26o-cashu-id.js); not offered where the wallet
       // cannot read an ID, nor SCAN where it cannot scan. PASTE reads the clipboard.
       ctAddShown: !!(window.FoxyWallet && window.FoxyWallet.cashuIdCheck),
       ctAddGo: () => this.cidClipboardAdd(),
@@ -755,13 +755,13 @@
       ctQueryInput: (e) => this.setState({ ctQuery: e.target.value }),
       ctFocusRef: this._refCt || (this._refCt = (el) => this.autoFocus('ct', el)),
       ctEmpty: (s.ctQuery || '').trim().toLowerCase().length === 0,
-      contactsEmptyText: 'Ask another Foxy user to share their Cashu ID with you to add them as a contact.',
+      contactsEmptyText: 'Ask another Foxy user to share their Foxy ID with you to add them as a contact.',
       contactsEmpty: s.walletLive ? this.contactRows().length === 0 : !!s.fresh,
       contactsAny: s.walletLive ? this.contactRows().length > 0 : !s.fresh,
       ctResults: (function (qq) {
         if (!qq || s.fresh) return [];
         return (s.contacts || []).filter(c => c.name.toLowerCase().indexOf(qq) >= 0 || c.handle.toLowerCase().indexOf(qq) >= 0)
-          .map(c => ({ name: c.name, handle: c.cid ? 'CASHU ID' : c.handle, initial: c.name.charAt(0), tint: c.tint }));
+          .map(c => ({ name: c.name, handle: c.cid ? 'FOXY ID' : c.handle, initial: c.name.charAt(0), tint: c.tint }));
       })((s.ctQuery || '').trim().toLowerCase()),
       ctHasResults: (function (qq) {
         if (!qq || s.fresh) return false;
@@ -785,7 +785,7 @@
         return !hit && qq.indexOf('@') < 0;
       })((s.ctQuery || '').trim().toLowerCase()),
       payContact: () => {
-        // the first match a Cashu ID: paid as one (26o-cashu-id.js)
+        // the first match a Foxy ID: paid as one (26o-cashu-id.js)
         const q0 = (this.state.ctQuery || '').trim().toLowerCase();
         const first = q0 ? (s.contacts || []).filter(c => c.name.toLowerCase().indexOf(q0) >= 0 || c.handle.toLowerCase().indexOf(q0) >= 0)[0] : null;
         if (first && first.cid) { this.cidPayStart(first); return; }

@@ -140,7 +140,7 @@
        * coming back this does nothing, and Tor coming up asks again. */
       dropSpare();
       warmSpareSoon();
-      // the Cashu ID's inbox was closed with the rest as Foxy left: the next listen opens it, whatever the catch-up says
+      // the Foxy ID's inbox was closed with the rest as Foxy left: the next listen opens it, whatever the catch-up says
       cidListenGone();
       // and the newest block header for the cards, if the one kept has grown old while the app was away
       headerLater();

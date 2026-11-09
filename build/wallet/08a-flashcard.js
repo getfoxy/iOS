@@ -2060,7 +2060,9 @@
     var began = Date.now(), last = began, took = [];
     var mark = function (name) { var now = Date.now(); took.push(name + ' ' + (now - last)); last = now; };
     var said = function (c) {
-      try { console.log('[foxy] card: read in ' + (Date.now() - began) + ' ms (' + took.join(', ') + ')'); } catch (e) {}
+      /* The card's software, and its design where the read has it, close the line: so a log can say which card was read. */
+      var kind = (c && c.info && c.info.version ? ', software ' + c.info.version : '') + (c && c.design ? ', design ' + c.design : '');
+      try { console.log('[foxy] card: read in ' + (Date.now() - began) + ' ms (' + took.join(', ') + kind + ')'); } catch (e) {}
       return c;
     };
     /* Within one tap the card is told the time once, and its key is asked for

@@ -1,6 +1,6 @@
   /* ---- REMIND ME AFTER 15 DAYS (08i-remind.js, Reminder.swift) ----
    *
-   * Only on a phone whose Cashu ID is in use. The first time it is, a card asks once (`remindAskCard`) and says why;
+   * Only on a phone whose Foxy ID is in use. The first time it is, a card asks once (`remindAskCard`) and says why;
    * TURN ON has iOS ask its own question. Notifications already allowed for payments turn it on with no card. There is
    * no switch in SETTINGS (the keeper, 2026-11-08): it stays as this default has it. */
 
@@ -27,7 +27,7 @@
     });
   }
 
-  /* The ID is in use and nobody has been asked: the card, once. Called at every return past the lock (`wakeWork`), never over the code of MY CASHU ID. */
+  /* The ID is in use and nobody has been asked: the card, once. Called at every return past the lock (`wakeWork`), never over the code of MY FOXY ID. */
   remindMaybeAsk() {
     const W = window.FoxyWallet;
     if (!W || !W.remindStatus || this._remindAsking) return;

@@ -4,10 +4,10 @@
  *
  *     node tests/till-tips.js
  *
- *   1  the answer to ACCEPT TIPS? checked: off, to the keeper, one Cashu ID, a group of up to eight whose whole
+ *   1  the answer to ACCEPT TIPS? checked: off, to the keeper, one Foxy ID, a group of up to eight whose whole
  *      percentages add up to 100; every ID named and a contact's (its delivery key from the contact)
  *   2  the split: each share rounded down to a whole sat or cent, the remainder to the first share
- *   3  the keeper's own till: a sale's tip to one person is one Cashu ID payment ("Tip to <name>"), the sale's row says
+ *   3  the keeper's own till: a sale's tip to one person is one Foxy ID payment ("Tip to <name>"), the sale's row says
  *      "tip"; to the keeper, nothing but the word on the row; a sale is passed on once
  *   4  a group: one payment per share; a share under the smallest sent waits and rides with the next tip to that ID
  *   5  the jobs: no route or another mint waits and counts nothing; a failure is tried again a minute later; ten failures
@@ -19,7 +19,7 @@
  *      out is PAST too; eight at most; no totals anywhere
  *   8  `tillTips`, the object anything else that passes tips on reuses
  *
- * Pages on harness.js's fake mints; the phone's till and Cashu ID sides are harness.js's, the relays stubbed. */
+ * Pages on harness.js's fake mints; the phone's till and Foxy ID sides are harness.js's, the relays stubbed. */
 const crypto = require('crypto');
 const { loadReal, fakeMint, nativePhone, cashuIdKeys, cashuIdDropKey, tillSaleKey } = require('./harness');
 
@@ -106,7 +106,7 @@ const fakeSale = (ctx, hash, sats, mint, extra) => { fakeRows.push(hash); ctx.pu
 const dropFakes = (ctx) => ctx.put('foxy.cashu.log', ctx.store('foxy.cashu.log', []).filter((e) => fakeRows.indexOf(e.hash) < 0));
 // a sale of a code's own (08d-till.js `tillSaleKey`): a nonce and the key it moves the code's key to
 const saleOf = (pass) => { const n = crypto.randomBytes(16).toString('hex'); return { n, key: tillSaleKey(pass.lock, n) }; };
-// a Cashu ID of somebody else's, kept as a contact under `name`
+// a Foxy ID of somebody else's, kept as a contact under `name`
 async function contact(ctx, name) {
   const k = cashuIdKeys(crypto.randomBytes(64));
   const text = ctx.W._cashuIdEncode(k.id, k.nostr, k.sig);
@@ -116,8 +116,8 @@ async function contact(ctx, name) {
   return { id: k.id, nostr: k.nostr, name, text, to };
 }
 const errOf = (fn) => { try { fn(); return ''; } catch (e) { return e.message; } };
-// a delivery to `nprofile` among what went over the relays: the Cashu ID envelope, read
-/* A payment to a Cashu ID is wrapped to one of the sixteen keys its delivery key moves to on the UTC day it goes
+// a delivery to `nprofile` among what went over the relays: the Foxy ID envelope, read
+/* A payment to a Foxy ID is wrapped to one of the sixteen keys its delivery key moves to on the UTC day it goes
  * (08e-cashu-id.js `cidDropKey`), never to the delivery key: `to` is the nprofile of the delivery key, as before, and
  * a message counts as to it when it is to one of today's keys. */
 const dropKeysOf = (nostr) => { const d = Math.floor(Date.now() / 86400000); return Array.from({ length: 16 }, (_, j) => cashuIdDropKey(nostr, d, j)); };
@@ -159,13 +159,13 @@ async function run() {
     'an ID that is not a contact, and comes with no delivery key, is refused');
   ok(T.check({ on: true, to: 'one', ids: [{ id: stranger.id, nostr: stranger.nostr, name: 'X' }] }).ids[0].nostr === stranger.nostr,
     'one with its delivery key is taken as it is');
-  ok(/not a Cashu ID/.test(errOf(() => T.check({ on: true, to: 'one', ids: [{ id: 'ab', name: 'X' }] }))), 'a key that is not one is refused');
+  ok(/not a Foxy ID/.test(errOf(() => T.check({ on: true, to: 'one', ids: [{ id: 'ab', name: 'X' }] }))), 'a key that is not one is refused');
   ok(/add up to 100%. They add up to 90%/.test(errOf(() => T.check({ on: true, to: 'group', ids: [{ id: ana.id, name: 'Ana', pct: 50 }, { id: ben.id, name: 'Ben', pct: 40 }] }))),
     'a group’s shares add up to 100, said with what they add up to');
   ok(/whole percentage/.test(errOf(() => T.check({ on: true, to: 'group', ids: [{ id: ana.id, name: 'Ana', pct: 50.5 }, { id: ben.id, name: 'Ben', pct: 49.5 }] }))), 'whole percentages');
   ok(/twice/.test(errOf(() => T.check({ on: true, to: 'group', ids: [{ id: ana.id, name: 'Ana', pct: 50 }, { id: ana.id, name: 'Ana', pct: 50 }] }))), 'an ID once');
   const nine = Array.from({ length: 9 }, (_, i) => ({ id: cashuIdKeys(crypto.randomBytes(64)).id, nostr: '11'.repeat(32), name: 'P' + i, pct: i ? 11 : 12 }));
-  ok(/eight Cashu IDs at most|8 Cashu IDs at most/.test(errOf(() => T.check({ on: true, to: 'group', ids: nine }))), 'a group is eight at most');
+  ok(/eight Foxy IDs at most|8 Foxy IDs at most/.test(errOf(() => T.check({ on: true, to: 'group', ids: nine }))), 'a group is eight at most');
   ok(T.check({ on: true, to: 'group', ids: nine.slice(0, 8).map((r, i) => Object.assign({}, r, { pct: i ? 12 : 16 })) }).ids.length === 8, 'and eight is a group');
   ok(K.W.tillTipsProblem({ on: true, to: 'nobody' }) !== '' && K.W.tillTipsProblem({ on: true, to: 'self' }) === '', 'tillTipsProblem says why, or nothing');
 
@@ -197,7 +197,7 @@ async function run() {
   ok(j1.state === 'sent' && j1.amount === 100 && j1.cid === ana.id && j1.sale === sale.hash, 'the job is sent', JSON.stringify(j1));
   ok((await K.W.balanceSats()) === bal0 - 100, 'and 100 left the keeper’s balance', String(await K.W.balanceSats()));
   const env1 = deliveredTo(ana.to);
-  ok(env1.length === 1 && env1[0].type === 'foxy-cashu-id' && /^cashu/.test(env1[0].token), 'Ana was sent a Cashu ID payment over Nostr', JSON.stringify(env1.map((e) => e.type)));
+  ok(env1.length === 1 && env1[0].type === 'foxy-cashu-id' && /^cashu/.test(env1[0].token), 'Ana was sent a Foxy ID payment over Nostr', JSON.stringify(env1.map((e) => e.type)));
   const tipRow = logRow(K, j1.payHash) || {};
   ok(tipRow.dir === 'out' && tipRow.memo === 'Tip to Ana' && tipRow.tillTipTo === 'Ana' && tipRow.tillTipSale === sale.hash,
     'its history row says "Tip to Ana" and names the sale', JSON.stringify({ memo: tipRow.memo, to: tipRow.tillTipTo }));

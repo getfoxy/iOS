@@ -201,9 +201,9 @@ final class NostrInboxTests: XCTestCase {
         XCTAssertEqual(payments, [#"{"id":"abc"}"#], "the same payment was announced twice")
     }
 
-    // MARK: paging back (the Cashu ID's inbox, M1)
+    // MARK: paging back (the Foxy ID's inbox, M1)
 
-    /// A relay answers at most `limit` wraps to one REQ. The Cashu ID's inbox
+    /// A relay answers at most `limit` wraps to one REQ. The Foxy ID's inbox
     /// reaches back thirty-two days, so a full page is followed by the next, up
     /// to before its oldest wrap (`until`), until a page is not full, `since` is
     /// reached, or eight pages have been asked.
@@ -302,7 +302,7 @@ final class NostrInboxTests: XCTestCase {
     }
 
 
-    // MARK: the Cashu ID's drop boxes
+    // MARK: the Foxy ID's drop boxes
 
     /// The keys of `days` for a delivery secret, as the bridge hands them (FoxyBridge+CashuID.swift): always
     /// `cashuIdAskCount` REQs covering the window that ends `today`.

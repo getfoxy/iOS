@@ -122,6 +122,14 @@ async function forge(ctx, card, o) {
     ok(card.version === 20 && info.version === '1.20' && info.proofs === true && oldInfo.version === '1.19' && oldInfo.proofs === false && olderInfo.proofs === false
        && olderInfo.version === '1.16',
        'the wallet reads a card of 1.20 as one that keeps proofs, and a card of 1.19 and before as one that does not (GET_INFO is the same in every form but for the version)', info.version + ' ' + oldInfo.version);
+    // the read's line in the log says the card's software, so a log can answer which card was in hand
+    for (const sw of [25, 21]) {
+      const c = newCard(H, undefined, { format: 4, software: sw });
+      const log = logging(H);
+      await readAs(H, c);
+      const lines = log.done().filter((l) => /card: read in \d+ ms/.test(l));
+      ok(lines.length >= 1 && lines.every((l) => l.endsWith('software 1.' + sw + ')') || l.indexOf('software 1.' + sw + ', design') > 0), 'the read’s own line names the card’s software, 1.' + sw, lines.join(' | '));
+    }
 
     await H.W.cardSetUp(card, { pin: '1234', recoverable: true });
     card.tap();

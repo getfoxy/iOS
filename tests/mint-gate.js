@@ -21,7 +21,7 @@
  *   7  the gate itself, and the wallet's real `canonicalMint` deciding which address is the same mint
  *   8  the till's own gate is unchanged
  *   9  a tile of a mint only visited asks; passed, it is chosen and free from then
- *  10  a Cashu ID payment at another mint, KEEP IT THERE: asked before the answer
+ *  10  a Foxy ID payment at another mint, KEEP IT THERE: asked before the answer
  *  11  the real wallet: a visit does not choose a mint, a switch does, the record is seeded from an older phone's list, a
  *      mint dropped from the list is no longer chosen; MOVE TO YOUR MINT's claim is a visit; then a tile tap asks; TRANSFER
  *      TO that mint asks, and a quote dropped leaves it unchosen; a move that fails after the claim goes home
@@ -908,7 +908,7 @@ async function homeRace() {
     ok(a.pads.length === pads, 'chosen, its tile asks nothing again');
   }
 
-  console.log('\n10. a Cashu ID payment at another mint, KEEP IT THERE');
+  console.log('\n10. a Foxy ID payment at another mint, KEEP IT THERE');
   {
     const offer = { key: 'k1', mint: NEW, host: 'mint.new', amount: 21, unit: 'sat', lands: 20, fee: 1, name: 'Ana' };
     const keepIt = (always) => (a) => {
@@ -916,7 +916,7 @@ async function homeRace() {
       const card = a.cards.find((c) => c[0] === 'cidOffer-k1');
       return card ? card[1].shut.tap(always) : undefined;
     };
-    await entry('KEEP IT THERE for a Cashu ID payment', () => {}, keepIt(false), 'decide keep k1');
+    await entry('KEEP IT THERE for a Foxy ID payment', () => {}, keepIt(false), 'decide keep k1');
     const W = wallet({ pin: PIN }), a = app(W);
     keepIt(true)(a);
     await wait(5);

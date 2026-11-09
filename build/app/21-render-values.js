@@ -39,7 +39,7 @@
       settings: 'M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4ZM19.2 13.4l1.8 1.4-1.9 3.3-2.1-.8a7.3 7.3 0 0 1-2 1.2l-.3 2.2h-3.8l-.3-2.2a7.3 7.3 0 0 1-2-1.2l-2.1.8-1.9-3.3 1.8-1.4a7.3 7.3 0 0 1 0-2.8L3.6 9.2l1.9-3.3 2.1.8a7.3 7.3 0 0 1 2-1.2l.3-2.2h3.8l.3 2.2a7.3 7.3 0 0 1 2 1.2l2.1-.8 1.9 3.3-1.8 1.4a7.3 7.3 0 0 1 0 2.8Z',
       close: 'M6 6l12 12M18 6L6 18',
       bars: 'M4 7h16M4 12h16M4 17h16',
-      // a QR code: three finder squares and a few dots (MY CASHU ID)
+      // a QR code: three finder squares and a few dots (MY FOXY ID)
       qr: 'M3.5 3.5h7v7h-7zM13.5 3.5h7v7h-7zM3.5 13.5h7v7h-7zM13.5 13.5h3v3h-3zM20.5 13.5v3M17.5 20.5h3M13.5 20.5h1',
       // a face in a frame: the corners of a viewfinder, two eyes and a smile
       faceid: 'M4 8.5v-3a1.5 1.5 0 0 1 1.5-1.5h3M15.5 4h3A1.5 1.5 0 0 1 20 5.5v3'
@@ -72,7 +72,7 @@
       mint: 'M3.5 9 12 4l8.5 5M5.5 9.5v7.5M9.8 9.5v7.5M14.2 9.5v7.5M18.5 9.5v7.5M3.5 20h17',
       // a wrench (the menu's TOOLS)
       tools: 'M14.6 3.8a4.6 4.6 0 0 0-4.3 6.2l-6.1 6.1a2 2 0 0 0 2.8 2.8l6.1-6.1a4.6 4.6 0 0 0 6.2-4.3l-2.6 2.6-2.6-.6-.6-2.6Z',
-      // a head over a pair of shoulders: a person's own profile (MY CASHU ID, and home's round button at the top left)
+      // a head over a pair of shoulders: a person's own profile (MY FOXY ID, and home's round button at the top left)
       profile: 'M12 12.2a4.1 4.1 0 1 0 0-8.2 4.1 4.1 0 0 0 0 8.2ZM4.5 20.5c0-3.9 3.4-6.4 7.5-6.4s7.5 2.5 7.5 6.4',
     };
     /* A row that opens something: the drawer shuts, and the screen it opens goes back to the menu when it is left
@@ -97,7 +97,7 @@
     v.rot0 = this.state.open0 ? 'rotate(90deg)' : 'rotate(0deg)';
     // opened or shut by hand: nothing is waiting to open it again
     v.toggleMenu = () => this.setState(p => ({ open0: !p.open0, menuReturn: null }));
-    /* Home's round button at the top left, the menu button's twin: MY CASHU ID (26o-cashu-id.js, `cidShow`), the same
+    /* Home's round button at the top left, the menu button's twin: MY FOXY ID (26o-cashu-id.js, `cidShow`), the same
      * screen as the menu's row. Opened from home, not the menu, so nothing is armed: DONE goes back to home. */
     v.cidHomeGo = () => this.cidShow();
     /* SCAN and PASTE are the two ways money arrives at a phone, so they are on
@@ -127,7 +127,7 @@
     const twoHere = this.twoUnitsOn();
     v.homeButtonsTwo = !twoHere ? [] : v.homeButtons.map(b => Object.assign({ dim: '1' }, b));
     /* The menu drawer, from the right: everything that is not RECEIVE, SEND,
-     * SCAN, PASTE or MY CASHU ID's round button, in its sections (below). */
+     * SCAN, PASTE or MY FOXY ID's round button, in its sections (below). */
     /* A balance with no verified backup: the menu button and BACKUP glow red,
      * so the way to fix it is visible from home. */
     // a balance in either unit: dollars are lost with the words as surely as sats
@@ -232,11 +232,11 @@
       v.menuRingInk2 = v.histRingInk2;
       v.menuRing = v.histRing;
     }
-    /* The drawer, in this order (docs/CASHU-ID.md "The screens" has it too):
+    /* The drawer, in this order (docs/FOXY-ID.md "The screens" has it too):
      *
      *   BACKUP ACCOUNT, at the very top and only while the wallet holds a balance and its words have not been checked
      *     (`unbacked`), with the backup's red ring
-     *   WALLET:   MY CASHU ID · HISTORY · CONTACTS · HIDE BALANCE
+     *   WALLET:   MY FOXY ID · HISTORY · CONTACTS · HIDE BALANCE
      *   MINTS:    SWITCH/ADD MINTS · TRANSFER MONEY (money at two mints or more) · and, at a mint with two balances, SWAP
      *             and CURRENCIES · OTHER MINTS (only while an answer is remembered)
      *   TOOLS:    POINT OF SALE · SPLIT A BILL   (WITHDRAW TO BANK left the menu 2026-11-05; the send screen's BANK ACCOUNT stays)
@@ -245,7 +245,7 @@
      *
      * Every section is open until it is tapped shut (`menuShut`, which remembers the shut ones while Foxy is open). Each
      * heading after the first has the gap over it that the eye sees between MENU and WALLET (`headTop`). The card is home's CARD button
-     * (`homeButtons`), not a row here; SWAP is a row here, not home's. MY CASHU ID is also home's round button at the top
+     * (`homeButtons`), not a row here; SWAP is a row here, not home's. MY FOXY ID is also home's round button at the top
      * left (`cidHomeGo`), and CONTACTS is the full list, a contact opening its payment. YOUR CHANGE is not a row any
      * more: the change screen (`goChange`) stays. BLUETOOTH TAP is a switch in SETTINGS (26d-tap.js, `tapAutoArms`).
      * A screen opened from a row goes back to the menu when it is left (01-ui-basics.js, `menuReturnArm`).
@@ -278,8 +278,8 @@
       glow: 'alertGlow 10.4s ease-in-out infinite',
       ringInk: backupRing.ringInk, ringInk2: backupRing.ringInk2, ring: backupRing.ring };
     const walletRows = [
-      /* MY CASHU ID (26o-cashu-id.js): the code another Foxy adds this one by, with SHARE. */
-      { label: 'MY CASHU ID', path: MENU_ICON.profile, tap: shut(() => this.cidShow()) },
+      /* MY FOXY ID (26o-cashu-id.js): the code another Foxy adds this one by, with SHARE. */
+      { label: 'MY FOXY ID', path: MENU_ICON.profile, tap: shut(() => this.cidShow()) },
       { label: 'HISTORY', path: MENU_ICON.history, tap: shut(() => this.go('history')),
         ringInk: v.histRingInk, ringInk2: v.histRingInk2, ring: v.histRing },
       { label: 'CONTACTS', path: MENU_ICON.contacts, tap: shut(v.goContacts) },
@@ -356,7 +356,7 @@
     const capRows = this.tillCapRows ? this.tillCapRows(MENU_ICON.receive, shut) : [];
     const settingRows = /** @type {any[]} */ ([]).concat(
       // FACE ID, SET PIN, then BLUETOOTH TAP (the keeper, 2026-11-08). The reminder after 15 days away has no row: it stays as it was
-      // by default, asked once when a Cashu ID is in use (26o-remind.js, `remindMaybeAsk`).
+      // by default, asked once when a Foxy ID is in use (26o-remind.js, `remindMaybeAsk`).
       [faceRow, pinRow],
       /* Whether an invoice goes on the air by itself. A switch, and the drawer stays open so it can be seen to move. */
       [Object.assign({ label: 'BLUETOOTH TAP', path: MENU_ICON.change,

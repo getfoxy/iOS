@@ -206,13 +206,13 @@ const SERIES = { '1D': { pts: [[0, 60], [50, 40], [100, 20]], d: 'M0 60L50 40L10
 // a representative state of a screen, against the stand-in wallet
 const at = (screen, state, extra) => Object.assign({ wallet: true, state: Object.assign({ screen, stack: [] }, LIVE, state || {}) }, extra || {});
 
-/* Contacts that are Cashu IDs, and the empty CONTACTS, last so that the views before keep their numbers. */
+/* Contacts that are Foxy IDs, and the empty CONTACTS, last so that the views before keep their numbers. */
 function cashuIdViews() {
   const v = [];
   const add = (label, view) => v.push([label, view]);
   const CID_A = '02' + 'a1'.repeat(32);
   const ID_CONTACTS = CONTACTS.concat([{ name: 'Carol', handle: 'foxyid1' + 'C'.repeat(179), cid: { id: CID_A, nostr: 'c3'.repeat(32), sig: '' } }]);
-  add('contacts, a Cashu ID among them', at('contacts', { contacts: ID_CONTACTS }));
+  add('contacts, a Foxy ID among them', at('contacts', { contacts: ID_CONTACTS }));
   add('contacts, empty', at('contacts', { contacts: [], stack: ['home'] }, { wallet: { cashuIdCheck: () => Promise.resolve({}), scan: () => Promise.resolve('') } }));
   // the menu with BACKUP ACCOUNT at the very top: money in the wallet, the words not checked
   add('home, the menu with BACKUP ACCOUNT', at('home', { open0: true }, { wallet: { backedUp: () => false } }));
@@ -600,7 +600,7 @@ function representative(logic) {
   add('confirm, any amount, no invoice yet', at('confirm', { flow: 'receive', amount: '', unit: 'USD' }));
   add('confirm, dollars', at('confirm', { flow: 'receive', invoice: 'lnbc2100n1stub', amount: '1.34', unit: 'USD', asset: 'DOLLARS' }));
   /* Tips at the till (26p-till-tips.js): the till's receive with its tip buttons, none picked and $2 picked; who the tips go to (the
-   * SWITCH MINT list of Cashu ID contacts), a group's shares short of 100% and at it; and CASHIER CODES, two live and two under PAST.
+   * SWITCH MINT list of Foxy ID contacts), a group's shares short of 100% and at it; and CASHIER CODES, two live and two under PAST.
    * Fixed times, so the expiry words do not move. */
   const TIP_TILL = { role: 'keeper', since: 0, unit: 'sat', main: 'sat', mint: MINT, mints: [MINT],
     tips: { on: true, to: 'one', ids: [{ id: '02' + '1'.repeat(64), nostr: '1'.repeat(64), name: 'Ana', pct: 100 }] } };
@@ -732,8 +732,8 @@ function representative(logic) {
     { wallet: Object.assign({}, OFFLINE, { trustedWaiting: () => [{ id: 'r1', sats: 4900, at: 1 }] }) }));
   add('txDetail, a payment at risk', at('txDetail', { tx: TX_AT_RISK }));
   // a payment to the ID at a mint this phone does not use, too small to bring home yet: a row in HISTORY, nothing asked
-  add('history, a Cashu ID payment waiting at another mint', at('history', { history: [{ label: 'TODAY', items: [
-    { name: 'From Carol', party: 'From Carol', dir: 'in', time: '10:40', sats: 5, fee: 0, rail: 'Cashu ID', hash: 'cid-waiting-cid:k1',
+  add('history, a Foxy ID payment waiting at another mint', at('history', { history: [{ label: 'TODAY', items: [
+    { name: 'From Carol', party: 'From Carol', dir: 'in', time: '10:40', sats: 5, fee: 0, rail: 'Foxy ID', hash: 'cid-waiting-cid:k1',
       pending: true, cidWait: true, cidKey: 'cid:k1', cidLine: 'At home.example.com \u00b7 tap to decide', note: '', token: '', mint: 'https://home.example.com' }, TX_IN] }] }));
   // a card's payment taken offline: in the list, its detail, and the amber ring on home while it waits
   add('history, a card payment taken offline, waiting for the mint', at('history', {
@@ -855,8 +855,8 @@ function representative(logic) {
   add('two balances: settings', at('home', Object.assign({ open0: true }, TWO_LIVE),
     { wallet: TWO({ walletChoice: () => ({ hold: 'both', recv: '', send: '' }) }) }));
   // SETTINGS open with the two till caps (26j-till-caps.js): what one payer may hand this phone offline, and what it holds in all
-  // SETTINGS with a Cashu ID in use: FACE ID LOCK, SET PIN, BLUETOOTH TAP, no reminder row (26o-remind.js)
-  add('settings, a Cashu ID in use, no reminder row', at('home', { open0: true },
+  // SETTINGS with a Foxy ID in use: FACE ID LOCK, SET PIN, BLUETOOTH TAP, no reminder row (26o-remind.js)
+  add('settings, a Foxy ID in use, no reminder row', at('home', { open0: true },
     { wallet: { remindView: () => ({ eligible: true, on: true }) } }));
   add('settings, what it takes offline', at('home', { open0: true },
     { wallet: { tillCaps: () => ({ payerSats: 66000, holdSats: 396000, promptSats: 198000, payerSet: false, holdSet: true }) } }));
@@ -1237,7 +1237,7 @@ function cards() {
   const yes = (a) => { const b = Array.from(a._blockedEl.querySelectorAll('div')).find((d) => d.textContent === 'YES, DELETE' && !d.children.length); if (b) b.click(); };
   add('card: clear history, are you sure', (a) => a.askClear('history'));
   add('card: clear history, are you triple sure', (a) => { a.askClear('history'); yes(a); });
-  // the Cashu ID (26o-cashu-id.js): MY CASHU ID's code with SHARE, and the card a pasted one asks with
+  // the Foxy ID (26o-cashu-id.js): MY FOXY ID's code with SHARE, and the card a pasted one asks with
   const CID_TEXT = 'foxyid1' + 'A'.repeat(94);
   // tips at the till (26p-till-tips.js): the questions, a group row's share, a code's name, a code again with END, and END's ask
   // (ACCEPT TIPS? itself is a screen now: with the screens, 'tillTips')
@@ -1245,18 +1245,18 @@ function cards() {
   // POINT OF SALE with no lock: SET A LOCK FIRST, with CREATE PIN and USE FACE ID (26m-till.js `tillGate`)
   add('card: SET A LOCK FIRST, with CREATE PIN and USE FACE ID', (a) => a.tillGate(() => {}, 'To open the till.'),
     { wallet: { screenLocked: () => false, pinIsSet: () => false, pinSet() {}, setSeedProtection: () => Promise.resolve() } });
-  add('card: PASTE A CASHU ID', (a) => a.tillIdPaste());
+  add('card: PASTE A FOXY ID', (a) => a.tillIdPaste());
   add('card: a share of the group', (a) => { a.setState({ tillGroup: [{ id: 'g1', nostr: '1'.repeat(64), name: 'Ana', pct: 60 }] }); a.tillGroupRow('g1'); });
   add('card: NAME THIS CODE?', (a) => a.tillCodeAdd());
   add('stage: a cashier code again, with END', (a) => a.tillCodeOpen({ id: 'a1', text: 'https://getfoxy.io/till#AAAA', exp: 1793159200, tips: { on: true, to: 'one', names: ['Ana'] } }, 'Front'));
   add('card: END THIS CODE?', (a) => a.tillCodeEndAsk({ id: 'a1' }, 'Front'));
-  add('stage: MY CASHU ID', (a) => a.cidShowCode(CID_TEXT));
+  add('stage: MY FOXY ID', (a) => a.cidShowCode(CID_TEXT));
   add('card: NAME THIS CONTACT?', (a) => a.cidNameAsk(CID_TEXT, ''));
   add('card: NAME THIS CONTACT?, a contact already', (a) => a.cidNameAsk(CID_TEXT, 'Alice'));
-  add('card: your own Cashu ID', (a) => a.cidAddAsk(CID_TEXT), { wallet: { cashuIdCheck: () => Promise.resolve({ own: true, name: '' }) } });
-  // a version 1 string, with no signature of the ID's own: not a Cashu ID
-  add('card: a version 1 Cashu ID', (a) => a.cidAddAsk(CID_TEXT), { wallet: { cashuIdCheck: () => Promise.reject(new Error('That is not a Cashu ID.')) } });
-  // a payment to the Cashu ID at a mint this phone does not use: its three answers and the tick, too small, in dollars; and SETTINGS > OTHER MINTS
+  add('card: your own Foxy ID', (a) => a.cidAddAsk(CID_TEXT), { wallet: { cashuIdCheck: () => Promise.resolve({ own: true, name: '' }) } });
+  // a version 1 string, with no signature of the ID's own: not a Foxy ID
+  add('card: a version 1 Foxy ID', (a) => a.cidAddAsk(CID_TEXT), { wallet: { cashuIdCheck: () => Promise.reject(new Error('That is not a Foxy ID.')) } });
+  // a payment to the Foxy ID at a mint this phone does not use: its three answers and the tick, too small, in dollars; and SETTINGS > OTHER MINTS
   const CID_OFFER = { key: 'cid:k1', name: 'Carol', mint: 'https://home.example.com', host: 'home.example.com', unit: 'sat', amount: 300, at: 0, drop: 0,
     back: true, lands: 290, toUnit: 'sat', fee: 10, why: '', small: false, others: 0, total: 300, choice: '' };
   add('card: paid at another mint', (a) => a.cidOfferCard(CID_OFFER));

@@ -7,10 +7,10 @@
    *                           mint, the default currency) and for each new CASHIER CODE, the till's answer first. Its back
    *                           button is walking away from the question.
    *   TIPS GO TO ............ a card: MYSELF, ONE PERSON, GROUP.
-   *   ONE PERSON ............ the SWITCH MINT list (`tillList` 'person'): the Cashu ID contacts, PASTE A CASHU ID (a card
-   *                           with a field) and SCAN A CASHU ID; an ID that is not a contact is named first, on the
+   *   ONE PERSON ............ the SWITCH MINT list (`tillList` 'person'): the Foxy ID contacts, PASTE A FOXY ID (a card
+   *                           with a field) and SCAN A FOXY ID; an ID that is not a contact is named first, on the
    *                           contacts' own NAME THIS CONTACT? card, and kept as one.
-   *   GROUP ................. the same list (`tillList` 'group'): up to eight rows, each a Cashu ID and its share, ADD and
+   *   GROUP ................. the same list (`tillList` 'group'): up to eight rows, each a Foxy ID and its share, ADD and
    *                           SAVE, SAVE grey until the shares add up to 100%. A row tapped asks its share on a card with a
    *                           field, or REMOVE. A row added takes what is left of the 100%.
    *   the tip buttons ....... $1, $2, $5 and OTHER under the amount on the till's receive screen, where its tips are on: the
@@ -174,20 +174,20 @@
     this.setState((p) => ({ screen: (p.stack || []).length ? p.stack[p.stack.length - 1] : 'home', stack: (p.stack || []).slice(0, -1), tillList: false }));
   }
 
-  /* ONE PERSON (`for` 'one'), or a row to ADD to the group (`for` 'group'): the contacts that are Cashu IDs, and the two ways in
+  /* ONE PERSON (`for` 'one'), or a row to ADD to the group (`for` 'group'): the contacts that are Foxy IDs, and the two ways in
    * for one that is not. */
   tillPersonOpen(forWhat) {
     this.tillListGo('person', { tillPersonFor: forWhat === 'group' ? 'group' : 'one' });
   }
 
-  // the Cashu ID contacts, those in the group already left out
+  // the Foxy ID contacts, those in the group already left out
   tillPersonRows() {
     const W = window.FoxyWallet;
     let list = [];
     try { list = (W && W.cashuIdContacts) ? W.cashuIdContacts() : []; } catch (e) { list = []; }
     const inGroup = this.state.tillPersonFor === 'group' ? (this.state.tillGroup || []).map((r) => r.id) : [];
     return (Array.isArray(list) ? list : []).filter((c) => c && c.cid && inGroup.indexOf(c.cid.id) < 0)
-      .map((c) => ({ id: c.cid.id, nostr: c.cid.nostr, name: String(c.name || 'Cashu ID') }));
+      .map((c) => ({ id: c.cid.id, nostr: c.cid.nostr, name: String(c.name || 'Foxy ID') }));
   }
 
   // a person picked, a contact or an ID just named: the answer for ONE PERSON, or a row of the group
@@ -195,7 +195,7 @@
     if (!p || !p.id) return;
     if (this.state.tillPersonFor === 'group') {
       const rows = (this.state.tillGroup || []).filter((r) => r.id !== p.id);
-      if (rows.length >= this.TILL_GROUP_MAX) { this.toast('A group is ' + this.TILL_GROUP_MAX + ' Cashu IDs at most.', true); return; }
+      if (rows.length >= this.TILL_GROUP_MAX) { this.toast('A group is ' + this.TILL_GROUP_MAX + ' Foxy IDs at most.', true); return; }
       // what is left of the 100%, so the last one added makes it whole
       const left = Math.max(0, 100 - rows.reduce((n, r) => n + (Number(r.pct) || 0), 0));
       this.setState({ tillList: 'group', tillGroup: rows.concat([{ id: p.id, nostr: p.nostr, name: p.name, pct: left }]) });
@@ -204,14 +204,14 @@
     this.tillTipsDone({ on: true, to: 'one', ids: [{ id: p.id, nostr: p.nostr, name: p.name, pct: 100 }] });
   }
 
-  // PASTE A CASHU ID: a card with a field to paste it into
+  // PASTE A FOXY ID: a card with a field to paste it into
   tillIdPaste() { this.cidPasteCard('tillIdPaste', (text) => this.tillIdRead(text)); }
 
-  // SCAN A CASHU ID: the camera
+  // SCAN A FOXY ID: the camera
   tillIdScan() {
     const W = window.FoxyWallet;
     if (!W || !W.scan) return;
-    Promise.resolve(W.scan('Scan a Cashu ID')).then((text) => { if (String(text || '').trim()) this.tillIdRead(text); }).catch(() => {});
+    Promise.resolve(W.scan('Scan a Foxy ID')).then((text) => { if (String(text || '').trim()) this.tillIdRead(text); }).catch(() => {});
   }
 
   /* An ID pasted or scanned: refused in the contacts' own words; this phone's own is MYSELF; a contact is picked by its name; any
@@ -223,15 +223,15 @@
     Promise.resolve(W.cashuIdCheck(t)).then((r) => {
       if (r.own) {
         this.blockedCard('cidOwn', {
-          tone: 'warn', title: 'THIS IS YOUR CASHU ID',
-          reason: 'Tips to you need no Cashu ID: pick MYSELF instead.',
+          tone: 'warn', title: 'THIS IS YOUR FOXY ID',
+          reason: 'Tips to you need no Foxy ID: pick MYSELF instead.',
         });
         return;
       }
       if (r.name) { this.tillPersonPick({ id: r.id, nostr: r.nostr, name: r.name }); return; }
       this.blockedCard('cidName', {
         tone: 'ask', title: 'NAME THIS CONTACT?',
-        reason: 'A Cashu ID from another Foxy. Give it a name: its tips say who they went to.',
+        reason: 'A Foxy ID from another Foxy. Give it a name: its tips say who they went to.',
         field: { value: '', placeholder: 'Name', max: 40 },
         retry: 'SAVE', go: (name) => this.tillIdKeep(t, name),
         shut: { label: 'CANCEL' },
@@ -239,7 +239,7 @@
     }).catch((e) => {
       this.blockedCard('cidBad', {
         tone: 'warn', title: 'THAT WON’T WORK',
-        reason: (W.reason ? W.reason(e) : String((e && e.message) || e)) || 'That is not a Cashu ID.',
+        reason: (W.reason ? W.reason(e) : String((e && e.message) || e)) || 'That is not a Foxy ID.',
         chip: 'Ask them to share it again.',
       });
     });
@@ -276,7 +276,7 @@
     const row = (this.state.tillGroup || []).find((r) => r.id === id);
     if (!row) return;
     this.blockedCard('tillGroupRow', {
-      tone: 'ask', title: String(row.name || 'CASHU ID').toUpperCase(),
+      tone: 'ask', title: String(row.name || 'FOXY ID').toUpperCase(),
       reason: 'Its share of every tip, in whole percent. The shares add up to 100%.',
       field: { value: String(Number(row.pct) || ''), placeholder: '%', max: 3 },
       retry: 'SET', go: (v) => this.tillGroupPct(id, v),
@@ -326,23 +326,23 @@
       ink: 'rgba(var(--ink-rgb),.55)', busy: false, bg: 'var(--surface)', border: 'rgba(var(--ink-rgb),.12)',
     }, o, { initial: String(o.name || '?').slice(0, 1).toUpperCase() });
     if (mode === 'person') {
-      const rows = this.tillPersonRows().map((p) => plainRow({ name: p.name, host: 'Cashu ID', text: '', tap: () => this.tillPersonPick(p) }));
+      const rows = this.tillPersonRows().map((p) => plainRow({ name: p.name, host: 'Foxy ID', text: '', tap: () => this.tillPersonPick(p) }));
       return {
         title: s.tillPersonFor === 'group' ? 'ADD TO THE GROUP' : 'TIPS GO TO',
-        line: rows.length ? 'Pick a contact, or paste or scan their Cashu ID.' : 'No Cashu ID contacts yet. Paste or scan one.',
+        line: rows.length ? 'Pick a contact, or paste or scan their Foxy ID.' : 'No Foxy ID contacts yet. Paste or scan one.',
         rows, past: [],
-        add: { shown: true, label: 'PASTE A CASHU ID', tap: () => this.tillIdPaste() },
-        next: { shown: true, on: true, label: 'SCAN A CASHU ID', tap: () => this.tillIdScan() },
+        add: { shown: true, label: 'PASTE A FOXY ID', tap: () => this.tillIdPaste() },
+        next: { shown: true, on: true, label: 'SCAN A FOXY ID', tap: () => this.tillIdScan() },
       };
     }
     if (mode === 'group') {
       const g = s.tillGroup || [];
       const sum = this.tillGroupSum();
-      const rows = g.map((r) => plainRow({ name: r.name, host: 'Cashu ID', text: (Number(r.pct) || 0) + '%',
+      const rows = g.map((r) => plainRow({ name: r.name, host: 'Foxy ID', text: (Number(r.pct) || 0) + '%',
         ink: Number(r.pct) >= 1 ? 'var(--acc-ink)' : 'var(--bad)', tap: () => this.tillGroupRow(r.id) }));
       return {
         title: 'GROUP',
-        line: g.length ? 'The shares add up to ' + sum + '% of 100%. Tap one to change it.' : 'Up to ' + this.TILL_GROUP_MAX + ' Cashu IDs, each with its share of every tip.',
+        line: g.length ? 'The shares add up to ' + sum + '% of 100%. Tap one to change it.' : 'Up to ' + this.TILL_GROUP_MAX + ' Foxy IDs, each with its share of every tip.',
         rows, past: [],
         add: { shown: g.length < this.TILL_GROUP_MAX, label: 'ADD', tap: () => this.tillPersonOpen('group') },
         next: { shown: true, on: this.tillGroupReady(), label: 'SAVE', tap: () => this.tillGroupSave() },

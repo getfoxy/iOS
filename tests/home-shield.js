@@ -456,7 +456,7 @@ const STATES = [
     const CLOCK = 'M12 7v5l3.5 2M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.5 8.5 0 0 0 12 3.5Z';
     const idBtn = q('[data-cashu-id-button]');
     ok(!!idBtn && idBtn.style.left === '22px' && idBtn.style.top === '56px' && !q('[data-chat-button]') && !q('[aria-label="Card"]') && !q('[aria-label="History"]'),
-      'home: the round button at the top left is MY CASHU ID (26o-cashu-id.js), and there is no CHAT, CARD or HISTORY button there', idBtn ? idBtn.innerHTML : 'none');
+      'home: the round button at the top left is MY FOXY ID (26o-cashu-id.js), and there is no CHAT, CARD or HISTORY button there', idBtn ? idBtn.innerHTML : 'none');
     const went = [];
     const realGo = A.goFlashcard;
     A.goFlashcard = function () { went.push([...arguments]); };
@@ -486,8 +486,8 @@ const STATES = [
     await settle();
     const drawerRows = [...w.document.querySelectorAll('div')].filter((d) => d.style.height === '60px' && d.style.borderRadius === '18px');
     const firstRow = drawerRows.find((d) => d.textContent.trim() === 'HISTORY');
-    ok(/WALLET/.test((drawerRows[0] || {}).textContent || '') && /MY CASHU ID/.test((drawerRows[1] || {}).textContent || '') && drawerRows.indexOf(firstRow) === 2,
-      'drawn in the drawer under WALLET and MY CASHU ID', firstRow ? firstRow.textContent : 'none');
+    ok(/WALLET/.test((drawerRows[0] || {}).textContent || '') && /MY FOXY ID/.test((drawerRows[1] || {}).textContent || '') && drawerRows.indexOf(firstRow) === 2,
+      'drawn in the drawer under WALLET and MY FOXY ID', firstRow ? firstRow.textContent : 'none');
     click(firstRow);
     await settle();
     ok(A.state.screen === 'history' && !A.state.open0, 'and it opens history, and closes the menu', A.state.screen);

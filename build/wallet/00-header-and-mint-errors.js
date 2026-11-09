@@ -105,7 +105,7 @@
   /* Stores an earlier build kept for features Foxy no longer has, read by nothing now: removed at every boot (a lookup
    * each, nothing once they are gone). Not a schema step, so a phone can still go back to a build that knows fewer steps.
    * The push wake's and the private LNURL's (the lock-key rows those codes were filed under stay: their keys are the
-   * seed's), and the messages between Cashu IDs: the conversations, what waited to go, and the first messages read. */
+   * seed's), and the messages between Foxy IDs: the conversations, what waited to go, and the first messages read. */
   var RETIRED_STORES = ['foxy.wake', 'foxy.lnurl.codes', 'foxy.msg.threads', 'foxy.msg.outbox', 'foxy.msg.seen'];
   (function dropRetiredStores() {
     if (storageNewer) return;
@@ -199,7 +199,7 @@
     tillKeeper: 'foxy.till.keeper',
     tillOutbox: 'foxy.till.outbox',
     /* Tips at the till (08f-till-tips.js): the keeper's answer as its till opened (whether, and to whom); every code
-     * made, kept to list under PAST after its row and keys are gone; the tips being passed on to Cashu IDs, each a
+     * made, kept to list under PAST after its row and keys are gone; the tips being passed on to Foxy IDs, each a
      * payment still to make from the keeper's balance; what is too small to send yet, per ID; and the sales whose tip
      * was passed on already, so a sale is never tipped twice. */
     tillTips: 'foxy.till.tips',
@@ -207,7 +207,7 @@
     tillTipJobs: 'foxy.till.tips.jobs',
     tillTipCarry: 'foxy.till.tips.carry',
     tillTipSales: 'foxy.till.tips.sales',
-    /* The Cashu ID (08e-cashu-id.js): what this phone sent to a contact, locked to a one-time key of theirs with a
+    /* The Foxy ID (08e-cashu-id.js): what this phone sent to a contact, locked to a one-time key of theirs with a
      * refund key of its own, until the mint says it was collected or its locktime brings it back (money: mustSave);
      * the secrets of what came in (hashed), so a delivery read twice is taken once; and what came while it could not be taken. */
     cidOutbox: 'foxy.cid.outbox',

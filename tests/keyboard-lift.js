@@ -137,7 +137,7 @@ function stubWallet() {
     lastToken: () => ({}), clearLastToken() {}, pendingMelts: () => [], splitPending: () => null,
     stopPreview() {}, stopPasteButton() {}, notify() {},
     share(text) { calls.shares.push(String(text)); return true; },
-    // ---- the Cashu ID's contract (build/wallet/21c-cashu-id.js) ----
+    // ---- the Foxy ID's contract (build/wallet/21c-cashu-id.js) ----
     cashuIdMine: () => Promise.resolve({ text: ID_MINE, id: REAL.cashuIdDecode(ID_MINE).id, nostr: REAL.cashuIdDecode(ID_MINE).nostr }),
     cashuIdShown() { calls.shown += 1; return Promise.resolve(1); },
     cashuIdListen() { calls.listens += 1; return Promise.resolve(1); },

@@ -235,12 +235,12 @@ you added for testing. Debugger detached and Console.app streaming, as in the
 setup above, unless a step says otherwise.
 
 **Menu paths.** The menu has four sections, each open until tapped shut:
-WALLET (MY CASHU ID, HISTORY, CONTACTS, HIDE BALANCE), MINTS (SWITCH/ADD MINTS, TRANSFER MONEY), TOOLS (POINT OF SALE, SPLIT A
+WALLET (MY FOXY ID, HISTORY, CONTACTS, HIDE BALANCE), MINTS (SWITCH/ADD MINTS, TRANSFER MONEY), TOOLS (POINT OF SALE, SPLIT A
 BILL) and SETTINGS (BLUETOOTH TAP, SET PIN, FACE ID LOCK, BACKUP,
 RESTORE, RESTORE LOST CARD, TEST LOGS). BACKUP ACCOUNT is at the very top while
 the wallet holds money and the words are not verified; BACKUP is always under
 SETTINGS. LOGS is TEST LOGS; SPLIT is SPLIT A BILL; the card is MENU → FOXY CARD
-(home's top-left button is MY CASHU ID, with a head-and-shoulders drawing).
+(home's top-left button is MY FOXY ID, with a head-and-shoulders drawing).
 
 ### A. Tor, the network, and what leaves the phone
 
@@ -1260,10 +1260,10 @@ what it did.
 
 #### 13r. The reminder after 15 days away
 
-Needs a phone with a Cashu ID in use (MENU → MY CASHU ID has been opened, or the words were restored) and a Debug build run
+Needs a phone with a Foxy ID in use (MENU → MY FOXY ID has been opened, or the words were restored) and a Debug build run
 with `-FoxyReminderMinutes 2`.
 
-1. Open MENU → MY CASHU ID, close it, put Foxy away and bring it back. **Pass:** no card over the code; at the return a card says "Foxy can remind you after 15 days away, so a payment
+1. Open MENU → MY FOXY ID, close it, put Foxy away and bring it back. **Pass:** no card over the code; at the return a card says "Foxy can remind you after 15 days away, so a payment
    waiting for you is not missed." with TURN ON and NOT NOW. (If notifications were already allowed for payments, no
    card: the switch is simply on.)
 2. TURN ON. **Pass:** iOS asks its own notification question once; MENU → SETTINGS has no reminder row (it opens with FACE ID LOCK,
@@ -1272,18 +1272,18 @@ with `-FoxyReminderMinutes 2`.
    for you." Tapping it opens Foxy.
 4. Open Foxy, leave it again after one minute, and wait 90 seconds. **Pass:** nothing yet (each coming and going starts the
    wait again); it comes 2 minutes after the last.
-5. A phone with no Cashu ID in use. **Pass:** no card.
+5. A phone with no Foxy ID in use. **Pass:** no card.
 
-#### 13s. Home's MY CASHU ID button, and a contact from the menu
+#### 13s. Home's MY FOXY ID button, and a contact from the menu
 
-Needs a phone with a Cashu ID contact saved, and a phone that has never opened MY CASHU ID (a fresh install will do).
+Needs a phone with a Foxy ID contact saved, and a phone that has never opened MY FOXY ID (a fresh install will do).
 
 1. On home, look at the top left. **Pass:** a round button the size and look of the menu button at the top right, with a
    head-and-shoulders drawing, and no number on its corner. No chat button anywhere, and no CHAT in the menu.
-2. Tap it. **Pass:** MY CASHU ID, the code with SHARE and DONE, the same screen as MENU → MY CASHU ID. DONE goes back to
+2. Tap it. **Pass:** MY FOXY ID, the code with SHARE and DONE, the same screen as MENU → MY FOXY ID. DONE goes back to
    home with the menu shut. On the fresh install the first tap reads the ID from the words first (Face ID if it is on),
    as the menu row does.
-3. MENU → CONTACTS, tap the Cashu ID contact. **Pass:** SET AMOUNT, "How much to send to <name>?", with no messages
+3. MENU → CONTACTS, tap the Foxy ID contact. **Pass:** SET AMOUNT, "How much to send to <name>?", with no messages
    screen in between; back returns to CONTACTS. No unread counts and no NEW MESSAGES on CONTACTS.
 4. On a phone that had the earlier build with messages, open Foxy once. **Pass:** nothing of the old conversations
    anywhere, and paying a contact still works.
@@ -2409,7 +2409,7 @@ claimed on it (a fresh install); step 2 a phone that has.*
 cashier a new one. Old codes still work on tills still on the old build until they end, and on those the replay in step 3
 is still open.*
 
-*Three phones: a keeper (POINT OF SALE open, tips on, to ONE PERSON, a Cashu ID contact on a fourth wallet or a second
+*Three phones: a keeper (POINT OF SALE open, tips on, to ONE PERSON, a Foxy ID contact on a fourth wallet or a second
 Foxy) and two cashiers. A payer: a fourth Foxy, or another Cashu wallet. Test money only.*
 
 1. **One code each.** On the keeper, CASHIER CODES, ADD A CASHIER twice (names Front and Patio). **Pass:** two LIVE rows;
@@ -2439,7 +2439,7 @@ Foxy) and two cashiers. A payer: a fourth Foxy, or another Cashu wallet. Test mo
 only.*
 
 1. **Two while closed.** Close Foxy fully. From the other wallet pay this phone
-   twice (two payments to its Cashu ID, which it collects on opening). Open
+   twice (two payments to its Foxy ID, which it collects on opening). Open
    Foxy.
    **Pass:** one green RECEIVED screen, the yellow flash once, the total of both
    in large figures, and a row for each, newest first, with its amount, its
@@ -2496,12 +2496,12 @@ only.*
 
 #### 22r. Four set-up flows from the 2026-11-08 walkthrough
 
-1. **PASTE A CASHU ID on an empty CONTACTS.** *A Foxy with no contacts; a second Foxy's MY CASHU ID copied with SHARE >
-   Copy.* MENU > CONTACTS. **Pass:** NO CONTACTS YET!, PASTE A CASHU ID and SCAN A CASHU ID, and no round search button at
-   the bottom left. Tap PASTE A CASHU ID. **Pass:** iOS asks to allow the paste (Allow Paste); then NAME THIS CONTACT? at
+1. **PASTE A FOXY ID on an empty CONTACTS.** *A Foxy with no contacts; a second Foxy's MY FOXY ID copied with SHARE >
+   Copy.* MENU > CONTACTS. **Pass:** NO CONTACTS YET!, PASTE A FOXY ID and SCAN A FOXY ID, and no round search button at
+   the bottom left. Tap PASTE A FOXY ID. **Pass:** iOS asks to allow the paste (Allow Paste); then NAME THIS CONTACT? at
    once, with no field to paste into. SAVE as Ana. **Pass:** Ana is on CONTACTS and the search button is back. With text
-   on the clipboard that is not a Cashu ID (copy an invoice), delete Foxy's contacts again or use a fresh wallet: **Pass:**
-   THAT WON’T WORK, `That is not a Cashu ID.`; with the paste refused at the iOS prompt, THAT WON’T WORK, `Nothing on the
+   on the clipboard that is not a Foxy ID (copy an invoice), delete Foxy's contacts again or use a fresh wallet: **Pass:**
+   THAT WON’T WORK, `That is not a Foxy ID.`; with the paste refused at the iOS prompt, THAT WON’T WORK, `Nothing on the
    clipboard.`
 2. **SET A LOCK FIRST sets the lock.** *A Foxy with no PIN and FACE ID LOCK off.* MENU > POINT OF SALE. **Pass:** SET A
    LOCK FIRST with CREATE PIN, USE FACE ID and CANCEL. CANCEL: the menu again, nothing set. Again, CREATE PIN: CHOOSE A
@@ -2596,9 +2596,9 @@ been used on a phone. Update the table when a section is run.
    PAY are what leaves, never less. PAYING FROM's pill at the foot: no chevron
    with one balance; at a mint with two it opens DOLLARS/BITCOIN; with money at
    two mints it opens PAY FROM, and NEXT comes back with the pill naming it.
-3. **A request (1m).** A Foxy over Tor, a tap, a website, a Cashu ID. **Pass:**
+3. **A request (1m).** A Foxy over Tor, a tap, a website, a Foxy ID. **Pass:**
    the button reads PAY and what leaves on every one; a website's host is
-   under RECEIVER; a Cashu ID's name is; the ✕ on a tap's screen leaves the
+   under RECEIVER; a Foxy ID's name is; the ✕ on a tap's screen leaves the
    other phone saying the payer cancelled.
 4. **PAY FROM (1p).** **Pass:** a tile per balance with its name, its balance
    line, a tick on the one chosen, its fee line with the ₿ or $ badge,

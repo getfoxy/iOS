@@ -9,8 +9,8 @@ import Foundation
 /// it, what it holds, or where this phone is.
 ///
 /// What Foxy sends is always wrapped this way. What it listens for is a
-/// request's own key, a till's cashier code's, the Cashu ID's delivery key
-/// once MY CASHU ID has been shown (CASHU-ID.md), and its recovery key after a
+/// request's own key, a till's cashier code's, the Foxy ID's delivery key
+/// once MY FOXY ID has been shown (FOXY-ID.md), and its recovery key after a
 /// restore; it has no other Nostr identity and reads nothing else.
 enum NostrDelivery {
 

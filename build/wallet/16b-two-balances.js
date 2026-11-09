@@ -471,7 +471,7 @@
               ? { pubkey: lockTo, locktime: Math.floor(o.lockUntil), refundKeys: o.refundTo ? [String(o.refundTo)] : undefined }
               : { pubkey: lockTo } });
             if (o.sigAll) lockOut.options.sigFlag = 'SIG_ALL';
-            // NUT-28: every key of the lock blinded per piece, E on each proof (a payment to a Cashu ID, 08e-cashu-id.js)
+            // NUT-28: every key of the lock blinded per piece, E on each proof (a payment to a Foxy ID, 08e-cashu-id.js)
             if (o.blindKeys) lockOut.options.blindKeys = true;
             if (Array.isArray(o.denominations) && o.denominations.length) {
               lockOut.denominations = o.denominations.map(function (d) { return Math.round(Number(d)); });

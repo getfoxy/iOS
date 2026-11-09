@@ -1,6 +1,6 @@
   /* ---- the reminder after fifteen days away -----------------------------------------------------------------------
    *
-   * Payments to this phone's Cashu ID wait at the relays until Foxy is opened. So a phone whose ID is in use
+   * Payments to this phone's Foxy ID wait at the relays until Foxy is opened. So a phone whose ID is in use
    * (`cidInUse`) can have Foxy remind it, once, fifteen days after Foxy was last in front: a notification made on the
    * phone (Reminder.swift, the `reminder` action) and sent by nobody. The phone replaces it every time Foxy comes to the
    * front or goes away, so it fires only after fifteen days away. The words are the phone's own; the page gives none.

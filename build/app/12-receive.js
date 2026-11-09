@@ -371,7 +371,7 @@
     this.syncInbox();
     // and the till's inbox and outbox, which the phone closed with the rest (26m-till.js, `tillWake`)
     if (this.tillWake) this.tillWake();
-    // and the Cashu ID's, closed the same way (26o-cashu-id.js, `cidWake`)
+    // and the Foxy ID's, closed the same way (26o-cashu-id.js, `cidWake`)
     if (this.cidWake) this.cidWake();
   }
 
@@ -1146,7 +1146,7 @@
      * Outside it, a cashier code asks whether to work the keeper's till (`tillJoinAsk`). */
     if (this.state.till && this.tillAccept) return this.tillAccept(t, kind);
     if (kind === 'till') return this.tillJoinAsk ? this.tillJoinAsk(t) : false;
-    // another Foxy's Cashu ID: NAME THIS CONTACT? (26o-cashu-id.js)
+    // another Foxy's Foxy ID: NAME THIS CONTACT? (26o-cashu-id.js)
     if (kind === 'cashuid') return this.cidAddAsk ? this.cidAddAsk(t) : false;
     /* Paying from a card (SEND on the card's screen, 26f-flashcard.js): a card pays Lightning, an invoice or an address,
      * and a bitcoin address on chain where the mint pays on chain (`fcOutAddress`, which asks it first). A Cashu payment

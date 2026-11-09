@@ -1,8 +1,8 @@
-# The Cashu ID
+# The Foxy ID
 
 A name another wallet keeps in its contacts and pays, with no server in the
 middle: something like a Lightning address, with more privacy. MENU › MY
-CASHU ID shows it as a QR code with SHARE. Another Foxy scans it, or pastes it
+FOXY ID shows it as a QR code with SHARE. Another Foxy scans it, or pastes it
 on the home screen, names the contact, and from then on pays it from
 CONTACTS (SEND › CONTACTS, or CONTACTS in the menu). The ID itself is never what the money is locked to: every payment
 is locked, by NUT-28 (pay-to-blinded-key, P2BK), to keys nobody has seen
@@ -34,7 +34,7 @@ every level hardened:
 | recovery key | `m/129373'/20'/3'/0'/0'` | the copies this phone sends itself of what it pays (Restoring, below); its x-only public half is the only address they go to, in no string, never shown, and used for nothing else |
 
 129373' is the purpose NUT-13 gives P2PK keys; a payment request's lock keys
-are its account 10' (`m/129373'/10'/0'/0'/i`), and 20' is the Cashu ID's. A
+are its account 10' (`m/129373'/10'/0'/0'/i`), and 20' is the Foxy ID's. A
 restore from the words gives the same keys and so the same ID string. The
 private halves stay in native code (`SEED-HANDLING.md`).
 
@@ -52,7 +52,7 @@ private halves stay in native code (`SEED-HANDLING.md`).
 
 186 characters in all. A string whose checksum does not match, or whose
 signature is not the ID key's over its own delivery key, is refused: "That is
-not a Cashu ID." A version above 2 is "from a newer Foxy"; both keys must be
+not a Foxy ID." A version above 2 is "from a newer Foxy"; both keys must be
 points on the curve. Version 1 (70 bytes, no signature, 101 characters), which
 early test builds showed, is refused the same way, pasted or scanned: nothing in
 it says the delivery key is the ID's own. So a contact's address changes only by
@@ -73,7 +73,7 @@ as it is. Every payment from such a wallet would be locked to the ID key itself,
 which the mint then sees at every claim (every payment to one person linked),
 and the ID key would become a lock key, which this design never lets it be.
 Until NUT-18 can carry "blind the keys", the ID stays `foxyid1`, and a wallet
-that is not a Foxy has no way to pay a Cashu ID now: the one-time request that
+that is not a Foxy has no way to pay a Foxy ID now: the one-time request that
 served it (below, "Any wallet") has no screen, so nothing shows it.
 
 ## Paying
@@ -223,7 +223,7 @@ restore loses, below).
 The receiver's phone listens on the drop boxes (above), NIP-17 gift wraps
 (kind 1059), page by page (500 to a page, up to eight, each reaching back from
 the oldest of the last with `until`), while Foxy is in front, and only once the
-ID is in use on it: MY CASHU ID shown, or its words restored. For each
+ID is in use on it: MY FOXY ID shown, or its words restored. For each
 delivery:
 
 1. **Read and bounded**: at most 64 kB and 100 pieces, a token in sats or
@@ -249,7 +249,7 @@ delivery:
    out.
 6. **Named only when proved**: `from` is believed only where `tag` is the one
    this phone works out from its own `d` and `from` (`cashuIdTag`) and `from` is
-   a contact; the history row says `From <name>`, otherwise `From a Cashu ID`.
+   a contact; the history row says `From <name>`, otherwise `From a Foxy ID`.
 7. Taken in as any locked ecash that arrives signed for (`receiveToken`), with E
    removed: swapped at its own mint, at once. A mint of this phone's that it is
    not on is swapped there by a wallet made for it, the phone staying where it
@@ -290,7 +290,7 @@ across a restart), and outside that mint's backoff:
        DECIDE LATER
 
    The amount is in the delivery's unit ("$3.00"), and the name is the
-   contact's where the payer proved it (above), "A Cashu ID" otherwise. Under
+   contact's where the payer proved it (above), "A Foxy ID" otherwise. Under
    BRING IT HOME is the fee the way home was quoted at, in the delivery's unit,
    and what it lands as where that is another unit ("fee about $0.06 · lands as
    3,875 sats"). With more waiting at that mint in that unit the card says so
@@ -362,9 +362,9 @@ use the two as they are.
 
 ## Any wallet
 
-MY CASHU ID shows its code with SHARE and DONE; it has no ANY WALLET button, and
+MY FOXY ID shows its code with SHARE and DONE; it has no ANY WALLET button, and
 the screen that button opened is gone, so a wallet that is not a Foxy has no way
-to pay a Cashu ID until something shows the request again. What stays is the wallet's half: for a
+to pay a Foxy ID until something shows the request again. What stays is the wallet's half: for a
 payer whose wallet cannot blind (Minibits, Cashu.me, any wallet that reads a
 NUT-18 request), `cashuIdAnyRequest` (`cidAnyRequest`) makes a standard payment
 request, and a payment to it comes in by the ID's inbox as ever. Its fields, as
@@ -401,7 +401,7 @@ the key is asked for over a year (ANY WALLET keys, above), so the relays can
 tie the days its REQs are asked to each other; and the payer sees an ordinary
 lock key, as for any request. A code is good for a year; money paid to a code
 more than a year old is not heard and is lost. No screen of the app shows an
-ANY WALLET code today (MY CASHU ID shows the ID alone); a screen that shows one
+ANY WALLET code today (MY FOXY ID shows the ID alone); a screen that shows one
 again must say the code is good for a year.
 
 ## Paid to the ID key itself
@@ -545,25 +545,25 @@ needs `d`. The ID key leaking is the words leaking.
 
 ## The screens
 
-MY CASHU ID is the round button at the top left of home (the menu button's
+MY FOXY ID is the round button at the top left of home (the menu button's
 twin, with a head-and-shoulders drawing) and a row in the menu's WALLET; both
 open the same screen: the ID as a QR code with SHARE and DONE. Opened from home,
 DONE goes back to home; opened from the menu, back to the menu. With no ID read
-yet, both say NO CASHU ID and why.
+yet, both say NO FOXY ID and why.
 
-CONTACTS, from the menu or from SEND, lists the contacts; a Cashu ID reads
-CASHU ID, and tapping it goes to SET AMOUNT for that contact (the payment
+CONTACTS, from the menu or from SEND, lists the contacts; a Foxy ID reads
+FOXY ID, and tapping it goes to SET AMOUNT for that contact (the payment
 above), from either. An empty CONTACTS says "Ask another Foxy user to share
-their Cashu ID with you to add them as a contact." with ADD A CASHU ID, a card
-with a field to paste the ID into (PASTE A CASHU ID, NEXT reads it as a pasted
-one is), and SCAN A CASHU ID under it (the camera, then the same). Neither is
+their Foxy ID with you to add them as a contact." with ADD A FOXY ID, a card
+with a field to paste the ID into (PASTE A FOXY ID, NEXT reads it as a pasted
+one is), and SCAN A FOXY ID under it (the camera, then the same). Neither is
 offered where the wallet cannot read an ID, and SCAN is not where it cannot
 scan.
 
 The menu, in this order, every section open until it is tapped shut:
 
     BACKUP ACCOUNT    only while the wallet holds a balance and the words are not verified
-    WALLET            MY CASHU ID · HISTORY · CONTACTS · HIDE BALANCE
+    WALLET            MY FOXY ID · HISTORY · CONTACTS · HIDE BALANCE
     MINTS             SWITCH/ADD MINTS · TRANSFER MONEY (money at two mints or more) · SWAP and WHAT YOU HOLD
                       (a mint with two balances) · OTHER MINTS (an answer remembered)
     TOOLS             POINT OF SALE · SPLIT A BILL
@@ -579,12 +579,12 @@ The menu, in this order, every section open until it is tapped shut:
   is on, in the balance the keypad is in.
 - Rotating the ID itself, and more than one ID. (What rotates is the drop box a
   payment is left in, above.)
-- A Cashu ID as a NUT-18 request: NUT-18 cannot yet ask a payer to blind the
+- A Foxy ID as a NUT-18 request: NUT-18 cannot yet ask a payer to blind the
   key (above). A proposal to add that marker is drafted, not sent. The
   one-time request (no screen shows it) was the stand-in.
 - The one-time request with an amount, or across mints this phone does not use; and a
   payment to the ID key itself at a mint this phone does not use (refused).
-- Messages between two Cashu IDs. A contact is paid and nothing else; a
+- Messages between two Foxy IDs. A contact is paid and nothing else; a
   payment's note goes in its own envelope (above). An earlier build had them;
   this build drops their stores at its first boot (`foxy.msg.threads`,
   `foxy.msg.outbox`, `foxy.msg.seen`, STORAGE.md), and a first message an older

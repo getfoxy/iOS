@@ -1,8 +1,8 @@
 import Foundation
 import CryptoKit
 
-/// A Cashu ID: a name another wallet can pay, which the payer learns once and
-/// keeps in its contacts (docs/CASHU-ID.md).
+/// A Foxy ID: a name another wallet can pay, which the payer learns once and
+/// keeps in its contacts (docs/FOXY-ID.md).
 ///
 /// Four keys come from the seed for it, each at a path of its own that no other
 /// key of Foxy's uses:
@@ -13,7 +13,7 @@ import CryptoKit
 ///     m/129373'/20'/3'/0'/0'    the recovery key: a copy of each payment this phone makes, to itself
 ///
 /// 129373' is the purpose NUT-13 gives P2PK keys; the lock keys a payment
-/// request takes are account 10' (P2PK.swift). Account 20' is the Cashu ID's,
+/// request takes are account 10' (P2PK.swift). Account 20' is the Foxy ID's,
 /// and every level is hardened, so no public key and chain code of these paths
 /// gives any other key. The same twelve words give the same keys on any phone.
 ///
@@ -61,7 +61,7 @@ enum CashuID {
     static let deliveryPath: [UInt32] = [1, 0, 0]
     static let payPath: [UInt32] = [2, 0, 0]
     /// The recovery key's: NIP-17 copies of this phone's own payments to contacts, sent to itself so that the
-    /// words find an uncollected payment again (docs/CASHU-ID.md, "Restoring"). Never in the ID string, never
+    /// words find an uncollected payment again (docs/FOXY-ID.md, "Restoring"). Never in the ID string, never
     /// a lock key, never the delivery key; nothing but those copies is ever addressed to it.
     static let recoveryPath: [UInt32] = [3, 0, 0]
 
@@ -236,7 +236,7 @@ enum CashuID {
     /// itself for each secret, in order. Every secret's lock key must be the ID as it is (`data` with the ID's x,
     /// either parity: BIP-340 keys carry none), not a blinding of it; one that is anything else refuses the whole
     /// request (`notLocked`) and nothing is signed. A payer who locked to the bare ID showed the mint the ID at the
-    /// claim, so signing here links that payment to the ID at the mint; the page asks first (docs/CASHU-ID.md,
+    /// claim, so signing here links that payment to the ID at the mint; the page asks first (docs/FOXY-ID.md,
     /// "Paid to the ID key itself"). The key is wiped before this returns, and never answered.
     static func signUnblinded(seed: NUT13.Seed, secrets: [String]) throws -> [[UInt8]] {
         guard !secrets.isEmpty, secrets.count <= mostSecrets else { throw Failure.notLocked }
@@ -304,7 +304,7 @@ enum CashuID {
 
     // MARK: The drop boxes: the delivery key's rotating children
 
-    /// A payment is never wrapped to the delivery key Q itself (docs/CASHU-ID.md, "The drop boxes"), but to one
+    /// A payment is never wrapped to the delivery key Q itself (docs/FOXY-ID.md, "The drop boxes"), but to one
     /// of sixteen keys of the UTC day it is posted on, each Q moved by a tweak anybody holding the ID string can
     /// work out:
     ///

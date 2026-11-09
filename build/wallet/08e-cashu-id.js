@@ -1,8 +1,8 @@
-  /* ---- the Cashu ID: a name another wallet pays, with no server ---------------
+  /* ---- the Foxy ID: a name another wallet pays, with no server ---------------
    *
-   * docs/CASHU-ID.md is the whole of it. In short: the phone derives the ID key
+   * docs/FOXY-ID.md is the whole of it. In short: the phone derives the ID key
    * and the delivery key from the seed at their own paths (Foxy/Keychain/CashuID.swift),
-   * and MY CASHU ID shows their public halves, with the ID key's signature binding
+   * and MY FOXY ID shows their public halves, with the ID key's signature binding
    * them, as one string, `foxyid1…`. Another Foxy pastes or scans it and keeps it
    * in its contacts. To pay it, that Foxy locks the ecash to the ID by NUT-28
    * (pay-to-blinded-key), exactly as cashu-ts does with `blindKeys`: for each
@@ -108,7 +108,7 @@
   /* The most pieces one payment's throwaway keys are made for: more than any
    * split of an amount, with a retried swap's second set. */
   var CID_PIECES_MAX = 256;
-  /* The drop boxes (CashuID.swift `dropTweak`, docs/CASHU-ID.md "The drop boxes"). A payment is wrapped to one of
+  /* The drop boxes (CashuID.swift `dropTweak`, docs/FOXY-ID.md "The drop boxes"). A payment is wrapped to one of
    * the sixteen keys the ID's delivery key moves to on the UTC day it is posted, picked at random, and once more, a
    * few seconds later (`cidAheadDelay`), to one of the next day's: so the receiver asks only for the day's keys and
    * for the days it was away, never the same key on two days, and never the delivery key itself. The phone keeps the
@@ -129,7 +129,7 @@
   // the most codes kept (FoxyBridge+CashuID.swift `cashuIdMostAny`): one more drops the oldest
   var CID_ANY_MOST = 960;
   /* A wrap's envelope carries a random run of filler (`pad`) a NIP-44 bucket or more long, fresh for every wrap: a
-   * payment's two wraps and its daily resends do not always land in the same size bucket (docs/CASHU-ID.md, Posting). */
+   * payment's two wraps and its daily resends do not always land in the same size bucket (docs/FOXY-ID.md, Posting). */
   var CID_PAD_MIN = 256;
   // the most a Nostr send may carry (FoxyBridge+Delivery.swift: half of NIP-44's longest message), filler included
   var CID_SEND_MAX = 32767;
@@ -182,7 +182,7 @@
 
   /* { id, nostr, sig, version } from an ID string, or { why } in words. Never throws. */
   function cidRead(text) {
-    var bad = { why: 'That is not a Cashu ID.' };
+    var bad = { why: 'That is not a Foxy ID.' };
     var t = String(text || '').trim();
     if (!CID_TEXT.test(t)) return bad;
     var bytes;
@@ -191,7 +191,7 @@
     var body = bytes.slice(0, bytes.length - 4);
     var sum = sha256(body).slice(0, 4);
     for (var i = 0; i < 4; i++) if (sum[i] !== bytes[bytes.length - 4 + i]) return bad;
-    if (body[0] > CID_VERSION) return { why: 'That Cashu ID is from a newer Foxy. Update Foxy and try again.' };
+    if (body[0] > CID_VERSION) return { why: 'That Foxy ID is from a newer Foxy. Update Foxy and try again.' };
     if (body[0] !== 2) return bad;
     var id = hexOf(body.slice(1, 34));
     var nostr = hexOf(body.slice(34, 66));
@@ -224,8 +224,8 @@
       var nostr = String((j && j.nostr) || '').toLowerCase();
       var sig = String((j && j.sig) || '').toLowerCase();
       var recovery = String((j && j.recovery) || '').toLowerCase();
-      if (!CID_HEX33.test(id) || !CID_HEX32.test(nostr)) throw new Error('the phone’s Cashu ID was not a pair of keys');
-      if (!CID_SIG.test(sig) || !cidBound(id, nostr, sig)) throw new Error('the phone’s Cashu ID did not come with its own signature');
+      if (!CID_HEX33.test(id) || !CID_HEX32.test(nostr)) throw new Error('the phone’s Foxy ID was not a pair of keys');
+      if (!CID_SIG.test(sig) || !cidBound(id, nostr, sig)) throw new Error('the phone’s Foxy ID did not come with its own signature');
       // the recovery key goes nowhere but the copies' address (`cidCopyAll`): not on what the screens are given
       cidRecoveryKey = CID_HEX32.test(recovery) && recovery !== nostr ? recovery : '';
       return { id: id, nostr: nostr, sig: sig, text: cidEncode(id, nostr, sig) };
@@ -235,7 +235,7 @@
     return run;
   }
 
-  /* Whether this phone's ID is in use: MY CASHU ID was shown on it, or its
+  /* Whether this phone's ID is in use: MY FOXY ID was shown on it, or its
    * words were restored (`cidRestored`). Until then it does not listen, and it
    * names itself to nobody it pays (`cidBody`). */
   var CID_SHOWN = 'foxy.cid.shown';
@@ -250,14 +250,14 @@
 
   /* Words restored (`adoptCandidate`): the ID they give may be in somebody's
    * contacts, with money on its way, so this phone listens for it from now on
-   * without MY CASHU ID being opened, and derives it at once. */
+   * without MY FOXY ID being opened, and derives it at once. */
   function cidRestored() {
     cidForget();
     cidMarkInUse();
     // and for a week it reads back the copies of what this seed paid and nobody has collected (`cidCopyArrived`)
-    try { mustSave(CID_RECOVER, Date.now()); } catch (e) { console.warn('[foxy] cashu id: the restore could not be noted for the copies:', (e && e.message) || e); }
+    try { mustSave(CID_RECOVER, Date.now()); } catch (e) { console.warn('[foxy] foxy id: the restore could not be noted for the copies:', (e && e.message) || e); }
     cidMine().then(function () { return cidListenNow(); }).then(null, function (e) {
-      console.warn('[foxy] cashu id: the restored seed’s ID was not read yet:', (e && e.message) || e);
+      console.warn('[foxy] foxy id: the restored seed’s ID was not read yet:', (e && e.message) || e);
     });
   }
 
@@ -294,7 +294,7 @@
     var n = cidOrder();
     var t = BigInt('0x' + hexOf(sha256(bytes)));
     if (t === BigInt(0) || t >= n) t = BigInt('0x' + hexOf(sha256(bytes.concat([255]))));
-    if (t === BigInt(0) || t >= n) throw new Error('No key for that Cashu ID could be made.');
+    if (t === BigInt(0) || t >= n) throw new Error('No key for that Foxy ID could be made.');
     return t;
   }
 
@@ -308,13 +308,13 @@
   function cidDropKey(nostrHex, day, j) {
     var d = Math.floor(Number(day));
     var slot = Math.floor(Number(j));
-    if (!CID_HEX32.test(String(nostrHex)) || !(d >= 0 && d < 4294967296) || !(slot >= 0 && slot < CID_SLOTS)) throw new Error('That is not a Cashu ID.');
+    if (!CID_HEX32.test(String(nostrHex)) || !(d >= 0 && d < 4294967296) || !(slot >= 0 && slot < CID_SLOTS)) throw new Error('That is not a Foxy ID.');
     var bytes = cidUtf8(CID_DROP_TAG).concat(cidHexBytes(nostrHex), [(d >>> 24) & 255, (d >>> 16) & 255, (d >>> 8) & 255, d & 255], [slot]);
     return cidMoved(String(nostrHex), cidMoveBy(bytes));
   }
 
   function cidAnyKey(nostrHex, idHex) {
-    if (!CID_HEX32.test(String(nostrHex)) || !/^[0-9a-f]{8}$/.test(String(idHex))) throw new Error('That is not a Cashu ID.');
+    if (!CID_HEX32.test(String(nostrHex)) || !/^[0-9a-f]{8}$/.test(String(idHex))) throw new Error('That is not a Foxy ID.');
     return cidMoved(String(nostrHex), cidMoveBy(cidUtf8(CID_ANY_TAG).concat(cidHexBytes(nostrHex), cidHexBytes(idHex))));
   }
 
@@ -379,10 +379,10 @@
    * changes only on the ID's own signature, which every string `cidRead` takes
    * carries. */
   function cidKeep(read, name) {
-    if (!read || !read.sig || !cidBound(read.id, read.nostr, read.sig)) throw new Error('That is not a Cashu ID.');
+    if (!read || !read.sig || !cidBound(read.id, read.nostr, read.sig)) throw new Error('That is not a Foxy ID.');
     var list = FoxyWallet.book() || [];
     var text = cidEncode(read.id, read.nostr, read.sig);
-    var clean = cidCleanName(name) || 'Cashu ID';
+    var clean = cidCleanName(name) || 'Foxy ID';
     var cid = /** @type {any} */ ({ id: read.id, nostr: read.nostr, sig: read.sig });
     var row = { handle: text, name: clean, at: Date.now(), cid: cid };
     var at = -1;
@@ -403,7 +403,7 @@
 
   /* ---- what arrived ---- */
 
-  // what came in by the Cashu ID, by the first 16 bytes of each secret's SHA-256, so a delivery read twice is taken once
+  // what came in by the Foxy ID, by the first 16 bytes of each secret's SHA-256, so a delivery read twice is taken once
   function cidSeenKey(secret) { return hexOf(sha256(cidUtf8(secret)).slice(0, 16)); }
 
   function cidSeenList() {
@@ -437,7 +437,7 @@
     var left = rows.filter(function (r) { return Number(r.drop) > now; });
     if (left.length !== rows.length) {
       save(K.cidInbox, left);
-      console.log('[foxy] cashu id: ' + (rows.length - left.length) + ' kept deliveries let go, a day before their locktime');
+      console.log('[foxy] foxy id: ' + (rows.length - left.length) + ' kept deliveries let go, a day before their locktime');
     }
     return left;
   }
@@ -448,9 +448,9 @@
   function cidInboxKeep(key, body, mint, drop) {
     var rows = cidInboxRows();
     if (rows.some(function (r) { return r.key === key; })) return;
-    if (rows.length >= CID_INBOX_MAX) throw new Error('the Cashu ID’s inbox holds ' + CID_INBOX_MAX + ' already; the relays still hold this one');
+    if (rows.length >= CID_INBOX_MAX) throw new Error('the Foxy ID’s inbox holds ' + CID_INBOX_MAX + ' already; the relays still hold this one');
     var bytes = rows.reduce(function (n, r) { return n + r.body.length; }, 0);
-    if (bytes + String(body).length > CID_INBOX_BYTES) throw new Error('the Cashu ID’s inbox is full; the relays still hold this one');
+    if (bytes + String(body).length > CID_INBOX_BYTES) throw new Error('the Foxy ID’s inbox is full; the relays still hold this one');
     rows.push({ key: key, body: String(body), at: Date.now(), mint: mint, drop: drop });
     mustSave(K.cidInbox, rows);
   }
@@ -573,7 +573,7 @@
     var c = cidContactOf(id);
     if (c && CID_HEX32.test(String(c.cid.nostr || ''))) return { id: id, nostr: c.cid.nostr, name: c.name || '' };
     var out = cidOutboxRows().filter(function (r) { return r.contact === id && CID_HEX32.test(String(r.to || '')); }).pop();
-    return out ? { id: id, nostr: out.to, name: cidCleanName(out.name) === 'a Cashu ID' ? '' : cidCleanName(out.name) } : null;
+    return out ? { id: id, nostr: out.to, name: cidCleanName(out.name) === 'a Foxy ID' ? '' : cidCleanName(out.name) } : null;
   }
 
   /* Who sent a delivery, as far as it can be proved: `name` a contact's (the
@@ -588,7 +588,7 @@
     if (!to) return Promise.resolve(none);
     return nativeJson('cashuIdTag', { peer: got.from, e: got.E }, 60000).then(function (j) {
       var tag = String((j && j.tag) || '').toLowerCase();
-      if (!tag || tag !== got.tag) { console.warn('[foxy] cashu id: a delivery named a payer without proving it'); return none; }
+      if (!tag || tag !== got.tag) { console.warn('[foxy] foxy id: a delivery named a payer without proving it'); return none; }
       var c = cidContactOf(got.from);
       return { name: c ? c.name : '', back: to };
     }, function () { return none; });
@@ -628,7 +628,7 @@
     return list.some(function (u) { return canonicalMint(String(u || '')) === m; });
   }
 
-  // the mints this phone visited only to bring a Cashu ID payment home, by `cidBringHome`, at most fifty
+  // the mints this phone visited only to bring a Foxy ID payment home, by `cidBringHome`, at most fifty
   var CID_BROUGHT = 'foxy.cid.brought';
   function cidBroughtFrom(m) {
     var l = load(CID_BROUGHT, []);
@@ -650,7 +650,7 @@
     var l = load(CID_BROUGHT, []);
     if (Array.isArray(l) && l.indexOf(c) >= 0) save(CID_BROUGHT, l.filter(function (x) { return x !== c; }));
     rememberMint(c);
-    console.log('[foxy] cashu id: ' + hostOf(c) + ' is a mint this phone uses now');
+    console.log('[foxy] foxy id: ' + hostOf(c) + ' is a mint this phone uses now');
   }
 
   // a mint of this phone's whose keys would not come: { next, wait } by host, for this page load
@@ -666,7 +666,7 @@
     var b = cidBackoff[m];
     var wait = b ? Math.min(b.wait * 2, CID_BACKOFF_MAX_MS) : CID_BACKOFF_MIN_MS;
     cidBackoff[m] = { next: Date.now() + wait, wait: wait };
-    console.warn('[foxy] cashu id: the keys of ' + hostOf(m) + ' did not come; asked again in ' + Math.round(wait / 60000) + ' min at the soonest');
+    console.warn('[foxy] foxy id: the keys of ' + hostOf(m) + ' did not come; asked again in ' + Math.round(wait / 60000) + ' min at the soonest');
   }
 
   /* ---- reading a delivery ---- */
@@ -793,7 +793,7 @@
     return nativeJson('cashuIdTag', { peer: got.from, e: got.E }, 60000).then(function (j) {
       var tag = String((j && j.tag) || '').toLowerCase();
       if (tag && tag === got.tag) return who.name;
-      console.warn('[foxy] cashu id: a delivery named a contact as its payer without proving it');
+      console.warn('[foxy] foxy id: a delivery named a contact as its payer without proving it');
       return '';
     }, function () { return ''; });
   }
@@ -820,7 +820,7 @@
     var o = opts || {};
     var key = '';
     var refuse = function (why) {
-      console.warn('[foxy] cashu id: a delivery was not taken: ' + why);
+      console.warn('[foxy] foxy id: a delivery was not taken: ' + why);
       if (key) cidInboxDrop(key);
       // for a card's answer (`cidDecide`): what to say
       o.said = String(why || '');
@@ -856,7 +856,7 @@
     if (cidSeenAny(proofs)) {
       cidInboxDrop(at);
       cidOfferDrop(at);
-      console.log('[foxy] cashu id: a delivery taken already, read again; nothing more taken');
+      console.log('[foxy] foxy id: a delivery taken already, read again; nothing more taken');
       return Promise.resolve('seen');
     }
     var amount = proofs.reduce(function (n, pr) { return n + satsOf(pr.amount); }, 0);
@@ -876,7 +876,7 @@
       }
       try { cidInboxKeep(at, text, mint, soonest * 1000 - CID_DAY_S * 1000); }
       catch (e) { return refuse('it could not be written down (' + ((e && e.message) || e) + ')'); }
-      console.log('[foxy] cashu id: a delivery is kept until ' + why);
+      console.log('[foxy] foxy id: a delivery is kept until ' + why);
       return 'kept';
     };
     var kw = kw0;
@@ -945,14 +945,14 @@
       }
       return cidFromName(got).then(function (name) {
         var token = encodeToken(mint, signed, unit);
-        var memo = name ? 'From ' + name : 'From a Cashu ID';
+        var memo = name ? 'From ' + name : 'From a Foxy ID';
         var away = canonicalMint(mintUrl || '') !== mint;
         /* Said at once as arriving: every check this phone can make has passed (the mint's keys and DLEQs, the lock, its
          * own signatures), and the mint's swap is what is left. Not counted anywhere until that lands, and never said as
          * received before it (`_onCashuIdPaid`). Not for one being brought home, which is said once it is home. */
         if (!d.quiet) {
           var coming = proofs.reduce(function (n, pr) { return n + satsOf(pr.amount); }, 0);
-          console.log('[foxy] cashu id: a payment checked on this phone; the mint is swapping it');
+          console.log('[foxy] foxy id: a payment checked on this phone; the mint is swapping it');
           if (typeof FoxyWallet._onCashuIdArriving === 'function') {
             try { FoxyWallet._onCashuIdArriving({ unit: unit, amount: coming, name: name, mint: mint }); } catch (x) {}
           }
@@ -966,7 +966,7 @@
             var note = got.note ? cidCleanName(String(got.note).slice(0, CID_NOTE_MAX)) : '';
             if (note) { try { FoxyWallet.tag(r.hash, { note: note }); } catch (x) {} }
           }
-          console.log('[foxy] cashu id: a payment was taken in at ' + hostOf(mint));
+          console.log('[foxy] foxy id: a payment was taken in at ' + hostOf(mint));
           return { taken: true, r: r, name: name };
         }, function (e) {
           var why = String((e && e.message) || e);
@@ -982,7 +982,7 @@
     }, function (e) {
       var why = String((e && e.message) || e);
       // the phone's own no: not locked to the key this seed derives for that E, which nothing will change
-      if (/not locked to this Cashu ID|not a payment to this Cashu ID|bad request/i.test(why)) {
+      if (/not locked to this Foxy ID|not a payment to this Foxy ID|bad request/i.test(why)) {
         cidOfferDrop(at);
         return { why: 'it is not locked to the key this phone works out from it (' + why.slice(0, 80) + ')', drop: true };
       }
@@ -1070,7 +1070,7 @@
         var ps = g.why ? [] : g.proofs;
         if (!ps.length || ps.some(function (pr) { return !!cidProofProblem(pr); }) || cidMintProblem(mint, unit, kw, sets, ps)) {
           cidOfferDrop(r.key);
-          console.warn('[foxy] cashu id: a payment waiting at ' + hostOf(mint) + ' no longer checks out; let go');
+          console.warn('[foxy] foxy id: a payment waiting at ' + hostOf(mint) + ' no longer checks out; let go');
           return;
         }
         items.push({ text: r.body, got: g, proofs: ps, at: r.key, amount: ps.reduce(function (n, pr) { return n + satsOf(pr.amount); }, 0) });
@@ -1085,7 +1085,7 @@
         try { kept = cidOfferKeep(row); } catch (e) { kept = false; }
         if (!kept) return refuse('it could not be written down to wait for its receiver');
         cidOfferQuoteAll(mint, unit, q);
-        console.log('[foxy] cashu id: a payment at ' + hostOf(mint) + ', a mint this phone does not use, waits'
+        console.log('[foxy] foxy id: a payment at ' + hostOf(mint) + ', a mint this phone does not use, waits'
           + (q.lands > 0 ? ' for its receiver to choose' : ' (' + q.why + ')'));
         cidHistoryChanged();
         if (!choice && typeof FoxyWallet._onCashuIdOffer === 'function') {
@@ -1180,7 +1180,7 @@
           }
           // a waiting one that cannot be taken any more (its payer took it back, or the mint says no) goes
           if (it.at !== items[0].at) cidOfferDrop(it.at);
-          console.warn('[foxy] cashu id: a payment at ' + hostOf(mint) + ' was not taken: ' + (t.why || t.later || 'it is being taken'));
+          console.warn('[foxy] foxy id: a payment at ' + hostOf(mint) + ' was not taken: ' + (t.why || t.later || 'it is being taken'));
         });
       });
     }, Promise.resolve()).then(function () {
@@ -1196,7 +1196,7 @@
    * on the next launch, connection or return (`carryResume`, `finishMove`). It
    * lands in `toUnit`: by default dollars as dollars where home issues them, and
    * everything else as sats. Its row at home is written by `cidCameHome`, with
-   * `name` ("a Cashu ID" without one). Resolves 'taken' once it is home, or
+   * `name` ("a Foxy ID" without one). Resolves 'taken' once it is home, or
    * 'away' when it is still at that mint, this phone's, for the walk home to
    * finish. Never rejects. */
   function cidCarry(dl) {
@@ -1216,15 +1216,15 @@
     var said = function (n, u) { return u === 'usd' ? cidSaid(n, 'usd') : n + ' sats'; };
     try { putCarryJob(job, true); }
     catch (e) {
-      console.warn('[foxy] cashu id: ' + said(kept, unit) + ' taken at ' + hostOf(mint) + ' could not be written down to bring home; they stay there');
+      console.warn('[foxy] foxy id: ' + said(kept, unit) + ' taken at ' + hostOf(mint) + ' could not be written down to bring home; they stay there');
       return Promise.resolve('away');
     }
-    console.log('[foxy] cashu id: ' + said(kept, unit) + ' taken at ' + hostOf(mint) + ', a mint this phone does not use; bringing them home'
+    console.log('[foxy] foxy id: ' + said(kept, unit) + ' taken at ' + hostOf(mint) + ', a mint this phone does not use; bringing them home'
       + (toUnit !== unit ? ' as ' + (toUnit === 'usd' ? 'dollars' : 'sats') : ''));
     return FoxyWallet.carryHome(job.id, null, function () {}, {}).then(function (r) {
       var state = String((r && r.state) || '');
       if (state === 'home') return 'taken';
-      console.warn('[foxy] cashu id: the payment from ' + hostOf(mint) + ' is not home yet (' + state + (r && r.why ? ': ' + String(r.why).slice(0, 80) : '') + ')');
+      console.warn('[foxy] foxy id: the payment from ' + hostOf(mint) + ' is not home yet (' + state + (r && r.why ? ': ' + String(r.why).slice(0, 80) : '') + ')');
       return 'away';
     }, function () { return 'away'; });
   }
@@ -1255,13 +1255,13 @@
     var base = done ? Math.round(Number(c.before) || 0) : 0;
     var worth = ju === tu ? landed : Math.round(Number(job.priceUnit) || 0);
     var fee = Math.max(0, base + kept - (done ? left : 0) - worth);
-    var who = c.name || 'a Cashu ID';
+    var who = c.name || 'a Foxy ID';
     var memo = ju === 'sat' && tu === 'sat'
       ? 'From ' + who + ', came home from ' + hostOf(job.from) + ', fee ' + fee + (fee === 1 ? ' sat' : ' sats')
       : 'From ' + who + ', came home from ' + hostOf(job.from) + ' as ' + cidSaid(landed, tu) + ', fee ' + cidSaid(fee, ju);
     try { amendTx(quote, { memo: memo, cid: 'in' }); } catch (x) {}
     if (job.hash) { try { amendTx(job.hash, { memo: 'From ' + who + ', brought home', cid: 'in' }); } catch (x) {} }
-    console.log('[foxy] cashu id: a payment from ' + hostOf(job.from) + ' came home, ' + cidSaid(landed, tu) + ', fee ' + cidSaid(fee, ju));
+    console.log('[foxy] foxy id: a payment from ' + hostOf(job.from) + ' came home, ' + cidSaid(landed, tu) + ', fee ' + cidSaid(fee, ju));
     cidHistoryChanged();
     if (typeof FoxyWallet._onCashuIdPaid === 'function') {
       try {
@@ -1287,7 +1287,7 @@
       var others = cidOfferRows().filter(function (x) { return x.mint === mint; });
       return others.reduce(function (chain, x) { return chain.then(function () { return took(x.body, x.key); }); }, Promise.resolve()).then(function () {
         cidHistoryChanged();
-        console.log('[foxy] cashu id: a payment at ' + hostOf(mint) + ' is kept there (' + r + ')');
+        console.log('[foxy] foxy id: a payment at ' + hostOf(mint) + ' is kept there (' + r + ')');
         return r === 'taken' ? 'there' : r;
       });
     });
@@ -1304,7 +1304,7 @@
   function cidSendBack(item, mint, unit, home, who) {
     var o = item.opts || {};
     var to = who.back;
-    var name = cidCleanName(who.name || to.name) || 'a Cashu ID';
+    var name = cidCleanName(who.name || to.name) || 'a Foxy ID';
     return cidTakeIn({ got: item.got, proofs: item.proofs, mint: mint, unit: unit, at: item.at, quiet: true }).then(function (t) {
       if (!t.taken) {
         if (t.later) return 'waiting';
@@ -1320,7 +1320,7 @@
         var why = String(FoxyWallet.reason ? FoxyWallet.reason(e) : ((e && e.message) || e)).slice(0, 120);
         cidUseMint(mint);
         if (hash) { try { amendTx(hash, { memo: from + ', kept at ' + hostOf(mint) + ': it could not be sent back', cid: 'in' }); } catch (x) {} }
-        console.warn('[foxy] cashu id: a payment could not be sent back; it stays at ' + hostOf(mint) + ': ' + why);
+        console.warn('[foxy] foxy id: a payment could not be sent back; it stays at ' + hostOf(mint) + ': ' + why);
         o.said = why;
         return 'there';
       };
@@ -1332,7 +1332,7 @@
         return cidPay(to.id, back, { unit: unit, name: name, memo: 'Sent back to ' + name, read: { id: to.id, nostr: to.nostr } });
       }).then(function () {
         if (hash) { try { amendTx(hash, { memo: from + ', sent back', cid: 'in' }); } catch (x) {} }
-        console.log('[foxy] cashu id: a payment at ' + hostOf(mint) + ' was sent back to its payer');
+        console.log('[foxy] foxy id: a payment at ' + hostOf(mint) + ' was sent back to its payer');
         return 'back';
       }, stayed).then(function (r) {
         return carryGoHome(home).then(function () { cidHistoryChanged(); return r; });
@@ -1383,7 +1383,7 @@
 
   /* ---- ANY WALLET: a standard payment request, for a wallet that cannot blind ----
    *
-   * MY CASHU ID's second button. A NUT-18 request (`creqA…`) any Cashu wallet pays today: no amount, the unit the
+   * MY FOXY ID's second button. A NUT-18 request (`creqA…`) any Cashu wallet pays today: no amount, the unit the
    * phone is in, this phone's mints that honour a lock (the default first), locked (NUT-11 through `nut10`) to a fresh
    * key from the seed-derived lock pool (`takeLockKey`, the key a receive request takes, filed as `cid-any-<id>`), and
    * a Nostr transport to a key of the request's own (`cidAnyKey`: the delivery key moved by the request's id, listened
@@ -1450,7 +1450,7 @@
         // a payment to it comes to the ID's inbox: the phone listens from now on
         cidMarkInUse();
         Promise.resolve(cidListenNow()).then(null, function () {});
-        console.log('[foxy] cashu id: ANY WALLET: a request at ' + mints.length + ' mint(s) in ' + unit + ', locked to a fresh key of the pool');
+        console.log('[foxy] foxy id: ANY WALLET: a request at ' + mints.length + ' mint(s) in ' + unit + ', locked to a fresh key of the pool');
         return { text: text, id: id, pub: pub, unit: unit, mints: mints, target: target };
       });
     });
@@ -1492,7 +1492,7 @@
           || typeof pr.id !== 'string' || !(satsOf(pr.amount) > 0)) return Promise.resolve(refuse('it holds a proof that is not ecash Foxy can read'));
     }
     if (repeatedProof(proofs)) return Promise.resolve(refuse('it names the same ecash more than once'));
-    if (cidSeenAny(proofs)) { console.log('[foxy] cashu id: a payment from another wallet, taken already, read again'); return Promise.resolve('seen'); }
+    if (cidSeenAny(proofs)) { console.log('[foxy] foxy id: a payment from another wallet, taken already, read again'); return Promise.resolve('seen'); }
     if (!cidListedMint(mint)) return Promise.resolve(refuse('it is at ' + hostOf(mint) + ', a mint this phone does not use, which no request of this phone names'));
     var lock = String(lockedTo(proofs[0]) || '').toLowerCase();
     if (!proofs.every(function (x) { return String(lockedTo(x) || '').toLowerCase() === lock; })) return Promise.resolve(refuse('its pieces are locked to more than one key'));
@@ -1513,7 +1513,7 @@
         var note = d.got.note ? cidCleanName(String(d.got.note).slice(0, CID_NOTE_MAX)) : '';
         if (note) { try { FoxyWallet.tag(r.hash, { note: note }); } catch (x) {} }
       }
-      console.log('[foxy] cashu id: a payment from another wallet (ANY WALLET) was taken in at ' + hostOf(mint));
+      console.log('[foxy] foxy id: a payment from another wallet (ANY WALLET) was taken in at ' + hostOf(mint));
       if (typeof FoxyWallet._onCashuIdPaid === 'function') {
         try { FoxyWallet._onCashuIdPaid({ unit: unit, amount: r && r.amount, sats: r && r.sats, hash: r && r.hash, name: '', mint: mint }); } catch (x) {}
       }
@@ -1564,12 +1564,12 @@
     if (repeatedProof(proofs)) return Promise.resolve(refuse('it names the same ecash more than once'));
     var key = 'cid:' + piecesFingerprint(proofs);
     if (cidSeenAny(proofs)) return Promise.resolve('seen');
-    if (cidLeftHas(key)) { console.log('[foxy] cashu id: a delivery paid to the ID key itself, left before, read again'); return Promise.resolve('left'); }
+    if (cidLeftHas(key)) { console.log('[foxy] foxy id: a delivery paid to the ID key itself, left before, read again'); return Promise.resolve('left'); }
     if (!cidListedMint(mint)) return Promise.resolve(refuse('it is paid to the ID key itself, unblinded, at ' + hostOf(mint) + ', a mint this phone does not use'));
     var amount = proofs.reduce(function (n, x) { return n + satsOf(x.amount); }, 0);
     if (!o.bareOk) {
       if (cidBareWaiting[key]) return Promise.resolve('unblinded');
-      console.warn('[foxy] cashu id: a delivery is locked to the ID key itself, unblinded: nothing signed; its receiver is asked');
+      console.warn('[foxy] foxy id: a delivery is locked to the ID key itself, unblinded: nothing signed; its receiver is asked');
       return cidFromName(d.got).then(function (name) {
         var refund = proofs.some(function (x) { return cidLocktimeOf(x) > 0; });
         var w = { key: key, text: d.text, name: name, mint: mint, unit: unit, amount: amount, at: Date.now(), refund: refund };
@@ -1588,7 +1588,7 @@
     var hold = cidHold(proofs);
     if (!hold) return Promise.resolve('seen');
     var held = hold;
-    console.warn('[foxy] cashu id: TAKE IT ANYWAY: the ID key itself is asked to sign ' + proofs.length + ' piece(s) of one delivery');
+    console.warn('[foxy] foxy id: TAKE IT ANYWAY: the ID key itself is asked to sign ' + proofs.length + ' piece(s) of one delivery');
     return nativeJson('cashuIdSignUnblinded', { secrets: proofs.map(function (x) { return x.secret; }) }, 60000).then(function (j) {
       var sigs = Array.isArray(j && j.sigs) ? j.sigs : [];
       if (sigs.length !== proofs.length) throw new Error('the phone’s signatures were not for what was asked');
@@ -1608,7 +1608,7 @@
             var note = d.got.note ? cidCleanName(String(d.got.note).slice(0, CID_NOTE_MAX)) : '';
             if (note) { try { FoxyWallet.tag(r.hash, { note: note }); } catch (x) {} }
           }
-          console.log('[foxy] cashu id: a payment to the ID key itself was taken, on its receiver’s word');
+          console.log('[foxy] foxy id: a payment to the ID key itself was taken, on its receiver’s word');
           if (typeof FoxyWallet._onCashuIdPaid === 'function') {
             try { FoxyWallet._onCashuIdPaid({ unit: unit, amount: r && r.amount, sats: r && r.sats, hash: r && r.hash, name: name, mint: mint }); } catch (x) {}
           }
@@ -1632,7 +1632,7 @@
     if (!take) {
       delete cidBareWaiting[key];
       cidLeftAdd(key);
-      console.log('[foxy] cashu id: a delivery paid to the ID key itself was left' + (w.refund ? '; its payer has it back after its locktime' : ''));
+      console.log('[foxy] foxy id: a delivery paid to the ID key itself was left' + (w.refund ? '; its payer has it back after its locktime' : ''));
       return Promise.resolve({ state: 'left', why: '' });
     }
     var o = /** @type {any} */ ({ bareOk: true });
@@ -1661,7 +1661,7 @@
       if (cidEarly.length >= CID_EARLY_MAX || bytes + text.length > CID_EARLY_BYTES) cidEarlyMissed = true;
       else cidEarly.push(text);
     }
-    console.log('[foxy] cashu id: a delivery read before the mint was connected; taken once it is');
+    console.log('[foxy] foxy id: a delivery read before the mint was connected; taken once it is');
     return true;
   }
 
@@ -1679,7 +1679,7 @@
       }, Promise.resolve()).then(function () {
         return cidListenNow(missed ? null : { ifClosed: true });
       }).then(null, function (e) {
-        console.warn('[foxy] cashu id: after the connect:', (e && e.message) || e);
+        console.warn('[foxy] foxy id: after the connect:', (e && e.message) || e);
       });
     }, 0);
   }
@@ -1778,7 +1778,7 @@
         var gap = ((g[0] << 8) | g[1]) % 60001;
         cidDayTimer = setTimeout(function () {
           cidDayTimer = null;
-          // opened meanwhile (the wake, MY CASHU ID shown): nothing to do
+          // opened meanwhile (the wake, MY FOXY ID shown): nothing to do
           if (!cidOpenedAt) cidListenNow().then(null, function () {});
         }, gap);
       });
@@ -1788,7 +1788,7 @@
   function cidFreshMs() { return CID_TESTS && Number(FoxyWallet._cashuIdFreshMs) > 0 ? Number(FoxyWallet._cashuIdFreshMs) : CID_FRESH_MS; }
 
   /* `opts.ifClosed`: an inbox opened less than `CID_FRESH_MS` ago is left open, and only what was kept is taken
-   * (`cidDrain`). Without it (the wake, MY CASHU ID shown, a restore) it is always opened again. */
+   * (`cidDrain`). Without it (the wake, MY FOXY ID shown, a restore) it is always opened again. */
   function cidListenNow(opts) {
     if (cidListenRun) return cidListenRun;
     if (!cidInUse()) return Promise.resolve(0);
@@ -1805,21 +1805,21 @@
         save(CID_HEARD, plan.today);
         cidDayArm();
       }
-      console.log('[foxy] cashu id: ' + (got ? 'listening on ' + plan.days.length + ' day(s) of keys' : 'no relay is listening'));
+      console.log('[foxy] foxy id: ' + (got ? 'listening on ' + plan.days.length + ' day(s) of keys' : 'no relay is listening'));
       return got;
     }, function (e) {
       cidOpenedAt = 0;
-      console.warn('[foxy] cashu id: the phone did not listen:', (e && e.message) || e);
+      console.warn('[foxy] foxy id: the phone did not listen:', (e && e.message) || e);
       return 0;
     }).then(function (n) {
       // after a restore, and for a week: this seed's own copies of what it paid, read back (`cidCopyArrived`)
       if (!cidRecovering()) return n;
       var since = Math.floor(Date.now() / 1000) - CID_SINCE_S + 300;
       return bridgeAsk('cashuIdCopiesOpen', { since: since }, 70000).then(function (c) {
-        console.log('[foxy] cashu id: ' + ((Number(String(c).trim()) || 0) ? 'reading back this seed’s copies' : 'no relay is holding this seed’s copies yet'));
+        console.log('[foxy] foxy id: ' + ((Number(String(c).trim()) || 0) ? 'reading back this seed’s copies' : 'no relay is holding this seed’s copies yet'));
         return n;
       }, function (e) {
-        console.warn('[foxy] cashu id: the copies were not read back:', (e && e.message) || e);
+        console.warn('[foxy] foxy id: the copies were not read back:', (e && e.message) || e);
         return n;
       });
     }).then(function (n) {
@@ -1940,7 +1940,7 @@
           cidHistoryChanged();
         }, function (e) {
           cidOutboxAmend(r.id, { tries: (Number(r.tries) || 0) + 1 });
-          console.warn('[foxy] cashu id: a payment was not sent yet:', (e && e.message) || e);
+          console.warn('[foxy] foxy id: a payment was not sent yet:', (e && e.message) || e);
         });
       });
     }, Promise.resolve()).then(function () {
@@ -1948,7 +1948,7 @@
       cidCopyArm();
       return sent;
     }, function (e) {
-      console.warn('[foxy] cashu id: the outbox could not be sent:', (e && e.message) || e);
+      console.warn('[foxy] foxy id: the outbox could not be sent:', (e && e.message) || e);
       cidRetryArm();
       cidCopyArm();
       return sent;
@@ -2023,15 +2023,15 @@
             sent += 1;
           }, function (e) {
             cidOutboxAmend(r.id, { copyAt: Date.now() + cidCopyDelay(), copyTries: (Number(r.copyTries) || 0) + 1 });
-            console.warn('[foxy] cashu id: a payment’s copy was not sent yet:', (e && e.message) || e);
+            console.warn('[foxy] foxy id: a payment’s copy was not sent yet:', (e && e.message) || e);
           });
         });
       }, Promise.resolve());
     }).then(function () {
-      if (sent) console.log('[foxy] cashu id: ' + sent + ' payment cop' + (sent === 1 ? 'y' : 'ies') + ' sent to this seed’s recovery key');
+      if (sent) console.log('[foxy] foxy id: ' + sent + ' payment cop' + (sent === 1 ? 'y' : 'ies') + ' sent to this seed’s recovery key');
       return sent;
     }, function (e) {
-      console.warn('[foxy] cashu id: the copies could not be sent:', (e && e.message) || e);
+      console.warn('[foxy] foxy id: the copies could not be sent:', (e && e.message) || e);
       return sent;
     });
     cidCopying = run;
@@ -2083,7 +2083,7 @@
           // tried again on the first wrap's schedule (`cidRetryArm`): once a minute, a quarter of an hour after thirty tries
           var tries = (Math.floor(Number(r.aheadTries)) || 0) + 1;
           cidOutboxAmend(r.id, { aheadAt: Date.now() + cidRetryMs() * (tries >= CID_TRIES_FAST ? CID_RETRY_SLOW : 1), aheadTries: tries });
-          console.warn('[foxy] cashu id: a payment’s second wrap was not sent yet:', (e && e.message) || e);
+          console.warn('[foxy] foxy id: a payment’s second wrap was not sent yet:', (e && e.message) || e);
         });
       });
     }, Promise.resolve()).then(function () { return sent; }, function () { return sent; });
@@ -2127,7 +2127,7 @@
    * recovery key (its public half is on every wrap a relay holds) is dropped. */
   function cidCopyArrived(body) {
     var run = cidCopyChain.then(function () { return cidCopyOne(body); }).then(null, function (e) {
-      console.warn('[foxy] cashu id: a copy could not be read:', (e && e.message) || e);
+      console.warn('[foxy] foxy id: a copy could not be read:', (e && e.message) || e);
       return 'refused';
     });
     cidCopyChain = run.then(function () {}, function () {});
@@ -2137,7 +2137,7 @@
   function cidTokenKey(token) { return hexOf(sha256(cidUtf8(String(token))).slice(0, 16)); }
 
   function cidCopyOne(body) {
-    var no = function (why) { console.warn('[foxy] cashu id: a copy was dropped: ' + why); return 'refused'; };
+    var no = function (why) { console.warn('[foxy] foxy id: a copy was dropped: ' + why); return 'refused'; };
     var text = typeof body === 'string' ? body : '';
     if (!text || text.length > CID_BODY_MAX) return no('it is larger than any payment');
     var j = null;
@@ -2202,17 +2202,17 @@
     return asking.then(function (w) { return statesOf(w, info.proofs); }).then(function (states) {
       return (states || []).length === info.proofs.length && states.every(function (st) { return String(st) === 'SPENT'; });
     }, function () { return false; }).then(function (collected) {
-      if (collected) { console.log('[foxy] cashu id: a copy of a payment its contact collected; nothing to bring back'); return 'collected'; }
+      if (collected) { console.log('[foxy] foxy id: a copy of a payment its contact collected; nothing to bring back'); return 'collected'; }
       if (cidOutboxRows().some(function (r) { return (r.tokenKey || cidTokenKey(r.token)) === tk; })) return 'seen';
       var now = Date.now();
-      var row = { id: 'cidr' + tk.slice(0, 16), to: to, contact: contact, name: cidCleanName(j.name) || 'a Cashu ID',
+      var row = { id: 'cidr' + tk.slice(0, 16), to: to, contact: contact, name: cidCleanName(j.name) || 'a Foxy ID',
                   E: CID_HEX33.test(String(j.E || '').toLowerCase()) ? String(j.E).toLowerCase() : String(info.proofs[0].p2pk_e).toLowerCase(),
                   token: j.token, tokenKey: tk, mint: mint, unit: unit, amount: Math.round(satsOf(j.amount) || 0) || sumProofs(info.proofs),
                   hash: '', at: Number(j.at) || now, lockUntil: locktime, index: index, refundRow: '', refundPub: refund,
                   from: '', tag: '', note: '', sentAt: Number(j.sentAt) || now, lastSentAt: now, tries: 0, state: 'out',
                   copiedAt: now, restored: true };
       cidOutboxPut(row);
-      console.log('[foxy] cashu id: a payment to ' + row.name + ' nobody has collected was found again from this seed’s copy');
+      console.log('[foxy] foxy id: a payment to ' + row.name + ' nobody has collected was found again from this seed’s copy');
       cidHistoryChanged();
       if (routeOpen()) cidWatchAll().then(null, function () {});
       return 'rebuilt';
@@ -2247,7 +2247,7 @@
             if (spent === info.proofs.length) {
               cidOutboxAmend(r.id, { state: 'collected', doneAt: Date.now() });
               if (r.hash) { try { amendTx(r.hash, { cidCollected: true }); FoxyWallet.settleTx(r.hash); FoxyWallet.forgetClaimedToken(r.token); } catch (x) {} }
-              console.log('[foxy] cashu id: a payment to a contact was collected');
+              console.log('[foxy] foxy id: a payment to a contact was collected');
               out.collected += 1;
               cidHistoryChanged();
               return null;
@@ -2256,7 +2256,7 @@
             return cidTakeBack(r, info, states).then(function (n) { if (n) out.back += 1; });
           });
         }).then(null, function (e) {
-          console.warn('[foxy] cashu id: a payment out could not be looked at yet:', (e && e.message) || e);
+          console.warn('[foxy] foxy id: a payment out could not be looked at yet:', (e && e.message) || e);
         });
       });
     }, Promise.resolve()).then(function () { cidOutboxTidy(); return out; });
@@ -2297,7 +2297,7 @@
         if (r.hash) { try { amendTx(r.hash, { cidBack: true }); FoxyWallet.forgetClaimedToken(r.token); } catch (x) {} }
         dropLockKey(r.refundRow);
         var n = Math.round(satsOf(got && (got.amount != null ? got.amount : got.sats)));
-        console.log('[foxy] cashu id: a payment its contact did not collect came back');
+        console.log('[foxy] foxy id: a payment its contact did not collect came back');
         cidHistoryChanged();
         if (typeof FoxyWallet._onTakenBack === 'function') {
           try { FoxyWallet._onTakenBack({ sats: unitOf(info.unit) === 'usd' ? 0 : n, unit: unitOf(info.unit) || 'sat', amount: n, hash: got && got.hash }); } catch (x) {}
@@ -2346,13 +2346,13 @@
       var r0 = /** @type {any} */ (cidRead(text));
       read = r0.id ? r0 : null;
     }
-    if (!read) return Promise.reject(new Error('That is not a Cashu ID.'));
+    if (!read) return Promise.reject(new Error('That is not a Foxy ID.'));
     var contact = cidContactOf(read.id);
-    var name = cidCleanName(o.name || (contact && contact.name)) || 'a Cashu ID';
+    var name = cidCleanName(o.name || (contact && contact.name)) || 'a Foxy ID';
     var unit = unitOf(o.unit) || 'sat';
     var want = Math.round(Number(amount) || 0);
     if (!(want > 0)) return Promise.reject(new Error('Ask for an amount above zero.'));
-    if (!routeOpen()) return Promise.reject(new Error('Paying a Cashu ID needs a connection. Nothing was sent.'));
+    if (!routeOpen()) return Promise.reject(new Error('Paying a Foxy ID needs a connection. Nothing was sent.'));
     // as a till checks before it makes a code (08d-till.js): a mint that does not honour a lock would let anyone spend it
     if (!tillMintLocks(mintUrl)) {
       return Promise.reject(new Error((mintUrl ? hostOf(canonicalMint(mintUrl)) : 'This mint') + ' does not say it honours a lock (NUT-11), so a contact cannot be paid from it. Nothing was sent.'));
@@ -2361,7 +2361,7 @@
     var rowId = 'cid' + Date.now().toString(36) + hexOf(window.CashuTS.createRandomSecretKey()).slice(0, 8);
     var refundRow = 'cid-refund-' + rowId;
     var run = cidMine().then(function (mine) {
-      if (mine.id === read.id) throw new Error('That is your own Cashu ID.');
+      if (mine.id === read.id) throw new Error('That is your own Foxy ID.');
       return primeLockPool().then(function () { return mine; });
     }).then(function (mine) {
       var refundPub = takeLockKey(refundRow, { unit: unit });
@@ -2395,7 +2395,7 @@
           var lock = String(lockedTo(pr) || '').toLowerCase();
           return CID_HEX33.test(String(pr.p2pk_e || '').toLowerCase()) && lock !== read.id && lock !== refundPub;
         })) {
-          console.error('[foxy] cashu id: a payment was made whose pieces are not blinded; it is kept to come back after its locktime');
+          console.error('[foxy] foxy id: a payment was made whose pieces are not blinded; it is kept to come back after its locktime');
         }
         var E = proofs.some(function (pr) { return String(pr.p2pk_e || '').toLowerCase() === sent.E0; })
           ? sent.E0 : String((proofs[0] && proofs[0].p2pk_e) || '').toLowerCase();
@@ -2452,7 +2452,7 @@
       else cidCopyArm();
       Promise.resolve().then(function () { return cidListenNow({ ifClosed: true }); }).then(null, function () {});
     } catch (e) {
-      console.warn('[foxy] cashu id: catching up failed:', (e && e.message) || e);
+      console.warn('[foxy] foxy id: catching up failed:', (e && e.message) || e);
     }
   }
 
@@ -2466,5 +2466,5 @@
       if (cidOutboxRows().some(function (r) { return cidCopyDue(r, Date.now()); })) setTimeout(function () { cidCopyAll().then(null, function () {}); }, 0);
       if (cidOutboxRows().some(function (r) { return cidAheadDue(r, Date.now()); })) setTimeout(function () { cidAheadAll().then(null, function () {}); }, 0);
     }
-    catch (e) { console.warn('[foxy] cashu id: sending on the route’s return:', (e && e.message) || e); }
+    catch (e) { console.warn('[foxy] foxy id: sending on the route’s return:', (e && e.message) || e); }
   }

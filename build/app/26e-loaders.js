@@ -237,7 +237,7 @@
     if (this.syncPreview) this.syncPreview();
     // a card screen coming down may be the end of a card flow, and what waited for it is raised (26f-flashcard.js)
     if (was === 'card' || was === 'cardReady' || was === 'cardBack' || was === 'cardAgain') this.cardFlowMayHaveEnded();
-    // a stage a menu row opened (MY CASHU ID): the menu again, unless another stage takes its place (01-ui-basics.js)
+    // a stage a menu row opened (MY FOXY ID): the menu again, unless another stage takes its place (01-ui-basics.js)
     if (this.menuReturnSoon) this.menuReturnSoon();
     return true;
   }

@@ -61,7 +61,7 @@ The bridge exposes exactly these actions:
 - `previewStart`, `previewStop`, `pasteStart`, `pasteStop`, `notify`, `reminder`, `share`, `exportText`, `openSettings`, `openCompany`
 - payment requests paid straight to whoever asked: `inboxOpen`, `inboxClose`, `inboxAnswer`, `onionPost`, `httpsPost`, `nostrSend`
 - the till (point of sale): a Nostr key made per cashier code and kept in the Keychain, and the inboxes that listen on those keys for the cashier's deliveries: `tillKeyMake`, `tillKeyDrop`, `tillInboxOpen`, `tillInboxClose`. One code per cashier, never handed out twice. A code's lock key is one of the seed's (`p2pkReserve`), but each request or invoice a cashier makes is locked to that key moved by a nonce of its own (MONEY.md §19), so a payer's copy of what it paid one till with is refused at any other request or till; the keeper adds the move to the key `p2pkKey` hands the page, in the page, as for any lock. A delivery's tip is passed on as it says, but never beyond what arrived, and a tip is passed on only from a sale the keeper's own history took in; the keeper's row shows the sale and the tip as two figures, which is how a whole-sale tip is caught: after the fact, once it has been passed on, not before. Old codes (version 1) on tills still on the old build keep the old replay open until they end; a keeper makes new codes after updating. What stays trusted: how much of a sale its cashier says was tip (the keeper sees it on the row); the cashier's phone says PAID on its own check of the ecash (locked to the request's key, signed by the mint, unspent at that moment); a code anybody has seen still lets them send the keeper ecash, which costs them real money
-- the Cashu ID (CASHU-ID.md): its public keys from the seed and the ID key's signature binding them, signatures by a payment's one-time key (never the key), the payer's name proved, the base of this phone's own throwaway keys for what it pays, the inbox on its delivery key, and the inbox on its recovery key that reads this phone's own copies back after a restore, and the ID key's own signature for a payment made to it unblinded, only on its receiver's TAKE IT ANYWAY: `cashuIdPublic`, `cashuIdSign`, `cashuIdTag`, `cashuIdEphemeral`, `cashuIdSignUnblinded`, `cashuIdInboxOpen`, `cashuIdInboxClose`, `cashuIdCopiesOpen`
+- the Foxy ID (FOXY-ID.md): its public keys from the seed and the ID key's signature binding them, signatures by a payment's one-time key (never the key), the payer's name proved, the base of this phone's own throwaway keys for what it pays, the inbox on its delivery key, and the inbox on its recovery key that reads this phone's own copies back after a restore, and the ID key's own signature for a payment made to it unblinded, only on its receiver's TAKE IT ANYWAY: `cashuIdPublic`, `cashuIdSign`, `cashuIdTag`, `cashuIdEphemeral`, `cashuIdSignUnblinded`, `cashuIdInboxOpen`, `cashuIdInboxClose`, `cashuIdCopiesOpen`
 - tap to pay, an invoice or a payment request handed over Bluetooth: `tapReceiveStart`, `tapReceiveStop`, `tapPayStart`, `tapPayStop`, `tapSend`, `tapChange`, and `bluetoothAsk`, the first install's Bluetooth question, `tapChangeKept`, `tapAsking`, `tapChangeDue`, `tapQuote`, `tapTerms`
 - `awake`, which holds the screen lit while a screen is being looked at rather than touched
 - `shakeStart`, `shakeStop`: whether a shake of the phone presses TAP, armed only on the receive screen (TAP-TO-PAY.md)
@@ -150,9 +150,9 @@ answer for a third of them.
 | `cashuIdSignUnblinded` | seed queue | NUT-11 Schnorr signatures by the ID key d itself over 1 to 100 P2PK secrets whose `data` is the ID as it is (its x, either parity), not asking for SIG_ALL: a payment a payer locked to the ID without blinding it, for the one delivery its receiver answered TAKE IT ANYWAY on the card PAID TO YOUR ID KEY; the shape of every secret is checked before the seed is read, one locked anywhere else (a blinded key among them) signs nothing, every signing is logged, and the key is never answered. The page asks first and nothing else calls it; LEAVE IT is the card's default |
 | `cashuIdTag` | seed queue | SHA-256("foxy-cashu-id-from-v1" ‖ x(d·peer) ‖ E) for two points the page names: the tag by which a payer proves its ID to a receiver, the same on both sides; nothing private is answered |
 | `cashuIdEphemeral` | seed queue | HMAC-SHA256 keyed by the paying key `m/129373'/20'/2'/0'/0'` over "foxy-cashu-id-e-v1" ‖ the receiver's ID ‖ an index (below 2^32) ‖ a locktime: the base one payment's throwaway keys are made from (`to` names the ID, `id` being the request's own); the paying key is never answered |
-| `cashuIdInboxOpen` | seed queue + cashu id days | listens for NIP-17 gift wraps (kind 1059), over Tor, at one relay picked at random (the next on a failure or a CLOSED), on the sixteen keys of each UTC day the page names (`cashuIdDays`: whole days from 32 back to today, today when none is), always in eleven REQs of exactly 48 keys covering the window three days each, the days not asked filled with keys made for the REQ, each REQ from two days (NIP-59's backdating) before its oldest day, answering "1" only once the relay has ended every REQ (EOSE); and a random 3 to 30 s later, in REQs of 48 of their own at every relay, on the keys of the ANY WALLET ids in `any` (8 hex each, 960 at most), from thirty-two days back, handing the ids back to the page (`_cashuIdAnyHeard`) once every relay opened has ended those REQs or failed, one having ended them; a relay that sends a NOTICE before ending the day keys' REQs, or leaves 30 s (from the first REQ having gone) without ending the next or sending a wrap, is let go for the next; never on the delivery key itself; page by page (500 a page, eight at most, each up to the oldest wrap of the last, `until`), closing the one before first; the delivery key is read on the seed queue and the day keys' secrets worked out there and handed to the inboxes, never to the page; each wrap is opened once, with the key its `p` tag names, and handed to the page as `_cashuIdArrived(body)` |
+| `cashuIdInboxOpen` | seed queue + foxy id days | listens for NIP-17 gift wraps (kind 1059), over Tor, at one relay picked at random (the next on a failure or a CLOSED), on the sixteen keys of each UTC day the page names (`cashuIdDays`: whole days from 32 back to today, today when none is), always in eleven REQs of exactly 48 keys covering the window three days each, the days not asked filled with keys made for the REQ, each REQ from two days (NIP-59's backdating) before its oldest day, answering "1" only once the relay has ended every REQ (EOSE); and a random 3 to 30 s later, in REQs of 48 of their own at every relay, on the keys of the ANY WALLET ids in `any` (8 hex each, 960 at most), from thirty-two days back, handing the ids back to the page (`_cashuIdAnyHeard`) once every relay opened has ended those REQs or failed, one having ended them; a relay that sends a NOTICE before ending the day keys' REQs, or leaves 30 s (from the first REQ having gone) without ending the next or sending a wrap, is let go for the next; never on the delivery key itself; page by page (500 a page, eight at most, each up to the oldest wrap of the last, `until`), closing the one before first; the delivery key is read on the seed queue and the day keys' secrets worked out there and handed to the inboxes, never to the page; each wrap is opened once, with the key its `p` tag names, and handed to the page as `_cashuIdArrived(body)` |
 | `cashuIdInboxClose` | — | closes every inbox of the ID's, the delivery key's and the recovery key's; the keys are the seed's and nothing is thrown away |
-| `cashuIdCopiesOpen` | seed queue + cashu id window | the same, on the recovery key `m/129373'/20'/3'/0'/0'`: NIP-17 gift wraps addressed to it, from the same window, each opened once and handed to the page as `_cashuIdCopy(body)`; the page asks only after its words were restored, and believes a copy only where this seed made its every E (CASHU-ID.md, Restoring); the key's private half never reaches the page |
+| `cashuIdCopiesOpen` | seed queue + foxy id window | the same, on the recovery key `m/129373'/20'/3'/0'/0'`: NIP-17 gift wraps addressed to it, from the same window, each opened once and handed to the page as `_cashuIdCopy(body)`; the page asks only after its words were restored, and believes a copy only where this seed made its every E (FOXY-ID.md, Restoring); the key's private half never reaches the page |
 | `onionPost` | onion only | only `http://` to a version 3 `.onion` host, with no user, query or fragment, through Tor's SOCKS port and never the open connection; a body of at most 256 kB, an answer cut off at 64 kB |
 | `httpsPost` | mint url | a payment posted once to the web address a request names (NUT-18 `post`, https): the same address checks a mint meets, so never localhost, an IP literal, a single-label name or the `.local` family, and never an `.onion`, which is `onionPost`'s; no sign-in or fragment in the address; a body of at most 256 kB; through Tor on a circuit of its own, or the open connection when the person chose it, as for a mint; never redirected, so a 3xx comes back as itself and is not read as paid; 60 s at most |
 | `tapReceiveStart` | offer only | a BOLT11 invoice, a Cashu payment request, or both, at most 4096 characters in all, advertised over Bluetooth by service UUID alone, with no name, code or amount; sent to any phone that connects, which learns no more than the QR code shows (TAP-TO-PAY.md); a batch of writes is answered once, so every write in it must be the one holder's, and one that is not refuses the batch |
@@ -360,7 +360,7 @@ What bounds the bridge:
   for you.", the title "Foxy", and no amount or name. The phone replaces
   it each time Foxy comes to the front or goes away, and a Debug build may
   shorten it for a phone test. It is made on the phone; there is no push and no
-  server. The page asks only with a Cashu ID in use: the reminder is on at once
+  server. The page asks only with a Foxy ID in use: the reminder is on at once
   where notifications are already allowed, and otherwise asked once.
 - **The system paste control** is placed only in a rectangle that is inside
   the web view, no more than 90% of its width and 50% of its height, and in
@@ -484,7 +484,7 @@ activity.
 The mint learns the Tor exit by definition. The question is who learns more.
 
 **Contacts.** `foxy.contacts` — names and Lightning addresses the user has
-saved, and the two public keys of each contact that is a Cashu ID (§8).
+saved, and the two public keys of each contact that is a Foxy ID (§8).
 
 **The Orbot access key.** `foxy.orbot.token`, in the keychain. It is a
 credential Orbot issues so Foxy's Tor can use Orbot's bypass port.
@@ -1202,7 +1202,7 @@ That is about the phone in a hand, not about an attacker with the file.
 **Adding a mint** asks the same lock where one is set: Face ID where FACE ID
 LOCK is on, else the PIN (`mintGate`). Someone holding the unlocked phone with
 Foxy open cannot point it at a mint of their choosing (ADD A MINT, a tile of a
-mint the phone only visited, TRANSFER TO one, a token's or a Cashu ID
+mint the phone only visited, TRANSFER TO one, a token's or a Foxy ID
 payment's KEEP IT THERE, a request's USE, a restore, a cashier code) without
 it. Free are the shipped mints, which the app chose, and the mints the person
 chose: the phone's own, every one it was saved on, every one passed through
@@ -1285,7 +1285,7 @@ The DLEQ check (§5) uses cashu-ts's `hasValidDleq`, not hand-rolled code. A
 mint response whose DLEQ fails is refused by cashu-ts; the app says THIS MINT
 SENT INVALID SIGNATURES and offers no retry, and the claim is never repeated.
 
-**The Cashu ID** (`CASHU-ID.md`). A name another wallet keeps in its contacts
+**The Foxy ID** (`FOXY-ID.md`). A name another wallet keeps in its contacts
 and pays, with no server: keys from the seed at paths of their own
 (`Foxy/Keychain/CashuID.swift`). The ID key is never a lock key. A payer locks
 each piece by NUT-28 (pay-to-blinded-key), as cashu-ts's `blindKeys` does: a
@@ -1304,7 +1304,7 @@ and blinded refund key again. What each party learns:
   or to each other; the locktime, a day thirty days on at a random second of it;
   and at a refund, the blinded refund key signing;
 - **a relay** sees each payment as two gift wraps to keys of two days, never
-  to the delivery key itself (the drop boxes, CASHU-ID.md): sixteen keys a UTC
+  to the delivery key itself (the drop boxes, FOXY-ID.md): sixteen keys a UTC
   day, worked out from the ID string, asked by the receiver in REQs of 48 keys
   at one relay picked at random, and no key asked on two days. So a relay that
   does not hold the ID string can tie one day's listens together and see when
@@ -1347,7 +1347,7 @@ and blinded refund key again. What each party learns:
   that is not Foxy's own could call the action without asking, which opens only
   ecash somebody has already locked to the ID unblinded, and nothing else (the
   page can already spend this phone's money).
-- **ANY WALLET**, once MY CASHU ID's second button (the screen is gone; the
+- **ANY WALLET**, once MY FOXY ID's second button (the screen is gone; the
   wallet's request stays), is a standard NUT-18 request for a
   wallet that cannot blind: locked to a fresh key of the seed-derived lock pool
   (`p2pkReserve`, as a receive request's), never to the ID key, with a Nostr
@@ -1374,9 +1374,9 @@ not gone (no relay took it, or it was made in the last half hour) is still
 recoverable only from the phone that sent it. Not built: rotating the ID, more than one, and
 delivery over the onion (an ID names no onion address: Foxy's onion addresses
 are per request and end with Foxy's visit). The ID is not a NUT-18 request,
-because NUT-18 cannot ask a payer to blind (`CASHU-ID.md`).
+because NUT-18 cannot ask a payer to blind (`FOXY-ID.md`).
 
-**No messages between Cashu IDs.** A contact is paid and nothing else: the
+**No messages between Foxy IDs.** A contact is paid and nothing else: the
 page asks the phone for no chain of keys between two IDs and listens on no
 contact's keys. The only Nostr keys Foxy listens on for an ID are the delivery
 key and, after a restore, the recovery key (above). A first message an older

@@ -1050,9 +1050,9 @@ function p2pkAt(parent, index) {
   return { priv: child.key.toString('hex'), pub: secpPublic(child.key).toString('hex') };
 }
 
-/* ---- the Cashu ID (Foxy/Keychain/CashuID.swift) ---------------------------
+/* ---- the Foxy ID (Foxy/Keychain/CashuID.swift) ---------------------------
  *
- * The phone's half, written here a second time from docs/CASHU-ID.md with
+ * The phone's half, written here a second time from docs/FOXY-ID.md with
  * nothing but node's crypto and BigInt: the keys at m/129373'/20'/0'/0'/0',
  * /1'/0'/0' and /2'/0'/0' (every level hardened), NUT-28's blinding (the shared
  * x of d·E by a plain double-and-add, rᵢ = SHA-256("Cashu_P2BK_v1" ‖ Zx ‖ i) with
@@ -1751,8 +1751,8 @@ function nativePhone(opts) {
       const keys = [];
       for (const p of pieces) {
         let t = null;
-        try { t = cashuIdOneTime(d, p.e.toLowerCase(), lockOf(p.secret)); } catch (x) { return no('That is not a payment to this Cashu ID.'); }
-        if (!t) return no('That ecash is not locked to this Cashu ID.');
+        try { t = cashuIdOneTime(d, p.e.toLowerCase(), lockOf(p.secret)); } catch (x) { return no('That is not a payment to this Foxy ID.'); }
+        if (!t) return no('That ecash is not locked to this Foxy ID.');
         keys.push(t.k);
       }
       phone.cashuIdSigned = (phone.cashuIdSigned || 0) + pieces.length;
@@ -1777,7 +1777,7 @@ function nativePhone(opts) {
       if (!words()) return no(SAYS.noSeed);
       if (!unlock('cashuIdSignUnblinded', 'read')) return no(SAYS.unreadable);
       const k = cashuIdKeys(seedNow());
-      if (!secrets.every((t) => lockOf(t).slice(2) === k.id.slice(2))) return no('That ecash is not locked to this Cashu ID.');
+      if (!secrets.every((t) => lockOf(t).slice(2) === k.id.slice(2))) return no('That ecash is not locked to this Foxy ID.');
       phone.cashuIdSignedBare = (phone.cashuIdSignedBare || 0) + secrets.length;
       return ok({ sigs: secrets.map((t) => schnorrSign(k.d, crypto.createHash('sha256').update(t, 'utf8').digest())) });
     },
@@ -1788,7 +1788,7 @@ function nativePhone(opts) {
       if (!words()) return no(SAYS.noSeed);
       if (!unlock('cashuIdTag', 'read')) return no(SAYS.unreadable);
       try { return ok({ tag: cashuIdTag(cashuIdKeys(seedNow()).d, m.peer.toLowerCase(), m.e.toLowerCase()) }); }
-      catch (x) { return no('That is not a payment to this Cashu ID.'); }
+      catch (x) { return no('That is not a payment to this Foxy ID.'); }
     },
     /* handleCashuIdEphemeral, SeedActions.cashuIdEphemeral: a payment's base. */
     cashuIdEphemeral(m) {

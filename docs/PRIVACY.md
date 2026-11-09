@@ -56,7 +56,7 @@ User-Agent and no cookies.
   request, Foxy delivers to the onion address or the relays the request names.
   Over Nostr the payment is encrypted to the receiver (NIP-44 inside NIP-59
   gift wraps), so a relay sees an encrypted message. Over an onion address it
-  travels inside Tor from end to end. A payment to your Cashu ID is left at
+  travels inside Tor from end to end. A payment to your Foxy ID is left at
   keys that change every day, and Foxy asks one relay, picked at random, for
   only that day's keys, so a relay that does not know your ID cannot tie one
   day you opened Foxy to another by what was asked (anyone who has your ID can
@@ -129,7 +129,7 @@ Three exceptions leave Foxy's Tor:
   Foxy PIN, if you set one, is stored as a salted hash.
 - **Notifications.** "Payment sent" and "Payment received" notifications are
   created on the iPhone itself and carry no amount. Foxy asks for permission
-  the first time one is due. With a Cashu ID in use, Foxy also sets a reminder
+  the first time one is due. With a Foxy ID in use, Foxy also sets a reminder
   after 15 days away: if notifications are already allowed it is simply on,
   otherwise Foxy asks once ("Foxy can remind you after 15 days away, so a
   payment waiting for you is not missed."). The one notification,
@@ -174,7 +174,7 @@ learn from each operation.
 | Camera | Scanning QR codes, asked the first time you scan |
 | Bluetooth | Tap to pay, asked the first time an invoice screen opens or you tap TAP TO PAY |
 | Face ID | FACE ID LOCK and the seed's protection, asked the first time Foxy uses Face ID |
-| Notifications | "Payment sent" and "Payment received", asked the first time one is due; and a reminder after 15 days away with a Cashu ID in use, on when notifications are already allowed, otherwise asked once; made on the phone, sent by nobody |
+| Notifications | "Payment sent" and "Payment received", asked the first time one is due; and a reminder after 15 days away with a Foxy ID in use, on when notifications are already allowed, otherwise asked once; made on the phone, sent by nobody |
 | NFC tag reading | The Foxy Flashcard, limited to the Foxy card applet |
 
 These are all the permissions Foxy asks for. Foxy does not use location,

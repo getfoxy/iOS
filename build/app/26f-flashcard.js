@@ -6822,7 +6822,7 @@
 
   /* ---- home and the card --------------------------------------------------------------------------------------------
    *
-   * CARD, the third of home's buttons under the balance (home's round button at the top left was CARD, and is MY CASHU ID now), opens the
+   * CARD, the third of home's buttons under the balance (home's round button at the top left was CARD, and is MY FOXY ID now), opens the
    * card's screen as a card's address does (`goFlashcard`), which asks for the card to be tapped; nothing of a card is shown before it has been read. The card's screen has the HOME
    * button in the same place, which comes back home (`fcGoHome`). A swipe does the same (`fcSwipe`): to the left on home is CARD,
    * to the right on the card's screen is HOME; nothing is drawn for it and nothing of a card is kept for it. */

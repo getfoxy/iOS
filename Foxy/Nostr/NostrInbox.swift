@@ -29,7 +29,7 @@ import Foundation
 /// (`deliveryFor`, build/wallet/07-request-delivery.js).
 ///
 /// One at a time, made and ended on the main queue. The till's inboxes are
-/// the exception, up to eight beside it (FoxyBridge+Till.swift), and the Cashu
+/// the exception, up to eight beside it (FoxyBridge+Till.swift), and the Foxy
 /// ID's (FoxyBridge+CashuID.swift), whose key is derived from the words on
 /// purpose: it is a name the person gives out, and lasts as long as it. The ID's
 /// inbox asks the relays for none of that key's own wraps, but for the keys
@@ -70,7 +70,7 @@ final class NostrInbox {
 
     /// The most keys one REQ names, and how many every REQ of an ID's inbox
     /// names: the real ones, and fresh keys nobody holds after them, in a
-    /// shuffled order. Three days of a Cashu ID's keys fill one; the relays
+    /// shuffled order. Three days of a Foxy ID's keys fill one; the relays
     /// take a hundred and more in a filter, and a REQ the same size whatever
     /// it carries tells a relay nothing by its size.
     static let askKeys = 48
@@ -89,7 +89,7 @@ final class NostrInbox {
     /// The REQs this inbox sends to each relay it opens, in order. Internal for a test.
     private(set) var asks: [Ask]
     /// Whether this inbox listens at one relay of the list, picked at random,
-    /// and moves to another only when that one fails or refuses (the Cashu
+    /// and moves to another only when that one fails or refuses (the Foxy
     /// ID's), or at every relay at once (a request's and a till's).
     let oneRelay: Bool
     /// The relays in the order this listen tries them, and how many have been tried.
@@ -175,7 +175,7 @@ final class NostrInbox {
     /// nil for a secret that is not a secp256k1 key.
     /// `pages`: how many answers of `limit` wraps one relay is asked for, each
     /// reaching back from the oldest wrap the last one held (`until`), until one
-    /// holds fewer than `limit` or `since` is reached (the Cashu ID's, whose window
+    /// holds fewer than `limit` or `since` is reached (the Foxy ID's, whose window
     /// is thirty-two days: FoxyBridge+CashuID.swift).
     init?(secret: [UInt8], since: Int, label: String, pages: Int = 1, onPayment: @escaping (_ body: String) -> Void) {
         guard secret.count == 32, let p = try? NostrCrypto.publicKey(of: secret) else { return nil }
@@ -191,7 +191,7 @@ final class NostrInbox {
         self.pages = max(1, pages)
     }
 
-    /// The Cashu ID's inbox: one REQ for each of `wanted`, every one naming
+    /// The Foxy ID's inbox: one REQ for each of `wanted`, every one naming
     /// exactly `askKeys` keys, its real ones and then fresh keys made for this
     /// REQ alone (real points, so nothing tells them apart), shuffled; a REQ
     /// with no real key is all filler. At one relay picked at random, the next
@@ -256,7 +256,7 @@ final class NostrInbox {
     var isOpen: Bool { !closed && !sockets.isEmpty }
 
     /// Open a socket to each relay and ask it for gift wraps addressed to this
-    /// key; or, for the Cashu ID's (`oneRelay`), to one relay picked at random,
+    /// key; or, for the Foxy ID's (`oneRelay`), to one relay picked at random,
     /// with every REQ. `done` with true once a relay is listening, false once
     /// none would.
     func open(_ done: @escaping (Bool) -> Void) {
@@ -499,7 +499,7 @@ final class NostrInbox {
 
     /// One line from a relay. `["EVENT", <sub>, <event>]` is the only kind that
     /// carries anything; an EOSE for one of this inbox's subscriptions may ask
-    /// for the next page (`pageEnded`); a CLOSED for one moves the Cashu ID's
+    /// for the next page (`pageEnded`); a CLOSED for one moves the Foxy ID's
     /// inbox to another relay; everything else (NOTICE, AUTH) is ignored.
     /// `relay`: the relay's place in `open`'s list, -1 where no page is followed.
     func took(_ text: String, relay: Int = -1) {
@@ -507,7 +507,7 @@ final class NostrInbox {
         guard !closed, text.utf8.count <= Self.largestPayment,
               let data = text.data(using: .utf8),
               let parts = (try? JSONSerialization.jsonObject(with: data)) as? [Any] else { return }
-        // a NOTICE while the Cashu ID's listen waits for its REQs' ends is a refusal (a relay over its limits says so)
+        // a NOTICE while the Foxy ID's listen waits for its REQs' ends is a refusal (a relay over its limits says so)
         if (parts.first as? String) == "NOTICE", oneRelay, relay >= 0, answer != nil, relaySockets[relay] != nil {
             print("[foxy] \(label): the relay sent a notice before ending every REQ; trying another")
             relayLost(relay)

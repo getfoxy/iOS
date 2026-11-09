@@ -53,7 +53,7 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
     /// The till's inboxes, by cashier code id: one Nostr key per code, kept in
     /// the Keychain for the code's three days (FoxyBridge+Till.swift).
     var tillInboxes = TillInboxes()
-    /// The Cashu ID's inbox: NIP-17 on the delivery key the seed derives, while
+    /// The Foxy ID's inbox: NIP-17 on the delivery key the seed derives, while
     /// Foxy is in front (FoxyBridge+CashuID.swift).
     var cashuIdInbox: NostrInbox?
     /// The open being made, so a close while the seed is read ends it; and its answer.
@@ -412,7 +412,7 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         "p2pkReserve": FoxyBridge.handleP2PKReserve,
         "p2pkPubkeys": FoxyBridge.handleP2PKPubkeys,
         "p2pkKey": FoxyBridge.handleP2PKKey,
-        // The Cashu ID: its public keys, signatures by a payment's one-time key, the payer's proved name, and the
+        // The Foxy ID: its public keys, signatures by a payment's one-time key, the payer's proved name, and the
         // base of this phone's own throwaway keys for what it pays (Foxy/Keychain/CashuID.swift)
         "cashuIdPublic": FoxyBridge.handleCashuIdPublic,
         "cashuIdSign": FoxyBridge.handleCashuIdSign,
@@ -462,7 +462,7 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         "tillKeyDrop": FoxyBridge.handleTillKeyDrop,
         "tillInboxOpen": FoxyBridge.handleTillInboxOpen,
         "tillInboxClose": FoxyBridge.handleTillInboxClose,
-        // The Cashu ID's inbox, on the delivery key the seed derives (FoxyBridge+CashuID.swift)
+        // The Foxy ID's inbox, on the delivery key the seed derives (FoxyBridge+CashuID.swift)
         "cashuIdInboxOpen": FoxyBridge.handleCashuIdInboxOpen,
         "cashuIdInboxClose": FoxyBridge.handleCashuIdInboxClose,
         // and on the recovery key, for this phone's own copies after a restore

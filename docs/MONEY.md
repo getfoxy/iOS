@@ -852,8 +852,8 @@ the unit on the crossing's note and claims with the far mint's dollar wallet,
 so `finishMove()` claims an interrupted one the same way; its result names the
 unit (`unit`). Only a payment brought home (below) asks for this now.
 
-**A payment to the Cashu ID at a mint this phone does not use**
-(`08e-cashu-id.js`, `CASHU-ID.md`). Its receiver decides on a card: BRING IT
+**A payment to the Foxy ID at a mint this phone does not use**
+(`08e-cashu-id.js`, `FOXY-ID.md`). Its receiver decides on a card: BRING IT
 HOME, KEEP IT THERE or SEND IT BACK. Before the card, the way home is quoted
 with nothing in hand (`cidHomeQuote`, `transferQuote(…, { quoteOnly: true })`):
 the default mint's invoice, the source's melt quote for it, the source's fee for
@@ -1814,7 +1814,7 @@ button (after the scan and a busy phone's refusal, before the connect), a tile
 of a mint only visited, TRANSFER TO a mint only visited (asked before the
 keypad; the quote and the run connect as visits, and the transfer landing is
 what chooses it, so one dropped leaves it unchosen), KEEP IT THERE for a token
-from a new mint and for a Cashu ID payment at another mint, USE on a request
+from a new mint and for a Foxy ID payment at another mint, USE on a request
 that names a mint new to this phone or only visited, a restore that keeps a
 mint only visited (the scan looks at every mint on the list; asked once, for
 them all), and a cashier code at a mint new to this phone. The ask is made
@@ -1865,7 +1865,7 @@ mint on the list; an invoice there not yet paid or collected (an expired,
 unpaid one holds nothing); a payment there still arriving; a card's load whose pieces are there; a payment from
 there still routing; a transfer, a carry home or a swap between its balances in
 flight; an on-chain address there still watched or a payout not confirmed; a
-Cashu ID payment from there not collected; a till open at it, a cashier code
+Foxy ID payment from there not collected; a till open at it, a cashier code
 that names it while the code lives, or a cashier's till at it; anything else
 moving money now. A token sent from there that nobody has claimed does not
 hold it (the keeper's answer, 2026-11-07): it stays on its note, RECLAIM as
@@ -2312,8 +2312,8 @@ keeper and sends them to it over Nostr. Tips are `08f-till-tips.js` and
 
 **The question.** As the till opens, after the lock, the mints, the default
 mint and the default currency, ACCEPT TIPS? YES / NO. YES asks TIPS GO TO:
-MYSELF, ONE PERSON (a Cashu ID contact, or one pasted or scanned, which has to
-be named and is kept as a contact first) or GROUP (up to eight Cashu IDs, each
+MYSELF, ONE PERSON (a Foxy ID contact, or one pasted or scanned, which has to
+be named and is kept as a contact first) or GROUP (up to eight Foxy IDs, each
 with a whole percentage, the percentages adding up to 100; the one added last
 takes what is left). The answer is kept with the till (`foxy.till.tips`, let go
 when the till closes) as
@@ -2336,15 +2336,15 @@ unit (`tillTip`: `num / den`), so the tip part of whatever lands is
 **Passed on** (`tipForward`), once the payment is in:
 
 - MYSELF: nothing moves. The sale's row says `tip $X` (`tillTip`).
-- ONE PERSON: one Cashu ID payment of the whole tip (`cashuIdPay`, see
-  `CASHU-ID.md`), its row "Tip to <name>".
+- ONE PERSON: one Foxy ID payment of the whole tip (`cashuIdPay`, see
+  `FOXY-ID.md`), its row "Tip to <name>".
 - GROUP: each share is `floor(tip × pct / 100)`, whole sats or cents, and what
   rounding leaves goes to the first share, so the shares add up to the tip. A
   share under 10 sats or 1 cent is not sent: it waits for that ID, at that mint
   and in that unit (`foxy.till.tips.carry`), and rides with the next tip to it.
   The rest are one payment each, each a "Tip to <name>" row.
 
-Each payment to a Cashu ID is a job (`foxy.till.tips.jobs`), made from the
+Each payment to a Foxy ID is a job (`foxy.till.tips.jobs`), made from the
 keeper's balance at the mint the sale landed at, one at a time. No route, or the
 phone at another mint, and it waits, counting no try. A failure is tried again a
 minute later, and at once when the route comes back; ten failures, or a week
@@ -2356,7 +2356,7 @@ stays in its balance.
 
 **A cashier's tips.** Each code is asked the same two questions as it is made,
 the till's answer first. The code itself carries only `tips: true` (or nothing):
-who the tips go to stays on the keeper's own row of the code, so nobody's Cashu
+who the tips go to stays on the keeper's own row of the code, so nobody's Foxy
 ID is in a QR code at a counter. A cashier's till shows the tip buttons only on
 a code that says so; its request or invoice names the tip part (`tillTip`, kept
 on the open request or the quote's record, never more than the payment), its
@@ -2396,7 +2396,7 @@ bytes) and is locked to
     K = L + t·G,  t = SHA-256("foxy-till-lock-v1" ‖ L (33 bytes) ‖ n)
 
 (once more with 0xFF appended where t is 0 or not below the group order, as the
-Cashu ID's drop boxes are moved). `n` is kept on the cashier's open request
+Foxy ID's drop boxes are moved). `n` is kept on the cashier's open request
 (`tillNonce`) or the invoice's quote record, on its outbox row (`nonce`), and
 goes in the delivery (`n`); the request the payer sees names `K` and neither `n`
 nor `L`. A till takes only ecash locked to the `K` of the request it is paid at:
@@ -2475,7 +2475,7 @@ screens, the itemized row among them).
 
 No money moves here; this is how arrivals are told, which decides what a person
 is shown about money that has already landed. Every arrival (a claim on return,
-a Cashu ID payment collected, a tap, a card, a request paid) goes through
+a Foxy ID payment collected, a tap, a card, a request paid) goes through
 `announcePayment` (`12-receive.js`); the history pass queues the ones it finds
 (`_paidQueue`, oldest first) and `nextPaidScreen` (`15-paid-wake-keyboard.js`)
 raises them.
