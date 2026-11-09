@@ -28,6 +28,10 @@
  *      section open and each shutting in place, the gap above each heading the gap under MENU; BACKUP ACCOUNT at the very
  *      top only with money and the words not checked; TRANSFER MONEY keeps its rule; no PUSH NOTIFICATIONS and no
  *      PRIVATE LNURL
+ *  12  SHOPS (26t-shops.js): a row under MY FOXY ID; the list, each shop with its host, when it was last collected from and
+ *      the collaborators it paid by name; PASTE A SHOP LINK adds one, a bad link is THAT WON'T WORK; a row shows the shop with
+ *      REMOVE; a collection says itself once as it starts and once as it ends, COLLECTING n OF N on its row, nothing when
+ *      nothing waited; the transaction screen of a collection lists every order (SALES) and COPY ORDERS copies them
  *
  * The real page, rendered in jsdom by build/foxy-render.js, over a stand-in wallet whose reader of ID strings is the real
  * wallet's (build/wallet/08e-cashu-id.js). Run `python3 tools/pack-index.py` first: this reads build/foxy-app.js. */
@@ -725,7 +729,7 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
 
   // ---- 11 the whole menu: the keeper's order, every section open, BACKUP ACCOUNT's rule ----
   {
-    const ORDER = ['WALLET', 'MY FOXY ID', 'HISTORY', 'CONTACTS', 'HIDE BALANCE',
+    const ORDER = ['WALLET', 'MY FOXY ID', 'SHOPS', 'HISTORY', 'CONTACTS', 'HIDE BALANCE',
       'MINTS', 'SWITCH/ADD MINTS', 'TRANSFER MONEY',
       'TOOLS', 'POINT OF SALE', 'SPLIT A BILL',
       'SETTINGS', 'FACE ID LOCK', 'SET PIN', 'BLUETOOTH TAP', 'BACKUP', 'RESTORE', 'RESTORE LOST CARD', 'TEST LOGS',
@@ -840,6 +844,69 @@ async function settle() { for (let i = 0; i < 8; i++) await wait(15); }
     await fresh(one, { open0: true });
     ok(labels().indexOf('TRANSFER MONEY') < 0, 'money at one mint: no TRANSFER MONEY', labels().join(', '));
     A.setState({ open0: false });
+    await settle();
+  }
+
+  // ---- 12 SHOPS ----
+  {
+    const W = stubWallet();
+    let shops = [{ id: 'shop.test', url: 'https://shop.test', host: 'shop.test', name: 'Fox Prints', onion: false, at: 1, lastAt: Date.UTC(2026, 10, 8, 10, 42), lastN: 3,
+      lastWhy: '', paid: [{ id: '02aa', name: 'Ana', n: 2, at: 1 }, { id: '03bb', name: 'Foxy ID 1a2b3c4d', n: 1, at: 1 }] }];
+    const added = [];
+    W.shops = () => JSON.parse(JSON.stringify(shops));
+    W.shopAdd = (t) => { added.push(t); if (!/^foxyshop:/.test(t)) throw new Error('That is not a shop link.'); const sh = { id: 'two.test', url: 'https://two.test', host: 'two.test', name: 'Two', paid: [], lastAt: 0 }; shops.push(sh); return sh; };
+    W.shopRemove = (id) => { const n = shops.length; shops = shops.filter((x) => x.id !== id); return shops.length < n; };
+    W.copyText = () => true;
+    await fresh(W, { open0: true });
+    const items = V().menuItems.map((m) => m.label);
+    ok(items.indexOf('SHOPS') === items.indexOf('MY FOXY ID') + 1, '12 SHOPS is the row under MY FOXY ID', items.join(', '));
+    V().menuItems.find((m) => m.label === 'SHOPS').tap();
+    await settle(); await settle();
+    ok(A.state.screen === 'switchMint' && A.state.tillList === 'shops' && V().mintTitle === 'SHOPS', '12 it opens the list titled SHOPS', A.state.screen + ' ' + V().mintTitle);
+    const row = V().mintRows[0];
+    ok(row && row.name === 'Fox Prints' && /shop\.test/.test(row.host) && /Collected/.test(row.host) && /Paid Ana, Foxy ID 1a2b3c4d/.test(row.host),
+      '12 a shop: its name, host, last collection and the collaborators it paid', row && row.host);
+    ok(V().tillAddLabel === 'PASTE A SHOP LINK' && V().tillNextLabel === 'SCAN A SHOP LINK', '12 PASTE A SHOP LINK and SCAN A SHOP LINK');
+    V().tillAdd();
+    await settle();
+    ok(/PASTE A SHOP LINK/.test(card()), '12 PASTE A SHOP LINK: a card with a field', card());
+    await typeIn('nonsense', 'ADD');
+    ok(/THAT WON.T WORK/.test(card()) && /not a shop link/.test(card()), '12 a bad link: THAT WON’T WORK, and why', card());
+    shutCard();
+    A.shopPaste(); await settle();
+    await typeIn('foxyshop:https://two.test?name=Two', 'ADD');
+    ok(shops.length === 2 && toasts.some((t) => /Two added/.test(t)), '12 a good link is added', toasts.join(' | '));
+    shutCard();
+    V().mintRows[0].tap(); await settle();
+    ok(/FOX PRINTS/.test(card()) && /REMOVE/.test(card()), '12 a row shows the shop with REMOVE', card());
+    press(A._blockedEl, 'REMOVE'); await settle();
+    ok(shops.length === 1 && shops[0].id === 'two.test', '12 REMOVE takes it off the list');
+    // a collection, as the wallet says it
+    toasts = [];
+    A.shopHeard({ state: 'collecting', shop: 'Two', id: 'two.test', n: 0, of: 1000 });
+    await settle();
+    A._shopProgAt = 0;
+    A.shopHeard({ state: 'collecting', shop: 'Two', id: 'two.test', n: 340, of: 1000 });
+    await settle();
+    ok(toasts.length === 1 && toasts[0] === 'Collecting 1,000 sales from Two', '12 said once as it starts', toasts.join(' | '));
+    ok(V().mintRows[0].text === 'COLLECTING 340 OF 1,000', '12 COLLECTING n OF N on its row', V().mintRows[0].text);
+    A.shopHeard({ state: 'collected', shop: 'Two', id: 'two.test', n: 1000 });
+    await settle();
+    ok(toasts[1] === '1,000 sales collected from Two' && V().mintRows[0].text === '', '12 and once as it ends', toasts.join(' | '));
+    A.shopHeard({ state: 'idle', shop: 'Two', id: 'two.test', n: 0 });
+    ok(toasts.length === 2, '12 nothing when nothing waited');
+    // the collection's row
+    const tx = { dir: 'in', sats: 3100, hash: 'shop-x-0', mint: MINT, memo: '2 sales from Two', at: 1,
+      shop: { name: 'Two', host: 'two.test', at: Date.UTC(2026, 10, 8, 11, 0), n: 2, total: 3100, unit: 'sat', ids: [['aa', 'Ana']], list: 'o1,2100,0;o2,1000;' } };
+    const d = A.shopTxVals(tx);
+    ok(d.txShopShown && /Two \(two\.test\)/.test(d.txShopLine) && /2 sales/.test(d.txShopLine) && d.txShopOrders.length === 2
+      && d.txShopOrders[0].order === 'o1' && /2,100/.test(d.txShopOrders[0].amount) && /Ana/.test(d.txShopPaid), '12 SALES: the shop, the count, every order with its amount, the shares paid', JSON.stringify(d.txShopOrders));
+    let copied = '';
+    A.copyText = (t) => { copied = t; return true; };
+    d.txShopCopy();
+    ok(copied.split('\n').length === 3 && /^o1,2100,sat,Ana$/m.test(copied) && /^o2,1000,sat,$/m.test(copied), '12 COPY ORDERS: a line an order', copied);
+    ok(!A.shopTxVals({ dir: 'in', sats: 1 }).txShopShown, '12 another row has no SALES');
+    A.setState({ screen: 'home', stack: [], tillList: false });
     await settle();
   }
 

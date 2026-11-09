@@ -366,7 +366,8 @@ function fakeMint(w, opts) {
   const o = opts || {};
   const C = w.CashuTS;
   // o.fill: the byte its key seed is made of, for mints with keysets of their own
-  let pair = C.createNewMintKeys(16, new w.Uint8Array(64).fill(o.fill || 7), { versionByte: o.versionByte || 0 });
+  // o.order: how many powers of two its keyset has (16: 1 to 32,768), more for a mint that issues larger pieces
+  let pair = C.createNewMintKeys(Number(o.order) || 16, new w.Uint8Array(64).fill(o.fill || 7), { versionByte: o.versionByte || 0 });
   let id = pair.keysetId;
   const hex = (b) => Buffer.from(Array.from(b)).toString('hex');
   let pubs = {};
@@ -617,7 +618,11 @@ function fakeMint(w, opts) {
       /* A quote locked to a key (NUT-20) is minted only with that key's signature over the quote id and the outputs, as
        * a real mint insists; `nut20Checked` counts the signatures it verified. */
       if (q.pubkey) {
-        if (typeof body.signature !== 'string' || !C.verifyMintQuoteSignature(q.pubkey, q.quote, body.outputs, body.signature)) {
+        /* o.amendedNut20: a mint that takes NUT-20's amended message (cashu-ts's first signature) as well as the legacy one, as a
+         * current mint does; without it, as Nutshell 0.18 does, the legacy one only, and cashu-ts asks again with it. */
+        const amended = !!o.amendedNut20 && typeof body.signature === 'string'
+          && C.schnorrVerifyDigest(body.signature, shopQuoteDigests(q.quote, body.outputs).amended.toString('hex'), q.pubkey) === true;
+        if (!amended && (typeof body.signature !== 'string' || !C.verifyMintQuoteSignature(q.pubkey, q.quote, body.outputs, body.signature))) {
           return no(20008, 'Signature for mint request invalid');
         }
         nut20Checked += 1;
@@ -799,6 +804,12 @@ function fakeMint(w, opts) {
       const want = sum(body.outputs);
       // what has confirmed and is not yet ecash is all there is to take
       if (want > q.paid - q.issued) return no(20002, 'the quote has only ' + (q.paid - q.issued) + ' available');
+      // o.onchainNut20: a locked address is minted only with its key's signature, amended or legacy (NUT-20)
+      if (o.onchainNut20 && q.pubkey) {
+        const sigOk = typeof body.signature === 'string' && (C.schnorrVerifyDigest(body.signature, shopQuoteDigests(q.quote, body.outputs).amended.toString('hex'), q.pubkey) === true
+          || C.verifyMintQuoteSignature(q.pubkey, q.quote, body.outputs, body.signature));
+        if (!sigOk) return no(20008, 'Signature for mint request invalid');
+      }
       if (!unsigned(body.outputs)) return no(10002, 'Blinded Message is already signed.');
       record(body.outputs);
       q.issued += want;
@@ -1198,6 +1209,27 @@ function schnorrSign(k, msg) {
   return Buffer.concat([n32(R[0]), n32((r + e * d) % SECP_ORDER)]).toString('hex');
 }
 
+/* A shop's collection (CashuID.swift `collectDigest`, `quoteDigests`, `signQuote`, `signMoved`): what the ID key signs
+ * for a shop's nonce and host, NUT-20's amended and legacy messages for a quote and its outputs, and P′ = ID + r·G with
+ * its key d + r. */
+// ‖ host ‖ path: two shops on one host at two paths never share a signature ('' for a shop at the host's root)
+const shopCollectDigest = (nonceHex, host, path) => sha(Buffer.from('foxy-shop-collect-v1'), Buffer.from(nonceHex, 'hex'), Buffer.from(String(host), 'utf8'), Buffer.from(String(path || ''), 'utf8'));
+function shopQuoteDigests(quote, outputs) {
+  const len4 = (n) => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b; };
+  const amountBytes = (a) => { let h = BigInt(a).toString(16); if (BigInt(a) === 0n) return Buffer.alloc(0); if (h.length % 2) h = '0' + h; return Buffer.from(h, 'hex'); };
+  const q = Buffer.from(String(quote), 'utf8');
+  const parts = [Buffer.from('Cashu_MintQuoteSig_v1'), len4(q.length), q];
+  let legacy = String(quote);
+  for (const o of outputs) {
+    const a = amountBytes(o.amount), B = Buffer.from(String(o.B_), 'hex');
+    parts.push(len4(a.length), a, len4(B.length), B);
+    legacy += String(o.B_).toLowerCase();
+  }
+  return { amended: sha(...parts), legacy: sha(Buffer.from(legacy, 'utf8')) };
+}
+const shopMovedKey = (d, rHex) => fmod(d + BigInt('0x' + rHex), SECP_ORDER);
+const shopMovedPub = (idHex, rHex) => ptBytes(ptAdd(ptParse(Buffer.from(idHex, 'hex')), ptMul(BigInt('0x' + rHex), SECP_G))).toString('hex');
+
 /* ---- the owner key (P-256) --------------------------------
  *
  * What the phone's native side does for a card, as Foxy/Keychain (CardOwner) does it, with Node's own crypto, and held to the
@@ -1503,6 +1535,9 @@ function nativePhone(opts) {
     phone.generate = () => B.generateMnemonic(B.wordlist, 128);
     phone.validate = (x) => B.validateMnemonic(x, B.wordlist);
     phone.derive = w.CashuTS.deriveSecretAndBlindingFactor;
+    // the shop's many signatures by d + r, by the page's own curve for speed (tests/shop-collect.js holds them to harness.js's)
+    phone.fastSign = w.CashuTS.schnorrSignDigest;
+    phone.fastPub = (hex) => w.CashuTS.getPubKeyFromPrivKey(new w.Uint8Array(Buffer.from(hex, 'hex')));
   };
   phone.background = () => { phone.candidates.clear(); };
   phone.relaunch = () => {
@@ -1798,6 +1833,52 @@ function nativePhone(opts) {
       if (!unlock('cashuIdEphemeral', 'read')) return no(SAYS.unreadable);
       return ok({ base: cashuIdPayBase(cashuIdKeys(seedNow()).pay, m.to.toLowerCase(), m.index, m.locktime) });
     },
+    /* handleCashuIdShop, SeedActions.cashuIdShop: a shop's collection. collect: the ID key over SHA-256("foxy-shop-collect-v1"
+     * ‖ nonce ‖ host); quote: NUT-20's two signatures by d + r, for a quote whose key is ID + r·G only; proofs: NUT-11's by
+     * d + r, for P2PK secrets locked to exactly ID + r·G only. The shapes before the seed is read; never a key. */
+    cashuIdShop(m) {
+      const pt = /^0[23][0-9a-fA-F]{64}$/, h32 = /^[0-9a-fA-F]{64}$/;
+      const lockOf = (sec) => {
+        try {
+          if (typeof sec !== 'string' || sec.length > 1024) return null;
+          const j = JSON.parse(sec);
+          if (!Array.isArray(j) || j.length !== 2 || j[0] !== 'P2PK' || !j[1] || typeof j[1].data !== 'string' || !pt.test(j[1].data)) return null;
+          if ((j[1].tags || []).some((t) => Array.isArray(t) && String(t[0]).toLowerCase() === 'sigflag' && String(t[1]).toUpperCase() === 'SIG_ALL')) return null;
+          return j[1].data.toLowerCase();
+        } catch (x) { return null; }
+      };
+      const goodR = (r) => typeof r === 'string' && h32.test(r);
+      if (m.kind === 'collect') {
+        if (typeof m.nonce !== 'string' || !h32.test(m.nonce) || typeof m.host !== 'string' || !/^[a-z0-9.-]{1,253}$/.test(m.host)
+            || (m.path !== undefined && (typeof m.path !== 'string' || !/^(\/[A-Za-z0-9._~\/-]{0,199})?$/.test(m.path)))) return no(SAYS.bad);
+      } else if (m.kind === 'quote') {
+        if (!goodR(m.r) || typeof m.quote !== 'string' || !/^[A-Za-z0-9_-]{1,256}$/.test(m.quote) || typeof m.pubkey !== 'string' || !pt.test(m.pubkey)
+            || !Array.isArray(m.outputs) || !m.outputs.length || m.outputs.length > 256
+            || !m.outputs.every((o) => o && int(o.amount, 0, Number.MAX_SAFE_INTEGER) && typeof o.B_ === 'string' && pt.test(o.B_))) return no(SAYS.bad);
+      } else if (m.kind === 'proofs') {
+        if (!goodR(m.r) || !Array.isArray(m.secrets) || !m.secrets.length || m.secrets.length > 100 || !m.secrets.every((t) => lockOf(t) !== null)) return no(SAYS.bad);
+      } else return no(SAYS.bad);
+      if (!words()) return no(SAYS.noSeed);
+      if (!unlock('cashuIdShop', 'read')) return no(SAYS.unreadable);
+      if (!phone.shopKeys || phone.shopKeys.words !== words()) phone.shopKeys = { words: words(), k: cashuIdKeys(seedNow()) };
+      const k = phone.shopKeys.k;
+      phone.shopSigned = phone.shopSigned || {};
+      phone.shopSigned[m.kind] = (phone.shopSigned[m.kind] || 0) + 1;
+      const sign = (key, digest) => (phone.fastSign && !phone.slowShop ? String(phone.fastSign(Buffer.from(digest).toString('hex'), n32(key).toString('hex'))) : schnorrSign(key, digest));
+      if (m.kind === 'collect') return ok({ pub: k.id, sig: schnorrSign(k.d, shopCollectDigest(m.nonce.toLowerCase(), m.host, m.path || '')) });
+      const r = BigInt('0x' + m.r);
+      if (r === 0n || r >= SECP_ORDER) return no('That is not a payment to this Foxy ID.');
+      const key = shopMovedKey(k.d, m.r);
+      if (key === 0n) return no('That is not a payment to this Foxy ID.');
+      const P = phone.fastPub && !phone.slowShop ? Buffer.from(phone.fastPub(n32(key).toString('hex'))).toString('hex') : ptBytes(ptMul(key, SECP_G)).toString('hex');
+      if (m.kind === 'quote') {
+        if (m.pubkey.toLowerCase() !== P) return no('That ecash is not locked to this Foxy ID.');
+        const dg = shopQuoteDigests(m.quote, m.outputs);
+        return ok({ sig: sign(key, dg.amended), legacy: sign(key, dg.legacy) });
+      }
+      if (!m.secrets.every((t) => lockOf(t) === P)) return no('That ecash is not locked to this Foxy ID.');
+      return ok({ sigs: m.secrets.map((t) => sign(key, crypto.createHash('sha256').update(t, 'utf8').digest())) });
+    },
     /* handleCardOwnerKey, SeedActions.cardOwnerKey: the owner PUBLIC key for a
      * card, 04 || X || Y. The private half is HMAC-SHA256 keyed with the seed over
      * "FoxyCard/owner", a zero byte and the card's key (33 bytes), taken mod the
@@ -1967,4 +2048,4 @@ module.exports = { cardGate, load, proof, stubCashu, connected, loadReal, fakeMi
                    p2pkParent, p2pkAt, cardOwnerScalar, p256Public, p256Sign, p256Verify, CARD_LABELS,
                    cashuIdKeys, cashuIdOneTime, cashuIdBlind, cashuIdTag, cashuIdPayBase, cashuIdPieceKey, cashuIdBindDigest,
                    p2bkTweak, sharedX, schnorrSign, cashuIdDropTweak, cashuIdAnyTweak, cashuIdDropKey, cashuIdAnyKey, cashuIdMovedSecret,
-                   tillSaleTweak, tillSaleKey, tillSaleSecret };
+                   tillSaleTweak, tillSaleKey, tillSaleSecret, shopCollectDigest, shopQuoteDigests, shopMovedKey, shopMovedPub };

@@ -26,7 +26,7 @@ A Cashu ecash card (a chip card running the Foxy applet) and the Foxy app's scre
 
 - No limit is asked or suggested. A no-PIN card is cash to whoever holds it; only ADD PIN's pad says so.
 - **Owner:** the phone whose twelve words made the card's owner key (the page sees only its public half and six kinds of signature). A phone restored from those words is owner too; a holder with no phone uses a friend's. Lose the words and the PIN and limits can never change.
-- **Designs:** FX1 (orange fur, a sleeping fox) is what the app writes; FL1 (black, a bolt in a circle) is drawn for a card naming none; EL1 (black, a beaker of orange liquid with a die in it and a sprout, its liquid, bubbles and sway animated, still under Reduce Motion) is the third. From 1.10 the card holds its code. Every design gets the snow that settles on the card's top edge.
+- **Designs:** by a code of three digits (docs/CARD-DESIGNS.md): 001 (orange fur, a sleeping fox) is what the app writes; FL1 (black, a bolt in a circle) is drawn for a card naming none; 002 (black, a beaker of orange liquid with a die in it and a sprout, its liquid, bubbles and sway animated, still under Reduce Motion) is the third. A card encoded as FX1 or EL1 reads as 001 or 002. From 1.10 the card holds its code. Every design gets the snow that settles on the card's top edge.
 - **Cash or recoverable:** all cards are cash; the recoverable choice (IF THE CARD IS LOST) is off.
 - A card with no owner is open while empty and cannot be loaded.
 

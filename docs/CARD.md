@@ -1974,16 +1974,19 @@ said a card's pieces were good, so a phone with no connection can say `Verified 
 `Not Verified`.
 
 **The card's face.** A card is drawn in a design named by a code of three
-characters (`docs/CARD-DESIGNS.md` in the card repository): FL1 is Flash's,
-FX1 is Foxy's, a picture of orange fur with a sleeping fox; EL1 is the beaker, drawn
-in CSS and SVG with its liquid flowing and bubbling and the beaker swaying (still
-under Reduce Motion), the same block in `build/markup.html` (and `FC_EL1_FACE`, which
-no screen behind the sheet draws now). A card of software
+digits, the same code the shop lists it by and the card is encoded with
+(`docs/CARD-DESIGNS.md` holds the table, the old FX1 and EL1 names that read as
+001 and 002, and how a design is added): 001 is Foxy's, a picture of orange fur
+with a sleeping fox; 002 is the beaker, drawn in CSS and SVG with its liquid
+flowing and bubbling and the beaker swaying (still under Reduce Motion), the
+same block in `build/markup.html` (and `FC_EL1_FACE`, which no screen behind the
+sheet draws now); a card naming none, or one this build cannot draw, is FL1,
+Flash's first. A card of software
 1.10 carries its code in its record, written at set-up and read back by every
 phone; for a card before that, the phone that set it up writes the code it
 chose on a note of its own (`foxy.flashcard.designs`, by the card's key: not
 the list of cards it can take back, which a cash card is never on), and any
-other phone draws it as FL1. This phone sets up its cards as FX1.
+other phone draws it as FL1. This phone sets up its cards as 001.
 
 
 ## What it does not protect against

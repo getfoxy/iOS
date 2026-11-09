@@ -12242,6 +12242,8 @@ class Component extends DCLogic {
     W._onCashuIdPaid = () => { if (this.refreshBalance) this.refreshBalance(); if (this.loadHistory) this.loadHistory(); };
     // and one checked here while the mint swaps it, said as arriving (26o-cashu-id.js)
     W._onCashuIdArriving = (v) => { if (this.cidArrivingSaid) this.cidArrivingSaid(v); };
+    // a shop's sales being collected, and collected (26t-shops.js)
+    W._onShopCollect = (ev) => { if (this.shopHeard) this.shopHeard(ev); };
     // one at a mint this phone does not use, waiting for its receiver's answer (26o-cashu-id.js)
     W._onCashuIdOffer = (v) => { if (this.loadHistory) this.loadHistory(); if (this.cidOfferCard) this.cidOfferCard(v); };
     // payments sent straight to this phone's requests, over Tor (12-receive.js)
@@ -16593,7 +16595,7 @@ class Component extends DCLogic {
      *
      *   BACKUP ACCOUNT, at the very top and only while the wallet holds a balance and its words have not been checked
      *     (`unbacked`), with the backup's red ring
-     *   WALLET:   MY FOXY ID · HISTORY · CONTACTS · HIDE BALANCE
+     *   WALLET:   MY FOXY ID · SHOPS · HISTORY · CONTACTS · HIDE BALANCE
      *   MINTS:    SWITCH/ADD MINTS · TRANSFER MONEY (money at two mints or more) · and, at a mint with two balances, SWAP
      *             and CURRENCIES · OTHER MINTS (only while an answer is remembered)
      *   TOOLS:    POINT OF SALE · SPLIT A BILL   (WITHDRAW TO BANK left the menu 2026-11-05; the send screen's BANK ACCOUNT stays)
@@ -16637,6 +16639,8 @@ class Component extends DCLogic {
     const walletRows = [
       /* MY FOXY ID (26o-cashu-id.js): the code another Foxy adds this one by, with SHARE. */
       { label: 'MY FOXY ID', path: MENU_ICON.profile, tap: shut(() => this.cidShow()) },
+      /* SHOPS (26t-shops.js): the shops whose sales come to this Foxy ID, and the collaborators each one paid. */
+      { label: 'SHOPS', path: MENU_ICON.receive, tap: shut(() => this.shopsOpen()) },
       { label: 'HISTORY', path: MENU_ICON.history, tap: shut(() => this.go('history')),
         ringInk: v.histRingInk, ringInk2: v.histRingInk2, ring: v.histRing },
       { label: 'CONTACTS', path: MENU_ICON.contacts, tap: shut(v.goContacts) },
@@ -20026,6 +20030,10 @@ class Component extends DCLogic {
         if (!tx.payHash) return;
         this.toast(this.copyText(tx.payHash) ? 'Payment hash copied' : 'Could not copy');
       },
+      /* A shop's collection (08g-shop-collect.js): the shop, the time, the count and the total, the collaborators it paid,
+       * and every order with its amount, to check against the shop's orders page; COPY ORDERS copies them as lines of
+       * order, amount and the collaborators each paid. A collection older than ninety days keeps its totals only. */
+      ...this.shopTxVals(tx),
       /* What this payment consumed and produced: a count and a copy button.
        * The proofs themselves are hex, they are long, and the outputs of a
        * recent payment are live change with no business on screen. */
@@ -31560,36 +31568,40 @@ class Component extends DCLogic {
   }
 
   /* The designs a card's face can be drawn in, each by a code of three
-   * characters (capital letters and digits).
+   * digits: the code a card is encoded with, the code the shop lists it by
+   * and the code this table draws it from, one and the same (docs/CARD-DESIGNS.md).
    *
-   * A card maker takes a code nobody has taken and adds its drawing; the
-   * codes taken are listed here and in docs/CARD-DESIGNS.md of the card
-   * repository (https://github.com/getfoxy/card), so that anybody can see which are. FL1 is the first
-   * Flash design, drawn in CSS; FX1 is Foxy's, a picture; EL1 is the beaker,
-   * drawn in CSS and SVG and animated (build/markup.html, the card on the
-   * FLASHCARD screen, and the face behind the sheet in 26h-tap-screen.js). From
-   * software 1.10 the card's record names its design; a card that names none
-   * is drawn as the design this phone wrote down for it when it set it up
-   * (FC_SETUP_DESIGN), and FC_DESIGN where it wrote none. */
+   * A new design takes the next code and adds its drawing. 001 is Foxy's, a
+   * picture; 002 is the beaker, drawn in CSS and SVG and animated
+   * (build/markup.html, the card on the FLASHCARD screen, and the face behind
+   * the sheet in 26h-tap-screen.js). FL1 is the first Flash design, drawn in
+   * CSS and kept as it was: it is no shop design. A card encoded before the
+   * digits names its design as FX1 or EL1, and FC_DESIGN_ALIASES reads those as
+   * 001 and 002. From software 1.10 the card's record names its design; a card
+   * that names none is drawn as the design this phone wrote down for it when it
+   * set it up (FC_SETUP_DESIGN), and FC_DESIGN where it wrote none. */
   FC_DESIGNS = {
     FL1: { name: 'Flash, first design', by: 'Flash' },
-    FX1: { name: 'Foxy, first design', by: 'Foxy' },
-    EL1: { name: 'Beaker, first design', by: 'Foxy' },
+    '001': { name: 'Foxy, first design', by: 'Foxy' },
+    '002': { name: 'Beaker, first design', by: 'Foxy' },
   };
+  FC_DESIGN_ALIASES = { FX1: '001', EL1: '002' };
   FC_DESIGN = 'FL1';
   /* EL1's face, the block build/markup.html holds inside the card on the FLASHCARD screen, for the face behind the sheet (26h-tap-screen.js);
-   * shown only under [data-card-design="EL1"]. The two must stay the same. */
+   * shown only under [data-card-design="002"]. The two must stay the same. */
   FC_EL1_FACE = '<div data-el1 style="position:absolute;inset:0;overflow:hidden;border-radius:inherit;background:radial-gradient(120% 90% at 50% 100%,#1A1D20 0%,#0B0C0D 60%,#050505 100%);font-family:Sora,sans-serif"><div style="position:absolute;inset:0;background:linear-gradient(115deg,rgba(255,255,255,0) 30%,rgba(255,255,255,.06) 46%,rgba(255,255,255,0) 60%);pointer-events:none"></div><div style="position:absolute;left:7.69cqw;top:7.69cqw;width:13.08cqw;height:10.38cqw;border-radius:1.92cqw;background-image:linear-gradient(90deg,transparent 32%,rgba(90,55,10,.3) 32% 34%,transparent 34% 66%,rgba(90,55,10,.3) 66% 68%,transparent 68%),linear-gradient(0deg,transparent 48%,rgba(90,55,10,.3) 48% 52%,transparent 52%),linear-gradient(135deg,#F6D58A,#C9963F)"></div><div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:29.81cqw;height:44.23cqw"><div style="position:absolute;inset:0;animation:foxyEl1Sway 3.2s ease-in-out infinite;transform-origin:50% 90%"><div style="position:absolute;left:16.4%;width:67.2%;top:30%;height:22.9%;overflow:hidden"><div style="position:absolute;left:-25%;width:150%;top:0;bottom:-40%;transform-origin:50% 41%;animation:foxyEl1Slosh 3.2s ease-in-out infinite"><svg viewBox="0 0 237 147" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%"><g style="animation:foxyEl1FlowB 4.6s linear infinite"><path d="M0 147 L0 51 L0 58.6 L3 58.1 L6 57.4 L9 56.5 L12 55.6 L15 54.5 L18 53.3 L21 52.0 L24 50.8 L27 49.5 L30 48.3 L33 47.1 L36 46.0 L39 45.1 L42 44.3 L45 43.7 L48 43.3 L51 43.0 L54 43.0 L57 43.2 L60 43.5 L63 44.1 L66 44.8 L69 45.7 L72 46.7 L75 47.8 L78 49.0 L81 50.3 L84 51.6 L87 52.8 L90 54.0 L93 55.2 L96 56.2 L99 57.1 L102 57.8 L105 58.4 L108 58.8 L111 59.0 L114 59.0 L117 58.8 L120 58.3 L123 57.7 L126 57.0 L129 56.1 L132 55.0 L135 53.9 L138 52.6 L141 51.4 L144 50.1 L147 48.9 L150 47.7 L153 46.6 L156 45.6 L159 44.7 L162 44.0 L165 43.5 L168 43.1 L171 43.0 L174 43.1 L177 43.3 L180 43.8 L183 44.4 L186 45.2 L189 46.2 L192 47.3 L195 48.4 L198 49.7 L201 50.9 L204 52.2 L207 53.4 L210 54.6 L213 55.7 L216 56.7 L219 57.5 L222 58.1 L225 58.6 L228 58.9 L231 59.0 L234 58.9 L237 58.6 L240 58.1 L243 57.4 L246 56.5 L249 55.6 L252 54.5 L255 53.3 L258 52.0 L261 50.8 L264 49.5 L267 48.3 L270 47.1 L273 46.0 L276 45.1 L279 44.3 L282 43.7 L285 43.3 L288 43.0 L291 43.0 L294 43.2 L297 43.5 L300 44.1 L303 44.8 L306 45.7 L309 46.7 L312 47.8 L315 49.0 L318 50.3 L321 51.6 L324 52.8 L327 54.0 L330 55.2 L333 56.2 L336 57.1 L339 57.8 L342 58.4 L345 58.8 L348 59.0 L351 59.0 L354 58.8 L357 58.3 L360 57.7 L363 57.0 L366 56.1 L369 55.0 L372 53.9 L375 52.6 L378 51.4 L381 50.1 L384 48.9 L387 47.7 L390 46.6 L393 45.6 L396 44.7 L399 44.0 L402 43.5 L405 43.1 L408 43.0 L411 43.1 L414 43.3 L417 43.8 L420 44.4 L423 45.2 L426 46.2 L429 47.3 L432 48.4 L435 49.7 L438 50.9 L441 52.2 L444 53.4 L447 54.6 L450 55.7 L453 56.7 L456 57.5 L459 58.1 L462 58.6 L465 58.9 L468 59.0 L471 58.9 L474 58.6 L474 147 Z" fill="#FFA24D"></path></g><g style="animation:foxyEl1Flow 2.8s linear infinite"><path d="M0 147 L0 55 L0 55.0 L3 56.0 L6 56.9 L9 57.8 L12 58.6 L15 59.3 L18 59.9 L21 60.4 L24 60.7 L27 60.9 L30 61.0 L33 60.9 L36 60.7 L39 60.3 L42 59.8 L45 59.1 L48 58.4 L51 57.5 L54 56.6 L57 55.7 L60 54.8 L63 53.8 L66 52.9 L69 52.0 L72 51.2 L75 50.6 L78 50.0 L81 49.5 L84 49.2 L87 49.0 L90 49.0 L93 49.1 L96 49.4 L99 49.8 L102 50.4 L105 51.1 L108 51.8 L111 52.7 L114 53.6 L117 54.5 L120 55.5 L123 56.4 L126 57.3 L129 58.2 L132 58.9 L135 59.6 L138 60.2 L141 60.6 L144 60.9 L147 61.0 L150 61.0 L153 60.8 L156 60.5 L159 60.0 L162 59.4 L165 58.8 L168 58.0 L171 57.1 L174 56.2 L177 55.2 L180 54.3 L183 53.4 L186 52.5 L189 51.6 L192 50.9 L195 50.2 L198 49.7 L201 49.3 L204 49.1 L207 49.0 L210 49.1 L213 49.3 L216 49.6 L219 50.1 L222 50.7 L225 51.4 L228 52.2 L231 53.1 L234 54.0 L237 55.0 L240 56.0 L243 56.9 L246 57.8 L249 58.6 L252 59.3 L255 59.9 L258 60.4 L261 60.7 L264 60.9 L267 61.0 L270 60.9 L273 60.7 L276 60.3 L279 59.8 L282 59.1 L285 58.4 L288 57.5 L291 56.6 L294 55.7 L297 54.8 L300 53.8 L303 52.9 L306 52.0 L309 51.2 L312 50.6 L315 50.0 L318 49.5 L321 49.2 L324 49.0 L327 49.0 L330 49.1 L333 49.4 L336 49.8 L339 50.4 L342 51.1 L345 51.8 L348 52.7 L351 53.6 L354 54.5 L357 55.5 L360 56.4 L363 57.3 L366 58.2 L369 58.9 L372 59.6 L375 60.2 L378 60.6 L381 60.9 L384 61.0 L387 61.0 L390 60.8 L393 60.5 L396 60.0 L399 59.4 L402 58.8 L405 58.0 L408 57.1 L411 56.2 L414 55.2 L417 54.3 L420 53.4 L423 52.5 L426 51.6 L429 50.9 L432 50.2 L435 49.7 L438 49.3 L441 49.1 L444 49.0 L447 49.1 L450 49.3 L453 49.6 L456 50.1 L459 50.7 L462 51.4 L465 52.2 L468 53.1 L471 54.0 L474 55.0 L474 147 Z" fill="#F68200"></path></g></svg></div></div><img src="img/card-el1-beaker.png" alt="" style="position:absolute;inset:0;width:100%;height:100%"></div><div style="position:absolute;left:20%;right:13%;top:18%;bottom:9.5%;overflow:hidden;border-radius:0 0 3.46cqw 3.46cqw;pointer-events:none"><span style="position:absolute;left:4%;bottom:-4%;width:1.35cqw;height:1.35cqw;border-radius:50%;border:0.38cqw solid #FFFFFF;background:rgba(255,255,255,.35);box-shadow:0 0 0.77cqw rgba(255,255,255,.4);box-sizing:border-box;opacity:0;animation:foxyEl1Bub 5.2s cubic-bezier(.4,0,.6,1) -2.91s infinite"></span><span style="position:absolute;left:9%;bottom:-4%;width:0.77cqw;height:0.77cqw;border-radius:50%;border:0.38cqw solid #FFFFFF;background:rgba(255,255,255,.35);box-shadow:0 0 0.77cqw rgba(255,255,255,.4);box-sizing:border-box;opacity:0;animation:foxyEl1Bub 4.4s cubic-bezier(.4,0,.6,1) -4.07s infinite"></span><span style="position:absolute;left:76%;bottom:-4%;width:1.15cqw;height:1.15cqw;border-radius:50%;border:0.38cqw solid #FFFFFF;background:rgba(255,255,255,.35);box-shadow:0 0 0.77cqw rgba(255,255,255,.4);box-sizing:border-box;opacity:0;animation:foxyEl1Bub 5.8s cubic-bezier(.4,0,.6,1) -4.04s infinite"></span><span style="position:absolute;left:84%;bottom:-4%;width:0.77cqw;height:0.77cqw;border-radius:50%;border:0.38cqw solid #FFFFFF;background:rgba(255,255,255,.35);box-shadow:0 0 0.77cqw rgba(255,255,255,.4);box-sizing:border-box;opacity:0;animation:foxyEl1Bub 4.8s cubic-bezier(.4,0,.6,1) -0.49s infinite"></span><span style="position:absolute;left:90%;bottom:-4%;width:0.96cqw;height:0.96cqw;border-radius:50%;border:0.38cqw solid #FFFFFF;background:rgba(255,255,255,.35);box-shadow:0 0 0.77cqw rgba(255,255,255,.4);box-sizing:border-box;opacity:0;animation:foxyEl1Bub 6.2s cubic-bezier(.4,0,.6,1) -1.06s infinite"></span><span style="position:absolute;left:40%;bottom:-4%;width:0.58cqw;height:0.58cqw;border-radius:50%;border:0.38cqw solid #FFFFFF;background:rgba(255,255,255,.35);box-shadow:0 0 0.77cqw rgba(255,255,255,.4);box-sizing:border-box;opacity:0;animation:foxyEl1Bub 3.6s cubic-bezier(.4,0,.6,1) -0.63s infinite"></span><span style="position:absolute;left:56%;bottom:-4%;width:0.77cqw;height:0.77cqw;border-radius:50%;border:0.38cqw solid #FFFFFF;background:rgba(255,255,255,.35);box-shadow:0 0 0.77cqw rgba(255,255,255,.4);box-sizing:border-box;opacity:0;animation:foxyEl1Bub 4.2s cubic-bezier(.4,0,.6,1) -2.56s infinite"></span><span style="position:absolute;left:14%;bottom:-4%;width:0.58cqw;height:0.58cqw;border-radius:50%;border:0.38cqw solid #FFFFFF;background:rgba(255,255,255,.35);box-shadow:0 0 0.77cqw rgba(255,255,255,.4);box-sizing:border-box;opacity:0;animation:foxyEl1Bub 5s cubic-bezier(.4,0,.6,1) -1.0s infinite"></span></div></div><div style="position:absolute;right:7.69cqw;bottom:5.77cqw;display:flex;flex-direction:column;align-items:center;gap:1.54cqw"><svg viewBox="0 0 28 34" style="width:5.96cqw;height:7.31cqw" fill="none" stroke="#EB6A2E" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v24M8 5h9a5.5 5.5 0 0 1 0 11H8M8 16h10a6.5 6.5 0 0 1 0 13H8M12 1.5v3.5M16.5 1.5v3.5M12 29v3.5M16.5 29v3.5"></path></svg><span style="font-weight:700;font-size:2.5cqw;letter-spacing:.32em;color:#BDBDBD">BEARER</span></div></div>';
   /* The design this phone gives the cards it sets up, written on its own file
    * for each (the card itself does not yet carry one): a card of this phone's
    * is drawn as Foxy's, and a card read at it as a till as Flash's. */
-  FC_SETUP_DESIGN = 'FX1';
+  FC_SETUP_DESIGN = '001';
 
-  /* The design to draw a card in: the one it names, where it names one this
-   * build can draw, and FC_DESIGN otherwise. */
+  /* The design to draw a card in: the one it names (a digit code, or an old
+   * code through FC_DESIGN_ALIASES), where it names one this build can draw,
+   * and FC_DESIGN otherwise. */
   fcDesignOf(card) {
-    const code = String((card && card.design) || '').toUpperCase();
-    return (/^[A-Z0-9]{3}$/.test(code) && this.FC_DESIGNS[code]) ? code : this.FC_DESIGN;
+    let code = String((card && card.design) || '').toUpperCase();
+    if (Object.prototype.hasOwnProperty.call(this.FC_DESIGN_ALIASES, code)) code = this.FC_DESIGN_ALIASES[code];
+    return (/^(\d{3}|FL1)$/.test(code) && this.FC_DESIGNS[code]) ? code : this.FC_DESIGN;
   }
 
   /* What has been done with this card, as this phone knows it: the history
@@ -39395,6 +39407,8 @@ class Component extends DCLogic {
     const s = this.state || {};
     const mode = s.tillList;
     if (!mode) return null;
+    // SHOPS (26t-shops.js): the shops this phone collects for, in the same rows
+    if (mode === 'shops') return this.shopListVals ? this.shopListVals() : null;
     const plainRow = (o) => Object.assign({
       dim: '1', down: false, downText: '', tint: 'var(--acc)', logo: 'none', here: false, notHere: true,
       ink: 'rgba(var(--ink-rgb),.55)', busy: false, bg: 'var(--surface)', border: 'rgba(var(--ink-rgb),.12)',
@@ -40722,6 +40736,157 @@ class Component extends DCLogic {
     const back = again ? (s.trUnit === 'usd' ? this.unitFigure(held.usd, 'usd') : this.money(held.sat).main) + ' came back as change. ' : '';
     return back + 'All of it moves, then ' + name + ' leaves your list.' + next
       + ' Change the fee hands back stays at ' + name + ' until you add it again.' + (sent ? ' ' + sent : '');
+  }
+  /* ---- SHOPS: the shops this phone collects for (08g-shop-collect.js, docs/FOXY-ID.md "Shops") --------------------------
+   *
+   *   SHOPS (the menu's WALLET, under MY FOXY ID) ... the SWITCH MINT list in a mode of its own (`tillList` 'shops', as the
+   *                                till's lists are): each shop a row, its name, and under it its host, when it was last
+   *                                collected from and the collaborators it paid by name (a contact's, or the Foxy ID's
+   *                                start), so an ID swapped at the shop shows here; COLLECTING n OF N on it while it runs.
+   *                                PASTE A SHOP LINK and SCAN A SHOP LINK add one; a row tapped shows it, with REMOVE.
+   *   a collection ................ said once as it starts ("Collecting N sales from <shop>") and once as it ends ("N sales
+   *                                collected from <shop>"); nothing when nothing waited. The app stays usable throughout.
+   *   HISTORY ...................... one RECEIVED row a collection, "N sales from <shop>", whose screen lists every order with
+   *                                its amount (SALES, COPY ORDERS); one SENT row for each collaborator. */
+
+  shopsOpen() { this.tillListGo('shops'); }
+
+  // "Ana, Ben, Foxy ID 1a2b3c4d" for the collaborators a shop has paid, newest first
+  shopPaidWords(paid) {
+    const names = (paid || []).map((p) => String((p && p.name) || '')).filter(Boolean);
+    if (!names.length) return '';
+    return 'Paid ' + names.slice(0, 4).join(', ') + (names.length > 4 ? ' +' + (names.length - 4) : '');
+  }
+
+  /* The list's values in its 'shops' mode (26p-till-tips.js `tillListVals`). */
+  shopListVals() {
+    const W = window.FoxyWallet;
+    const list = (W && W.shops) ? W.shops() : [];
+    const prog = this.state.shopProg || null;
+    const rows = list.map((sh) => {
+      const busy = !!(prog && prog.id === sh.id);
+      const when = sh.lastAt ? 'Collected ' + this.tillExpiresText(sh.lastAt) : 'Not collected yet';
+      return {
+        name: sh.name, host: [sh.host, when, this.shopPaidWords(sh.paid)].filter(Boolean).join(' · '),
+        text: busy ? 'COLLECTING ' + this.group(prog.n) + (prog.of ? ' OF ' + this.group(prog.of) : '') : '',
+        ink: busy ? 'var(--acc-ink)' : 'rgba(var(--ink-rgb),.55)',
+        dim: '1', down: false, downText: '', tint: 'var(--acc)', logo: 'none', here: false, notHere: true, busy: false,
+        bg: 'var(--surface)', border: 'rgba(var(--ink-rgb),.12)', initial: String(sh.name || '?').slice(0, 1).toUpperCase(),
+        tap: () => this.shopShow(sh),
+      };
+    });
+    return {
+      title: 'SHOPS',
+      line: rows.length ? 'Foxy collects their sales when it opens and every ten minutes, and pays each collaborator their share.'
+        : 'Add the link your shop shows its keeper. Its sales come to your Foxy ID here.',
+      rows, past: [],
+      add: { shown: true, label: 'PASTE A SHOP LINK', tap: () => this.shopPaste() },
+      next: { shown: true, on: true, label: 'SCAN A SHOP LINK', tap: () => this.shopScan() },
+    };
+  }
+
+  shopPaste() {
+    this.blockedCard('shopPaste', {
+      tone: 'ask', title: 'PASTE A SHOP LINK',
+      reason: 'The link your shop shows its keeper. It starts foxyshop:',
+      field: { value: '', placeholder: 'foxyshop:https://…', max: 600 },
+      retry: 'ADD', go: (text) => this.shopAddGo(text),
+      shut: { label: 'CANCEL' },
+    });
+  }
+
+  shopScan() {
+    const W = window.FoxyWallet;
+    if (!W || !W.scan) return;
+    Promise.resolve(W.scan('Scan a shop link')).then((text) => { if (String(text || '').trim()) this.shopAddGo(text); }).catch(() => {});
+  }
+
+  shopAddGo(text) {
+    const W = window.FoxyWallet;
+    if (!W || !W.shopAdd) return;
+    try {
+      const sh = W.shopAdd(String(text || ''));
+      this.setState({ menuTick: (this.state.menuTick || 0) + 1 });
+      this.toast(sh.name + ' added. Its sales come here.');
+    } catch (e) {
+      this.blockedCard('shopBad', {
+        tone: 'warn', title: 'THAT WON’T WORK',
+        reason: (W.reason ? W.reason(e) : String((e && e.message) || e)) || 'That is not a shop link.',
+        chip: 'Copy the link from your shop again.',
+      });
+    }
+  }
+
+  // a shop tapped: what it is, and REMOVE
+  shopShow(sh) {
+    const W = window.FoxyWallet;
+    const paid = this.shopPaidWords(sh.paid);
+    this.blockedCard('shopShow', {
+      tone: 'ask', title: String(sh.name || 'SHOP').toUpperCase(),
+      reason: sh.host + '. ' + (sh.lastAt ? 'Last collected ' + this.tillExpiresText(sh.lastAt) + '.' : 'Not collected from yet.')
+        + (paid ? ' ' + paid + '.' : '') + (sh.lastWhy ? ' ' + sh.lastWhy + '.' : ''),
+      retry: 'DONE', go: () => {},
+      shut: { label: 'REMOVE', pill: true, tap: () => {
+        if (W && W.shopRemove) W.shopRemove(sh.id);
+        this.setState({ menuTick: (this.state.menuTick || 0) + 1 });
+        this.toast(sh.name + ' removed');
+      } },
+    });
+  }
+
+  /* What the wallet says as a collection goes (`_onShopCollect`): once as it starts, its count on the shop's row while it
+   * runs (no oftener than twice a second), and once as it ends. */
+  shopHeard(ev) {
+    if (!ev) return;
+    if (ev.state === 'paying') return;
+    if (ev.state === 'collecting') {
+      if (!(Number(ev.n) > 0)) this.toast('Collecting ' + this.shopSalesWords(ev.of) + ' from ' + ev.shop);
+      const now = Date.now();
+      if (!(Number(ev.n) > 0) || now - (this._shopProgAt || 0) > 500) {
+        this._shopProgAt = now;
+        this.setState({ shopProg: { id: ev.id, n: Number(ev.n) || 0, of: Number(ev.of) || 0 } });
+      }
+      return;
+    }
+    if (this.state.shopProg) this.setState({ shopProg: null });
+    if (ev.state === 'collected' && Number(ev.n) > 0) {
+      this.toast(this.shopSalesWords(ev.n) + ' collected from ' + ev.shop);
+      if (this.refreshBalance) this.refreshBalance();
+      if (this.loadHistory) this.loadHistory();
+    }
+  }
+
+  shopSalesWords(n) { const k = Math.max(0, Math.round(Number(n) || 0)); return k === 1 ? '1 sale' : this.group(k) + ' sales'; }
+
+  /* The transaction screen's SALES, for a collection's row (26-render-history-and-contacts.js `renderTxDetail`). */
+  shopTxVals(tx) {
+    const d = tx && tx.shop && typeof tx.shop === 'object' ? tx.shop : null;
+    const none = { txShopShown: false, txShopLine: '', txShopPaidShown: false, txShopPaid: '', txShopOrders: [], txShopMoreShown: false, txShopMore: '', txShopCopy: () => {} };
+    if (!d) return none;
+    const unit = d.unit || tx.unit || 'sat';
+    const money = (n) => (unit === 'sat' ? '₿ ' + this.group(n) : this.unitMoney(n, unit));
+    // "order,amount,i.j;" an order (08g-shop-collect.js `shopRowFold`)
+    const orders = String(d.list || '').split(';').filter(Boolean).map((x) => {
+      const f = x.split(',');
+      return [f[0], Number(f[1]) || 0, f[2] ? f[2].split('.').map(Number) : []];
+    });
+    const ids = Array.isArray(d.ids) ? d.ids : [];
+    const SHOWN = 200;
+    return {
+      txShopShown: true,
+      txShopLine: d.name + ' (' + d.host + ') · ' + this.tillExpiresText(d.at) + ' · ' + this.shopSalesWords(d.n) + ', ' + money(d.total)
+        + (orders.length ? '' : '. The list of orders was let go after ninety days.'),
+      txShopPaidShown: ids.length > 0,
+      txShopPaid: ids.length ? 'Shares paid to ' + ids.map((x) => x[1]).join(', ') : '',
+      txShopOrders: orders.slice(0, SHOWN).map((o) => ({ order: String(o[0]), amount: money(Number(o[1]) || 0) })),
+      txShopMoreShown: orders.length > SHOWN,
+      txShopMore: orders.length > SHOWN ? 'and ' + this.group(orders.length - SHOWN) + ' more: COPY ORDERS has them all' : '',
+      txShopCopy: () => {
+        const lines = ['order,amount,unit,shares paid to'].concat(orders.map((o) => [o[0], o[1], unit,
+          (Array.isArray(o[2]) ? o[2] : []).map((i) => (ids[i] ? ids[i][1] : '')).join(' ')].join(',')));
+        this.toast(this.copyText(lines.join('\n')) ? 'Orders copied' : 'Could not copy');
+      },
+    };
   }
 
   /* switchMint: the mint list. */

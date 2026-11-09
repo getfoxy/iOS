@@ -260,6 +260,152 @@ enum CashuID {
         "{\"sigs\":[" + sigs.map { "\"" + NUT13.hex($0) + "\"" }.joined(separator: ",") + "]}"
     }
 
+
+    // MARK: A shop's sales, collected (docs/FOXY-ID.md, "Shops")
+
+    /// What the ID key signs to prove to a shop that this phone is the keeper of the shop's Foxy ID:
+    /// SHA-256(collectPrefix ‖ the shop's nonce (32 bytes) ‖ the shop's host ‖ the request's full path, as UTF-8: the
+    /// link's path joined with the call's, as the shop's engine checks it), so a signature is good for one call at one shop. Nothing else
+    /// signed by the ID key starts with these bytes, and no NUT-10 secret is a string that does.
+    static let collectPrefix = Array("foxy-shop-collect-v1".utf8)
+    /// NUT-20's amended message, as cashu-ts writes it (`Cashu_MintQuoteSig_v1`): plain bytes, then each field
+    /// with its length as 4 bytes, big-endian.
+    static let quoteSigPrefix = Array("Cashu_MintQuoteSig_v1".utf8)
+    /// The most outputs one collected quote is minted into, the longest quote id and the longest host.
+    static let mostOutputs = 256
+    static let longestQuote = 256
+    static let longestHost = 253
+
+    /// A host as a shop's link names it: 1 to 253 characters of lowercase letters, digits, dots and dashes.
+    static func isShopHost(_ host: String) -> Bool {
+        let bytes = Array(host.utf8)
+        guard !bytes.isEmpty, bytes.count <= longestHost else { return false }
+        return bytes.allSatisfy { ($0 >= 0x61 && $0 <= 0x7a) || ($0 >= 0x30 && $0 <= 0x39) || $0 == 0x2e || $0 == 0x2d }
+    }
+
+    /// A quote id as a mint makes it: 1 to 256 characters of letters, digits, dashes and underscores.
+    static func isQuoteId(_ quote: String) -> Bool {
+        let bytes = Array(quote.utf8)
+        guard !bytes.isEmpty, bytes.count <= longestQuote else { return false }
+        return bytes.allSatisfy { ($0 >= 0x61 && $0 <= 0x7a) || ($0 >= 0x41 && $0 <= 0x5a) || ($0 >= 0x30 && $0 <= 0x39) || $0 == 0x2d || $0 == 0x5f }
+    }
+
+    /// A request's path as a shop's call sends it (FOXY-ID.md, Shops): "" or "/" and up to 199 more of letters, digits and . _ ~ / -.
+    static func isShopPath(_ path: String) -> Bool {
+        let bytes = Array(path.utf8)
+        if bytes.isEmpty { return true }
+        guard bytes.count <= 200, bytes[0] == 0x2f else { return false }
+        return bytes.allSatisfy { ($0 >= 0x61 && $0 <= 0x7a) || ($0 >= 0x41 && $0 <= 0x5a) || ($0 >= 0x30 && $0 <= 0x39)
+            || $0 == 0x2e || $0 == 0x5f || $0 == 0x7e || $0 == 0x2f || $0 == 0x2d }
+    }
+
+    static func collectDigest(nonce: [UInt8], host: String, path: String) -> [UInt8] {
+        Array(SHA256.hash(data: collectPrefix + nonce + Array(host.utf8) + Array(path.utf8)))
+    }
+
+    /// The ID key's BIP-340 signature over `collectDigest`, and the ID's public key (33): the shop checks the
+    /// signature against the ID it was set up with. Nothing is signed for a nonce that is not 32 bytes or a host
+    /// that is not a host.
+    static func collectSign(seed: NUT13.Seed, nonce: [UInt8], host: String, path: String) throws -> (id: [UInt8], sig: [UInt8]) {
+        guard nonce.count == 32, isShopHost(host), isShopPath(path) else { throw Failure.notLocked }
+        var d = try secret(seed: seed, path: idPath)
+        defer { NUT13.wipe(&d) }
+        return try NUT13.withContext { ctx in
+            let id = try NUT13.publicKey(d, ctx)
+            return (id, try NUT13.schnorr(digest: collectDigest(nonce: nonce, host: host, path: path), key: d, ctx))
+        }
+    }
+
+    /// One output of a mint request: its amount and its blinded message B_ (33 bytes).
+    struct Output: Equatable {
+        let amount: UInt64
+        let blinded: [UInt8]
+    }
+
+    /// The amount as NUT-20's amended message carries it: big-endian with no leading zero bytes, none for 0.
+    static func amountBytes(_ amount: UInt64) -> [UInt8] {
+        var out = [UInt8]()
+        var v = amount
+        while v > 0 { out.insert(UInt8(v & 0xff), at: 0); v >>= 8 }
+        return out
+    }
+
+    private static func length4(_ n: Int) -> [UInt8] {
+        let v = UInt32(n)
+        return [UInt8(v >> 24 & 0xff), UInt8(v >> 16 & 0xff), UInt8(v >> 8 & 0xff), UInt8(v & 0xff)]
+    }
+
+    /// NUT-20's two messages for a quote and its outputs: the amended one (cashu-ts `signMintQuote`'s
+    /// successor, sent first) and the legacy one, SHA-256(quote id ‖ each B_ as hex), which an older mint asks for.
+    static func quoteDigests(quote: String, outputs: [Output]) -> (amended: [UInt8], legacy: [UInt8]) {
+        var amended = quoteSigPrefix
+        let q = Array(quote.utf8)
+        amended += length4(q.count) + q
+        var legacy = q
+        for o in outputs {
+            let a = amountBytes(o.amount)
+            amended += length4(a.count) + a + length4(o.blinded.count) + o.blinded
+            legacy += Array(NUT13.hex(o.blinded).utf8)
+        }
+        return (Array(SHA256.hash(data: amended)), Array(SHA256.hash(data: legacy)))
+    }
+
+    /// d + r, the key of the ID moved by a shop's order number r (P′ = ID + r·G), and P′. r must be a number
+    /// above 0 and below n, so the ID key itself is never what signs; the caller wipes the key. The key kept is
+    /// never changed: r moves a copy.
+    private static func movedKey(d: [UInt8], r: [UInt8], _ ctx: OpaquePointer) throws -> (k: [UInt8], P: [UInt8]) {
+        guard NUT13.isScalar(r, ctx) else { throw Failure.badTweak }
+        var k: [UInt8]
+        do { k = try NUT13.addScalar(d, r, ctx) } catch { throw Failure.badTweak }
+        do { return (k, try NUT13.publicKey(k, ctx)) } catch { NUT13.wipe(&k); throw error }
+    }
+
+    /// NUT-20's signatures, amended and legacy, by d + r over a quote locked to `pubkey`, which must be ID + r·G;
+    /// for any other key nothing is signed (`notLocked`). The digests are made here from the quote and the outputs,
+    /// never handed in.
+    static func signQuote(seed: NUT13.Seed, r: [UInt8], quote: String, pubkey: [UInt8], outputs: [Output]) throws -> (sig: [UInt8], legacy: [UInt8]) {
+        guard isQuoteId(quote), !outputs.isEmpty, outputs.count <= mostOutputs,
+              outputs.allSatisfy({ isPoint($0.blinded) }), isPoint(pubkey) else { throw Failure.notLocked }
+        var d = try secret(seed: seed, path: idPath)
+        defer { NUT13.wipe(&d) }
+        return try NUT13.withContext { ctx in
+            var moved = try movedKey(d: d, r: r, ctx)
+            defer { NUT13.wipe(&moved.k) }
+            guard moved.P == pubkey else { throw Failure.notLocked }
+            let digests = quoteDigests(quote: quote, outputs: outputs)
+            return (try NUT13.schnorr(digest: digests.amended, key: moved.k, ctx),
+                    try NUT13.schnorr(digest: digests.legacy, key: moved.k, ctx))
+        }
+    }
+
+    /// NUT-11's signature by d + r for each secret, in order: every one a P2PK secret (not SIG_ALL) locked to
+    /// exactly ID + r·G, or nothing is signed (`notLocked`).
+    static func signMoved(seed: NUT13.Seed, r: [UInt8], secrets: [String]) throws -> [[UInt8]] {
+        guard !secrets.isEmpty, secrets.count <= mostSecrets else { throw Failure.notLocked }
+        var d = try secret(seed: seed, path: idPath)
+        defer { NUT13.wipe(&d) }
+        return try NUT13.withContext { ctx in
+            var moved = try movedKey(d: d, r: r, ctx)
+            defer { NUT13.wipe(&moved.k) }
+            for text in secrets {
+                guard let lock = lockOf(text), lock == moved.P else { throw Failure.notLocked }
+            }
+            return try secrets.map { text in
+                try NUT13.schnorr(digest: Array(SHA256.hash(data: Array(text.utf8))), key: moved.k, ctx)
+            }
+        }
+    }
+
+    /// `cashuIdShop` kind collect: {"pub": <66 hex>, "sig": <128 hex>}.
+    static func collectReply(_ signed: (id: [UInt8], sig: [UInt8])) -> String {
+        "{\"pub\":\"\(NUT13.hex(signed.id))\",\"sig\":\"\(NUT13.hex(signed.sig))\"}"
+    }
+
+    /// `cashuIdShop` kind quote: {"sig": <128 hex>, "legacy": <128 hex>}.
+    static func quoteReply(_ signed: (sig: [UInt8], legacy: [UInt8])) -> String {
+        "{\"sig\":\"\(NUT13.hex(signed.sig))\",\"legacy\":\"\(NUT13.hex(signed.legacy))\"}"
+    }
+
     // MARK: The payer's name, proved
 
     /// SHA-256(fromPrefix ‖ x(d·peer) ‖ E): the same on both sides, the payer with

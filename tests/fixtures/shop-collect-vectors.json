@@ -1,0 +1,48 @@
+{
+  "about": "SHOPS (docs/FOXY-ID.md): P′ = ID + r·G, its key d + r, the collect digest SHA-256(\"foxy-shop-collect-v1\" ‖ nonce ‖ host ‖ the request’s full path: the link’s path joined with the call’s, no trailing slash, no query), NUT-20’s amended and legacy messages; made by tests/harness.js",
+  "words": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+  "id": "0365233b8ef683341a31e9cd29dcbc2612c5f4e07bb5dbad2d2e7d64fefc0bd896",
+  "r": "1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+  "moved": "02f5fb9e0b6c68a60bb13826149fbca65c66ae3ae4b88f19dad45e5091f951079e",
+  "movedKey": "2688f76d7eabf304269ada6c898a7f4768285026b9602ea820a89a02479fbbbf",
+  "nonce": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+  "host": "shop.example.com",
+  "collectDigest": "8e21328b86236ec84aa037721c81e1dac09dccc68a404f5f2eb76d32c1c5fbbd",
+  "path": "/shops/one/api/shop/collected",
+  "collectDigestPath": "fd96d3a45fb67f1c31edbe495f29f32d1828eeb1247dedb1b0771dbdce05aac2",
+  "paths": [
+    {
+      "path": "/api/shop/collect",
+      "digest": "8e21328b86236ec84aa037721c81e1dac09dccc68a404f5f2eb76d32c1c5fbbd"
+    },
+    {
+      "path": "/api/shop/collected",
+      "digest": "c2826a10caf9a25bbb3cda3d58cf2ff502acb9155187c618f18974328992871e"
+    },
+    {
+      "path": "/shops/one/api/shop/collect",
+      "digest": "c9c56ae4ca9c04cc92517f3e292097be7ab204ebc31c18e86ec16d8228917b7f"
+    },
+    {
+      "path": "/shops/one/api/shop/collected",
+      "digest": "fd96d3a45fb67f1c31edbe495f29f32d1828eeb1247dedb1b0771dbdce05aac2"
+    }
+  ],
+  "quote": "q-0123456789abcdef_ZZ",
+  "outputs": [
+    {
+      "amount": 1,
+      "B_": "021111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "amount": 256,
+      "B_": "032222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "amount": 0,
+      "B_": "023333333333333333333333333333333333333333333333333333333333333333"
+    }
+  ],
+  "amendedDigest": "ad78e4af9dcfdeb09d725a234bf74ee341c4eda623116952cd987c530b4e34f9",
+  "legacyDigest": "f51b65fe020281c7f2349d5d3dd59de4ce79b0662326db9decd7dd1528104587"
+}

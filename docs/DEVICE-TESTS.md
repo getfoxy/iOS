@@ -858,6 +858,35 @@ swaps. The first step also needs a mint that pays out on chain.*
    with the same sentence, and pressing it makes nothing. One sat less is not
    held.
 
+#### A shop's sales, collected (SHOPS)
+
+*Needs the demo shop set up with this phone's Foxy ID as the shop's, at a mint
+this phone has chosen, two collaborators' Foxy IDs (one of them a contact on
+this phone), and three or more test orders paid. The money is the shop's
+buyers': run it with sats the keeper agreed to move.*
+
+1. **Add.** MENU > SHOPS > PASTE A SHOP LINK, the shop's `foxyshop:` link.
+   **Pass:** iOS asks once to allow the shop's host; the shop is a row with
+   its name and host; within a few seconds "Collecting N sales from <shop>",
+   COLLECTING n OF N on its row, and the rest of the app works meanwhile.
+2. **Collected.** **Pass:** "N sales collected from <shop>"; HISTORY has ONE
+   RECEIVED row "N sales from <shop>" for the whole amount, and one SENT row
+   per collaborator ("To <name> · <shop>"); the row's SALES lists every order
+   with its amount and sums to the total, and COPY ORDERS gives the same
+   lines; the shop's orders page shows each order CONFIRMED; the
+   collaborators' phones each get ONE payment, "<shop> · your share of N
+   sales", with no order number; SHOPS shows the time and "Paid <names>".
+3. **Nothing twice.** Close and open Foxy. **Pass:** no new row, no payment,
+   and the log has no mint request for an invoice already collected.
+4. **A cut.** Pay 300 test orders, open Foxy, and turn on airplane mode while
+   it counts. Turn it off. **Pass:** the count picks up where it stopped; at
+   the end each order is CONFIRMED once, each collaborator has been paid
+   their whole share (in one payment, or one more for the part after the cut),
+   and the pile (SETTINGS > TEST LOGS, the pieces line) is a few dozen pieces.
+5. **A lie.** Mark an unpaid order paid in the engine's database. **Pass:**
+   the log says the mint does not say it is paid; it is not CONFIRMED; nobody
+   is paid for it.
+
 ### C. The seed and the keychain
 
 #### 14. The native seed screens

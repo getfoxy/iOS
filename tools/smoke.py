@@ -1861,10 +1861,22 @@ actions32 = ['seedStatus', 'seedCreate', 'seedMigrate', 'countersImport', 'count
              # proved name, and the base of this phone's own throwaway keys for what it pays
              'cashuIdPublic', 'cashuIdSign', 'cashuIdTag', 'cashuIdEphemeral',
              # and the ID key's own signature, for a delivery paid to it unblinded that the receiver takes anyway
-             'cashuIdSignUnblinded']
+             'cashuIdSignUnblinded',
+             # and a shop's collection: the ID key over a shop's nonce, and the ID key moved by an order's r
+             'cashuIdShop']
+# a shop's collection signs with the ID key moved by an order's r, and only for the key that move names (FOXY-ID.md, Shops):
+# r a number above 0 and below n, the quote's key and every secret's lock exactly ID + r·G, the collect digest made natively
+cid32 = read32('Foxy', 'Keychain', 'CashuID.swift')
+for need32 in ('guard NUT13.isScalar(r, ctx) else { throw Failure.badTweak }',
+               'do { k = try NUT13.addScalar(d, r, ctx) } catch { throw Failure.badTweak }',
+               'guard moved.P == pubkey else { throw Failure.notLocked }',
+               'guard let lock = lockOf(text), lock == moved.P else { throw Failure.notLocked }',
+               'Array(SHA256.hash(data: collectPrefix + nonce + Array(host.utf8) + Array(path.utf8)))'):
+    if need32 not in cid32:
+        problems32.append('CashuID.swift no longer has ' + need32)
 declared32 = re.search(r'static let nativeSeedActions: Set<String> = \[(.*?)\]', native32, re.S)
 if not declared32 or sorted(re.findall(r'"(\w+)"', declared32.group(1))) != sorted(actions32):
-    problems32.append('nativeSeedActions is not the twenty-six seed actions')
+    problems32.append('nativeSeedActions is not the twenty-seven seed actions')
 # a card's owner key signs every label but load only against the keeper's yes, asked before the card session and never in it
 sign32 = bridge_handler(both32, 'cardOwnerSign') or ''
 # (the handler asks cardOwnerAllows, whose body is the rule, as the tests drive it)
@@ -1923,7 +1935,8 @@ for line32 in acts32.splitlines():
         if kind32 == 'answer' and not arg32.startswith(('json(', 'countersReply(', 'NUT13.reply(',
                                                         'P2PK.pubkeysReply(', 'P2PK.keyReply(',
                                                         'CashuID.publicReply(', 'CashuID.signReply(',
-                                                        'CashuID.tagReply(', 'CashuID.baseReply(')):
+                                                        'CashuID.tagReply(', 'CashuID.baseReply(',
+                                                        'CashuID.collectReply(', 'CashuID.quoteReply(')):
             problems32.append('a seed action answers the page with ' + arg32.strip())
         elif re.search(r'\b(words|phrase|typed|mnemonic|seed|saved|served|candidate)\b', code32):
             problems32.append('a seed action may answer the page with the words or the seed: ' + arg32.strip())

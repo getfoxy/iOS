@@ -351,6 +351,8 @@
     /* Foxy has left the screen: no question waiting to be asked again on a fresh circuit is (`askedAgain`, `statesOf`). */
     _stopAskingAgain: function () {
       torSilentAway();                        // the askings unanswered are counted from the return (`torSilentAsked`)
+      // and the shops' collection stops where it is, taken up on the return (08g-shop-collect.js `shopStop`)
+      try { shopStop(); } catch (e) {}
       var held = askAgainStops.splice(0, askAgainStops.length);
       held.forEach(function (letGo) { try { letGo(); } catch (e) {} });
       return held.length;

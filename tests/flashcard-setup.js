@@ -311,30 +311,30 @@ const insOf = (card) => card.sent.filter((a) => a.slice(0, 2) === 'b0').map((a) 
        'read by a phone, it is new and names no mint, in the design it was printed in (the card’s own word that it has a record kept apart)',
        JSON.stringify({ setUp: fresh.info.setUp, hasRecord: fresh.info.hasRecord, recordSet: fresh.info.recordSet, mint: fresh.record.mint, design: fresh.design }));
     printed.tap();
-    const made = await W.cardSetUp(printed, { pin: '2580', design: 'FX1' });
+    const made = await W.cardSetUp(printed, { pin: '2580', design: '001' });
     ok(made.info.setUp && made.info.hasRecord && made.record.mint === MINT && printed.state.record.mint === MINT && printed.state.record.design === 'EL1' && made.design === 'EL1',
-       'set up with the app’s FX1, it keeps EL1: the record is this phone’s mint, with the design the card named', JSON.stringify([printed.state.record.mint, printed.state.record.design]));
+       'set up with the app’s 001, it keeps EL1: the record is this phone’s mint, with the design the card named', JSON.stringify([printed.state.record.mint, printed.state.record.design]));
     printed.tap();
     ok((await W.cardLook(printed)).design === 'EL1', 'and reads EL1 afterwards');
     // one with no design on it is given the app's own
     const plain = newCard(P, undefined, { format: 4, software: 24 });
     plain.tap();
-    const plainMade = await W.cardSetUp(plain, { pin: '2580', design: 'FX1' });
-    ok(plain.state.record.design === 'FX1' && plainMade.design === 'FX1', 'a card that names none is set up in the app’s FX1', plain.state.record.design);
+    const plainMade = await W.cardSetUp(plain, { pin: '2580', design: '001' });
+    ok(plain.state.record.design === '001' && plainMade.design === '001', 'a card that names none is set up in the app’s 001, three digits on the chip', plain.state.record.design);
     // a set-up cut off after its PIN and before its record: the card keeps that PIN (it has a record, the maker's), and the same set-up tried again finishes it under it
     const cut = newCard(P, undefined, { format: 4, software: 24 });
     await cut.send('00a404000af0464f5859434152440100');
     await cut.send(maker('EL1'));
     cut.tap();
     cut.leaveBefore('32', 1);
-    ok((await why(W.cardSetUp(cut, { pin: '2580', design: 'FX1' }))) === 'gone' && cut.state.pinState === 1 && cut.state.record.mint === '-' && !cut.state.owner,
+    ok((await why(W.cardSetUp(cut, { pin: '2580', design: '001' }))) === 'gone' && cut.state.pinState === 1 && cut.state.record.mint === '-' && !cut.state.owner,
        'a set-up cut off before its record leaves a PIN on the maker’s record, and no owner');
     cut.tap();
     const cutSeen = await W.cardLook(cut);
     ok(cutSeen.info.setUp === false && cutSeen.info.hasRecord === false && cutSeen.info.recordSet === true && cutSeen.info.pinSet === true,
        'it reads as a set-up not finished, not as a holder’s card at a mint called "-"', JSON.stringify({ setUp: cutSeen.info.setUp, hasRecord: cutSeen.info.hasRecord }));
     cut.tap();
-    const cutMade = await W.cardSetUp(cut, { pin: '2580', design: 'FX1' });
+    const cutMade = await W.cardSetUp(cut, { pin: '2580', design: '001' });
     ok(cutMade.mine === true && !!cut.state.owner && cut.state.record.mint === MINT && cut.state.record.design === 'EL1',
        'and the same set-up tried again finishes it, the PIN shown first, at this phone’s mint, still EL1', JSON.stringify([cut.state.record.mint, cut.state.record.design]));
   }

@@ -2413,6 +2413,8 @@
                       from: me ? me.from : '', tag: me ? me.tag : '',
                       note: o.note ? cidCleanName(String(o.note).slice(0, CID_NOTE_MAX)) : '',
                       sentAt: null, lastSentAt: null, tries: 0, state: 'out' };
+          // a shop's payout to a collaborator: its own name, so it is never made twice (08g-shop-collect.js `shopPayOut`)
+          if (o.shopPay) row.shopPay = String(o.shopPay).slice(0, 400);
           cidOutboxPut(row);
           if (made.hash) {
             try { amendTx(made.hash, { memo: o.memo ? String(o.memo).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 80) : 'To ' + name, cid: 'out' }); } catch (x) {}
@@ -2451,6 +2453,8 @@
       if (cidOutboxRows().some(function (r) { return cidCopyDue(r, now); })) cidCopyAll().then(null, function () {});
       else cidCopyArm();
       Promise.resolve().then(function () { return cidListenNow({ ifClosed: true }); }).then(null, function () {});
+      // and the shops this phone collects for (08g-shop-collect.js), a moment after, not on a visit
+      if (!claimAway) shopResume();
     } catch (e) {
       console.warn('[foxy] foxy id: catching up failed:', (e && e.message) || e);
     }
@@ -2465,6 +2469,8 @@
       if (cidOutboxRows().some(function (r) { return cidDue(r, Date.now()); })) setTimeout(function () { cidDeliverAll().then(null, function () {}); }, 0);
       if (cidOutboxRows().some(function (r) { return cidCopyDue(r, Date.now()); })) setTimeout(function () { cidCopyAll().then(null, function () {}); }, 0);
       if (cidOutboxRows().some(function (r) { return cidAheadDue(r, Date.now()); })) setTimeout(function () { cidAheadAll().then(null, function () {}); }, 0);
+      // and the shops' collection, which waited for the route
+      if (!shopRunning && !claimAway) shopResume();
     }
     catch (e) { console.warn('[foxy] foxy id: sending on the route’s return:', (e && e.message) || e); }
   }

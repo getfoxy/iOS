@@ -236,7 +236,7 @@
      *
      *   BACKUP ACCOUNT, at the very top and only while the wallet holds a balance and its words have not been checked
      *     (`unbacked`), with the backup's red ring
-     *   WALLET:   MY FOXY ID · HISTORY · CONTACTS · HIDE BALANCE
+     *   WALLET:   MY FOXY ID · SHOPS · HISTORY · CONTACTS · HIDE BALANCE
      *   MINTS:    SWITCH/ADD MINTS · TRANSFER MONEY (money at two mints or more) · and, at a mint with two balances, SWAP
      *             and CURRENCIES · OTHER MINTS (only while an answer is remembered)
      *   TOOLS:    POINT OF SALE · SPLIT A BILL   (WITHDRAW TO BANK left the menu 2026-11-05; the send screen's BANK ACCOUNT stays)
@@ -280,6 +280,8 @@
     const walletRows = [
       /* MY FOXY ID (26o-cashu-id.js): the code another Foxy adds this one by, with SHARE. */
       { label: 'MY FOXY ID', path: MENU_ICON.profile, tap: shut(() => this.cidShow()) },
+      /* SHOPS (26t-shops.js): the shops whose sales come to this Foxy ID, and the collaborators each one paid. */
+      { label: 'SHOPS', path: MENU_ICON.receive, tap: shut(() => this.shopsOpen()) },
       { label: 'HISTORY', path: MENU_ICON.history, tap: shut(() => this.go('history')),
         ringInk: v.histRingInk, ringInk2: v.histRingInk2, ring: v.histRing },
       { label: 'CONTACTS', path: MENU_ICON.contacts, tap: shut(v.goContacts) },

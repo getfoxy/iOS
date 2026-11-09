@@ -62,7 +62,9 @@ function till(ctx, start) {
   const a = appOn(ctx, Object.assign({ screen: 'confirm' }, start || {}), { split: true });
   const hist = new Function('window', 'document', 'return {' + HISTORY_SIGS.map((s) => lift(appFile('16-history-lists.js'), s)).join(',\n') + '}')(
     ctx.window, ctx.window.document);
-  const view = new Function('window', 'document', 'CTA_INK', 'return {' + RENDER_SIGS.map((s) => lift(appFile('26-render-history-and-contacts.js'), s)).join(',\n') + '}')(
+  // a shop's collection lines in a row's detail (26t-shops.js), which renderTxDetail spreads into every detail
+  const view = new Function('window', 'document', 'CTA_INK', 'return {' + RENDER_SIGS.map((s) => lift(appFile('26-render-history-and-contacts.js'), s))
+    .concat([lift(appFile('26t-shops.js'), 'shopTxVals(tx) {')]).join(',\n') + '}')(
     ctx.window, ctx.window.document, () => '#fff');
   const queue = new Function('window', 'document', 'CONFIRM_SCREENS', 'return {' + QUEUE.map(([src, s]) => lift(src, s)).join(',\n') + '}')(
     { FoxyWallet: { notify: () => {} } }, { visibilityState: 'visible' }, []);

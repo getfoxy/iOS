@@ -563,11 +563,138 @@ scan.
 The menu, in this order, every section open until it is tapped shut:
 
     BACKUP ACCOUNT    only while the wallet holds a balance and the words are not verified
-    WALLET            MY FOXY ID · HISTORY · CONTACTS · HIDE BALANCE
+    WALLET            MY FOXY ID · SHOPS · HISTORY · CONTACTS · HIDE BALANCE
     MINTS             SWITCH/ADD MINTS · TRANSFER MONEY (money at two mints or more) · SWAP and WHAT YOU HOLD
                       (a mint with two balances) · OTHER MINTS (an answer remembered)
     TOOLS             POINT OF SALE · SPLIT A BILL
     SETTINGS          BLUETOOTH TAP · SET PIN · FACE ID LOCK · BACKUP · RESTORE · RESTORE LOST CARD · TEST LOGS
+
+## Shops
+
+A shop that sells for this phone's keeper holds no words and no money. Its
+engine is set up with a mint, a currency, the shop's Foxy ID (this phone's ID
+string) and, for each product, the collaborators' Foxy IDs with an amount or a
+share. The keeper's Foxy collects the money and pays the collaborators
+(build/wallet/08g-shop-collect.js, build/app/26t-shops.js).
+
+**An order.** The engine makes a random `r` of 32 bytes for it and asks the
+mint for an invoice (NUT-04 bolt11) of the order's amount locked by NUT-20 to
+
+    P′ = ID + r·G
+
+or, paid with Cashu (NUT-18, POST), asks for ecash locked by NUT-11 to the same
+P′; or, at or above the mint's on-chain minimum, for an on-chain address (NUT-04
+onchain) locked to P′. The phone takes an on-chain order only when its address is
+locked to P′: an address with no lock is anybody's who holds its id, the
+engine's too, so it is refused with a log line (the keeper's rule). The mint never sees the ID; the engine can check the lock and the mint's
+state and spend nothing: the key of P′ is d + r, and d never leaves the phone.
+
+**The link.** SHOPS (the menu's WALLET, under MY FOXY ID) adds a shop by
+scanning or pasting its link once:
+
+    foxyshop:https://shop.example.com?name=Fox%20Prints
+    foxyshop:http://<56 letters>.onion?name=Fox%20Prints
+
+`foxyshop:` may be left off; the address may carry a path, under which the
+shop's `/api` lives; `name` is what the list and the history call it (the host
+when it has none). Plain http only to an .onion; no address with a login, a
+fragment, an IP or a single-label name. 20 shops at most.
+
+**Collecting.** On every open, on the route's return and every ten minutes
+while Foxy is open, for each shop, through Tor by the door every mint request
+goes by (an onion's POST through `onionPost`):
+
+    GET  /api/shop/collect/challenge                     → { nonce: 64 hex, at }
+    POST /api/shop/collect   { pub, nonce, sig, after? } → { items: [ … ] (200 at most), total? }
+    POST /api/shop/collected { pub, nonce, sig, orders: [ { order, amount, unit, mintedAt, quoteOrProofs, earlier? } ] } → 2xx
+
+`pub` is the ID (66 hex), `sig` the ID key's BIP-340 signature over
+
+    SHA-256("foxy-shop-collect-v1" ‖ nonce (the 32 bytes) ‖ host (UTF-8, lowercase, no port) ‖ path)
+
+where path is the request's full path as it is sent (UTF-8): the link's path
+joined with the call's, no trailing slash, no query. So `https://shop.example.com`
+signs "/api/shop/collect" for the list and "/api/shop/collected" for the ack, and
+`https://example.com/shop` signs "/shop/api/shop/collect" and
+"/shop/api/shop/collected": a signature is good for one call at one shop, never
+for the other call nor for another shop on the same host
+
+made on the native side (`cashuIdShop` kind `collect`, CashuID.swift
+`collectSign`). Each call takes a fresh nonce. `after` is the last order of the
+page before; a page of fewer than 200 is the last. An item is
+`{ order, kind: "quote"|"onchain"|"proofs", quote | proofs, r, amount, unit, mint,
+splits: [ { id, amount, memo } ], memo, paidAt }`: `quote` a bolt11 quote id for
+"quote", an onchain quote id for "onchain".
+
+For each item, before anything is paid to anybody: the order number, `r`
+(0 < r < n), the amount and unit; every split a valid Foxy ID and the splits
+together no more than the amount; the mint one this phone chose (the lock's gate)
+that honours a lock (NUT-11), and NUT-20 for an invoice; then the mint itself:
+the invoice PAID, for the amount and unit, locked to P′; the on-chain quote with
+the amount confirmed and not yet issued, locked to P′; or every piece of the
+ecash unspent, locked to P′ alone, and the amount. Anything else is refused with
+a log line and left for the next time, and nothing is paid for it.
+
+Then the money comes in, four orders at a time, each lane on a circuit of its
+own: an invoice, or an on-chain quote, is minted with outputs of this phone's seed, NUT-20's two
+signatures (the amended message and the legacy one) made by d + r on the native
+side from the quote id and the outputs (`cashuIdShop` kind `quote`; the outputs'
+counters are written on the order's row first); ecash is signed by d + r
+(`cashuIdShop` kind `proofs`, NUT-11, never SIG_ALL). The native side signs only
+for a key that is ID + r·G and builds every digest itself, so a page that names
+an `r` signs nothing it could not sign already, and never with the ID key
+itself. When a page is in, what it minted is swapped once, with the pieces the
+collection's earlier pages left, into the fewest pieces the amount needs (as
+many swaps as the mint's longest array asks): 10,000 sales leave a handful of
+pieces. Then the page's orders are said collected, each with its amount, unit,
+when it was minted and how it came.
+
+After the last page each collaborator is paid once: the sum of their splits in
+this collection, as any contact is paid (the drop boxes, a refund key, thirty
+days), with the note "<shop> · your share of N sales" and no order number. What
+is left is the keeper's.
+
+**Again, and after a cut.** What is in flight is written down before each step
+(`foxy.shop.runs`): the collection's sums, and the orders of the page out not
+yet said collected. An order offered again that was taken is only said again;
+an invoice the mint calls ISSUED is restored from the counters this phone wrote
+for it, or, where this phone never minted it, said collected `earlier` and never
+minted; ecash the mint calls spent is the same. A collection cut by a lost route
+or a close resumes where it left off, and pays what it owes on its next run.
+
+**What a page may not hold.** An order whose invoice (mint and quote id) or any
+of whose ecash pieces another order of the same page names, or that names one
+twice, is refused with a log line. An invoice the mint calls ISSUED counts as this
+phone's only when the outputs it reserved for it bring back the whole amount;
+otherwise it is said collected `earlier` and pays nobody. A share already paid in
+a collection that is still open (an order waiting to be said collected) is not
+paid again when the same collaborator's next sale comes in: it starts a new
+payout. Each payout has a name of its own on its outbox row, so a phone killed
+after the payment went and before it was written down does not pay it twice.
+A page's minted money goes into the pile first; its ecash orders are taken in one
+by one after, so one the mint refuses holds back nothing else. Put away, the
+collection stops at its next step and the ten-minute timer with it; the return
+takes it up again.
+
+**History.** A collection is one RECEIVED row, "N sales from <shop>", with the
+whole amount; its screen (SALES) has the shop, the time, the count, the total,
+the collaborators paid, and every order with its amount and which collaborators
+it paid, about 25 bytes an order, its total the sum of its orders (COPY ORDERS
+copies them, to check against the shop's orders page). Order lists older than
+ninety days are trimmed to the totals. Each collaborator's payment is its own
+SENT row, "To <name> · <shop>".
+
+**SHOPS** lists each shop, its host, when it was last collected from and the
+collaborators it paid by name (the contact's, or "Foxy ID" and the ID's
+start), so an ID swapped at the shop shows; COLLECTING n OF N while it runs.
+A collection says itself once as it starts and once as it ends ("N sales
+collected from <shop>"), and nothing when nothing waited. A row opens the shop,
+with REMOVE.
+
+**What a hacked engine can do.** Swap the IDs on new orders (the keeper sees
+whom it paid, in SHOPS and in the row); claim paid orders that are not (the
+mint is asked first, so nothing is paid on a lie); hand out a stale `r` (the
+mint's lock does not match, nothing happens). It cannot take the money.
 
 ## Not built
 

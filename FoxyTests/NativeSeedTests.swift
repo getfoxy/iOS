@@ -23,7 +23,7 @@ final class NativeSeedTests: XCTestCase {
 
     // MARK: Which actions answer
 
-    func testTheSeedActionsAreTwentySixAndRunInEveryBuild() {
+    func testTheSeedActionsAreTwentySevenAndRunInEveryBuild() {
         XCTAssertEqual(FoxyBridge.nativeSeedActions, [
             "seedStatus", "seedCreate", "seedMigrate", "countersImport", "counterReserve", "counterReserveAt", "counterAdvance",
             "counterSnapshot", "restoreSecrets", "seedShow", "seedEnter", "seedAdopt", "seedCandidateForget", "seedWipe",
@@ -37,8 +37,10 @@ final class NativeSeedTests: XCTestCase {
             "cashuIdPublic", "cashuIdSign", "cashuIdTag", "cashuIdEphemeral",
             // and the ID key's own signature, for a delivery paid to it unblinded that the receiver takes anyway
             "cashuIdSignUnblinded",
+            // and a shop's collection: the ID key over a shop's nonce, the ID key moved by an order's r
+            "cashuIdShop",
         ])
-        XCTAssertEqual(FoxyBridge.nativeSeedActions.count, 26)
+        XCTAssertEqual(FoxyBridge.nativeSeedActions.count, 27)
         // the draft's action that handed the page a secret is gone, and so is the signed time
         XCTAssertNil(FoxyBridge.handlers["cardOwner"])
         XCTAssertNil(FoxyBridge.handlers["cardTime"])
@@ -89,6 +91,23 @@ final class NativeSeedTests: XCTestCase {
                                     ["secrets": [1]], ["secrets": secret], ["pieces": [["secret": secret, "e": id]]]] {
             XCTAssertEqual(FoxyBridge.cashuIdSignUnblindedCheck(body), .refuse("bad request"), "\(body)")
         }
+    }
+
+    /// cashuIdShop: a quote's request is read as the action takes it (tests/fixtures/shop-collect-vectors.json); a host
+    /// not in lower case and a kind it does not know are refused.
+    func testCashuIdShopTakesOnlyItsShapes() throws {
+        let url = repoRoot().appendingPathComponent("tests/fixtures/shop-collect-vectors.json")
+        let v = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let r = try XCTUnwrap(v["r"] as? String), quote = try XCTUnwrap(v["quote"] as? String)
+        let moved = try XCTUnwrap(v["moved"] as? String), nonce = try XCTUnwrap(v["nonce"] as? String)
+        let outs = try XCTUnwrap(v["outputs"] as? [[String: Any]])
+        let outputs = try outs.map { CashuID.Output(amount: try XCTUnwrap(($0["amount"] as? NSNumber)?.uint64Value),
+                                                    blinded: try NUT13.bytes(hex: try XCTUnwrap($0["B_"] as? String))) }
+        XCTAssertEqual(FoxyBridge.cashuIdShopCheck(["kind": "quote", "r": r, "quote": quote, "pubkey": moved,
+                                                    "outputs": outs.map { ["amount": $0["amount"] as Any, "B_": $0["B_"] as Any] }]),
+                       .ok(.quote(r: try NUT13.bytes(hex: r), quote: quote, pubkey: try NUT13.bytes(hex: moved), outputs: outputs)))
+        XCTAssertEqual(FoxyBridge.cashuIdShopCheck(["kind": "collect", "nonce": nonce, "host": "Shop.Example.com"]), .refuse("bad request"))
+        XCTAssertEqual(FoxyBridge.cashuIdShopCheck(["kind": "sign"]), .refuse("bad request"))
     }
 
     /// cashuIdTag and cashuIdEphemeral: points, a 32-bit index and a whole locktime; the ID under `to`, never `id`.

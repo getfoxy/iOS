@@ -94,22 +94,22 @@ html,body{margin:0;height:100%;background:#111214;font-family:SatSymbol,Figtree,
 img[data-logo-lt]{display:none !important;}
 [data-foxy-theme="light"] img[data-logo-lt]{display:block !important;}
 [data-foxy-theme="light"] [data-qr-vignette]{background:var(--chip) !important;}
-/* EL1, the beaker design: the card's face drawn in CSS and inline SVG, with its liquid flowing and bubbling and the beaker swaying (the keyframes below; still under Reduce Motion). It is a block of its own inside the face ([data-el1], shown only for EL1), the same block as FC_EL1_FACE in build/app/26f-flashcard.js, which the screen behind the sheet draws. */
+/* 002, the beaker design: the card's face drawn in CSS and inline SVG, with its liquid flowing and bubbling and the beaker swaying (the keyframes below; still under Reduce Motion). It is a block of its own inside the face ([data-el1], shown only for EL1), the same block as FC_EL1_FACE in build/app/26f-flashcard.js, which the screen behind the sheet draws. */
 @keyframes foxyEl1Bub{0%{bottom:-4%;opacity:0;transform:translateX(0) scale(.6)}10%{opacity:.85}45%{transform:translateX(2px) scale(1)}75%{transform:translateX(-2px) scale(1)}92%{opacity:.8;transform:translateX(1px) scale(1.05)}100%{bottom:90%;opacity:0;transform:translateX(1px) scale(1.7)}}@keyframes foxyEl1Flow{from{transform:translateX(0)}to{transform:translateX(-237px)}}@keyframes foxyEl1FlowB{from{transform:translateX(-237px)}to{transform:translateX(0)}}@keyframes foxyEl1Slosh{0%,100%{transform:rotate(-4deg) translateY(1px)}50%{transform:rotate(4deg) translateY(-2px)}}@keyframes foxyEl1Sway{0%,100%{transform:rotate(-1.2deg)}50%{transform:rotate(1.2deg)}}
 @media (prefers-reduced-motion:reduce){[data-el1],[data-el1] *{animation:none!important}}
 [data-el1]{display:none}
-/* FX1, the Foxy design: the face is its picture (chip, fox, bearer mark all in it), drawn over the same card with only the app's own lines kept (its badge, and the limit line, which sits at the bottom left as BEARER does at the bottom right: the same margins, and the picture's own ink) */
-[data-card-portrait]:not([data-card-design="FX1"]) [data-card-picture]{display:none}
+/* 001, the Foxy design: the face is its picture (chip, fox, bearer mark all in it), drawn over the same card with only the app's own lines kept (its badge, and the limit line, which sits at the bottom left as BEARER does at the bottom right: the same margins, and the picture's own ink) */
+[data-card-portrait]:not([data-card-design="001"]) [data-card-picture]{display:none}
 [data-card-stage="1"]{touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none}[data-card-stage="1"] [data-card-portrait]{backface-visibility:hidden;-webkit-backface-visibility:hidden}
-[data-card-portrait][data-card-design="FX1"] [data-card-turn]{display:none}
-[data-card-design="FX1"] [data-card-face]{background:url(img/card-fx1.png) center/cover no-repeat !important;border:0 !important;box-shadow:0 .9cqw 3cqw rgba(0,0,0,.35) !important}
-[data-card-design="FX1"] [data-card-face]>div:not([data-card-lines]),[data-card-design="FX1"] [data-card-face]>sc-if>div:not([data-card-lines]){display:none !important}
-[data-card-design="FX1"] [data-card-lines]{left:8.2cqw !important;bottom:5.45cqw !important}
-/* EL1: its own block is shown and the drawn face's parts hidden; the app's lines sit at BEARER's margins in BEARER's grey */
-[data-card-design="EL1"] [data-card-face]{background:#0B0C0D !important;border:0 !important;box-shadow:0 .19cqw 0 #1C1C1C,0 .38cqw 0 #171717,0 .58cqw 0 #121212,0 .77cqw 0 #0E0E0E,0 .96cqw .19cqw rgba(0,0,0,.9),0 2.7cqw 3.5cqw rgba(0,0,0,.45),0 6.5cqw 11.5cqw rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.12),inset 0 0 0 1px rgba(255,255,255,.05) !important}
-[data-card-design="EL1"] [data-card-face]>div:not([data-card-lines]):not([data-el1]),[data-card-design="EL1"] [data-card-face]>sc-if>div:not([data-card-lines]){display:none !important}
-[data-card-design="EL1"] [data-el1]{display:block}
-[data-card-design="EL1"] [data-card-lines]{left:7.69cqw !important;bottom:5.77cqw !important}
+[data-card-portrait][data-card-design="001"] [data-card-turn]{display:none}
+[data-card-design="001"] [data-card-face]{background:url(img/card-fx1.png) center/cover no-repeat !important;border:0 !important;box-shadow:0 .9cqw 3cqw rgba(0,0,0,.35) !important}
+[data-card-design="001"] [data-card-face]>div:not([data-card-lines]),[data-card-design="001"] [data-card-face]>sc-if>div:not([data-card-lines]){display:none !important}
+[data-card-design="001"] [data-card-lines]{left:8.2cqw !important;bottom:5.45cqw !important}
+/* 002: its own block is shown and the drawn face's parts hidden; the app's lines sit at BEARER's margins in BEARER's grey */
+[data-card-design="002"] [data-card-face]{background:#0B0C0D !important;border:0 !important;box-shadow:0 .19cqw 0 #1C1C1C,0 .38cqw 0 #171717,0 .58cqw 0 #121212,0 .77cqw 0 #0E0E0E,0 .96cqw .19cqw rgba(0,0,0,.9),0 2.7cqw 3.5cqw rgba(0,0,0,.45),0 6.5cqw 11.5cqw rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.12),inset 0 0 0 1px rgba(255,255,255,.05) !important}
+[data-card-design="002"] [data-card-face]>div:not([data-card-lines]):not([data-el1]),[data-card-design="002"] [data-card-face]>sc-if>div:not([data-card-lines]){display:none !important}
+[data-card-design="002"] [data-el1]{display:block}
+[data-card-design="002"] [data-card-lines]{left:7.69cqw !important;bottom:5.77cqw !important}
 
 
 
@@ -905,6 +905,9 @@ img[data-logo-lt]{display:none !important;}
 </sc-if>
 <sc-if value="{{ txHasPayHash }}">
 <div sc-camel-on-click="{{ txCopyPayHash }}" style="margin-top:22px;cursor:pointer" style-active="opacity:0.5"><div style="font-size:18px;font-weight:600;letter-spacing:0.045em;color:rgba(var(--ink-rgb),.45)">PAYMENT HASH</div><div style="font-family:DM Mono,ui-monospace,monospace;font-size:15px;font-weight:600;line-height:1.45;margin-top:3px;color:var(--ink);overflow-wrap:anywhere">{{ txPayHash }}</div></div>
+</sc-if>
+<sc-if value="{{ txShopShown }}">
+<div data-foxy-shop-sales="1" style="margin-top:22px"><div style="font-size:18px;font-weight:600;letter-spacing:0.045em;color:rgba(var(--ink-rgb),.45)">SALES</div><div style="font-size:18px;font-weight:700;line-height:1.35;margin-top:3px;color:var(--ink);text-wrap:pretty">{{ txShopLine }}</div><sc-if value="{{ txShopPaidShown }}"><div style="font-size:16px;font-weight:600;line-height:1.35;margin-top:6px;color:rgba(var(--ink-rgb),.6);text-wrap:pretty">{{ txShopPaid }}</div></sc-if><div style="display:flex;flex-direction:column;gap:4px;margin-top:10px"><sc-for list="{{ txShopOrders }}" as="o" hint-placeholder-count="3"><div style="display:flex;justify-content:space-between;gap:12px;font-family:DM Mono,ui-monospace,monospace;font-size:15px;font-weight:600;line-height:1.35;color:var(--ink)"><div style="min-width:0;overflow-wrap:anywhere">{{ o.order }}</div><div style="flex:none;text-align:right">{{ o.amount }}</div></div></sc-for></div><sc-if value="{{ txShopMoreShown }}"><div style="font-size:15px;font-weight:600;margin-top:6px;color:rgba(var(--ink-rgb),.5)">{{ txShopMore }}</div></sc-if><div sc-camel-on-click="{{ txShopCopy }}" style="margin-top:10px;height:44px;border-radius:22px;border:1.5px solid rgba(var(--ink-rgb),.16);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;letter-spacing:0.03em;color:var(--ink);cursor:pointer" style-active="opacity:0.55">COPY ORDERS</div></div>
 </sc-if>
 <sc-if value="{{ txHasReceipt }}">
 <div style="margin-top:22px"><div style="font-size:18px;font-weight:600;letter-spacing:0.045em;color:rgba(var(--ink-rgb),.45)">RECEIPT</div><div style="font-size:18px;font-weight:700;line-height:1.35;margin-top:3px;color:var(--ink);text-wrap:pretty">{{ txReceiptLine }}</div><div style="display:flex;gap:10px;margin-top:10px"><div sc-camel-on-click="{{ txCopyReceipt }}" style="flex:1;height:44px;border-radius:22px;border:1.5px solid rgba(var(--ink-rgb),.16);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;letter-spacing:0.03em;color:var(--ink);cursor:pointer" style-active="opacity:0.55">{{ txReceiptCta }}</div><div sc-camel-on-click="{{ txDeleteReceipt }}" style="flex:1;height:44px;border-radius:22px;border:1.5px solid rgba(var(--ink-rgb),.16);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;letter-spacing:0.03em;color:rgba(var(--ink-rgb),.6);cursor:pointer" style-active="opacity:0.55">DELETE</div></div></div>

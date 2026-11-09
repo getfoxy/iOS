@@ -237,16 +237,16 @@ function amt(a) {
       await p1.send(SELECT);
       await p1.send(maker);
       p1.tap();
-      await R.W.cardSetUpFor(p1, { pin: '5555', design: 'FX1' });
+      await R.W.cardSetUpFor(p1, { pin: '5555', design: '001' });
       ok(p1.state.record.mint === MINT && p1.state.record.design === 'EL1' && p1.state.pinState === 1 && !p1.state.owner,
-         'a card the maker wrote EL1 on, set up for its holder with the app’s FX1, is at this phone’s mint and still EL1', JSON.stringify([p1.state.record.mint, p1.state.record.design]));
+         'a card the maker wrote EL1 on, set up for its holder with the app’s 001, is at this phone’s mint and still EL1', JSON.stringify([p1.state.record.mint, p1.state.record.design]));
       // cut off after its PIN and before its record: any phone takes it up again with the PIN it has (the card keeps it, having a record)
       const p2 = card4(H, 24);
       await p2.send(SELECT);
       await p2.send(maker);
       p2.tap();
       p2.leaveBefore('32', 1);
-      ok((await why(R.W.cardSetUpFor(p2, { pin: '5555', design: 'FX1' }))) === 'gone' && p2.state.pinState === 1 && p2.state.record.mint === '-',
+      ok((await why(R.W.cardSetUpFor(p2, { pin: '5555', design: '001' }))) === 'gone' && p2.state.pinState === 1 && p2.state.record.mint === '-',
          'a set-up for the holder cut off before its record leaves the PIN on the maker’s record');
       p2.tap();
       const seen2 = await G.W.cardLook(p2, { short: true });
@@ -306,7 +306,7 @@ function amt(a) {
     let v = vals(holder);
     ok(v.fcNew && v.fcNewLine === 'Welcome to Foxy Card. Set it up to put money on it.' && typeof v.fcSetUp === 'function' && !('fcRestore' in v) && !v.fcGuest,
        'a new card is welcomed, with SET UP CARD and no RESTORE LOST CARD (that is home’s MENU’s)', v.fcNewLine);
-    ok(welcome(holder) && welcome(holder).buttons === 'SET UP CARD,CANCEL' && welcome(holder).line === '' && welcome(holder).design === 'FX1',
+    ok(welcome(holder) && welcome(holder).buttons === 'SET UP CARD,CANCEL' && welcome(holder).line === '' && welcome(holder).design === '001',
        'it lands on WELCOME TO YOUR FOXY CARD, over the card’s screen: the picture of the design it will be given, SET UP CARD and CANCEL', JSON.stringify(welcome(holder)));
     welcome(holder).press('SET UP CARD');
     let nm = named(holder);

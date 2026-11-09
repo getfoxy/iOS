@@ -18,7 +18,7 @@ extension FoxyBridge {
         "restoreSecrets",
         "p2pkReserve", "p2pkPubkeys", "p2pkKey",
         "cardOwnerKey", "cardOwnerSign",
-        "cashuIdPublic", "cashuIdSign", "cashuIdTag", "cashuIdEphemeral", "cashuIdSignUnblinded",
+        "cashuIdPublic", "cashuIdSign", "cashuIdTag", "cashuIdEphemeral", "cashuIdSignUnblinded", "cashuIdShop",
         "seedShow", "seedEnter", "seedAdopt", "seedCandidateForget", "seedWipe",
         "seedProtection", "seedProtect",
     ]
@@ -189,6 +189,53 @@ extension FoxyBridge {
             secrets.append(secret)
         }
         return .ok(SeedActions.CashuIdSignUnblindedRequest(secrets: secrets))
+    }
+
+    /// cashuIdShop {kind, ...}: a shop's collection (docs/FOXY-ID.md, "Shops").
+    ///   collect {nonce: 64 hex, host, path?}: a host of lowercase letters, digits, dots and dashes, and the shop's path ("" or "/…");
+    ///   quote {r: 64 hex, quote, pubkey: a point, outputs: 1 to 256 of {amount, B_: a point}};
+    ///   proofs {r: 64 hex, secrets: 1 to 100 P2PK secrets, not SIG_ALL}.
+    /// Whether r moves this ID to the key named is the seed's question (CashuID.signQuote, signMoved), asked after.
+    static func cashuIdShopCheck(_ body: [String: Any]) -> NativeCheck<SeedActions.CashuIdShopRequest> {
+        let hex32 = { (value: Any?) -> [UInt8]? in
+            guard let text = value as? String, text.utf8.count == 64, let bytes = try? NUT13.bytes(hex: text.lowercased()),
+                  bytes.count == 32 else { return nil }
+            return bytes
+        }
+        switch body["kind"] as? String {
+        case "collect":
+            let path = body["path"] == nil ? "" : (body["path"] as? String) ?? "\u{0}"
+            guard let nonce = hex32(body["nonce"]), let host = body["host"] as? String, CashuID.isShopHost(host),
+                  CashuID.isShopPath(path) else {
+                return .refuse("bad request")
+            }
+            return .ok(.collect(nonce: nonce, host: host, path: path))
+        case "quote":
+            guard let r = hex32(body["r"]), let quote = body["quote"] as? String, CashuID.isQuoteId(quote),
+                  let pubkey = pointText(body["pubkey"]),
+                  let list = body["outputs"] as? [Any], !list.isEmpty, list.count <= CashuID.mostOutputs else {
+                return .refuse("bad request")
+            }
+            var outputs = [CashuID.Output]()
+            for item in list {
+                guard let o = item as? [String: Any], let amount = exactInteger(o["amount"]), amount >= 0,
+                      let blinded = pointText(o["B_"]) else { return .refuse("bad request") }
+                outputs.append(CashuID.Output(amount: UInt64(amount), blinded: blinded))
+            }
+            return .ok(.quote(r: r, quote: quote, pubkey: pubkey, outputs: outputs))
+        case "proofs":
+            guard let r = hex32(body["r"]), let list = body["secrets"] as? [Any], !list.isEmpty, list.count <= CashuID.mostSecrets else {
+                return .refuse("bad request")
+            }
+            var secrets = [String]()
+            for item in list {
+                guard let secret = item as? String, CashuID.lockOf(secret) != nil else { return .refuse("bad request") }
+                secrets.append(secret)
+            }
+            return .ok(.proofs(r: r, secrets: secrets))
+        default:
+            return .refuse("bad request")
+        }
     }
 
     /// cashuIdTag {peer, e}: two points, the other wallet's ID and the E the tag is bound to.
@@ -485,6 +532,14 @@ extension FoxyBridge {
         switch Self.cashuIdSignUnblindedCheck(body) {
         case .refuse(let why): resolve(id: id, text: nil, error: why)
         case .ok(let request): onSeedQueue(id: id) { SeedActions.cashuIdSignUnblinded(secrets: request.secrets, env: $0) }
+        }
+    }
+
+    /// {kind, ...} → a shop's collection signed (CashuID.collectSign, signQuote, signMoved). No key is answered.
+    func handleCashuIdShop(id: String, body: [String: Any]) {
+        switch Self.cashuIdShopCheck(body) {
+        case .refuse(let why): resolve(id: id, text: nil, error: why)
+        case .ok(let request): onSeedQueue(id: id) { SeedActions.cashuIdShop(request, env: $0) }
         }
     }
 

@@ -486,8 +486,8 @@ const STATES = [
     await settle();
     const drawerRows = [...w.document.querySelectorAll('div')].filter((d) => d.style.height === '60px' && d.style.borderRadius === '18px');
     const firstRow = drawerRows.find((d) => d.textContent.trim() === 'HISTORY');
-    ok(/WALLET/.test((drawerRows[0] || {}).textContent || '') && /MY FOXY ID/.test((drawerRows[1] || {}).textContent || '') && drawerRows.indexOf(firstRow) === 2,
-      'drawn in the drawer under WALLET and MY FOXY ID', firstRow ? firstRow.textContent : 'none');
+    ok(/WALLET/.test((drawerRows[0] || {}).textContent || '') && /MY FOXY ID/.test((drawerRows[1] || {}).textContent || '') && /SHOPS/.test((drawerRows[2] || {}).textContent || '') && drawerRows.indexOf(firstRow) === 3,
+      'drawn in the drawer under WALLET, MY FOXY ID and SHOPS', firstRow ? firstRow.textContent : 'none');
     click(firstRow);
     await settle();
     ok(A.state.screen === 'history' && !A.state.open0, 'and it opens history, and closes the menu', A.state.screen);

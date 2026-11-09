@@ -421,6 +421,10 @@
         if (!tx.payHash) return;
         this.toast(this.copyText(tx.payHash) ? 'Payment hash copied' : 'Could not copy');
       },
+      /* A shop's collection (08g-shop-collect.js): the shop, the time, the count and the total, the collaborators it paid,
+       * and every order with its amount, to check against the shop's orders page; COPY ORDERS copies them as lines of
+       * order, amount and the collaborators each paid. A collection older than ninety days keeps its totals only. */
+      ...this.shopTxVals(tx),
       /* What this payment consumed and produced: a count and a copy button.
        * The proofs themselves are hex, they are long, and the outputs of a
        * recent payment are live change with no business on screen. */

@@ -483,6 +483,14 @@ enum SeedActions {
         let secrets: [String]
     }
 
+    /// cashuIdShop's request, checked (NativeSeedBridge.cashuIdShopCheck): a shop's collection, signed by the ID key
+    /// (collect) or by the ID key moved by an order's r (quote, proofs).
+    enum CashuIdShopRequest: Equatable {
+        case collect(nonce: [UInt8], host: String, path: String)
+        case quote(r: [UInt8], quote: String, pubkey: [UInt8], outputs: [CashuID.Output])
+        case proofs(r: [UInt8], secrets: [String])
+    }
+
     /// cashuIdTag's request: the other ID, and the E the tag is bound to.
     struct CashuIdTagRequest: Equatable {
         let peer: [UInt8]
@@ -536,6 +544,29 @@ enum SeedActions {
             print("[foxy] foxy id: the ID key itself signed \(sigs.count) piece(s) of one delivery paid to it unblinded,"
                   + " on the receiver's TAKE IT ANYWAY")
             return .answer(CashuID.signReply(sigs))
+        } catch {
+            return .refuse(problem(error))
+        }
+    }
+
+    /// cashuIdShop → a shop's collection signed (docs/FOXY-ID.md, "Shops"): collect {"pub", "sig"}, the ID key over
+    /// SHA-256("foxy-shop-collect-v1" ‖ nonce ‖ host ‖ path); quote {"sig", "legacy"}, NUT-20's two signatures by d + r for a
+    /// quote locked to ID + r·G; proofs {"sigs"}, NUT-11's by d + r for secrets locked to ID + r·G. The digests are made
+    /// here; no key, and no d + r, is ever answered.
+    static func cashuIdShop(_ request: CashuIdShopRequest, env: SeedEnvironment) -> SeedReply {
+        do {
+            let saved = try readSavedSeed(env)
+            switch request {
+            case .collect(let nonce, let host, let path):
+                let signed = try CashuID.collectSign(seed: saved, nonce: nonce, host: host, path: path)
+                return .answer(CashuID.collectReply(signed))
+            case .quote(let r, let quote, let pubkey, let outputs):
+                let signed = try CashuID.signQuote(seed: saved, r: r, quote: quote, pubkey: pubkey, outputs: outputs)
+                return .answer(CashuID.quoteReply(signed))
+            case .proofs(let r, let secrets):
+                let sigs = try CashuID.signMoved(seed: saved, r: r, secrets: secrets)
+                return .answer(CashuID.signReply(sigs))
+            }
         } catch {
             return .refuse(problem(error))
         }

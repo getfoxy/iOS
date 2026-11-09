@@ -173,8 +173,8 @@ for (const [cond, title, sub] of SCREENS) {
   let reduce = false;
   dom.window.matchMedia = () => ({ matches: reduce });
   const app = Object.assign(new Function('return {' + src + '}')(), {
-    FC_SPIN: { auto: 24, perPx: 0.57, keep: 0.94, rest: 1600, gone: 60 }, FC_SETUP_DESIGN: 'FX1', FC_SPEED_CHIPS: [1, 2, 5],
-    fcDesignOf: () => 'FX1', fcLimitRows: () => [], fcLostRows: () => [], back() {}, state: {},
+    FC_SPIN: { auto: 24, perPx: 0.57, keep: 0.94, rest: 1600, gone: 60 }, FC_SETUP_DESIGN: '001', FC_SPEED_CHIPS: [1, 2, 5],
+    fcDesignOf: () => '001', fcLimitRows: () => [], fcLostRows: () => [], back() {}, state: {},
   });
   const vals = (sc, s) => app.renderCardScreens({ s, sc });
   const w = vals('fcWelcome', { fcWelcome: { sats: 1 } });

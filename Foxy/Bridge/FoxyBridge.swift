@@ -420,6 +420,8 @@ final class FoxyBridge: NSObject, WKScriptMessageHandler {
         "cashuIdEphemeral": FoxyBridge.handleCashuIdEphemeral,
         // and the ID key's own signature, only for a delivery paid to it unblinded that the receiver chose to take
         "cashuIdSignUnblinded": FoxyBridge.handleCashuIdSignUnblinded,
+        // and a shop's collection: the ID key over a shop's nonce, and the ID key moved by an order's r (docs/FOXY-ID.md, "Shops")
+        "cashuIdShop": FoxyBridge.handleCashuIdShop,
         "seedShow": FoxyBridge.handleSeedShow,
         "seedEnter": FoxyBridge.handleSeedEnter,
         "seedAdopt": FoxyBridge.handleSeedAdopt,

@@ -271,4 +271,99 @@ final class CashuIDTests: XCTestCase {
         XCTAssertEqual(SeedActions.cashuIdSign(pieces: [], env: env).error, "bad request")
         XCTAssertEqual(SeedActions.cashuIdTag(peer: [2, 3], e: try b(v.E), env: env).error, "bad request")
     }
+    // MARK: A shop's collection (CashuID.collectSign, signQuote, signMoved), held to tests/fixtures/shop-collect-vectors.json
+
+    private struct ShopVectors: Decodable {
+        struct Out: Decodable { let amount: UInt64; let B_: String }
+        struct Path: Decodable { let path, digest: String }
+        let paths: [Path]
+        let words, id, r, moved, movedKey, nonce, host, collectDigest, path, collectDigestPath, quote, amendedDigest, legacyDigest: String
+        let outputs: [Out]
+    }
+
+    private func shopVectors() throws -> ShopVectors {
+        let url = repoRoot().appendingPathComponent("tests/fixtures/shop-collect-vectors.json")
+        return try JSONDecoder().decode(ShopVectors.self, from: Data(contentsOf: url))
+    }
+
+    private func verifies(_ sig: [UInt8], _ digest: [UInt8], _ key: [UInt8]) throws -> Bool {
+        let ctx = try XCTUnwrap(secp256k1_context_create(UInt32(SECP256K1_CONTEXT_NONE)))
+        defer { secp256k1_context_destroy(ctx) }
+        var point = secp256k1_pubkey()
+        guard secp256k1_ec_pubkey_parse(ctx, &point, key, 33) == 1 else { return false }
+        var xonly = secp256k1_xonly_pubkey()
+        guard secp256k1_xonly_pubkey_from_pubkey(ctx, &xonly, nil, &point) == 1 else { return false }
+        return secp256k1_schnorrsig_verify(ctx, sig, digest, 32, &xonly) == 1
+    }
+
+    func testAShopsCollectionIsSignedOnlyForWhatItNames() throws {
+        let v = try shopVectors()
+        let s = try NUT13.seed(mnemonic: v.words)
+        let outputs = try v.outputs.map { CashuID.Output(amount: $0.amount, blinded: try b($0.B_)) }
+        // the digests, made here from their parts
+        XCTAssertEqual(NUT13.hex(CashuID.collectDigest(nonce: try b(v.nonce), host: v.host, path: "/api/shop/collect")), v.collectDigest)
+        // the request's full path is in it: both calls, a link with a path and one without, each its own
+        XCTAssertEqual(v.paths.count, 4)
+        for p in v.paths { XCTAssertEqual(NUT13.hex(CashuID.collectDigest(nonce: try b(v.nonce), host: v.host, path: p.path)), p.digest, p.path) }
+        XCTAssertEqual(Set(v.paths.map { $0.digest }).count, 4)
+        XCTAssertEqual(NUT13.hex(CashuID.collectDigest(nonce: try b(v.nonce), host: v.host, path: v.path)), v.collectDigestPath)
+        let dg = CashuID.quoteDigests(quote: v.quote, outputs: outputs)
+        XCTAssertEqual(NUT13.hex(dg.amended), v.amendedDigest)
+        XCTAssertEqual(NUT13.hex(dg.legacy), v.legacyDigest)
+        // collect: the ID key itself, over the shop's nonce and host
+        let c = try CashuID.collectSign(seed: s, nonce: try b(v.nonce), host: v.host, path: "/api/shop/collect")
+        XCTAssertEqual(NUT13.hex(c.id), v.id)
+        XCTAssertTrue(try verifies(c.sig, try b(v.collectDigest), try b(v.id)))
+        let cp = try CashuID.collectSign(seed: s, nonce: try b(v.nonce), host: v.host, path: v.path)
+        XCTAssertTrue(try verifies(cp.sig, try b(v.collectDigestPath), try b(v.id)))
+        XCTAssertFalse(try verifies(cp.sig, try b(v.collectDigest), try b(v.id)))
+        XCTAssertThrowsError(try CashuID.collectSign(seed: s, nonce: [1, 2, 3], host: v.host, path: ""))
+        XCTAssertThrowsError(try CashuID.collectSign(seed: s, nonce: try b(v.nonce), host: "Not A Host", path: ""))
+        XCTAssertThrowsError(try CashuID.collectSign(seed: s, nonce: try b(v.nonce), host: v.host, path: "no-slash"))
+        // quote: d + r, both messages, for a quote locked to ID + r·G and no other key
+        let q = try CashuID.signQuote(seed: s, r: try b(v.r), quote: v.quote, pubkey: try b(v.moved), outputs: outputs)
+        XCTAssertTrue(try verifies(q.sig, dg.amended, try b(v.moved)))
+        XCTAssertTrue(try verifies(q.legacy, dg.legacy, try b(v.moved)))
+        XCTAssertThrowsError(try CashuID.signQuote(seed: s, r: try b(v.r), quote: v.quote, pubkey: try b(v.id), outputs: outputs)) {
+            XCTAssertEqual($0 as? CashuID.Failure, .notLocked)
+        }
+        XCTAssertThrowsError(try CashuID.signQuote(seed: s, r: [UInt8](repeating: 0, count: 32), quote: v.quote, pubkey: try b(v.moved), outputs: outputs)) {
+            XCTAssertEqual($0 as? CashuID.Failure, .badTweak)
+        }
+        XCTAssertThrowsError(try CashuID.signQuote(seed: s, r: try b(v.r), quote: "bad quote!", pubkey: try b(v.moved), outputs: outputs))
+        // r = n, and r = n − d (so d + r = 0): no key, nothing signed
+        let n = try b("fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141")
+        XCTAssertThrowsError(try CashuID.signQuote(seed: s, r: n, quote: v.quote, pubkey: try b(v.moved), outputs: outputs)) {
+            XCTAssertEqual($0 as? CashuID.Failure, .badTweak)
+        }
+        var d = try CashuID.secret(seed: s, path: CashuID.idPath)
+        defer { NUT13.wipe(&d) }
+        let minusD = try NUT13.withContext { try NUT13.negated(scalar: d, $0) }
+        XCTAssertThrowsError(try CashuID.signQuote(seed: s, r: minusD, quote: v.quote, pubkey: try b(v.moved), outputs: outputs)) {
+            XCTAssertEqual($0 as? CashuID.Failure, .badTweak)
+        }
+        XCTAssertThrowsError(try CashuID.signMoved(seed: s, r: minusD, secrets: ["[\"P2PK\",{\"nonce\":\"11\",\"data\":\"\(v.moved)\"}]"])) {
+            XCTAssertEqual($0 as? CashuID.Failure, .badTweak)
+        }
+        // proofs: NUT-11 by d + r, only for P2PK secrets locked to exactly ID + r·G, never SIG_ALL
+        let secret = "[\"P2PK\",{\"nonce\":\"11\",\"data\":\"\(v.moved)\",\"tags\":[]}]"
+        let sigs = try CashuID.signMoved(seed: s, r: try b(v.r), secrets: [secret])
+        XCTAssertTrue(try verifies(sigs[0], Array(SHA256.hash(data: Array(secret.utf8))), try b(v.moved)))
+        XCTAssertThrowsError(try CashuID.signMoved(seed: s, r: try b(v.r), secrets: ["[\"P2PK\",{\"nonce\":\"11\",\"data\":\"\(v.id)\"}]"]))
+        XCTAssertThrowsError(try CashuID.signMoved(seed: s, r: try b(v.r),
+            secrets: ["[\"P2PK\",{\"nonce\":\"11\",\"data\":\"\(v.moved)\",\"tags\":[[\"sigflag\",\"SIG_ALL\"]]}]"]))
+        // the actions: the replies, and no key in any of them (the bridge's checks are in NativeSeedTests, which needs the app)
+        var env = SeedEnvironment.live
+        let words = v.words
+        env.savedSeed = { .found(try! NUT13.seed(mnemonic: words)) }
+        let reply = SeedActions.cashuIdShop(.quote(r: try b(v.r), quote: v.quote, pubkey: try b(v.moved), outputs: outputs), env: env)
+        XCTAssertNotNil(reply.text)
+        XCTAssertEqual(SeedActions.cashuIdShop(.quote(r: try b(v.r), quote: v.quote, pubkey: try b(v.id), outputs: outputs), env: env).error,
+                       "That ecash is not locked to this Foxy ID.")
+        let collect = SeedActions.cashuIdShop(.collect(nonce: try b(v.nonce), host: v.host, path: "/api/shop/collect"), env: env)
+        for text in [reply.text ?? "", collect.text ?? ""] {
+            XCTAssertFalse(text.contains(v.movedKey))
+            XCTAssertFalse(text.contains(v.r))
+        }
+    }
 }

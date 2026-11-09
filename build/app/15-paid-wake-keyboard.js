@@ -267,6 +267,8 @@
     W._onCashuIdPaid = () => { if (this.refreshBalance) this.refreshBalance(); if (this.loadHistory) this.loadHistory(); };
     // and one checked here while the mint swaps it, said as arriving (26o-cashu-id.js)
     W._onCashuIdArriving = (v) => { if (this.cidArrivingSaid) this.cidArrivingSaid(v); };
+    // a shop's sales being collected, and collected (26t-shops.js)
+    W._onShopCollect = (ev) => { if (this.shopHeard) this.shopHeard(ev); };
     // one at a mint this phone does not use, waiting for its receiver's answer (26o-cashu-id.js)
     W._onCashuIdOffer = (v) => { if (this.loadHistory) this.loadHistory(); if (this.cidOfferCard) this.cidOfferCard(v); };
     // payments sent straight to this phone's requests, over Tor (12-receive.js)

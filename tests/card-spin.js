@@ -82,8 +82,8 @@ Object.defineProperty(dom.window.document, 'hidden', { configurable: true, get: 
 let app = null;
 try {
   app = Object.assign(new Function('return {' + src + '}')(), {
-    FC_SPIN: { auto: 24, perPx: 0.57, keep: 0.94, rest: 0, gone: 60 }, FC_SETUP_DESIGN: 'FX1', FC_TAP_SCREENS: { '1a': { bg: '', ink: '' } }, FC_TAP_ICONS: {}, FC_TAP_PAD: '90px 36px 0px', FC_TAP_PAD_CARD: '40px 36px 0px', FC_TAP_CARD_H: '200px', FC_SPEED_CHIPS: [1, 2, 5],
-    fcDesignOf: () => 'FX1', fcLimitRows: () => [], fcLostRows: () => [], back() {}, cardFlowBusy: () => false,
+    FC_SPIN: { auto: 24, perPx: 0.57, keep: 0.94, rest: 0, gone: 60 }, FC_SETUP_DESIGN: '001', FC_TAP_SCREENS: { '1a': { bg: '', ink: '' } }, FC_TAP_ICONS: {}, FC_TAP_PAD: '90px 36px 0px', FC_TAP_PAD_CARD: '40px 36px 0px', FC_TAP_CARD_H: '200px', FC_SPEED_CHIPS: [1, 2, 5],
+    fcDesignOf: () => '001', fcLimitRows: () => [], fcLostRows: () => [], back() {}, cardFlowBusy: () => false,
     hideStage() { const o = document.getElementById('foxy-stage'); if (o) o.remove(); },
     state: { screen: 'flashcard', fc: { key: 'k', setUp: true } },
   });
@@ -229,7 +229,7 @@ const drawn = () => app.renderCardScreens({ s: app.state, sc: app.state.screen }
     app.fcFamilyFill(root, { screen: '1a', title: 'TAP TO READ', card: true });
     const art = root.querySelector('[data-tp-art]');
     const stageSpin = root.querySelector('[data-card-stage="1"] [data-card-spin]');
-    ok(!!art && art.style.display !== 'none' && !!stageSpin && !!root.querySelector('[data-card-portrait][data-card-design="FX1"] [data-card-picture]') && !!root.querySelector('[data-card-back]'),
+    ok(!!art && art.style.display !== 'none' && !!stageSpin && !!root.querySelector('[data-card-portrait][data-card-design="001"] [data-card-picture]') && !!root.querySelector('[data-card-back]'),
        'the screen holds the card on a turntable: its portrait in the design a new card is shown in, and its dark back');
     ok(root.querySelector('[data-tp-body]').style.padding === '40px 36px 0px', 'the screen makes room for it at the top');
     await wait(120);

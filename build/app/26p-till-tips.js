@@ -321,6 +321,8 @@
     const s = this.state || {};
     const mode = s.tillList;
     if (!mode) return null;
+    // SHOPS (26t-shops.js): the shops this phone collects for, in the same rows
+    if (mode === 'shops') return this.shopListVals ? this.shopListVals() : null;
     const plainRow = (o) => Object.assign({
       dim: '1', down: false, downText: '', tint: 'var(--acc)', logo: 'none', here: false, notHere: true,
       ink: 'rgba(var(--ink-rgb),.55)', busy: false, bg: 'var(--surface)', border: 'rgba(var(--ink-rgb),.12)',

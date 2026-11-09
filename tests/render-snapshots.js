@@ -1115,6 +1115,16 @@ function representative(logic) {
   ] }], historyComplete: false, histUnit: 'usd' }, TWO_LIVE), { wallet: HOLDS_BTC }));
   add('two balances: dollars a card paid for sats, swapped into bitcoin, in detail', at('txDetail', Object.assign({ tx: ASK_ROW('req-d3', '09:30',
     { convert: 'done', convertSats: 6961, stamp: 'Today, 09:30' }) }, TWO_LIVE), { wallet: HOLDS_BTC }));
+  /* SHOPS (26t-shops.js): the shops this phone collects for, none yet, one being collected from; and a collection's row. */
+  const SHOPS_W = (list) => ({ wallet: { shops: () => list } });
+  const SHOP_ONE = { id: 'shop.example.com', url: 'https://shop.example.com', host: 'shop.example.com', name: 'Fox Prints', onion: false, at: 1,
+    lastAt: Date.UTC(2026, 10, 8, 10, 42), lastN: 12, lastWhy: '', paid: [{ id: '02aa', name: 'Ana', n: 12, at: 1 }, { id: '03bb', name: 'Foxy ID 1a2b3c4d', n: 4, at: 1 }] };
+  add('SHOPS, none yet', at('switchMint', { tillList: 'shops' }, SHOPS_W([])));
+  add('SHOPS, one shop and the collaborators it paid', at('switchMint', { tillList: 'shops' }, SHOPS_W([SHOP_ONE])));
+  add('SHOPS, collecting 340 of 1,000', at('switchMint', { tillList: 'shops', shopProg: { id: 'shop.example.com', n: 340, of: 1000 } }, SHOPS_W([SHOP_ONE])));
+  add('txDetail, a shop collection: SALES with every order', at('txDetail', { tx: { dir: 'in', sats: 7400, feeSats: 0, hash: 'shop-k1-0', memo: '3 sales from Fox Prints',
+    stamp: 'Today, 10:42', mint: 'https://forge.example.com', shop: { name: 'Fox Prints', host: 'shop.example.com', at: Date.UTC(2026, 10, 8, 10, 42), n: 3, total: 7400, unit: 'sat',
+      ids: [['aaaaaaaaaaaaaaaa', 'Ana'], ['bbbbbbbbbbbbbbbb', 'Foxy ID 1a2b3c4d']], list: 'A-1001,2100,0.1;A-1002,2100,0;A-1003,3200;' } } }));
   /* SEND > BANK ACCOUNT (26q-bank.js): the exchanges on the mint list, the username screen in each state its lookup leaves it,
    * River's paste screen, SET AMOUNT straight to the address kept with CHANGE EXCHANGE, and the sent screen for each. */
   const BANK_W = (over) => ({ wallet: Object.assign({

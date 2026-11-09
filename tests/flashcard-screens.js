@@ -181,9 +181,13 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
   ok(v.fcFaceLines === false && v.fcCardCap === '0px', 'and nothing is drawn under the card: no badge, and its limit is in its HISTORY');
   ok(!holder.fcWelcomeCard(holder.state) && v.fcSpin === '1' && v.fcPersp === '1100px',
      'the card’s picture on its own screen stands on the welcome’s turntable (26j-card-wheel.js, `fcSpinOn`)', JSON.stringify([v.fcSpin, v.fcPersp]));
-  ok(v.fcDesign === 'FX1' && holder.fcDesignOf({ design: 'zz9' }) === 'FL1' && holder.fcDesignOf({ design: 'EL1' }) === 'EL1' && holder.fcDesignOf({}) === 'FL1' && holder.fcDesignOf({ design: 'fl1' }) === 'FL1'
+  ok(v.fcDesign === '001' && holder.FC_SETUP_DESIGN === '001' && holder.fcDesignOf({ design: '001' }) === '001' && holder.fcDesignOf({ design: 'FX1' }) === '001'
+     && holder.fcDesignOf({ design: '002' }) === '002' && holder.fcDesignOf({ design: 'EL1' }) === '002' && holder.fcDesignOf({ design: 'ZZZ' }) === holder.FC_DESIGN
+     && holder.fcDesignOf({ design: '999' }) === holder.FC_DESIGN && Object.keys(holder.FC_DESIGNS).every((k) => k === 'FL1' || /^\d{3}$/.test(k)),
+     'design codes are three digits: a card answering 001 or its alias FX1 is 001, 002 or EL1 is 002, an unknown code is the default; the shop designs are keyed by digits', v.fcDesign);
+  ok(holder.fcDesignOf({ design: 'zz9' }) === 'FL1' && holder.fcDesignOf({ design: 'EL1' }) === '002' && holder.fcDesignOf({}) === 'FL1' && holder.fcDesignOf({ design: 'fl1' }) === 'FL1'
      && Object.keys(holder.FC_DESIGNS).every((k) => /^[A-Z0-9]{3}$/.test(k)),
-     'a card this phone set up is drawn in Foxy’s design FX1; one that names no design, or one this build cannot draw, is drawn in FL1; every design has a code of three characters', v.fcDesign);
+     'a card this phone set up is drawn in Foxy’s design 001; one that names no design, or one this build cannot draw, is drawn in FL1; every design has a code of three characters', v.fcDesign);
   ok(VERIFIED_AT.test(verOf(holder)) && v.fcVerifiedShown === undefined, 'and its HISTORY, not its title, says it is verified, and at what time: a card with nothing on it has nothing a mint could dispute', verOf(holder));
   ok(v.fcBlockShown === undefined && v.fcBlockLine === undefined && v.fcClockShown === undefined && v.fcClockLine === undefined,
      'no card has a block line or a CLOCK line on its screen any more', v.fcBlockLine);
@@ -2551,15 +2555,22 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
       const fresh = newCard(H2, undefined, { format: 4 });
       await setUpWith(owner, H2, fresh, '');
       await look(owner, H2, fresh);
-      ok(vals(owner).fcDesign === 'FX1', 'a card that names none is given this phone’s own, FX1', vals(owner).fcDesign);
+      ok(vals(owner).fcDesign === '001', 'a card that names none is given this phone’s own, 001', vals(owner).fcDesign);
       // the card maker's record (the mint "-", the design it was printed in): drawn in that design, as a new card with no mint and no menu
       const made = newCard(H2, undefined, { format: 4, software: 24 });
       await made.send('00a404000af0464f5859434152440100');
       await made.send('b0320000' + '68' + '00' + '00'.repeat(33) + '00'.repeat(65) + '01' + '2d' + Buffer.from('EL1', 'latin1').toString('hex'));
       await look(owner, H2, made);
       const mv = vals(owner);
-      ok(mv.fcDesign === 'EL1' && owner.state.fc.hasRecord === false && owner.state.fc.setUp === false && mv.fcPill === false && mv.fcMintShown === false && mv.fcMenuItems.length === 0,
-         'a card the maker wrote EL1 on is drawn EL1, new: no mint, no pill, no menu', JSON.stringify([mv.fcDesign, mv.fcPill, mv.fcMintShown, mv.fcMenuItems.length]));
+      ok(mv.fcDesign === '002' && owner.state.fc.hasRecord === false && owner.state.fc.setUp === false && mv.fcPill === false && mv.fcMintShown === false && mv.fcMenuItems.length === 0,
+         'a card the maker wrote EL1 on is drawn 002, new: no mint, no pill, no menu', JSON.stringify([mv.fcDesign, mv.fcPill, mv.fcMintShown, mv.fcMenuItems.length]));
+      for (const [wrote, drawn] of [['001', '001'], ['002', '002'], ['FX1', '001'], ['ZZZ', 'FL1'], ['999', 'FL1']]) {
+        const c = newCard(H2, undefined, { format: 4, software: 24 });
+        await c.send('00a404000af0464f5859434152440100');
+        await c.send('b0320000' + '68' + '00' + '00'.repeat(33) + '00'.repeat(65) + '01' + '2d' + Buffer.from(wrote, 'latin1').toString('hex'));
+        await look(owner, H2, c);
+        ok(vals(owner).fcDesign === drawn, 'a card whose chip says ' + wrote + ' is drawn ' + drawn, vals(owner).fcDesign);
+      }
     }
     await look(owner, H2, n);
 
@@ -2860,12 +2871,12 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     const badge = /<div data-card-badge style="([^"]*)">\{\{ fcCheck \}\}/.exec(markup);
     ok(!!badge && /text-transform:uppercase/.test(badge[1]) && /letter-spacing:\.3em/.test(badge[1]) && /color:\{\{ fcCheckInk \}\}/.test(badge[1]),
        'and its badge (Blocked, Locked) above it, under the card, the same capitals in its own ink');
-    // the designs: FX1's own upright picture; any other its face turned a quarter
-    ok(/\[data-card-portrait\]:not\(\[data-card-design="FX1"\]\) \[data-card-picture\]\{display:none\}/.test(markup)
-       && /\[data-card-portrait\]\[data-card-design="FX1"\] \[data-card-turn\]\{display:none\}/.test(markup)
+    // the designs: 001's own upright picture; any other its face turned a quarter
+    ok(/\[data-card-portrait\]:not\(\[data-card-design="001"\]\) \[data-card-picture\]\{display:none\}/.test(markup)
+       && /\[data-card-portrait\]\[data-card-design="001"\] \[data-card-turn\]\{display:none\}/.test(markup)
        && /<div data-card-picture style="[^"]*background:url\(img\/card-fx1-portrait\.jpg\) center\/cover no-repeat"><\/div>/.test(markup)
        && /<div data-card-turn style="[^"]*width:var\(--ch\);transform:translate\(-50%,-50%\) rotate\(90deg\);container-type:inline-size">/.test(markup),
-       'FX1 is its own upright picture, and every other design is its face turned a quarter');
+       '001 is its own upright picture, and every other design is its face turned a quarter');
     // the picture: a JPEG of 1080 by 1712 (54:85.6), from its frame header
     const jpg = fs.readFileSync(path.join(root, 'Web', 'img', 'card-fx1-portrait.jpg'));
     let i = 2, size = null;
@@ -3349,7 +3360,7 @@ const LIMIT_WARNING = 'A daily limit is the most this card will spend in one day
     // the welcome, on the card's screen: a new card, a set-up cut short, and none for a card that is not this phone's to set up
     a.setState({ fc: { key: 'k1', setUp: false, pin: 'none', hasRecord: false } });
     let v = a.renderCardScreens({ s: a.state, sc: 'flashcard' });
-    ok(v.isFcPanel && v.fpWelcome && !v.fpLimits && v.fpLine === '' && v.fpDesign === 'FX1', 'a new card on the card’s screen: WELCOME TO YOUR FOXY CARD over it, the card in the design it will be given');
+    ok(v.isFcPanel && v.fpWelcome && !v.fpLimits && v.fpLine === '' && v.fpDesign === '001', 'a new card on the card’s screen: WELCOME TO YOUR FOXY CARD over it, the card in the design it will be given');
     a.setState({ fc: { key: 'k1', setUp: false, pin: 'set', pinSet: true, hasRecord: false } });
     v = a.renderCardScreens({ s: a.state, sc: 'flashcard' });
     ok(v.fpWelcome && v.fpLine === 'Its set-up was cut short. Finish it to put money on it.', 'a set-up cut short is welcomed with a line saying so', v.fpLine);

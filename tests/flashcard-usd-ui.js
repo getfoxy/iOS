@@ -78,6 +78,8 @@ const LIFTS = [
                            'topUpFeeSats(mint) {', 'recoveringSats(mint) {', 'txTotalOut(t) {', 'txTotalUnit(t) {', 'txWhen(t) {', 'txLabel(d, now) {', 'txStamp(d, now) {',
                            'txDay(d, now) {', 'txClock(d) {', 'txWho(t) {', 'txCardName(t) {']],
   ['26-render-history-and-contacts.js', ['renderHistory(c) {', 'renderTxDetail(c) {', 'histRowTwo(']],
+  // a shop's collection lines in a row's detail, which renderTxDetail spreads into every detail
+  ['26t-shops.js', ['shopTxVals(tx) {']],
   ['12-receive.js', ['announcePayment(ev) {']],
   ['15-paid-wake-keyboard.js', ['nextPaidScreen() {', 'queuedEv(next) {', 'queueLater() {', 'paidDismissed() {']],
   ['26i-swap.js', ['convertOnReturn(due) {']],
