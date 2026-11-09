@@ -89,11 +89,13 @@ multiplying relay traffic, and what the check-in costs over Tor with many mints.
 
 ## Several Cashu IDs, one per purpose
 
-Asked for 2026-11-09. Foxy holds one Cashu ID per wallet today. The person
-should be able to make more from the same words, at the next index each time,
-name them (a market tip jar, a friend, a collaborator) and keep every one of
-them open: a holder of one ID can count only that ID's boxes, and an old ID
-keeps taking payments. Fifty is the expected number, growing over the years.
+Asked for 2026-11-09. Foxy holds one Cashu ID per wallet today. Instead, every
+visit to MY CASHU ID shows the next fresh ID from the same words, so each
+person ever given one holds their own, and a holder can count only what they
+themselves sent. Every ID stays open and keeps taking payments. A list under
+the screen names the ones kept on purpose (a market tip jar printed once and
+reused, a collaborator) and shows which contact holds which. IDs pile up with
+visits, most never shared; the rules below keep that cheap.
 
 - Up to fifty IDs, every one is asked at every open, as the one ID is today:
   the average person hands out a few and should never wait. Above fifty,
@@ -108,11 +110,13 @@ keeps taking payments. Fifty is the expected number, growing over the years.
   person who expects a payment from someone who has not paid in a while and
   does not want to wait for the weekly turn.
 - Restore from the words must bring the IDs back. The words give the keys at
-  every index, not how many were made or their names. A restore scans a fixed
-  depth (the first hundred indexes) and listens on all of them for the thirty
-  days a payment waits, keeping any that receives; the names ride in the copies
-  the phone sends its own recovery key, read back while the relays still hold
-  them, otherwise an ID comes back as "Cashu ID 7" to be renamed.
+  every index, not how many were handed out or their names. A restored phone
+  listens on a generous fixed depth (the first thousand indexes) by the same
+  activity rule: any index that gets paid wakes up, the rest cost a weekly
+  request; a payment waits thirty days, so a restore has a month of slack. The
+  names ride in the copies the phone sends its own recovery key, read back
+  while the relays still hold them, otherwise an ID comes back as "Cashu ID 7"
+  to be renamed.
 
 ## Tip or donate to an artist from the shop
 

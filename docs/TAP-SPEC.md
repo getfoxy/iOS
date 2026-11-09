@@ -49,7 +49,7 @@ an invoice is on screen. The payer is the central and never advertises.
   advertisement holds that UUID and nothing else.
 - The characteristics are `SHA-256(label ‖ service)[0..16]`, with the labels
   `foxy tap v2 in` and `foxy tap v2 out`.
-- The payer picks a receiver by signal strength: −33 dBm or stronger, which is
+- The payer picks a receiver by signal strength: −35 dBm or stronger, which is
   phones touching. The receiver cannot measure the payer; iOS gives a
   peripheral no reading.
 

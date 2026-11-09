@@ -133,7 +133,7 @@ characteristics, which is what actually says Foxy.
 
 **Finding the receiver.** The payer keeps each phone's signal strength over
 the last two seconds. A phone counts as close when it has been heard at least
-twice over at least 0.35 s and the middle reading is **-33 dBm** or stronger,
+twice over at least 0.35 s and the middle reading is **-35 dBm** or stronger,
 read at the weaker half of a pair. If a second phone is within 8 dB of the
 first, the closer one is chosen, judged across a full second. A receiver heard
 at -54 dBm or stronger but not close enough puts TAP TO PAY on the payer's
@@ -251,7 +251,7 @@ which is the single largest caveat in this document and is recorded in
   one-time onion address and its lock key — what the QR shows, to somebody who
   need not be able to see the screen. The receiver cannot measure how far away
   a payer is (CoreBluetooth gives a peripheral no signal strength for a
-  central); the -33 dBm rule is the payer's own app being polite. With every
+  central); the -35 dBm rule is the payer’s own app being polite. With every
   invoice arming itself this is each invoice, not each press.
 - **The same stranger can sit on the link.** One payer at a time: while it
   holds the handshake the code card covers the QR and nobody else can tap, and
@@ -308,7 +308,7 @@ for the card.
 
 ## Tuning
 
-The cut-off is -33 dBm over a 0.35 s hold (`nearDbm`), in `TapProximity`
+The cut-off is -35 dBm over a 0.35 s hold (`nearDbm`), in `TapProximity`
 (`Foxy/Bluetooth/TapProtocol.swift`). Every reading is written to the field
 log (`[tap]` lines), which is where the number comes from.
 
@@ -459,7 +459,7 @@ like the others. Nothing secret crosses them and no handshake is needed.
   the card a second after the announcement; one whose link never warms, four.
 - A receiver's service going away (`didModifyServices`) takes the payer's card
   down at once and drops the stale link.
-- The handshake starts at -33 dBm (on trial; it was -40, then -30), and never while the receiver is on its amount screen: the payer warms the link and waits for the receiver's byte first, and the receiver refuses a payer that tries anyway. The receiver goes on
+- The handshake starts at -35 dBm (on trial; it was -40, then -30, then -33), and never while the receiver is on its amount screen: the payer warms the link and waits for the receiver's byte first, and the receiver refuses a payer that tries anyway. The receiver goes on
   the air from the amount screen, so the link is warm by the time NEXT is pressed.
 - `TapEdges`: the Bluetooth antenna is not in the same place on every iPhone,
   so which edge to hold together depends on the pair. A 17 Pro receiver is

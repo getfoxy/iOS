@@ -1340,7 +1340,7 @@ MENU → SETTINGS → BLUETOOTH TAP off, nothing is on the air until **TAP** is
 pressed, and the QR should then go orange and say TAP HERE. Payer: just hold the
 phone against the receiver's — from home or from SEND, with no button to press.
 
-Expect on the **payer** `a receiver at -NN dBm (needs -33, advertised),
+Expect on the **payer** `a receiver at -NN dBm (needs -35, advertised),
 connecting` — the receiver advertises and the payer listens, so this line is on
 the paying phone — then on the receiver `handshake: keys agreed, the code is on
 screen`, the orange card becoming four digits, and the same digits on the

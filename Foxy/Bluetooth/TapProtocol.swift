@@ -275,7 +275,7 @@ struct TapProximity {
      * when touching — the 15 Pro Max read -45 to -51 — is told it is close by
      * the TAP TO PAY toast (`nearbyDbm`) and has to be held tighter, or its
      * case taken off. */
-    var nearDbm = -33   // -30 was at the limit; on trial
+    var nearDbm = -35   // -33 from 2026-11-09 was a shade tight on trial; -30 was at the limit
     /// A receiver this strong is near enough to be told about — the payer's
     /// screen says TAP TO PAY — but not near enough to connect by itself.
     /// -60 reached across a room; -52 still too far, -48
