@@ -2574,6 +2574,32 @@ only.*
    card's first screen; airplane mode off, TRY AGAIN, hold the card: set up as chosen, nothing typed twice.
 6. **The log.** `sh tools/pull-device-log.sh`. **Pass:** `the set-up waits for a connection, its entries kept` at steps 3
    and 5, and no `offline, so the keypad is in sats` on the set-up's screens.
+7. **Typed offline, written at today's price.** *A phone whose last price is some hours old.* On a new card, a bitcoin card,
+   go through the set-up in airplane mode with the defaults ($10.00, $30.00, $10 a second): NO CONNECTION. Airplane mode
+   off, wait for the route and for the price under the figures to be current, TRY AGAIN, hold the card. **Pass:** LIMITS in
+   the card's menu shows $30.00 without the PIN and $10 a second at today's price, whatever the price was when it was typed.
+   With a phone whose price is more than a day old and no fresh one yet (hard to stage: leave the phone offline for a day),
+   **Pass:** NO BITCOIN PRICE, TRY AGAIN and BACK, nothing written to the card.
+8. **Another card at TRY AGAIN.** Reach NO CONNECTION on a new card as in step 3, airplane mode off, TRY AGAIN, and hold a
+   different new card. **Pass:** THAT IS ANOTHER CARD, `Nothing was written to it.`, TRY AGAIN and BACK; the second card is
+   still new when read. TRY AGAIN with the first card: set up, with its name.
+9. **Locked in between.** Reach NO CONNECTION with a PIN or FACE ID LOCK on, put Foxy away for a few seconds and unlock it.
+   **Pass:** TRY AGAIN says `The set-up was closed. Start it again.` and the card is not asked for.
+
+#### 22t. A cashier holding the till
+
+*An empty wallet with no PIN and FACE ID LOCK off; a second phone to pay from. Test money only.*
+
+1. **No SECURE FOXY over the till.** MENU > POINT OF SALE, CREATE PIN, open the till, take a first sale from the second
+   phone, DISMISS on PAID. **Pass:** the till's SET AMOUNT, and no SECURE FOXY card. Hand the phone to someone as a cashier
+   would: there is no way to set a PIN from the till. The X: ENTER YOUR PIN; a PIN other than the keeper's leaves the till
+   up. The same with USE FACE ID in place of CREATE PIN: a face that is not the keeper's (cover the camera) leaves the till
+   up.
+2. **Closed, then SECURE FOXY.** Close the till with the keeper's PIN. **Pass:** home, and SECURE FOXY does not come back
+   (the lock set at the opening answered it). SET A FOXY PIN, wherever it is reached with a PIN set, asks ENTER YOUR PIN
+   first.
+3. **A mismatch given up.** MENU > POINT OF SALE with no lock, CREATE PIN, type 1234, then 4321, and tap CANCEL at once.
+   **Pass:** the pad does not come back after a moment and no till opens.
 
 ## Getting a log off somebody else's phone
 

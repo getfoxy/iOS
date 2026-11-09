@@ -53,7 +53,11 @@
     try { localStorage.setItem(this.SECURE_ASKED, String(Date.now())); } catch (e) {}
   }
 
+  /* Never over a till: whoever holds the phone there may be the cashier, and SET A FOXY PIN would make the lock theirs. Not
+   * marked shown, so it comes once the till is closed. A PIN already set is asked for before a new one replaces it
+   * (`pinSetup`). */
   offerSecureFoxy() {
+    if (this.state && this.state.till) return;
     if (!this.secureCardDue()) return;
     this.secureCardShown();
     const W = window.FoxyWallet;
@@ -626,9 +630,37 @@
     if (this.menuReturnSoon) this.menuReturnSoon();
   }
 
-  /* Setup: enter, repeat, then read what forgetting it costs. */
+  /* Setup: enter, repeat, then read what forgetting it costs. Where a lock is on, it is asked first (the PIN, or a face where
+   * FACE ID LOCK is on), so a PIN is never made or replaced unasked; given up, `onDone(false)`. */
   pinSetup(onDone) {
     const W = window.FoxyWallet;
+    /* (any lock at all: a Face-ID-only phone asks the face before a first PIN is made, or whoever held it could make one) */
+    if (W && W.pinIsSet && W.pinIsSet()) {
+      this.lockAsk(() => this.pinSetupPads(onDone), 'To change your PIN.', () => { if (onDone) onDone(false); });
+      return;
+    }
+    if (W && W.screenLocked && W.screenLocked() && W.biometric) {
+      // FACE ID LOCK with no PIN: the face (or the phone's passcode) first, as the lock asks it (`lockAsk`); refused, nothing is set
+      Promise.resolve(W.biometric('To set a PIN', true)).then((answer) => {
+        if (answer === 'yes' || answer === 'unavailable') { if (answer === 'yes' && W.pinTriesClear) W.pinTriesClear(); this.pinSetupPads(onDone); return; }
+        if (onDone) onDone(false);
+      }, () => { if (onDone) onDone(false); });
+      return;
+    }
+    this.pinSetupPads(onDone);
+  }
+
+  /* The two pads of `pinSetup`. "Those did not match" starts them again after 700 ms: CANCEL inside that wait stops it, and
+   * an answer is given once, so a set-up given up never ends in `onDone(true)`. */
+  pinSetupPads(onDone) {
+    const W = window.FoxyWallet;
+    let answered = false;
+    const answer = (v) => { if (answered) return; answered = true; if (onDone) onDone(v); };
+    const cancel = () => {
+      if (this._pinAgainT) { clearTimeout(this._pinAgainT); this._pinAgainT = null; }
+      answer(false);
+    };
+    if (this._pinAgainT) { clearTimeout(this._pinAgainT); this._pinAgainT = null; }
     this.pinOverlay({
       title: 'CHOOSE A PIN',
       // true to the menu's switch: with FACE ID LOCK on, a face opens Foxy first
@@ -636,19 +668,20 @@
         ? 'Four digits or more. It opens Foxy when Face ID does not.'
         : 'Four digits or more. You will enter this every time you open Foxy.',
       cta: 'NEXT',
-      onCancel: () => { if (onDone) onDone(false); },
+      onCancel: cancel,
       onSubmit: (first) => {
         this.pinOverlay({
           title: 'ENTER IT AGAIN',
           subtitle: 'So a mistyped digit does not become your PIN.',
           cta: 'NEXT',
-          onCancel: () => { if (onDone) onDone(false); },
+          onCancel: cancel,
           onSubmit: (second, warn) => {
             if (second !== first) {
               warn('Those did not match. Start again.');
-              setTimeout(() => this.pinSetup(onDone), 700);
+              this._pinAgainT = setTimeout(() => { this._pinAgainT = null; answered = true; this.pinSetupPads(onDone); }, 700);
               return;
             }
+            answered = true;
             this.pinConfirmWarning(first, onDone);
           },
         });
@@ -749,6 +782,8 @@
      * around them, with its DELETE, is marked like the prompts. */
     document.querySelectorAll('[data-foxy-close-on-lock]')
       .forEach(n => n.remove());
+    // and a card set-up's kept entries, its PIN among them (26j-card-wheel.js `fcSuForget`)
+    if (this.fcSuForget) this.fcSuForget();
     if (this._pinLocked) return;
     this._pinLocked = true;
     this._lockedOnce = true;

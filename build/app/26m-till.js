@@ -103,20 +103,38 @@
    * anybody can close is a phone anybody can walk off into SEND with. `why` is the pad's line under its title. The card
    * sets one there: CREATE PIN is SET PIN's set-up and USE FACE ID is FACE ID LOCK's (10-pin.js, `pinSetup`,
    * `chooseProtection`), and a lock set through either goes straight on to what it stood in front of (POS mode, from the
-   * menu's POINT OF SALE), the lock just set being the person's own proof. Given up, nothing opens. */
+   * menu's POINT OF SALE), the lock just set being the person's own proof. Given up, nothing opens.
+   *
+   * A lock is set here only in front of OPENING the till, when no till is up. With a till up (closing it, the cashier codes)
+   * whoever holds the phone may be the cashier, and a lock made on the spot would be theirs: a till that has lost its lock
+   * asks the phone's own passcode or face instead (`W.biometric`, the passcode allowed), and goes on only on 'yes'. A lock
+   * set here also answers SECURE FOXY (10-pin.js, `offerSecureFoxy`), so that card never comes up later over the till. */
   tillGate(then, why) {
     const W = window.FoxyWallet;
     const go = typeof then === 'function' ? then : () => {};
     const pinSet = !!(W && W.pinIsSet && W.pinIsSet());
     const face = !!(W && W.faceLock && W.faceLock() && W.biometric);
     if (!W || !W.screenLocked || !W.screenLocked() || (!pinSet && !face)) {
+      if (this.state && this.state.till) {
+        if (!W || !W.biometric) { this.toast('This phone cannot check who is holding it.', true); return; }
+        return Promise.resolve(W.biometric(String(why || 'Foxy').replace(/\.$/, ''), true)).then((answer) => {
+          if (answer === 'yes') { go(); return; }
+          if (answer === 'unavailable') this.toast('Set a passcode on this phone to do this.', true);
+        }, () => {});
+      }
       // a lock being set here ends at the till, or at home where it is given up: not the menu again
       const setting = () => { if (this.menuReturnDrop) this.menuReturnDrop(); };
+      // the lock set here is the phone's answer to SECURE FOXY too
+      const kept = () => {
+        if (this.secureCardShown) this.secureCardShown();
+        // (and a SECURE FOXY already waiting behind this card is dropped, never shown on the till's opening: 11-cards.js `dismissCard`)
+        if (this.dismissCard) this.dismissCard('secureFoxy');
+      };
       const pills = [];
       if (W && W.setSeedProtection) {
         pills.push({ label: 'USE FACE ID', tap: () => {
           setting();
-          this.chooseProtection('device', (done) => { if (done) go(); });
+          this.chooseProtection('device', (done) => { if (done) { kept(); go(); } });
         } });
       }
       this.blockedCard('tillNoLock', Object.assign({
@@ -128,7 +146,7 @@
         retry: 'CREATE PIN',
         go: () => {
           setting();
-          this.pinSetup((done) => { if (done && W.pinIsSet && W.pinIsSet()) go(); });
+          this.pinSetup((done) => { if (done && W.pinIsSet && W.pinIsSet()) { kept(); go(); } });
         },
       } : {}));
       return;
@@ -375,6 +393,8 @@
       + (mints.length > 1 ? ' and ' + (mints.length - 1) + ' more mint' + (mints.length > 2 ? 's' : '') : ''));
     // the requests made before it are let go, so none from before is shown in the till (`forgetRequests`)
     if (this.forgetRequests) this.forgetRequests();
+    // no SECURE FOXY over the till, up or waiting, from before it opened (10-pin.js `offerSecureFoxy`)
+    if (this.dismissCard) this.dismissCard('secureFoxy');
     this.setState(Object.assign({ till: till, open0: false }, this.homeState(till)));
     /* The rows at the till's mints are read once now and marked seen, not raised: a mint the phone had not been on this session
      * has a whole past that is not this session's (16-history-lists.js). */

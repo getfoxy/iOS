@@ -3701,6 +3701,8 @@ class Component extends DCLogic {
     if (!on) return;
     // a question waiting to be asked again on a new circuit is not asked from the background (the house rule for timers)
     try { const Wa = window.FoxyWallet; if (Wa && Wa._stopAskingAgain) Wa._stopAskingAgain(); } catch (e) {}
+    // a card set-up's entries kept for a TRY AGAIN, its PIN among them, are not kept in the background (26j-card-wheel.js `fcSuForget`)
+    if (this.fcSuForget) this.fcSuForget();
     this._putAwayAt = Date.now();
     if (this._tidyOwed || this._tidyT) this.tidyChangeLater(this._tidyMore);
     this._closingT = setTimeout(() => {
@@ -7708,7 +7710,11 @@ class Component extends DCLogic {
     try { localStorage.setItem(this.SECURE_ASKED, String(Date.now())); } catch (e) {}
   }
 
+  /* Never over a till: whoever holds the phone there may be the cashier, and SET A FOXY PIN would make the lock theirs. Not
+   * marked shown, so it comes once the till is closed. A PIN already set is asked for before a new one replaces it
+   * (`pinSetup`). */
   offerSecureFoxy() {
+    if (this.state && this.state.till) return;
     if (!this.secureCardDue()) return;
     this.secureCardShown();
     const W = window.FoxyWallet;
@@ -8281,9 +8287,37 @@ class Component extends DCLogic {
     if (this.menuReturnSoon) this.menuReturnSoon();
   }
 
-  /* Setup: enter, repeat, then read what forgetting it costs. */
+  /* Setup: enter, repeat, then read what forgetting it costs. Where a lock is on, it is asked first (the PIN, or a face where
+   * FACE ID LOCK is on), so a PIN is never made or replaced unasked; given up, `onDone(false)`. */
   pinSetup(onDone) {
     const W = window.FoxyWallet;
+    /* (any lock at all: a Face-ID-only phone asks the face before a first PIN is made, or whoever held it could make one) */
+    if (W && W.pinIsSet && W.pinIsSet()) {
+      this.lockAsk(() => this.pinSetupPads(onDone), 'To change your PIN.', () => { if (onDone) onDone(false); });
+      return;
+    }
+    if (W && W.screenLocked && W.screenLocked() && W.biometric) {
+      // FACE ID LOCK with no PIN: the face (or the phone's passcode) first, as the lock asks it (`lockAsk`); refused, nothing is set
+      Promise.resolve(W.biometric('To set a PIN', true)).then((answer) => {
+        if (answer === 'yes' || answer === 'unavailable') { if (answer === 'yes' && W.pinTriesClear) W.pinTriesClear(); this.pinSetupPads(onDone); return; }
+        if (onDone) onDone(false);
+      }, () => { if (onDone) onDone(false); });
+      return;
+    }
+    this.pinSetupPads(onDone);
+  }
+
+  /* The two pads of `pinSetup`. "Those did not match" starts them again after 700 ms: CANCEL inside that wait stops it, and
+   * an answer is given once, so a set-up given up never ends in `onDone(true)`. */
+  pinSetupPads(onDone) {
+    const W = window.FoxyWallet;
+    let answered = false;
+    const answer = (v) => { if (answered) return; answered = true; if (onDone) onDone(v); };
+    const cancel = () => {
+      if (this._pinAgainT) { clearTimeout(this._pinAgainT); this._pinAgainT = null; }
+      answer(false);
+    };
+    if (this._pinAgainT) { clearTimeout(this._pinAgainT); this._pinAgainT = null; }
     this.pinOverlay({
       title: 'CHOOSE A PIN',
       // true to the menu's switch: with FACE ID LOCK on, a face opens Foxy first
@@ -8291,19 +8325,20 @@ class Component extends DCLogic {
         ? 'Four digits or more. It opens Foxy when Face ID does not.'
         : 'Four digits or more. You will enter this every time you open Foxy.',
       cta: 'NEXT',
-      onCancel: () => { if (onDone) onDone(false); },
+      onCancel: cancel,
       onSubmit: (first) => {
         this.pinOverlay({
           title: 'ENTER IT AGAIN',
           subtitle: 'So a mistyped digit does not become your PIN.',
           cta: 'NEXT',
-          onCancel: () => { if (onDone) onDone(false); },
+          onCancel: cancel,
           onSubmit: (second, warn) => {
             if (second !== first) {
               warn('Those did not match. Start again.');
-              setTimeout(() => this.pinSetup(onDone), 700);
+              this._pinAgainT = setTimeout(() => { this._pinAgainT = null; answered = true; this.pinSetupPads(onDone); }, 700);
               return;
             }
+            answered = true;
             this.pinConfirmWarning(first, onDone);
           },
         });
@@ -8404,6 +8439,8 @@ class Component extends DCLogic {
      * around them, with its DELETE, is marked like the prompts. */
     document.querySelectorAll('[data-foxy-close-on-lock]')
       .forEach(n => n.remove());
+    // and a card set-up's kept entries, its PIN among them (26j-card-wheel.js `fcSuForget`)
+    if (this.fcSuForget) this.fcSuForget();
     if (this._pinLocked) return;
     this._pinLocked = true;
     this._lockedOnce = true;
@@ -8484,6 +8521,9 @@ class Component extends DCLogic {
   }
 
   blockedCard(kind, over) {
+    /* Never SECURE FOXY over a till (10-pin.js, `offerSecureFoxy`): whoever holds the phone there may be the cashier. Refused here
+     * too, so a SECURE FOXY queued behind another card before the till opened is dropped as the queue is drawn. */
+    if (kind === 'secureFoxy' && this.state && this.state.till) return;
     const spec = Object.assign({}, this.BLOCKED_INFO(kind) || {}, over || {});
     if (!spec.title) return;
 
@@ -8635,9 +8675,11 @@ class Component extends DCLogic {
       if (this.menuReturnSoon) this.menuReturnSoon();
       // the next card that was waiting, once this one (and anything its close opened) is done
       setTimeout(() => {
-        if (this._blockedEl || !(this._cardQueue || []).length) return;
-        const next = this._cardQueue.shift();
-        this.blockedCard(next.kind, next.over);
+        // (one refused as it is drawn, SECURE FOXY over a till, gives its turn to the next)
+        while (!this._blockedEl && (this._cardQueue || []).length) {
+          const next = this._cardQueue.shift();
+          this.blockedCard(next.kind, next.over);
+        }
       }, 250);
     };
 
@@ -26915,6 +26957,8 @@ class Component extends DCLogic {
       return;
     }
     let spec = (cards[kind] || (() => ({ tone: 'warn', title: 'THAT DID NOT WORK', reason: said + safe })))();
+    // (a set-up's TRY AGAIN with another card held up: its entries are the first card's, and nothing was written)
+    if (opt.setUp && kind === 'wrong-card') spec = { tone: 'warn', title: 'THAT IS ANOTHER CARD', reason: said, chip: 'Nothing was written to it.' };
     if (opt.setUp && this.fcSuKeepCard && this._fcSuLast) {
       if (!spec.retry && retry && kind !== 'blocked') spec = Object.assign({}, spec, again);
       spec = this.fcSuKeepCard(spec);
@@ -30787,7 +30831,7 @@ class Component extends DCLogic {
   /* `answer`: the owner's answer to the rate guard (software 1.23: `rate-far`, `fcRateFar`), { rateOk } or { keepRate }. */
   /* `tx`: NO PIN AMOUNT chosen with the no PIN limit ({ n, unit, usd }, 26j-card-wheel.js `fcLimitTxNext`), kept on this phone once the
    * card has taken the limit. */
-  fcLimitRun(sats, tap, usd, pin, answer, tx) {
+  fcLimitRun(typedSats, tap, usd, pin, answer, typedTx) {
     const W = this.fcW();
     // 'nopin': the no PIN limit (software 1.16 and on), whose dollars are kept like the limit on one tap's
     const np = tap === 'nopin';
@@ -30798,6 +30842,23 @@ class Component extends DCLogic {
     const lu = this.fcLimitUnit();
     // a dollar card's limit is its cents, and is kept at nothing: no dollars are sent for it (the wallet writes no pace note for one)
     const keep = v123 ? (lu === 'sat' ? usd : 0) : this.fcUnit() === 'usd' ? 0 : usd;
+    /* A bitcoin card's limit typed in dollars was turned into sats at NEXT, at whatever price this phone had then, which offline is the
+     * last one seen, of any age. It is worked out again here from those dollars at this phone's own price (`fcRatePrice`, none older
+     * than a day), and with no such price nothing is written (`no-price`), as a card's set-up does (26j-card-wheel.js `fcSuAtPrice`).
+     * NO PIN AMOUNT chosen with it (`typedTx`) the same. */
+    const txUsd = typedTx && typedTx.unit !== 'usd' && Number(typedTx.usd) > 0;
+    let sats = typedSats;
+    let tx = typedTx;
+    if (Number(keep) > 0 || txUsd) {
+      const p = this.fcRatePrice ? this.fcRatePrice() : 0;
+      if (!(p > 0)) {
+        this.fcFailed(Object.assign(new Error('This phone has no Bitcoin price, so the card\u2019s limit was not written: the card weighs its bitcoin against the limit at a price. Get online once and try again.'), { card: 'no-price' }),
+                      { again: () => this.fcLimitRun(typedSats, tap, usd, pin, answer, typedTx) });
+        return;
+      }
+      if (Number(keep) > 0) sats = Math.round(Number(keep) / p * 1e8);
+      if (txUsd) tx = Object.assign({}, typedTx, { n: Math.round(Number(typedTx.usd) / p * 1e8) });
+    }
     const more = v123 ? Object.assign({ unit: lu, price: (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0) }, answer || {}) : {};
     /* (a per tap limit on a card with pieces larger than it: its money is recut under it in the same tap, under its limits lifted, as the
      * wallet's `cardSetLimit` does it: with the PIN or on a card that has none, a card of the deep drawer, not one that holds both currencies) */
@@ -30815,10 +30876,10 @@ class Component extends DCLogic {
         this.toast((np ? 'No PIN maximum ' : (this.fcPacedNow && this.fcPacedNow()) ? 'Per second limit ' : 'Per tap limit ') + (sats > 0 ? 'set.' : 'removed.') + (card && card.recut ? ' The card\u2019s money is recut under it.' : ''));
       }, (e) => {
         // the rate guard: asked once, and the limit written with the answer
-        if (e && e.card === 'rate-far' && !answer) { this.fcRateFar(e, (a) => this.fcLimitRun(sats, tap, usd, pin, a, tx)); return; }
-        this.fcFailed(e, { again: () => this.fcLimitRun(sats, tap, usd, pin, answer, tx),
+        if (e && e.card === 'rate-far' && !answer) { this.fcRateFar(e, (a) => this.fcLimitRun(typedSats, tap, usd, pin, a, typedTx)); return; }
+        this.fcFailed(e, { again: () => this.fcLimitRun(typedSats, tap, usd, pin, answer, typedTx),
                            // (a wrong PIN for the recut: the pad again, not the same PIN)
-                           pinAgain: pin ? () => this.fcPinOr({ title: 'CARD PIN', subtitle: 'To recut its money under the new limit' }, (p2) => this.fcLimitRun(sats, tap, usd, p2, answer, tx)) : undefined });
+                           pinAgain: pin ? () => this.fcPinOr({ title: 'CARD PIN', subtitle: 'To recut its money under the new limit' }, (p2) => this.fcLimitRun(typedSats, tap, usd, p2, answer, typedTx)) : undefined });
       });
   }
 
@@ -31929,7 +31990,11 @@ class Component extends DCLogic {
     if (cu && (unit === 'usd' || unit === 'sat') && cu.some((x) => x.unit === unit)) return W.cardPrepare(card, sats, { unit });
     const holdsUsd = !!(card.record && card.record.unit === 'usd');
     if (unit === 'usd' && !holdsUsd && alt) {
-      // a bitcoin card, typed in dollars: its sats, from this phone's bitcoin, checked as the keypad checks them
+      /* a bitcoin card, typed in dollars: its sats, from this phone's bitcoin, checked as the keypad checks them. Worked out again here
+       * from the cents typed (`sats`) at this phone's own price (`fcRatePrice`, none older than a day), not at the price of NEXT, which
+       * offline is the last one seen, of any age. */
+      const p = this.fcRatePrice ? this.fcRatePrice() : 0;
+      alt.sats = p > 0 ? Math.round(Number(sats) / 100 / p * 1e8) : 0;
       if (!(alt.sats > 0)) {
         const np = /** @type {any} */ (new Error('This phone has no Bitcoin price to load the card at. Type the amount in sats.'));
         np.card = 'wrong-unit';
@@ -32277,9 +32342,12 @@ class Component extends DCLogic {
                         run: (c) => this.fcSendSetUpRun(sats, unit, alt, c) });
   }
 
-  fcSendSetUpRun(sats, unit, alt, c) {
+  fcSendSetUpRun(sats, unit, alt, typed) {
     const W = this.fcW();
-    if (!W) return;
+    if (!W || (this.fcSuStale && this.fcSuStale(typed))) return;
+    // (the holder's figures typed in dollars, worked out at this moment's price, or nothing written: 26j-card-wheel.js `fcSuAtPrice`)
+    const c = this.fcSuAtPrice ? this.fcSuAtPrice(typed) : typed;
+    if (!c) { this.fcFailed(this.fcSuNoPrice(), { setUp: true, again: () => this.fcSendSetUpRun(sats, unit, alt, typed), cancelled: () => this.fcSuReturn() }); return; }
     let made = null;
     // whether the set-up itself was finished in this tap: a tap cut after it is a send with the holder's PIN, one cut before it the set-up again
     let setUp = false;
@@ -35294,8 +35362,12 @@ class Component extends DCLogic {
   /* The set-up's steps from the first. `o`: { other, unit, run, keepPin } — `other` for a card set up for somebody else (`fcSendSetUp`), `keepPin` for one of those taken up again on a card that keeps its PIN (asked once),
    * `unit` the card's where it is not asked, `run(choice)` what the tap does with { pin, unit, noPin, tapLimit, noPinUsd, tapUsd,
    * noPinTx, noPinTxUsd, noPinTxUnit } (this phone's own set-up when none is given). */
+  /* (`key`: the card on the screen as the set-up begins, this phone's own set-up only. A TRY AGAIN after NO CONNECTION writes its
+   * entries to that card alone: another card held up is refused, `wrong-card`, and nothing is written to it.) */
   fcSetUpSteps(o) {
-    this._fcSu = Object.assign({ pin: '', unit: '', noPin: 0, tapLimit: 0, noPinUsd: 0, tapUsd: 0, noPinTx: 0, noPinTxUsd: 0 }, o || {});
+    const fc = this.state && this.state.fc;
+    const key = (!o || !o.other) && fc && fc.key ? String(fc.key) : '';
+    this._fcSu = Object.assign({ pin: '', unit: '', noPin: 0, tapLimit: 0, noPinUsd: 0, tapUsd: 0, noPinTx: 0, noPinTxUsd: 0, key }, o || {});
     // (a set-up begun afresh: nothing of an earlier one's is taken up again)
     this._fcSuLast = null;
     this.fcSuPin('');
@@ -35559,7 +35631,7 @@ class Component extends DCLogic {
     this._fcSu = null;
     this._fcSuLast = su;
     const choice = { pin: su.pin, unit: su.unit, noPin: su.noPin, tapLimit: su.tapLimit, noPinUsd: su.noPinUsd, tapUsd: su.tapUsd,
-                     noPinTx: su.noPinTx || 0, noPinTxUsd: su.noPinTxUsd || 0, noPinTxUnit };
+                     noPinTx: su.noPinTx || 0, noPinTxUsd: su.noPinTxUsd || 0, noPinTxUnit, key: su.key || '', su };
     this.fcSuRouteThen(() => {
       if (typeof su.run === 'function') { su.run(choice); return; }
       this.fcSetUpStepsRun(choice);
@@ -35579,6 +35651,37 @@ class Component extends DCLogic {
       if (open()) { go(); return; }
       this.fcSuNoRoute(go);
     }, () => this.fcSuNoRoute(go));
+  }
+
+  /* The entries kept for a TRY AGAIN, the card PIN among them, forgotten as Foxy locks or is put away (10-pin.js `pinLock`,
+   * 07-history-tokens-mints.js `putAway`): a TRY AGAIN still on the screen then says to start again and writes nothing
+   * (`fcSuStale`). Only in this page's memory, never on the disk. */
+  /* A set-up still being typed is dropped too, its PIN with it: off its steps to the card's screen (or where the step was asked
+   * over), to be begun again. */
+  fcSuForget() {
+    const su = this._fcSuLast;
+    if (su) { su.pin = ''; this._fcSuLast = null; }
+    const now = this._fcSu;
+    if (!now) return;
+    const s = this.state || {};
+    const onStep = !!(this.fcSuAsking && this.fcSuAsking()) || (s.screen === 'fcSpeed' && s.fcSpeed && s.fcSpeed.mode === 'su');
+    const was = now.was;
+    now.pin = '';
+    this._fcSu = null;
+    if (!onStep) return;
+    console.log('[foxy] card: the set-up being typed was closed as Foxy locked');
+    if (was) { this.setState({ screen: was.screen, stack: was.stack, flow: was.flow, amount: was.amount, unit: was.unit, amountDefault: false }); return; }
+    this.setState(p => {
+      const at = (p.stack || []).lastIndexOf('flashcard');
+      return { screen: 'flashcard', stack: at >= 0 ? p.stack.slice(0, at) : [], amount: '', amountDefault: false };
+    });
+  }
+
+  // a choice whose kept entries were forgotten (`fcSuForget`), or another set-up's: said, and nothing is written
+  fcSuStale(c) {
+    if (!c || !c.su || c.su === this._fcSuLast) return false;
+    this.toast('The set-up was closed. Start it again.', true);
+    return true;
   }
 
   // NO CONNECTION, before the tap or from a tap the route went from: TRY AGAIN (the route looked at again, then `go`) and BACK
@@ -35618,11 +35721,43 @@ class Component extends DCLogic {
     return true;
   }
 
+  /* A set-up's figures at the price of the moment they are written. A bitcoin card's figures typed in dollars (`tapUsd`, `noPinUsd`,
+   * `noPinTxUsd`) were turned into sats at NEXT, at whatever price this phone had then, which offline is the last one it saw, of any
+   * age. Just before the write they are worked out again from those dollars at this phone's own price (`fcRatePrice`, none older
+   * than a day); with no such price, null, and nothing is written (`no-price`). Figures typed in sats, and a dollar card's cents,
+   * are as typed. */
+  fcSuAtPrice(c) {
+    const usd = [c.tapUsd, c.noPinUsd, c.noPinTxUnit === 'usd' ? 0 : c.noPinTxUsd].some((v) => Number(v) > 0);
+    if (!usd) return c;
+    const p = this.fcRatePrice ? this.fcRatePrice() : 0;
+    if (!(p > 0)) return null;
+    const at = (d) => Math.round(Number(d) / p * 1e8);
+    const out = Object.assign({}, c);
+    if (Number(c.tapUsd) > 0) out.tapLimit = at(c.tapUsd);
+    if (Number(c.noPinUsd) > 0) out.noPin = at(c.noPinUsd);
+    if (c.noPinTxUnit !== 'usd' && Number(c.noPinTxUsd) > 0) out.noPinTx = at(c.noPinTxUsd);
+    return out;
+  }
+
+  // the refusal for a set-up whose dollars have no price to be written at, in the wallet's words for it (08a-flashcard.js, `cardNoPrice`)
+  fcSuNoPrice() {
+    const e = /** @type {any} */ (new Error('This phone has no Bitcoin price, so the card was not set up: a card of bitcoin needs a price for its limits. Get online once and try again.'));
+    e.card = 'no-price';
+    return e;
+  }
+
   /* The owner's set-up, in one tap: the PIN, the record, the holder's numbers, and this phone as the owner, the card holding while
    * it is claimed (08a-flashcard.js, `cardHoldOn`). */
-  fcSetUpStepsRun(c) {
+  fcSetUpStepsRun(typed) {
     const W = this.fcW();
-    if (!W) return;
+    if (!W || this.fcSuStale(typed)) return;
+    /* (the figures at this moment's price: `typed` is kept as chosen, in dollars, for a TRY AGAIN to work them out again) */
+    const c = this.fcSuAtPrice(typed);
+    const again = () => this.fcSetUpStepsRun(typed);
+    if (!c) {
+      this.fcFailed(this.fcSuNoPrice(), { setUp: true, again, cancelled: () => this.fcSuReturn() });
+      return;
+    }
     // (and the price: a card of software 1.23 keeps its numbers in cents and is given its rate at it, 08a-flashcard.js `cardSetUpCents`)
     const how = /** @type {any} */ ({ pin: c.pin, recoverable: true, design: this.FC_SETUP_DESIGN, tapLimit: c.tapLimit, noPin: c.noPin,
                                       tapUsd: c.tapUsd, noPinUsd: c.noPinUsd, price: (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0) });
@@ -35632,7 +35767,9 @@ class Component extends DCLogic {
     if (fc && fc.v123 && c.unit) how.hold = c.unit;
     // (the route looked at again as the tap fires: lost since NEXT, it is NO CONNECTION, nothing asked of the card)
     const W2 = /** @type {any} */ (W);
-    if (W2.routeOpen && !W2.routeOpen()) { this.fcSuRouteThen(() => this.fcSetUpStepsRun(c)); return; }
+    if (W2.routeOpen && !W2.routeOpen()) { this.fcSuRouteThen(again); return; }
+    // (the card the set-up began on, and no other: `wrong-card`)
+    if (c.key) how.only = c.key;
     this.fcTap({ flow: 'setup' }, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
       .then((card) => {
         // written: nothing of the set-up is left to come back to
@@ -35642,7 +35779,7 @@ class Component extends DCLogic {
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.toast(c.unit === 'both' ? 'The card is set up. It holds dollars and bitcoin.' : c.unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
-      }, (e) => this.fcFailed(e, { setUp: true, again: () => this.fcSetUpStepsRun(c), pinAgain: () => this.fcSuPinAgain(c, (c2) => this.fcSetUpStepsRun(c2)),
+      }, (e) => this.fcFailed(e, { setUp: true, again, pinAgain: () => this.fcSuPinAgain(typed, (c2) => this.fcSetUpStepsRun(c2)),
                                    cancelled: () => this.fcSuReturn() }));
   }
 
@@ -37482,20 +37619,38 @@ class Component extends DCLogic {
    * anybody can close is a phone anybody can walk off into SEND with. `why` is the pad's line under its title. The card
    * sets one there: CREATE PIN is SET PIN's set-up and USE FACE ID is FACE ID LOCK's (10-pin.js, `pinSetup`,
    * `chooseProtection`), and a lock set through either goes straight on to what it stood in front of (POS mode, from the
-   * menu's POINT OF SALE), the lock just set being the person's own proof. Given up, nothing opens. */
+   * menu's POINT OF SALE), the lock just set being the person's own proof. Given up, nothing opens.
+   *
+   * A lock is set here only in front of OPENING the till, when no till is up. With a till up (closing it, the cashier codes)
+   * whoever holds the phone may be the cashier, and a lock made on the spot would be theirs: a till that has lost its lock
+   * asks the phone's own passcode or face instead (`W.biometric`, the passcode allowed), and goes on only on 'yes'. A lock
+   * set here also answers SECURE FOXY (10-pin.js, `offerSecureFoxy`), so that card never comes up later over the till. */
   tillGate(then, why) {
     const W = window.FoxyWallet;
     const go = typeof then === 'function' ? then : () => {};
     const pinSet = !!(W && W.pinIsSet && W.pinIsSet());
     const face = !!(W && W.faceLock && W.faceLock() && W.biometric);
     if (!W || !W.screenLocked || !W.screenLocked() || (!pinSet && !face)) {
+      if (this.state && this.state.till) {
+        if (!W || !W.biometric) { this.toast('This phone cannot check who is holding it.', true); return; }
+        return Promise.resolve(W.biometric(String(why || 'Foxy').replace(/\.$/, ''), true)).then((answer) => {
+          if (answer === 'yes') { go(); return; }
+          if (answer === 'unavailable') this.toast('Set a passcode on this phone to do this.', true);
+        }, () => {});
+      }
       // a lock being set here ends at the till, or at home where it is given up: not the menu again
       const setting = () => { if (this.menuReturnDrop) this.menuReturnDrop(); };
+      // the lock set here is the phone's answer to SECURE FOXY too
+      const kept = () => {
+        if (this.secureCardShown) this.secureCardShown();
+        // (and a SECURE FOXY already waiting behind this card is dropped, never shown on the till's opening: 11-cards.js `dismissCard`)
+        if (this.dismissCard) this.dismissCard('secureFoxy');
+      };
       const pills = [];
       if (W && W.setSeedProtection) {
         pills.push({ label: 'USE FACE ID', tap: () => {
           setting();
-          this.chooseProtection('device', (done) => { if (done) go(); });
+          this.chooseProtection('device', (done) => { if (done) { kept(); go(); } });
         } });
       }
       this.blockedCard('tillNoLock', Object.assign({
@@ -37507,7 +37662,7 @@ class Component extends DCLogic {
         retry: 'CREATE PIN',
         go: () => {
           setting();
-          this.pinSetup((done) => { if (done && W.pinIsSet && W.pinIsSet()) go(); });
+          this.pinSetup((done) => { if (done && W.pinIsSet && W.pinIsSet()) { kept(); go(); } });
         },
       } : {}));
       return;
@@ -37754,6 +37909,8 @@ class Component extends DCLogic {
       + (mints.length > 1 ? ' and ' + (mints.length - 1) + ' more mint' + (mints.length > 2 ? 's' : '') : ''));
     // the requests made before it are let go, so none from before is shown in the till (`forgetRequests`)
     if (this.forgetRequests) this.forgetRequests();
+    // no SECURE FOXY over the till, up or waiting, from before it opened (10-pin.js `offerSecureFoxy`)
+    if (this.dismissCard) this.dismissCard('secureFoxy');
     this.setState(Object.assign({ till: till, open0: false }, this.homeState(till)));
     /* The rows at the till's mints are read once now and marked seen, not raised: a mint the phone had not been on this session
      * has a whole past that is not this session's (16-history-lists.js). */

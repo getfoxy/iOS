@@ -58,8 +58,12 @@
   /* The set-up's steps from the first. `o`: { other, unit, run, keepPin } — `other` for a card set up for somebody else (`fcSendSetUp`), `keepPin` for one of those taken up again on a card that keeps its PIN (asked once),
    * `unit` the card's where it is not asked, `run(choice)` what the tap does with { pin, unit, noPin, tapLimit, noPinUsd, tapUsd,
    * noPinTx, noPinTxUsd, noPinTxUnit } (this phone's own set-up when none is given). */
+  /* (`key`: the card on the screen as the set-up begins, this phone's own set-up only. A TRY AGAIN after NO CONNECTION writes its
+   * entries to that card alone: another card held up is refused, `wrong-card`, and nothing is written to it.) */
   fcSetUpSteps(o) {
-    this._fcSu = Object.assign({ pin: '', unit: '', noPin: 0, tapLimit: 0, noPinUsd: 0, tapUsd: 0, noPinTx: 0, noPinTxUsd: 0 }, o || {});
+    const fc = this.state && this.state.fc;
+    const key = (!o || !o.other) && fc && fc.key ? String(fc.key) : '';
+    this._fcSu = Object.assign({ pin: '', unit: '', noPin: 0, tapLimit: 0, noPinUsd: 0, tapUsd: 0, noPinTx: 0, noPinTxUsd: 0, key }, o || {});
     // (a set-up begun afresh: nothing of an earlier one's is taken up again)
     this._fcSuLast = null;
     this.fcSuPin('');
@@ -323,7 +327,7 @@
     this._fcSu = null;
     this._fcSuLast = su;
     const choice = { pin: su.pin, unit: su.unit, noPin: su.noPin, tapLimit: su.tapLimit, noPinUsd: su.noPinUsd, tapUsd: su.tapUsd,
-                     noPinTx: su.noPinTx || 0, noPinTxUsd: su.noPinTxUsd || 0, noPinTxUnit };
+                     noPinTx: su.noPinTx || 0, noPinTxUsd: su.noPinTxUsd || 0, noPinTxUnit, key: su.key || '', su };
     this.fcSuRouteThen(() => {
       if (typeof su.run === 'function') { su.run(choice); return; }
       this.fcSetUpStepsRun(choice);
@@ -343,6 +347,37 @@
       if (open()) { go(); return; }
       this.fcSuNoRoute(go);
     }, () => this.fcSuNoRoute(go));
+  }
+
+  /* The entries kept for a TRY AGAIN, the card PIN among them, forgotten as Foxy locks or is put away (10-pin.js `pinLock`,
+   * 07-history-tokens-mints.js `putAway`): a TRY AGAIN still on the screen then says to start again and writes nothing
+   * (`fcSuStale`). Only in this page's memory, never on the disk. */
+  /* A set-up still being typed is dropped too, its PIN with it: off its steps to the card's screen (or where the step was asked
+   * over), to be begun again. */
+  fcSuForget() {
+    const su = this._fcSuLast;
+    if (su) { su.pin = ''; this._fcSuLast = null; }
+    const now = this._fcSu;
+    if (!now) return;
+    const s = this.state || {};
+    const onStep = !!(this.fcSuAsking && this.fcSuAsking()) || (s.screen === 'fcSpeed' && s.fcSpeed && s.fcSpeed.mode === 'su');
+    const was = now.was;
+    now.pin = '';
+    this._fcSu = null;
+    if (!onStep) return;
+    console.log('[foxy] card: the set-up being typed was closed as Foxy locked');
+    if (was) { this.setState({ screen: was.screen, stack: was.stack, flow: was.flow, amount: was.amount, unit: was.unit, amountDefault: false }); return; }
+    this.setState(p => {
+      const at = (p.stack || []).lastIndexOf('flashcard');
+      return { screen: 'flashcard', stack: at >= 0 ? p.stack.slice(0, at) : [], amount: '', amountDefault: false };
+    });
+  }
+
+  // a choice whose kept entries were forgotten (`fcSuForget`), or another set-up's: said, and nothing is written
+  fcSuStale(c) {
+    if (!c || !c.su || c.su === this._fcSuLast) return false;
+    this.toast('The set-up was closed. Start it again.', true);
+    return true;
   }
 
   // NO CONNECTION, before the tap or from a tap the route went from: TRY AGAIN (the route looked at again, then `go`) and BACK
@@ -382,11 +417,43 @@
     return true;
   }
 
+  /* A set-up's figures at the price of the moment they are written. A bitcoin card's figures typed in dollars (`tapUsd`, `noPinUsd`,
+   * `noPinTxUsd`) were turned into sats at NEXT, at whatever price this phone had then, which offline is the last one it saw, of any
+   * age. Just before the write they are worked out again from those dollars at this phone's own price (`fcRatePrice`, none older
+   * than a day); with no such price, null, and nothing is written (`no-price`). Figures typed in sats, and a dollar card's cents,
+   * are as typed. */
+  fcSuAtPrice(c) {
+    const usd = [c.tapUsd, c.noPinUsd, c.noPinTxUnit === 'usd' ? 0 : c.noPinTxUsd].some((v) => Number(v) > 0);
+    if (!usd) return c;
+    const p = this.fcRatePrice ? this.fcRatePrice() : 0;
+    if (!(p > 0)) return null;
+    const at = (d) => Math.round(Number(d) / p * 1e8);
+    const out = Object.assign({}, c);
+    if (Number(c.tapUsd) > 0) out.tapLimit = at(c.tapUsd);
+    if (Number(c.noPinUsd) > 0) out.noPin = at(c.noPinUsd);
+    if (c.noPinTxUnit !== 'usd' && Number(c.noPinTxUsd) > 0) out.noPinTx = at(c.noPinTxUsd);
+    return out;
+  }
+
+  // the refusal for a set-up whose dollars have no price to be written at, in the wallet's words for it (08a-flashcard.js, `cardNoPrice`)
+  fcSuNoPrice() {
+    const e = /** @type {any} */ (new Error('This phone has no Bitcoin price, so the card was not set up: a card of bitcoin needs a price for its limits. Get online once and try again.'));
+    e.card = 'no-price';
+    return e;
+  }
+
   /* The owner's set-up, in one tap: the PIN, the record, the holder's numbers, and this phone as the owner, the card holding while
    * it is claimed (08a-flashcard.js, `cardHoldOn`). */
-  fcSetUpStepsRun(c) {
+  fcSetUpStepsRun(typed) {
     const W = this.fcW();
-    if (!W) return;
+    if (!W || this.fcSuStale(typed)) return;
+    /* (the figures at this moment's price: `typed` is kept as chosen, in dollars, for a TRY AGAIN to work them out again) */
+    const c = this.fcSuAtPrice(typed);
+    const again = () => this.fcSetUpStepsRun(typed);
+    if (!c) {
+      this.fcFailed(this.fcSuNoPrice(), { setUp: true, again, cancelled: () => this.fcSuReturn() });
+      return;
+    }
     // (and the price: a card of software 1.23 keeps its numbers in cents and is given its rate at it, 08a-flashcard.js `cardSetUpCents`)
     const how = /** @type {any} */ ({ pin: c.pin, recoverable: true, design: this.FC_SETUP_DESIGN, tapLimit: c.tapLimit, noPin: c.noPin,
                                       tapUsd: c.tapUsd, noPinUsd: c.noPinUsd, price: (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0) });
@@ -396,7 +463,9 @@
     if (fc && fc.v123 && c.unit) how.hold = c.unit;
     // (the route looked at again as the tap fires: lost since NEXT, it is NO CONNECTION, nothing asked of the card)
     const W2 = /** @type {any} */ (W);
-    if (W2.routeOpen && !W2.routeOpen()) { this.fcSuRouteThen(() => this.fcSetUpStepsRun(c)); return; }
+    if (W2.routeOpen && !W2.routeOpen()) { this.fcSuRouteThen(again); return; }
+    // (the card the set-up began on, and no other: `wrong-card`)
+    if (c.key) how.only = c.key;
     this.fcTap({ flow: 'setup' }, (link, on) => { on('writing'); how.onHold = () => on('writing'); return W.cardSetUp(link, how); })
       .then((card) => {
         // written: nothing of the set-up is left to come back to
@@ -406,7 +475,7 @@
         this.fcShow(card);
         this.haptic && this.haptic('success');
         this.toast(c.unit === 'both' ? 'The card is set up. It holds dollars and bitcoin.' : c.unit === 'usd' ? 'The card is set up. It holds dollars.' : 'The card is set up.');
-      }, (e) => this.fcFailed(e, { setUp: true, again: () => this.fcSetUpStepsRun(c), pinAgain: () => this.fcSuPinAgain(c, (c2) => this.fcSetUpStepsRun(c2)),
+      }, (e) => this.fcFailed(e, { setUp: true, again, pinAgain: () => this.fcSuPinAgain(typed, (c2) => this.fcSetUpStepsRun(c2)),
                                    cancelled: () => this.fcSuReturn() }));
   }
 

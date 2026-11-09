@@ -190,7 +190,7 @@ const PIN = { 'foxy.pin.v1': JSON.stringify({ salt: 'aa', hash: 'bb' }) };
       }
       return src.slice(start + 3, i + 1);
     };
-    const body = ['pinOverlay(opts) {', 'pinDismiss() {', 'pinSetup(onDone) {',
+    const body = ['pinOverlay(opts) {', 'pinDismiss() {', 'pinSetup(onDone) {', 'pinSetupPads(onDone) {',
                   'pinConfirmWarning(pin, onDone) {', 'pinTry(pin) {', 'pinLock() {',
                   'pinUnlocked() {', 'watchWake() {', 'wakeWork() {']
       .filter(sig => sig !== 'wakeWork() {' || src.indexOf('\n  ' + sig) >= 0)
@@ -336,9 +336,17 @@ const PIN = { 'foxy.pin.v1': JSON.stringify({ salt: 'aa', hash: 'bb' }) };
          'choosing a PIN with FACE ID LOCK off says it is entered at every opening');
       const on = mount({ 'foxy.secure.choice': '"device"' }, 'yes');
       on.app.pinSetup();
-      ok(/It opens Foxy when Face ID does not\./.test(on.root().textContent)
+      ok(!on.root() && on.faces.length === 1 && on.faces[0].passcode === true,
+         'with FACE ID LOCK on and no PIN, the face (or the phone’s passcode) is asked before a first PIN is chosen', on.faces.length + ' asked');
+      await settle(); await settle();
+      ok(!!on.root() && /It opens Foxy when Face ID does not\./.test(on.root().textContent)
          && !/every time/.test(on.root().textContent),
-         'and with it on, that it opens Foxy when a face does not');
+         'and once it says yes, that the PIN opens Foxy when a face does not');
+      const no = mount({ 'foxy.secure.choice': '"device"' }, 'no');
+      let said = null;
+      no.app.pinSetup((v) => { said = v; });
+      await settle(); await settle();
+      ok(!no.root() && said === false && no.W.pinIsSet() === false, 'a face that says no: no pad, no PIN, and the set-up told it was given up');
     }
 
     /* ---- a return's work waits for the lock --------------------------

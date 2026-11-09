@@ -1,5 +1,8 @@
 
   blockedCard(kind, over) {
+    /* Never SECURE FOXY over a till (10-pin.js, `offerSecureFoxy`): whoever holds the phone there may be the cashier. Refused here
+     * too, so a SECURE FOXY queued behind another card before the till opened is dropped as the queue is drawn. */
+    if (kind === 'secureFoxy' && this.state && this.state.till) return;
     const spec = Object.assign({}, this.BLOCKED_INFO(kind) || {}, over || {});
     if (!spec.title) return;
 
@@ -151,9 +154,11 @@
       if (this.menuReturnSoon) this.menuReturnSoon();
       // the next card that was waiting, once this one (and anything its close opened) is done
       setTimeout(() => {
-        if (this._blockedEl || !(this._cardQueue || []).length) return;
-        const next = this._cardQueue.shift();
-        this.blockedCard(next.kind, next.over);
+        // (one refused as it is drawn, SECURE FOXY over a till, gives its turn to the next)
+        while (!this._blockedEl && (this._cardQueue || []).length) {
+          const next = this._cardQueue.shift();
+          this.blockedCard(next.kind, next.over);
+        }
       }, 250);
     };
 

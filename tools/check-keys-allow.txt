@@ -11,3 +11,4 @@ tests/fixtures/cashu-id-vectors.json:95edcd9e7bbb1e33def6787d1fb576a1e8322da0a54
 tests/fixtures/cashu-id-vectors.json:c20815d5de53b43aee88fd79498b039b7a6c32ea2193d4924d377504599f9ba6 | a drop-box test vector made from public test words, not a wallet's key
 tests/fixtures/cashu-id-vectors.json:c3721f652c0943ca918eb3e50c8ecbd9638b86e1aace7fb26b75b879b9e2b2de | a drop-box test vector made from public test words, not a wallet's key
 tests/fixtures/cashu-id-vectors.json:252df67537b6d26db4c4766c1a8c989661c59adba0b92254f842666ee1c461ee | a drop-box test vector made from public test words, not a wallet's key
+tests/fixtures/shop-collect-vectors.json:2688f76d7eabf304269ada6c898a7f4768285026b9602ea820a89a02479fbbbf | a shop-collect test vector made from public test words (abandon … about), not a wallet's key

@@ -199,6 +199,9 @@
       // read the short way: what is on the card is no part of setting it up
       return cardLook(link, { short: true }).then(function (c) {
         card = c;
+        /* `o.only`: the key of the card the set-up began on (its entries kept after NO CONNECTION, 26j-card-wheel.js `fcSetUpSteps`).
+         * Any other card held up is refused before anything is written to it. */
+        if (o.only && card.key !== o.only) throw cardError('wrong-card', 'That is another card. Hold up the card you began setting up, or go back and start again.');
         if (card.info.locked) throw cardRefused('6986');
         /* A card with an owner is not open, set up or not: it is its owner's, and
          * only that owner's proof changes it. */

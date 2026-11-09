@@ -1206,6 +1206,8 @@
       return;
     }
     let spec = (cards[kind] || (() => ({ tone: 'warn', title: 'THAT DID NOT WORK', reason: said + safe })))();
+    // (a set-up's TRY AGAIN with another card held up: its entries are the first card's, and nothing was written)
+    if (opt.setUp && kind === 'wrong-card') spec = { tone: 'warn', title: 'THAT IS ANOTHER CARD', reason: said, chip: 'Nothing was written to it.' };
     if (opt.setUp && this.fcSuKeepCard && this._fcSuLast) {
       if (!spec.retry && retry && kind !== 'blocked') spec = Object.assign({}, spec, again);
       spec = this.fcSuKeepCard(spec);
@@ -5078,7 +5080,7 @@
   /* `answer`: the owner's answer to the rate guard (software 1.23: `rate-far`, `fcRateFar`), { rateOk } or { keepRate }. */
   /* `tx`: NO PIN AMOUNT chosen with the no PIN limit ({ n, unit, usd }, 26j-card-wheel.js `fcLimitTxNext`), kept on this phone once the
    * card has taken the limit. */
-  fcLimitRun(sats, tap, usd, pin, answer, tx) {
+  fcLimitRun(typedSats, tap, usd, pin, answer, typedTx) {
     const W = this.fcW();
     // 'nopin': the no PIN limit (software 1.16 and on), whose dollars are kept like the limit on one tap's
     const np = tap === 'nopin';
@@ -5089,6 +5091,23 @@
     const lu = this.fcLimitUnit();
     // a dollar card's limit is its cents, and is kept at nothing: no dollars are sent for it (the wallet writes no pace note for one)
     const keep = v123 ? (lu === 'sat' ? usd : 0) : this.fcUnit() === 'usd' ? 0 : usd;
+    /* A bitcoin card's limit typed in dollars was turned into sats at NEXT, at whatever price this phone had then, which offline is the
+     * last one seen, of any age. It is worked out again here from those dollars at this phone's own price (`fcRatePrice`, none older
+     * than a day), and with no such price nothing is written (`no-price`), as a card's set-up does (26j-card-wheel.js `fcSuAtPrice`).
+     * NO PIN AMOUNT chosen with it (`typedTx`) the same. */
+    const txUsd = typedTx && typedTx.unit !== 'usd' && Number(typedTx.usd) > 0;
+    let sats = typedSats;
+    let tx = typedTx;
+    if (Number(keep) > 0 || txUsd) {
+      const p = this.fcRatePrice ? this.fcRatePrice() : 0;
+      if (!(p > 0)) {
+        this.fcFailed(Object.assign(new Error('This phone has no Bitcoin price, so the card\u2019s limit was not written: the card weighs its bitcoin against the limit at a price. Get online once and try again.'), { card: 'no-price' }),
+                      { again: () => this.fcLimitRun(typedSats, tap, usd, pin, answer, typedTx) });
+        return;
+      }
+      if (Number(keep) > 0) sats = Math.round(Number(keep) / p * 1e8);
+      if (txUsd) tx = Object.assign({}, typedTx, { n: Math.round(Number(typedTx.usd) / p * 1e8) });
+    }
     const more = v123 ? Object.assign({ unit: lu, price: (this.fcRatePrice ? this.fcRatePrice() : (this.px && this.px()) || 0) }, answer || {}) : {};
     /* (a per tap limit on a card with pieces larger than it: its money is recut under it in the same tap, under its limits lifted, as the
      * wallet's `cardSetLimit` does it: with the PIN or on a card that has none, a card of the deep drawer, not one that holds both currencies) */
@@ -5106,10 +5125,10 @@
         this.toast((np ? 'No PIN maximum ' : (this.fcPacedNow && this.fcPacedNow()) ? 'Per second limit ' : 'Per tap limit ') + (sats > 0 ? 'set.' : 'removed.') + (card && card.recut ? ' The card\u2019s money is recut under it.' : ''));
       }, (e) => {
         // the rate guard: asked once, and the limit written with the answer
-        if (e && e.card === 'rate-far' && !answer) { this.fcRateFar(e, (a) => this.fcLimitRun(sats, tap, usd, pin, a, tx)); return; }
-        this.fcFailed(e, { again: () => this.fcLimitRun(sats, tap, usd, pin, answer, tx),
+        if (e && e.card === 'rate-far' && !answer) { this.fcRateFar(e, (a) => this.fcLimitRun(typedSats, tap, usd, pin, a, typedTx)); return; }
+        this.fcFailed(e, { again: () => this.fcLimitRun(typedSats, tap, usd, pin, answer, typedTx),
                            // (a wrong PIN for the recut: the pad again, not the same PIN)
-                           pinAgain: pin ? () => this.fcPinOr({ title: 'CARD PIN', subtitle: 'To recut its money under the new limit' }, (p2) => this.fcLimitRun(sats, tap, usd, p2, answer, tx)) : undefined });
+                           pinAgain: pin ? () => this.fcPinOr({ title: 'CARD PIN', subtitle: 'To recut its money under the new limit' }, (p2) => this.fcLimitRun(typedSats, tap, usd, p2, answer, typedTx)) : undefined });
       });
   }
 
@@ -6220,7 +6239,11 @@
     if (cu && (unit === 'usd' || unit === 'sat') && cu.some((x) => x.unit === unit)) return W.cardPrepare(card, sats, { unit });
     const holdsUsd = !!(card.record && card.record.unit === 'usd');
     if (unit === 'usd' && !holdsUsd && alt) {
-      // a bitcoin card, typed in dollars: its sats, from this phone's bitcoin, checked as the keypad checks them
+      /* a bitcoin card, typed in dollars: its sats, from this phone's bitcoin, checked as the keypad checks them. Worked out again here
+       * from the cents typed (`sats`) at this phone's own price (`fcRatePrice`, none older than a day), not at the price of NEXT, which
+       * offline is the last one seen, of any age. */
+      const p = this.fcRatePrice ? this.fcRatePrice() : 0;
+      alt.sats = p > 0 ? Math.round(Number(sats) / 100 / p * 1e8) : 0;
       if (!(alt.sats > 0)) {
         const np = /** @type {any} */ (new Error('This phone has no Bitcoin price to load the card at. Type the amount in sats.'));
         np.card = 'wrong-unit';
@@ -6568,9 +6591,12 @@
                         run: (c) => this.fcSendSetUpRun(sats, unit, alt, c) });
   }
 
-  fcSendSetUpRun(sats, unit, alt, c) {
+  fcSendSetUpRun(sats, unit, alt, typed) {
     const W = this.fcW();
-    if (!W) return;
+    if (!W || (this.fcSuStale && this.fcSuStale(typed))) return;
+    // (the holder's figures typed in dollars, worked out at this moment's price, or nothing written: 26j-card-wheel.js `fcSuAtPrice`)
+    const c = this.fcSuAtPrice ? this.fcSuAtPrice(typed) : typed;
+    if (!c) { this.fcFailed(this.fcSuNoPrice(), { setUp: true, again: () => this.fcSendSetUpRun(sats, unit, alt, typed), cancelled: () => this.fcSuReturn() }); return; }
     let made = null;
     // whether the set-up itself was finished in this tap: a tap cut after it is a send with the holder's PIN, one cut before it the set-up again
     let setUp = false;

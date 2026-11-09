@@ -455,6 +455,8 @@
     if (!on) return;
     // a question waiting to be asked again on a new circuit is not asked from the background (the house rule for timers)
     try { const Wa = window.FoxyWallet; if (Wa && Wa._stopAskingAgain) Wa._stopAskingAgain(); } catch (e) {}
+    // a card set-up's entries kept for a TRY AGAIN, its PIN among them, are not kept in the background (26j-card-wheel.js `fcSuForget`)
+    if (this.fcSuForget) this.fcSuForget();
     this._putAwayAt = Date.now();
     if (this._tidyOwed || this._tidyT) this.tidyChangeLater(this._tidyMore);
     this._closingT = setTimeout(() => {

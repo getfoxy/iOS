@@ -10,6 +10,9 @@
  *
  *   1  the gate: no lock says SET A LOCK FIRST with CREATE PIN and USE FACE ID (the SET PIN and FACE ID LOCK set-ups, then
  *      on into POS mode, not the menu) and CANCEL; a face that says yes goes through; a PIN, wrong and then right
+ *   1b the lock is the keeper's: no SECURE FOXY over a till, the lock set at the opening answers it, a new PIN asks the one
+ *      set, a till that has lost its lock asks the phone's own passcode or face, and a set-up given up after a mismatch
+ *      stays given up
  *   2  POINT OF SALE and CASHIER CODE are rows under SETTINGS, and only there
  *   3  the keeper's till: SET AMOUNT in receive, its X and HISTORY, no menu, no scan, no paste, no balance, no home
  *   4  every road home ends at the till's SET AMOUNT: closeReceive, dismissPending, PAID's DISMISS, a card's CLOSE, Back with
@@ -500,6 +503,133 @@ const textOf = (w) => (w.document.getElementById('dc-root') || w.document.body).
     ok(pinUp() && W.calls.biometric.length === 0, 'a PIN with FACE ID LOCK off: the pad, no face asked');
     await typePin('2468');
     eq(through, 1, 'and the PIN opens it');
+  }
+
+  // ---- 1b. the lock is the keeper's: nobody holding the till sets one there -------------------------------------------
+  /* A new merchant phone is usually empty. Opened through SET A LOCK FIRST, the first sale's PAID used to bring up SECURE FOXY
+   * over the till, and its SET A FOXY PIN replaced the keeper's PIN with no check: the cashier then closed the till with their
+   * own PIN and was in the full wallet. Now SECURE FOXY never comes up over a till, the lock set at the opening is the answer
+   * to it, a new PIN asks the one already set, and a till that has lost its lock asks the phone's own passcode or face. */
+  for (const variant of ['pin', 'face']) {
+    const W = stubWallet({});
+    W.bridged = () => true;
+    try { w.localStorage.removeItem('foxy.secure.asked'); } catch (e) {}
+    await fresh(W, { balSats: 0 });
+    A.tillGate(() => A.tillOpen(), 'To open the till.');
+    await settle();
+    if (variant === 'pin') {
+      press(A._blockedEl, 'CREATE PIN'); await settle();
+      await typePinAs('1111', 'NEXT'); await typePinAs('1111', 'NEXT');
+      press(A._blockedEl, 'SET THE PIN'); await settle();
+    } else {
+      press(A._blockedEl, 'USE FACE ID'); await settle();
+    }
+    await noTips(); await settle();
+    ok(A.state.till && A.state.till.role === 'keeper', variant + ': an empty wallet’s till opened through SET A LOCK FIRST');
+    let asked = null;
+    try { asked = w.localStorage.getItem('foxy.secure.asked'); } catch (e) {}
+    ok(!!asked, variant + ': the lock set there answers SECURE FOXY');
+    // the first sale, PAID, DISMISS: whatever SECURE FOXY's own record says, it is not shown over the till
+    try { w.localStorage.removeItem('foxy.secure.asked'); } catch (e) {}
+    const was = A.balNow;
+    A.balNow = () => ({ sats: 2100 });
+    A.setState({ balSats: 2100, screen: 'paid', stack: [], recv: { live: 'in' }, recvResolved: true }); await settle();
+    V().dismissPaid(); await wait(1300); await settle();
+    ok(!/SECURE FOXY/.test(card()) && !!A.state.till, variant + ': PAID dismissed in the till: no SECURE FOXY over it', card().slice(0, 40));
+    A.offerSecureFoxy(); await settle();
+    ok(!/SECURE FOXY/.test(card()), variant + ': nor when it is asked for directly while the till is up');
+    eq(W.calls.pinSets || [], variant === 'pin' ? ['1111'] : [], variant + ': the keeper’s PIN set once, and only by the keeper');
+    // the close, with a face that does not scan: the keeper's PIN where there is one, and nothing at all with Face ID only
+    W.opt.faceSays = 'no';
+    A.tillGate(() => A.tillEnd(), 'To close the till.'); await settle(); await settle();
+    if (variant === 'pin') {
+      ok(pinUp() && /ENTER YOUR PIN/.test(A._pinEl.textContent), 'pin: closing asks the keeper’s PIN');
+      await typePin('9999');
+      ok(!!A.state.till && W.calls.keeperCloses === 0, 'pin: a cashier’s PIN does not close it');
+      A.pinDismiss();
+    } else {
+      ok(!pinUp() && !card() && !!A.state.till && W.calls.keeperCloses === 0, 'face: a face refused, no pad and no card: the till stays');
+    }
+    A.balNow = was;
+    shutCard();
+    if (A.state.till) { A.tillEnd(); await settle(); }
+    try { w.localStorage.removeItem('foxy.secure.asked'); } catch (e) {}
+    A.setState({ balSats: 2100 }); A.balNow = () => ({ sats: 2100 });
+    A.offerSecureFoxy(); await settle();
+    ok(/SECURE FOXY/.test(card()), variant + ': once the till is closed SECURE FOXY may come, as it was never shown', card().slice(0, 30));
+    if (variant === 'pin') {
+      // SECURE FOXY's SET A FOXY PIN with a PIN already set: the PIN already set is asked first, and a wrong one changes nothing
+      press(A._blockedEl, 'SET A FOXY PIN'); await settle(); await settle();
+      ok(pinUp() && /ENTER YOUR PIN/.test(A._pinEl.textContent) && /To change your PIN\./.test(A._pinEl.textContent),
+        'SET A FOXY PIN with a PIN set: ENTER YOUR PIN first', pinUp() ? A._pinEl.textContent.slice(0, 50) : card().slice(0, 50));
+      await typePin('9999');
+      ok(pinUp() && !/CHOOSE A PIN/.test(A._pinEl.textContent), 'a wrong PIN: no CHOOSE A PIN');
+      await typePin('1111');
+      ok(pinUp() && /CHOOSE A PIN/.test(A._pinEl.textContent), 'the right PIN: then CHOOSE A PIN');
+      press(A._pinEl, 'CANCEL'); await settle();
+    }
+    A.balNow = was;
+    shutCard();
+    if (A._pinEl) A.pinDismiss();
+  }
+  for (const pill of ['USE FACE ID', 'CREATE PIN']) {
+    /* POINT OF SALE tapped within a second of PAID's DISMISS: SECURE FOXY, due then, waits behind SET A LOCK FIRST, and the queue
+     * used to draw it over the till once the lock was set. It is dropped as the queue is drawn. */
+    const W = stubWallet({});
+    W.bridged = () => true;
+    try { w.localStorage.removeItem('foxy.secure.asked'); } catch (e) {}
+    await fresh(W, { balSats: 2100 });
+    const was = A.balNow;
+    A.balNow = () => ({ sats: 2100 });
+    A.tillGate(() => A.tillOpen(), 'To open the till.'); await settle();
+    A.offerSecureFoxy(); await settle();
+    ok((A._cardQueue || []).some((c) => c.kind === 'secureFoxy') && /SET A LOCK FIRST/.test(card()),
+      'queued: SECURE FOXY waits behind SET A LOCK FIRST (' + pill + ')', JSON.stringify((A._cardQueue || []).map((c) => c.kind)));
+    press(A._blockedEl, pill); await settle();
+    if (pill === 'CREATE PIN') {
+      await typePinAs('1111', 'NEXT'); await typePinAs('1111', 'NEXT');
+      press(A._blockedEl, 'SET THE PIN'); await settle();
+    }
+    await wait(300); await settle(); await noTips(); await wait(300); await settle();
+    ok(!!A.state.till && !/SECURE FOXY/.test(card()) && !(A._cardQueue || []).some((c) => c.kind === 'secureFoxy'),
+      'queued: the till opens with no SECURE FOXY over it, and none left waiting (' + pill + ')', card().slice(0, 40));
+    A.balNow = was;
+    shutCard();
+    if (A._pinEl) A.pinDismiss();
+    if (A.state.till) { A.tillEnd(); await settle(); }
+  }
+  {
+    // a till that has lost its lock: closing it and the cashier codes ask the phone's own passcode or face, never SET A LOCK FIRST
+    const W = stubWallet({ pin: '1111' });
+    await keeperTill(W); await noTips();
+    W.opt.pin = '';
+    W.opt.faceSays = 'no';
+    A.tillGate(() => A.tillEnd(), 'To close the till.'); await settle(); await settle();
+    ok(!/SET A LOCK FIRST/.test(card()) && !pinUp() && !!A.state.till, 'no lock, closing: no CREATE PIN or USE FACE ID offered', card().slice(0, 40));
+    const last = W.calls.biometric[W.calls.biometric.length - 1] || [];
+    ok(/close the till/i.test(String(last[0])) && last[1] === true, 'the phone’s own check is asked, its passcode allowed', JSON.stringify(last));
+    V().amtCodeTap(); await settle(); await settle();
+    ok(!/SET A LOCK FIRST/.test(card()) && A.state.tillList !== 'codes', 'nor for the cashier codes, refused by the phone: no codes', card().slice(0, 40));
+    W.opt.faceSays = 'unavailable';
+    A.tillGate(() => A.tillEnd(), 'To close the till.'); await settle(); await settle();
+    ok(!!A.state.till, 'a phone that cannot check: the till stays');
+    W.opt.faceSays = 'yes';
+    A.tillGate(() => A.tillEnd(), 'To close the till.'); await settle(); await settle();
+    ok(!A.state.till && W.calls.keeperCloses === 1, 'the keeper says yes: closed');
+  }
+  {
+    // CREATE PIN given up inside the 700 ms after "Those did not match": nothing comes back and nothing opens
+    const W = stubWallet({});
+    await fresh(W);
+    let through = 0;
+    A.tillGate(() => { through += 1; }, 'To open the till.');
+    await settle();
+    press(A._blockedEl, 'CREATE PIN'); await settle();
+    await typePinAs('1234', 'NEXT');
+    await typePinAs('4321', 'NEXT');
+    press(A._pinEl, 'CANCEL'); await settle();
+    await wait(800); await settle();
+    ok(!pinUp() && through === 0, 'a set-up given up just after a mismatch: the pad does not come back', pinUp() ? A._pinEl.textContent.slice(0, 30) : '');
   }
 
   // ---- 2. the rows ----------------------------------------------------------------------------------

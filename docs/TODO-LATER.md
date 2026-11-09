@@ -69,6 +69,24 @@ means one pass is all a partial recovery gets (`16a-onchain.js`).
   because the link is built around a payment request and a token is not one.
   It is a real feature and the handshake would carry it unchanged.
 
+## Several accounts in one Foxy
+
+Asked for 2026-11-09. One Foxy holds several accounts, each with its own words,
+its own Foxy ID, its own mints and balances, and a name the person gives it: a
+personal one, and one for each business or website, so streams of money stay
+cleanly apart. An account shows the total across its mints; switching accounts
+switches everything (ID, drop boxes, shops collected from, history).
+
+With it, a cross-mint check-in: today only the active mint is connected to and
+asked about on open. Every mint of every account should be checked, so a
+payment that landed at a mint not on the screen is still counted and collected.
+What arrived since the last look is shown on a notifications screen rather than
+only in each mint's history.
+
+Not designed yet: where the words of the other accounts live (the keychain holds
+one seed today), how the per-account Foxy ID inbox is listened to without
+multiplying relay traffic, and what the check-in costs over Tor with many mints.
+
 ## Decided: not doing
 
 - **PIN length stays at four digits minimum.** Six would

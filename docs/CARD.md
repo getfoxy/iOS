@@ -222,6 +222,16 @@ tap again with every entry as it was, and BACK (or a tap beside the card) is MAX
 amounts, the PIN and the name kept. Nothing goes back to the start; the entries are dropped only when the card is written
 or the round back buttons are walked out of the set-up on purpose.
 
+Figures typed in dollars offline were turned into sats at the last price this phone saw, of any age. They are worked out
+again from the dollars just before the write, at this phone's own price and only one less than a day old (`fcRatePrice`):
+typed at a price half today's, the card still takes the dollars meant, not twice them. With no such price the set-up is
+refused with **NO BITCOIN PRICE**, TRY AGAIN and BACK, and nothing is written. CARD LIMITS does the same for a bitcoin card's
+limits typed in dollars, and SEND > FLASHCARD in dollars to a bitcoin card loads the sats those dollars are at the price of
+the tap. TRY AGAIN writes to the card the set-up began on and no other: another card held up is **THAT IS ANOTHER CARD**,
+with nothing written to it. The kept entries, the PIN among them, live only in the page's memory and are forgotten as Foxy
+locks or is put away; a TRY AGAIN left on the screen then says to start again, and a set-up still being typed goes back to
+the card's screen, to be begun again.
+
 A card with no owner is open while it is empty, because there is nothing on it
 to protect, and it cannot be loaded. A card with an owner is its owner's, empty
 or not: a terminal that has the PIN and empties a card cannot then claim it.

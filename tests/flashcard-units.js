@@ -1325,9 +1325,9 @@ const pay = (R, card, o) => { card.tap(); card.sent.length = 0; return R.W.cardP
       try { await a.fcSendPrepare(read, 300, 'usd', null); } catch (e) { no = e; }
       ok(no && no.card === 'wrong-unit' && no.cardUnit === 'sat' && /holds bitcoin, so it is loaded from your bitcoin/.test(no.message),
          'SEND of dollars to it is refused in words, nothing made', no && no.message);
-      // typed in dollars with a price, it is loaded with their sats
+      // typed in dollars with a price, it is loaded with their sats at the price of the tap, whatever NEXT worked out (here 1,000)
       const made = await a.fcSendPrepare(read, 300, 'usd', { sats: 1000, have: 50000 });
-      ok(made && made.unit === 'sat' && made.amount === 1000, 'SEND typed in dollars with a price puts their sats on it', JSON.stringify(made && [made.unit, made.amount]));
+      ok(made && made.unit === 'sat' && made.amount === Math.round(3 / PRICE * 1e8), 'SEND typed in dollars with a price puts their sats on it, at the price of the tap', JSON.stringify(made && [made.unit, made.amount]));
       c.tap();
       await H.W.cardWrite(c, { pin: '1234' });
       // the card itself is not bound: a payment from it, and dollars put on by the wallet asked for them
